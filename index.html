@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CRM EntrenaConMétodo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+  <header class="bg-slate-900 text-white shadow">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-emerald-500 flex items-center justify-center font-bold">EM</div>
+        <div>
+          <h1 class="text-lg font-semibold leading-tight">EntrenaConMétodo · CRM</h1>
+          <p class="text-xs text-slate-300">Gestión de clientes, pagos y seguimiento</p>
+        </div>
+      </div>
+      <nav class="flex gap-1 text-sm">
+        <button data-view="dashboard" class="nav-btn px-3 py-1.5 rounded hover:bg-slate-700">Inicio</button>
+        <button data-view="clientes" class="nav-btn px-3 py-1.5 rounded hover:bg-slate-700">Clientes</button>
+        <button data-view="pagos" class="nav-btn px-3 py-1.5 rounded hover:bg-slate-700">Pagos</button>
+        <button data-view="seguimiento" class="nav-btn px-3 py-1.5 rounded hover:bg-slate-700">Seguimiento</button>
+        <button data-view="pendientes" class="nav-btn px-3 py-1.5 rounded hover:bg-slate-700">Pendientes</button>
+        <button data-view="sesiones" class="nav-btn px-3 py-1.5 rounded hover:bg-slate-700">Sesiones</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto p-4">
+    <div id="view"></div>
+  </main>
+
+  <div id="modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="hidden fixed bottom-6 right-6 bg-slate-900 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
