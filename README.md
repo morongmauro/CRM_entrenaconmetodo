@@ -1,53 +1,96 @@
 # CRM EntrenaConMétodo
 
-CRM ligero pensado para un negocio de **coaching online** (entrenamiento, nutrición, hábitos). Permite llevar el control de pagos, hacer seguimiento semanal de cada cliente y registrar su progreso.
+Centro de control personal para tu negocio de coaching. **Estático (Vercel) + Supabase**. 100% gratis para uso personal.
 
-## Qué incluye
+## Lo que hace
 
-### Módulo 1 — Control de pagos
-- Lista de clientes con su plan, monto y día de pago.
-- Generación automática del cobro mensual a partir del día de pago de cada cliente (botón **"Generar pagos del mes"**).
-- Vista mensual con **quién pagó** y **quién está pendiente**, agrupado por nombre.
-- **Alertas en el inicio**: pagos vencidos y pagos de los próximos 7 días.
-- Registro del método de pago (Transferencia, PayPal, etc.) y notas.
-- Botón **"Marcar pagado"** con un clic.
+### 📊 Inicio
+KPIs del día, **bandeja semanal** con clientes que faltan por seguimiento, alertas de pagos vencidos / próximos, clientes en riesgo, pendientes urgentes y cumpleaños de la semana.
 
-### Módulo 2 — Trazabilidad y seguimiento semanal
-- Bitácora semanal por cliente: **avances, estado de ánimo, adherencia (0-10), notas**.
-- **Pendientes** que le pediste a cada cliente, con fecha límite y prioridad. Se pueden marcar como completados.
-- Vista de seguimiento por semana ISO que muestra **quién ya tiene registro** y **a quién todavía no le has hecho seguimiento**.
+### 📅 Seguimiento semanal
+- Vista **por cliente** (sidebar + timeline) o **vista panel** (kanban).
+- Cards por semana con adherencia desglosada: **Entreno · Alimentación · Descanso**.
+- **% de asistencia entreno** calculado automáticamente (días asistidos / días planeados).
+- Modal con **panel de contexto** al registrar nueva semana: resumen automático "qué decirle", pendientes abiertos, recordatorio de lesiones, últimas 2-3 semanas.
+- **Plantillas** (Alta / Media / Baja) para arrancar el texto según la adherencia.
+- Botón **"Copiar de la semana anterior"** para no escribir desde cero.
 
-### Módulo 3 (extra sugerido para coaching) — Sesiones y progreso
-- **Calendario de sesiones** (fecha, hora, duración, tema, estado: agendada / realizada / cancelada).
-- **Métricas de progreso** por cliente (peso, % grasa, cintura, cadera, pecho, brazo, pierna) para entrenamiento físico.
-- **Objetivo** del cliente registrado en su ficha.
+### 💰 Pagos
+- **Tabla anual** estilo Notion: clientes en filas, meses en columnas, totales por mes y año.
+- **Cards del mes** con estado visual (verde pagado, amarillo pendiente, rojo vencido).
+- Multi-moneda **COP + USD**: la tabla suma todo en COP usando tu tasa configurable.
+- Click en cualquier celda para marcar pagado o editar.
 
-## Cómo correrlo
+### 📌 Pendientes
+- Filtros: Todos / Abiertos / Generales / De la semana / Completados.
+- Promoción: un pendiente semanal que se vuelve recurrente lo conviertes a **General** con un clic.
+- Checkboxes para marcar como hecho.
 
-Requisitos: Node.js 18 o superior.
+### 👥 Clientes
+Cards con datos clave + ficha completa con identidad, datos de coaching (objetivo, meta, lesiones, lugar de entreno), comercial (monto, día de pago, canal, método preferido) y tags libres.
 
-```bash
-npm install
-npm start
+### 📈 Mi negocio
+KPIs: cobrado vs mes anterior, retención mensual, LTV promedio, adherencia global, conversión por canal, clientes en plateau, próximos a renovar.
+
+### ⚙️ Ajustes
+Tasa USD→COP y tu nombre.
+
+## Configuración (10 minutos)
+
+### 1) Crear proyecto en Supabase
+1. https://supabase.com → "New project" → nombre `crm-entrenaconmetodo`. Espera 1-2 min.
+2. **SQL Editor** → "New query" → pega TODO el contenido de `schema.sql` → "Run".
+
+### 2) Crear tu usuario
+**Authentication → Users → Add user**. Email + contraseña + marca **"Auto Confirm User"**.
+
+### 3) Obtener credenciales
+**Project Settings → API**. Copia **Project URL** y **anon public key**.
+
+### 4) Configurar
+Abre `config.js` y reemplaza los dos valores.
+
+### 5) Deploy en Vercel
+1. Sube los archivos a GitHub.
+2. https://vercel.com → "Add New Project" → importa el repo.
+3. Framework Preset: **Other**. Deploy.
+4. Entra a la URL, login con tu email/clave.
+
+## Archivos
+
+```
+.
+├── index.html       App principal (login + UI)
+├── app.js           Toda la lógica
+├── styles.css       Estilos
+├── config.js        URL y anon key de Supabase ← TÚ LO EDITAS
+├── schema.sql       Esquema de la base ← pegar en Supabase
+├── README.md
+└── .gitignore
 ```
 
-Abre http://localhost:3000 en tu navegador.
+Sin servidor Node.js, sin `npm install`. Solo HTML + JS estático.
 
-Para desarrollo con recarga automática:
+## Costo
 
-```bash
-npm run dev
-```
+- **Vercel free**: hosting estático ilimitado, 100 GB/mes de tráfico.
+- **Supabase free**: 500 MB de base de datos, 5 GB/mes de tráfico, autenticación incluida.
 
-## Datos
+Para uso personal: **$0**.
 
-Todo se guarda en una base SQLite local en `data/crm.db`. No se sube a internet, no requiere cuenta. Para hacer backup, copia esa carpeta.
+## Variables del sistema
 
-## Otras ideas que pueden servirte (para más adelante)
+### Cliente (diligenciable)
+Nombre, teléfono, email, fecha nacimiento, sexo, ciudad, zona horaria, profesión, horario laboral, objetivo, meta específica, fecha objetivo, lugar de entreno, restricciones/lesiones, patologías, antecedentes deportivos, preferencias dietéticas, monto, moneda, día de pago, fecha inicio, estado, canal de adquisición, método de pago preferido, días de gracia, tags libres, notas.
 
-- **Plantillas de mensajes** de WhatsApp / correo (cobro, bienvenida, recordatorio).
-- **Renovaciones**: alerta cuando un plan trimestral/anual está por vencer.
-- **Ingresos por mes** en gráfico para ver tu evolución.
-- **Tags** por canal de adquisición (Instagram, referido, web) para saber de dónde vienen tus mejores clientes.
-- **Encuesta NPS** periódica (1 pregunta cada 4 semanas) para detectar clientes en riesgo.
-- **Material entregado** (PDF, video, plan): un campo por cliente con links a Drive/Notion.
+### Seguimiento semanal (diligenciable)
+Adherencia entreno (0-10), adherencia alimentación (0-10), adherencia descanso (0-10), días planeados, días asistidos, avances, pendientes de la semana, ánimo, notas.
+
+### Pago (diligenciable)
+Mes, pagado sí/no, monto, moneda, fecha de pago (opcional), método (opcional), nota.
+
+### Pendiente (diligenciable)
+Cliente, descripción, scope (semana/general), prioridad, fecha límite, estado.
+
+### Calculados (no diligencias, el sistema los muestra)
+Promedio de adherencia (3 dimensiones), % asistencia entreno, días desde último seguimiento, tendencia, edad, días hasta cumpleaños, total cobrado/pendiente del mes y año, conversión USD→COP, clientes en riesgo, clientes en plateau, retención mensual, LTV, conversión por canal.
