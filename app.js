@@ -136,6 +136,54 @@ const helpers = {
   },
 };
 
+// ===== Gráfica SVG simple =====
+// series = [{ label, color, points: number[] }]  · xLabels = string[]
+function lineChart(series, xLabels = [], opts = {}) {
+  const w = opts.width || 600;
+  const h = opts.height || 180;
+  const pad = { top: 14, right: 14, bottom: 28, left: 32 };
+  const iw = w - pad.left - pad.right;
+  const ih = h - pad.top - pad.bottom;
+  const yMax = opts.yMax ?? 10;
+  const yMin = opts.yMin ?? 0;
+  const n = Math.max(...series.map(s => s.points.length), 1);
+  const sx = (i) => pad.left + (n === 1 ? iw / 2 : (i / (n - 1)) * iw);
+  const sy = (y) => pad.top + ih - ((y - yMin) / (yMax - yMin)) * ih;
+
+  let svg = `<svg viewBox="0 0 ${w} ${h}" class="w-full h-auto" preserveAspectRatio="xMidYMid meet">`;
+  // Grid Y
+  for (let g = 0; g <= 4; g++) {
+    const yv = yMin + (yMax - yMin) * (g / 4);
+    const yy = sy(yv);
+    svg += `<line x1="${pad.left}" y1="${yy}" x2="${w - pad.right}" y2="${yy}" stroke="#e2e8f0" stroke-width="1"/>`;
+    svg += `<text x="${pad.left - 6}" y="${yy + 3}" text-anchor="end" font-size="10" fill="#94a3b8">${yv.toFixed(0)}</text>`;
+  }
+  // Series
+  for (const s of series) {
+    const pts = s.points
+      .map((y, i) => y === null || y === undefined ? null : `${sx(i)},${sy(y)}`)
+      .filter(Boolean).join(' ');
+    if (pts) svg += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    s.points.forEach((y, i) => {
+      if (y !== null && y !== undefined) {
+        svg += `<circle cx="${sx(i)}" cy="${sy(y)}" r="3" fill="${s.color}"/>`;
+      }
+    });
+  }
+  // X labels
+  xLabels.forEach((lbl, i) => {
+    if (i % Math.max(1, Math.floor(xLabels.length / 8)) === 0 || i === xLabels.length - 1) {
+      svg += `<text x="${sx(i)}" y="${h - 10}" text-anchor="middle" font-size="10" fill="#94a3b8">${lbl}</text>`;
+    }
+  });
+  svg += '</svg>';
+  return svg;
+}
+
+function legendDot(color, label) {
+  return `<span class="inline-flex items-center gap-1.5 text-xs text-slate-600 mr-3"><span class="w-2.5 h-2.5 rounded-full" style="background:${color}"></span>${label}</span>`;
+}
+
 const PLANTILLAS = {
   alta: `Excelente semana! Cumpliste muy bien con el plan.
 
@@ -681,8 +729,7 @@ window.switchSegView = (which) => { _segView = which; routes.seguimiento(); };
 function renderSegFocus(clientes, allSegs, ultPorCliente) {
   const cliente = clientes.find(c => c.id === _selectedClienteId);
   const segs = allSegs.filter(s => s.cliente_id === _selectedClienteId).sort((a, b) => b.semana.localeCompare(a.semana));
-  const activos = clientes.filter(c => c.estado === 'activo');
-  const otros = clientes.filter(c => c.estado !== 'activo');
+  const ordenados = clientes.slice().sort(sortByEstado);
 
   const sidebar = `
     <aside class="col-span-12 lg:col-span-4 card h-fit">
@@ -691,7 +738,7 @@ function renderSegFocus(clientes, allSegs, ultPorCliente) {
         <span class="absolute left-3 top-2.5 text-slate-400 text-sm">🔍</span>
       </div>
       <div id="seg-list" class="space-y-1 max-h-[600px] overflow-y-auto scrollbar-thin">
-        ${[...activos, ...otros].map(c => clienteSidebarItem(c, ultPorCliente[c.id])).join('')}
+        ${ordenados.map(c => clienteSidebarItem(c, ultPorCliente[c.id])).join('')}
       </div>
     </aside>
   `;
@@ -771,6 +818,24 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
   const edad = helpers.edadDe(c.fecha_nacimiento);
   const semanas = segs.length;
   const inicio = c.fecha_inicio ? fmt.fecha(c.fecha_inicio) : '—';
+
+  // Últimas 8 semanas (más antiguas a la izquierda)
+  const ult8 = segs.slice(0, 8).reverse();
+  const labels = ult8.map(s => fmt.labelSemana(s.semana));
+  const ptsEnt = ult8.map(s => s.adherencia_entreno ?? null);
+  const ptsAli = ult8.map(s => s.adherencia_alimentacion ?? null);
+  const ptsDes = ult8.map(s => s.adherencia_descanso ?? null);
+  const hayDatos = ult8.length >= 2;
+
+  // Promedios desglosados últimas 4 sem
+  const promDim = (campo) => {
+    const vals = segs.slice(0, 4).map(s => s[campo]).filter(v => v !== null && v !== undefined);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  };
+  const pEnt = promDim('adherencia_entreno');
+  const pAli = promDim('adherencia_alimentacion');
+  const pDes = promDim('adherencia_descanso');
+
   return `
     <div class="card">
       <div class="flex items-start gap-4 flex-wrap">
@@ -791,14 +856,31 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
         <div class="text-right">
           <div class="text-xs text-slate-500">Adherencia 4 sem</div>
           <div class="text-2xl font-bold ${promAdh === null ? 'text-slate-400' : promAdh >= 7.5 ? 'text-emerald-600' : promAdh >= 5 ? 'text-amber-600' : 'text-red-600'}">${promAdh === null ? '—' : promAdh.toFixed(1)}<span class="text-sm text-slate-400">/10</span></div>
-          ${sparkPoints ? `<svg viewBox="0 0 100 24" class="w-24 h-6 mt-1"><polyline fill="none" stroke="#10b981" stroke-width="2" points="${sparkPoints}" /></svg>` : ''}
           <div class="text-xs ${tendColor} font-semibold mt-0.5">${tend}</div>
         </div>
       </div>
+
+      ${hayDatos ? `
+      <div class="mt-5 pt-5 border-t border-slate-100">
+        <div class="flex items-baseline justify-between mb-2 flex-wrap gap-2">
+          <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider">Compliance últimas 8 semanas</h4>
+          <div>
+            ${legendDot('#10b981', `Entreno · ${pEnt !== null ? pEnt.toFixed(1) : '—'}/10`)}
+            ${legendDot('#3b82f6', `Alimentación · ${pAli !== null ? pAli.toFixed(1) : '—'}/10`)}
+            ${legendDot('#8b5cf6', `Descanso · ${pDes !== null ? pDes.toFixed(1) : '—'}/10`)}
+          </div>
+        </div>
+        ${lineChart([
+          { label: 'Entreno', color: '#10b981', points: ptsEnt },
+          { label: 'Alimentación', color: '#3b82f6', points: ptsAli },
+          { label: 'Descanso', color: '#8b5cf6', points: ptsDes },
+        ], labels, { height: 160 })}
+      </div>` : ''}
+
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-5 border-t border-slate-100">
         <div><div class="text-xs text-slate-500 mb-1">Estado</div><div class="font-bold">${c.estado === 'activo' ? '<span class="text-emerald-600">● Activo</span>' : c.estado === 'pausa' ? '<span class="text-orange-600">● Pausa</span>' : '<span class="text-slate-500">● Finalizado</span>'}</div></div>
         <div><div class="text-xs text-slate-500 mb-1">Canal</div><div class="font-bold capitalize">${c.canal_adquisicion || '—'}</div></div>
-        <div><div class="text-xs text-slate-500 mb-1">Plan entreno</div><div class="font-bold capitalize">${c.lugar_entreno || '—'}</div></div>
+        <div><div class="text-xs text-slate-500 mb-1">Lugar entreno</div><div class="font-bold capitalize">${c.lugar_entreno || '—'}</div></div>
         <div><div class="text-xs text-slate-500 mb-1">Ficha</div><button class="text-emerald-600 font-semibold text-sm hover:underline" onclick="verCliente('${c.id}')">Abrir</button></div>
       </div>
     </div>
@@ -1116,14 +1198,14 @@ routes.pagos = async () => {
     map[p.cliente_id][p.mes] = p;
   }
 
-  // Totales
+  // Totales — suman TODOS los pagos con monto > 0 (pagados + pendientes)
   const totalesMes = {};
   let totalAnio = 0;
   for (const mes of meses) {
     let t = 0;
     for (const c of clientes) {
       const p = map[c.id]?.[mes];
-      if (p && p.pagado) t += copConv(p.monto, p.moneda);
+      if (p && Number(p.monto) > 0) t += copConv(p.monto, p.moneda);
     }
     totalesMes[mes] = t;
     totalAnio += t;
@@ -1214,8 +1296,14 @@ window.generarMesActual = async () => {
   navigate('pagos');
 };
 
+const ORDEN_ESTADO = { activo: 0, pausa: 1, finalizado: 2 };
+function sortByEstado(a, b) {
+  const d = (ORDEN_ESTADO[a.estado] ?? 99) - (ORDEN_ESTADO[b.estado] ?? 99);
+  return d !== 0 ? d : a.nombre.localeCompare(b.nombre, 'es');
+}
+
 function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActualNum) {
-  const activos = clientes.filter(c => c.estado !== 'finalizado');
+  const activos = clientes.filter(c => c.estado !== 'finalizado').sort(sortByEstado);
   $('#pagos-content').innerHTML = `
     <div class="card overflow-hidden p-0">
       <div class="flex items-center justify-between px-5 py-3 border-b border-slate-100 flex-wrap gap-2">
@@ -1254,6 +1342,7 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
                   } else if (p && Number(p.monto) > 0) {
                     cls = monthNum < mesActualNum ? 'pay-overdue' : 'pay-pending';
                     val = fmtVal(p.monto);
+                    totalFila += copConv(p.monto, p.moneda);
                   } else if (monthNum < mesActualNum) {
                     cls = 'pay-overdue';
                     val = '—';
@@ -1372,10 +1461,8 @@ window.abrirPago = async (cliente_id, mes) => {
             <option value="USD" ${monedaSug === 'USD' ? 'selected' : ''}>USD</option>
           </select>
         </div>
-        <div><label>Fecha pago</label><input id="pg-fecha" type="date" value="${p?.fecha_pago || ''}"></div>
-        <div><label>Método</label><input id="pg-metodo" placeholder="${cliente.metodo_pago_preferido || ''}" value="${p?.metodo || ''}"></div>
       </div>
-      <p class="text-xs text-slate-500">Si solo guardas sin marcar pagado, queda como pendiente del mes (amarillo).</p>
+      <p class="text-xs text-slate-500">Si guardas sin marcar pagado, queda como pendiente del mes (amarillo).</p>
       <div><label>Nota</label><input id="pg-nota" value="${escapeHtml(p?.nota || '')}"></div>
     </div>
   `, `
@@ -1391,8 +1478,7 @@ window.guardarPago = async (cliente_id, mes) => {
     cliente_id, mes, pagado,
     monto: Number($('#pg-monto').value) || 0,
     moneda: $('#pg-moneda').value,
-    fecha_pago: $('#pg-fecha').value || (pagado ? fmt.hoy() : null),
-    metodo: $('#pg-metodo').value || null,
+    fecha_pago: pagado ? fmt.hoy() : null,
     nota: $('#pg-nota').value || null,
   });
   closeModal();
@@ -1988,6 +2074,52 @@ routes.negocio = async () => {
         <div class="text-xs text-slate-500 mt-1">próximos pagos</div>
       </div>
     </div>
+
+    ${(() => {
+      // Compliance global últimas 8 semanas
+      const sems = [];
+      for (let i = 7; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i * 7);
+        sems.push(fmt.semanaISO(d));
+      }
+      const labelsSem = sems.map(s => fmt.labelSemana(s));
+      const promPorSem = (campo) => sems.map(sem => {
+        const regs = allSegs.filter(s => s.semana === sem);
+        const vals = regs.map(s => s[campo]).filter(v => v !== null && v !== undefined);
+        return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+      });
+      const pctCumplimiento = sems.map(sem => {
+        const con = new Set(allSegs.filter(s => s.semana === sem).map(s => s.cliente_id)).size;
+        return activos.length > 0 ? Math.round((con / activos.length) * 100) : 0;
+      });
+      return `
+      <div class="card mb-6">
+        <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+          <h3 class="font-bold text-slate-900">Tendencia de adherencia · 8 semanas</h3>
+          <div>
+            ${legendDot('#10b981', 'Entreno')}
+            ${legendDot('#3b82f6', 'Alimentación')}
+            ${legendDot('#8b5cf6', 'Descanso')}
+          </div>
+        </div>
+        ${lineChart([
+          { label: 'Entreno', color: '#10b981', points: promPorSem('adherencia_entreno') },
+          { label: 'Alimentación', color: '#3b82f6', points: promPorSem('adherencia_alimentacion') },
+          { label: 'Descanso', color: '#8b5cf6', points: promPorSem('adherencia_descanso') },
+        ], labelsSem, { height: 200 })}
+      </div>
+
+      <div class="card mb-6">
+        <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+          <h3 class="font-bold text-slate-900">% de clientes con seguimiento semanal</h3>
+          <span class="text-xs text-slate-500">cuántos de tus ${activos.length} activos tuvieron registro cada semana</span>
+        </div>
+        ${lineChart([
+          { label: 'Cumplimiento', color: '#f59e0b', points: pctCumplimiento },
+        ], labelsSem, { height: 180, yMax: 100 })}
+      </div>
+      `;
+    })()}
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <div class="card">
