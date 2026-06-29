@@ -1147,6 +1147,7 @@ routes.pagos = async () => {
           <button class="toggle-btn ${_pagosView === 'table' ? 'active' : ''}" onclick="switchPagView('table')">Tabla anual</button>
           <button class="toggle-btn ${_pagosView === 'cards' ? 'active' : ''}" onclick="switchPagView('cards')">Cards del mes</button>
         </div>
+        <button class="btn btn-secondary btn-sm" onclick="generarMesActual()" title="Crea pagos pendientes del mes actual basado en el último monto de cada cliente">📅 Generar mes</button>
         <div class="flex items-center gap-1">
           <button class="btn btn-ghost" onclick="cambiarAnio(-1)">‹</button>
           <span class="font-semibold px-2">${_pagosYear}</span>
@@ -1182,6 +1183,37 @@ routes.pagos = async () => {
 window.switchPagView = (which) => { _pagosView = which; routes.pagos(); };
 window.cambiarAnio = (d) => { _pagosYear += d; routes.pagos(); };
 
+window.generarMesActual = async () => {
+  const mesActual = fmt.mesActual();
+  if (!confirm(`¿Generar pagos pendientes para ${fmt.mesEsLargo(mesActual)}?\n\nSe creará un pago pendiente por cada cliente activo, usando el monto del último mes que pagó (o el monto de su ficha si no tiene historial).`)) return;
+
+  const clientes = await db.clientes.list();
+  const activos = clientes.filter(c => c.estado === 'activo');
+
+  // Último pago > 0 por cliente
+  const { data: ultimos } = await sb.from('pagos').select('cliente_id, monto, moneda, mes').gt('monto', 0).order('mes', { ascending: false });
+  const ultPorCliente = {};
+  for (const p of (ultimos || [])) {
+    if (!ultPorCliente[p.cliente_id]) ultPorCliente[p.cliente_id] = p;
+  }
+  // Ya existentes para este mes
+  const { data: existentes } = await sb.from('pagos').select('cliente_id').eq('mes', mesActual);
+  const yaTienen = new Set((existentes || []).map(p => p.cliente_id));
+
+  let creados = 0, omitidos = 0;
+  for (const c of activos) {
+    if (yaTienen.has(c.id)) { omitidos++; continue; }
+    const ult = ultPorCliente[c.id];
+    const monto = ult?.monto || Number(c.monto) || 0;
+    const moneda = ult?.moneda || c.moneda || 'COP';
+    if (monto <= 0) { omitidos++; continue; }
+    await db.pagos.upsert({ cliente_id: c.id, mes: mesActual, pagado: false, monto, moneda });
+    creados++;
+  }
+  toast(`✓ ${creados} pago(s) creado(s) · ${omitidos} ya tenían`, 3500);
+  navigate('pagos');
+};
+
 function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActualNum) {
   const activos = clientes.filter(c => c.estado !== 'finalizado');
   $('#pagos-content').innerHTML = `
@@ -1212,18 +1244,25 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
                 const celdas = meses.map((m, i) => {
                   const p = map[c.id]?.[m];
                   const monthNum = i + 1;
-                  let cls = 'pay-future';
-                  let val = '—';
+                  const monedaCel = (p && p.moneda) || c.moneda || 'COP';
+                  const fmtVal = (n) => monedaCel === 'USD' ? `$${Number(n).toFixed(0)}` : Number(n).toLocaleString('es-CO');
+                  let cls, val;
                   if (p && p.pagado) {
                     cls = 'pay-paid';
-                    val = c.moneda === 'USD' ? `$${Number(p.monto).toFixed(0)}` : Number(p.monto).toLocaleString('es-CO');
+                    val = fmtVal(p.monto);
                     totalFila += copConv(p.monto, p.moneda);
+                  } else if (p && Number(p.monto) > 0) {
+                    cls = monthNum < mesActualNum ? 'pay-overdue' : 'pay-pending';
+                    val = fmtVal(p.monto);
                   } else if (monthNum < mesActualNum) {
                     cls = 'pay-overdue';
                     val = '—';
                   } else if (monthNum === mesActualNum) {
                     cls = 'pay-pending';
-                    val = c.moneda === 'USD' ? `$${Number(c.monto).toFixed(0)}` : Number(c.monto).toLocaleString('es-CO');
+                    val = Number(c.monto) > 0 ? fmtVal(c.monto) : '—';
+                  } else {
+                    cls = 'pay-future';
+                    val = '—';
                   }
                   return `<td class="pay-cell ${cls}" onclick="abrirPago('${c.id}', '${m}')" title="${fmt.mesEsLargo(m)}">${val}</td>`;
                 }).join('');
@@ -1310,6 +1349,15 @@ function renderPagosCards(clientes, map, mesActual) {
 window.abrirPago = async (cliente_id, mes) => {
   const cliente = await db.clientes.get(cliente_id);
   const { data: p } = await sb.from('pagos').select('*').eq('cliente_id', cliente_id).eq('mes', mes).maybeSingle();
+
+  // Si no hay pago previo y el cliente no tiene monto, sugerir el del último mes
+  let montoSug = p?.monto ?? cliente.monto ?? '';
+  let monedaSug = p?.moneda || cliente.moneda || 'COP';
+  if (!p && !Number(cliente.monto)) {
+    const { data: ult } = await sb.from('pagos').select('monto, moneda').eq('cliente_id', cliente_id).gt('monto', 0).order('mes', { ascending: false }).limit(1).maybeSingle();
+    if (ult) { montoSug = ult.monto; monedaSug = ult.moneda; }
+  }
+
   openModal(modalShell(`Pago · ${cliente.nombre} · ${fmt.mesEsLargo(mes)}`, `
     <div class="space-y-3">
       <div class="flex items-center gap-3 mb-2">
@@ -1317,16 +1365,17 @@ window.abrirPago = async (cliente_id, mes) => {
         <label for="pg-pagado" class="mb-0 normal-case font-semibold cursor-pointer">Marcar como pagado</label>
       </div>
       <div class="grid grid-cols-2 gap-3">
-        <div><label>Monto</label><input id="pg-monto" type="number" step="0.01" value="${p?.monto || cliente.monto || ''}"></div>
+        <div><label>Monto</label><input id="pg-monto" type="number" step="0.01" value="${montoSug || ''}"></div>
         <div><label>Moneda</label>
           <select id="pg-moneda">
-            <option value="COP" ${(p?.moneda || cliente.moneda || 'COP') === 'COP' ? 'selected' : ''}>COP</option>
-            <option value="USD" ${(p?.moneda || cliente.moneda) === 'USD' ? 'selected' : ''}>USD</option>
+            <option value="COP" ${monedaSug === 'COP' ? 'selected' : ''}>COP</option>
+            <option value="USD" ${monedaSug === 'USD' ? 'selected' : ''}>USD</option>
           </select>
         </div>
         <div><label>Fecha pago</label><input id="pg-fecha" type="date" value="${p?.fecha_pago || ''}"></div>
         <div><label>Método</label><input id="pg-metodo" placeholder="${cliente.metodo_pago_preferido || ''}" value="${p?.metodo || ''}"></div>
       </div>
+      <p class="text-xs text-slate-500">Si solo guardas sin marcar pagado, queda como pendiente del mes (amarillo).</p>
       <div><label>Nota</label><input id="pg-nota" value="${escapeHtml(p?.nota || '')}"></div>
     </div>
   `, `
