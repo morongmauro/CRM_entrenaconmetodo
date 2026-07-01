@@ -136,6 +136,213 @@ const helpers = {
   },
 };
 
+// ===== Constantes de coaching =====
+const PAL_MAP = {
+  sedentario: 1.2,
+  ligero: 1.375,
+  moderado: 1.55,
+  activo: 1.725,
+  muy_activo: 1.9,
+};
+
+const OBJETIVOS_KCAL = [
+  { key: 'deficit_30', label: 'Déficit -30% (agresivo)', pct: -0.30 },
+  { key: 'deficit_25', label: 'Déficit -25%', pct: -0.25 },
+  { key: 'deficit_20', label: 'Déficit -20% (moderado)', pct: -0.20 },
+  { key: 'deficit_15', label: 'Déficit -15%', pct: -0.15 },
+  { key: 'deficit_10', label: 'Déficit -10% (suave)', pct: -0.10 },
+  { key: 'deficit_5',  label: 'Déficit -5%', pct: -0.05 },
+  { key: 'mantener',   label: 'Mantenimiento', pct: 0 },
+  { key: 'superavit_5',  label: 'Superávit +5%', pct: 0.05 },
+  { key: 'superavit_10', label: 'Superávit +10% (recomp)', pct: 0.10 },
+  { key: 'superavit_15', label: 'Superávit +15%', pct: 0.15 },
+  { key: 'superavit_20', label: 'Superávit +20%', pct: 0.20 },
+  { key: 'superavit_25', label: 'Superávit +25%', pct: 0.25 },
+  { key: 'superavit_30', label: 'Superávit +30% (agresivo)', pct: 0.30 },
+];
+
+const FASES_PROGRAMA = [
+  { key: 'preparacion',    label: '🟢 Preparación / onboarding' },
+  { key: 'bloque_fuerza',  label: '🏋️ Bloque de fuerza' },
+  { key: 'hipertrofia',    label: '💪 Hipertrofia' },
+  { key: 'cutting',        label: '🔥 Cutting / definición' },
+  { key: 'recomposicion',  label: '⚖️ Recomposición' },
+  { key: 'mantenimiento',  label: '🎯 Mantenimiento' },
+  { key: 'deload',         label: '😴 Deload / descarga' },
+];
+
+const ENCUESTA_ACTIVIDAD = [
+  {
+    key: 'q_fuerza',
+    label: '¿Cuántos días a la semana entrena fuerza?',
+    opts: [ ['0', 0], ['1-2', 1], ['3-4', 2], ['5 o más', 3] ],
+  },
+  {
+    key: 'q_cardio',
+    label: '¿Cuántos días a la semana hace cardio o deporte?',
+    opts: [ ['0', 0], ['1-2', 1], ['3-5', 2], ['6 o más', 3] ],
+  },
+  {
+    key: 'q_trabajo',
+    label: '¿Cómo es su trabajo?',
+    opts: [ ['Oficina/sedentario', 0], ['Mixto', 2], ['Físico', 4] ],
+  },
+  {
+    key: 'q_pasos',
+    label: '¿Cuántos pasos diarios estima?',
+    opts: [ ['<5.000', 0], ['5.000-8.000', 1], ['8.000-12.000', 3], ['>12.000', 4] ],
+  },
+  {
+    key: 'q_deportes',
+    label: '¿Practica deportes recreativos los fines de semana?',
+    opts: [ ['No', 0], ['A veces', 1], ['Siempre', 2] ],
+  },
+];
+
+function nivelDesdeEncuesta(respuestas) {
+  const total = Object.values(respuestas || {}).reduce((a, b) => a + Number(b || 0), 0);
+  if (total <= 3) return { nivel: 'sedentario', pal: 1.2, total };
+  if (total <= 6) return { nivel: 'ligero', pal: 1.375, total };
+  if (total <= 9) return { nivel: 'moderado', pal: 1.55, total };
+  if (total <= 12) return { nivel: 'activo', pal: 1.725, total };
+  return { nivel: 'muy_activo', pal: 1.9, total };
+}
+
+// ===== Cálculo de meta nutricional =====
+function calcMetaNutricional({ peso, altura, edad, sexo, grasa_pct, pal, objetivo_pct }) {
+  const w = Number(peso), h = Number(altura), a = Number(edad), g = grasa_pct != null && grasa_pct !== '' ? Number(grasa_pct) : null;
+  if (!w || !h || !a || !sexo || !pal || objetivo_pct == null) return null;
+
+  let bmr, metodo, formula;
+  if (g !== null && g > 0 && g < 60) {
+    const magra = w * (1 - g / 100);
+    bmr = 370 + 21.6 * magra;
+    metodo = 'Katch-McArdle';
+    formula = `BMR = 370 + 21.6 × masa_magra(${magra.toFixed(1)} kg) = ${bmr.toFixed(0)} kcal`;
+  } else {
+    const s = sexo === 'M' ? 5 : sexo === 'F' ? -161 : -78;  // "otro" promedio
+    bmr = 10 * w + 6.25 * h - 5 * a + s;
+    metodo = 'Mifflin-St Jeor';
+    formula = `BMR = 10×${w} + 6.25×${h} − 5×${a} ${s >= 0 ? '+' : '−'} ${Math.abs(s)} = ${bmr.toFixed(0)} kcal`;
+  }
+
+  const tdee = bmr * pal;
+  const kcal = Math.round(tdee * (1 + objetivo_pct));
+  const proteina = Math.round(w * 1.8);
+  const grasas = Math.round(kcal * 0.25 / 9);
+  const carbos = Math.round((kcal - proteina * 4 - grasas * 9) / 4);
+
+  const signo = objetivo_pct >= 0 ? '+' : '';
+  const argumento = `Método: ${metodo}
+${formula}
+TDEE = BMR × PAL(${pal}) = ${tdee.toFixed(0)} kcal
+Meta = TDEE × (1 ${signo}${(objetivo_pct * 100).toFixed(0)}%) = ${kcal} kcal
+Proteína: ${w} kg × 1.8 g = ${proteina} g
+Grasas: 25% de kcal = ${grasas} g
+Carbos: resto = ${carbos} g`;
+
+  return { kcal, proteina, grasas, carbos, metodo, argumento, bmr: Math.round(bmr), tdee: Math.round(tdee) };
+}
+
+// ===== Scores calculados a partir de indicadores objetivos =====
+function calcScores(s, cliente) {
+  const pctSafe = (num, den) => den > 0 ? Math.min(100, (num / den) * 100) : null;
+
+  // Entreno
+  const scoreFuerza = pctSafe(s.fuerza_ejecutados, s.fuerza_planeados);
+  const scoreCardio = pctSafe(s.cardio_ejecutados, s.cardio_planeados);
+  const entrenos = [scoreFuerza, scoreCardio].filter(v => v !== null);
+  const score_entreno = entrenos.length ? entrenos.reduce((a, b) => a + b, 0) / entrenos.length : null;
+
+  // Alimentación metas
+  let score_alim_metas = null;
+  if (cliente?.meta_calorias && s.kcal_promedio != null) {
+    const kcalPct = Math.max(0, 100 - Math.abs((s.kcal_promedio - cliente.meta_calorias) / cliente.meta_calorias * 100));
+    let protePct = null;
+    if (cliente.meta_proteina_g && s.proteina_promedio_g != null) {
+      protePct = Math.min(100, (s.proteina_promedio_g / cliente.meta_proteina_g) * 100);
+    }
+    score_alim_metas = protePct !== null ? (kcalPct + protePct) / 2 : kcalPct;
+  }
+
+  // Alimentación registro
+  const score_alim_registro = s.dias_registro_alim != null ? (s.dias_registro_alim / 7) * 100 : null;
+
+  // Global
+  const componentes = [score_entreno, score_alim_metas, score_alim_registro].filter(v => v !== null);
+  const score_global = componentes.length ? componentes.reduce((a, b) => a + b, 0) / componentes.length : null;
+
+  return { score_entreno, score_alim_metas, score_alim_registro, score_global };
+}
+
+// ===== Streaks (rachas de cumplimiento) =====
+function calcStreaks(segsOrdenadosDesc) {
+  const streak = { fuerza: 0, cardio: 0, alim: 0, global: 0 };
+  const cumple = (v) => v !== null && v !== undefined && v >= 75;
+  for (const s of segsOrdenadosDesc) {
+    const scoreF = s.fuerza_planeados > 0 ? (s.fuerza_ejecutados / s.fuerza_planeados) * 100 : null;
+    const scoreC = s.cardio_planeados > 0 ? (s.cardio_ejecutados / s.cardio_planeados) * 100 : null;
+    if (cumple(scoreF)) streak.fuerza++; else if (streak.fuerza === 0) {} else break;
+  }
+  return streak;
+}
+
+function calcStreakDim(segs, evaluador) {
+  // segs desc por semana, evaluador(s) => bool
+  let count = 0;
+  for (const s of segs) {
+    if (evaluador(s)) count++;
+    else break;
+  }
+  return count;
+}
+
+// ===== Auto-borrador WhatsApp =====
+function borradorWhatsApp(cliente, seg, scores, pendientes, streaks) {
+  const nombre = (cliente.nombre || '').split(' ')[0];
+  const partes = [`Hola ${nombre}!`, ''];
+
+  // Reconocimiento por scores
+  if (scores.score_global != null) {
+    if (scores.score_global >= 85) partes.push(`Semana top 🔥 · cumpliste ${Math.round(scores.score_global)}% del plan.`);
+    else if (scores.score_global >= 65) partes.push(`Buena semana · ${Math.round(scores.score_global)}% de cumplimiento.`);
+    else if (scores.score_global >= 40) partes.push(`Semana mixta, cumpliste ${Math.round(scores.score_global)}%. Hablemos qué ajustar.`);
+    else partes.push(`Semana retadora (${Math.round(scores.score_global)}%). No te preocupes, la reencauzamos.`);
+    partes.push('');
+  }
+
+  // Detalle entreno
+  if (seg.fuerza_planeados) {
+    partes.push(`🏋️ Fuerza: ${seg.fuerza_ejecutados || 0}/${seg.fuerza_planeados} sesiones`);
+  }
+  if (seg.cardio_planeados) {
+    partes.push(`🏃 Cardio/deporte: ${seg.cardio_ejecutados || 0}/${seg.cardio_planeados} sesiones`);
+  }
+  if (scores.score_alim_metas != null) {
+    partes.push(`🥗 Alimentación vs metas: ${Math.round(scores.score_alim_metas)}%`);
+  }
+  if (seg.dias_registro_alim != null) {
+    partes.push(`📝 Registros en app: ${seg.dias_registro_alim}/7 días`);
+  }
+
+  // Streaks
+  if (streaks?.fuerza >= 3) partes.push('', `🎉 ¡Llevas ${streaks.fuerza} semanas seguidas cumpliendo fuerza!`);
+
+  // Pendientes
+  const abiertos = (pendientes || []).filter(p => p.estado === 'abierto').slice(0, 3);
+  if (abiertos.length) {
+    partes.push('', 'Para esta semana:');
+    abiertos.forEach(p => partes.push(`• ${p.descripcion}`));
+  }
+
+  // Lesión
+  if (cliente.lesion_actual && cliente.lesion_estado !== 'resuelta') {
+    partes.push('', `⚕️ Ojo con ${cliente.lesion_actual}, seguimos monitoreando.`);
+  }
+
+  return partes.join('\n');
+}
+
 // ===== Gráfica SVG simple =====
 // series = [{ label, color, points: number[] }]  · xLabels = string[]
 function lineChart(series, xLabels = [], opts = {}) {
@@ -316,7 +523,12 @@ $('#logout-btn').addEventListener('click', async () => {
 
 async function loadSettings() {
   const { data } = await sb.from('settings').select('*').maybeSingle();
-  if (data) _settings = { usd_cop_rate: Number(data.usd_cop_rate) || 4000, nombre_coach: data.nombre_coach || 'Coach' };
+  if (data) _settings = {
+    usd_cop_rate: Number(data.usd_cop_rate) || 4000,
+    nombre_coach: data.nombre_coach || 'Coach',
+    mealtracker_url: data.mealtracker_url || '',
+    mealtracker_anon_key: data.mealtracker_anon_key || '',
+  };
 }
 
 // =====================================================
@@ -391,6 +603,19 @@ const db = {
     },
     async hacerGeneral(id) { await sb.from('pendientes').update({ scope: 'general', seguimiento_id: null }).eq('id', id); },
     async remove(id) { await sb.from('pendientes').delete().eq('id', id); },
+  },
+  mediciones: {
+    async listCliente(cliente_id) {
+      const { data } = await sb.from('mediciones_corporales').select('*').eq('cliente_id', cliente_id).order('fecha', { ascending: true });
+      return data || [];
+    },
+    async insert(row) {
+      const { data, error } = await sb.from('mediciones_corporales').insert(row).select().single();
+      if (error) toast(error.message);
+      return data;
+    },
+    async update(id, row) { await sb.from('mediciones_corporales').update(row).eq('id', id); },
+    async remove(id) { await sb.from('mediciones_corporales').delete().eq('id', id); },
   },
   settings: {
     async save(s) {
@@ -877,11 +1102,17 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
         ], labels, { height: 160 })}
       </div>` : ''}
 
+      ${c.meta_calorias ? `
+      <div class="mt-4 pt-4 border-t border-slate-100 bg-blue-50/50 -mx-5 -mb-5 px-5 py-3 rounded-b-2xl">
+        <div class="text-xs font-bold text-blue-800 uppercase mb-1">🥗 Meta nutricional diaria</div>
+        <div class="text-sm font-semibold text-blue-900">${c.meta_calorias} kcal · ${c.meta_proteina_g}g prote · ${c.meta_grasas_g}g grasas · ${c.meta_carbos_g}g carbos</div>
+      </div>` : ''}
+
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-5 border-t border-slate-100">
         <div><div class="text-xs text-slate-500 mb-1">Estado</div><div class="font-bold">${c.estado === 'activo' ? '<span class="text-emerald-600">● Activo</span>' : c.estado === 'pausa' ? '<span class="text-orange-600">● Pausa</span>' : '<span class="text-slate-500">● Finalizado</span>'}</div></div>
-        <div><div class="text-xs text-slate-500 mb-1">Canal</div><div class="font-bold capitalize">${c.canal_adquisicion || '—'}</div></div>
-        <div><div class="text-xs text-slate-500 mb-1">Lugar entreno</div><div class="font-bold capitalize">${c.lugar_entreno || '—'}</div></div>
-        <div><div class="text-xs text-slate-500 mb-1">Ficha</div><button class="text-emerald-600 font-semibold text-sm hover:underline" onclick="verCliente('${c.id}')">Abrir</button></div>
+        <div><div class="text-xs text-slate-500 mb-1">Fase</div><div class="font-bold">${c.fase_programa ? (FASES_PROGRAMA.find(f => f.key === c.fase_programa)?.label || c.fase_programa) : '—'}</div></div>
+        <div><div class="text-xs text-slate-500 mb-1">Lugar entreno</div><div class="font-bold capitalize">${c.lugar_entreno ? c.lugar_entreno.replace('_',' ') : '—'}</div></div>
+        <div><div class="text-xs text-slate-500 mb-1">Ficha</div><button class="text-emerald-600 font-semibold text-sm hover:underline" onclick="verCliente('${c.id}')">Abrir perfil</button></div>
       </div>
     </div>
   `;
@@ -996,22 +1227,74 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
 
       <!-- FORM -->
       <div class="col-span-12 lg:col-span-7 p-6 overflow-y-auto space-y-4">
-        <div class="grid grid-cols-3 gap-3">
-          <div><label>Entreno</label><input id="sg-ent" type="number" min="0" max="10" value="${s.adherencia_entreno ?? ''}" placeholder="0-10"></div>
-          <div><label>Alimentación</label><input id="sg-ali" type="number" min="0" max="10" value="${s.adherencia_alimentacion ?? ''}" placeholder="0-10"></div>
-          <div><label>Descanso</label><input id="sg-des" type="number" min="0" max="10" value="${s.adherencia_descanso ?? ''}" placeholder="0-10"></div>
-        </div>
-
-        <div class="bg-slate-50 rounded-xl p-3">
-          <label>Asistencia entreno esta semana</label>
-          <div class="flex items-center gap-2">
-            <input id="sg-dias-as" type="number" min="0" class="w-20" value="${s.dias_asistidos ?? ''}" placeholder="3" onchange="calcPct()">
-            <span class="text-sm text-slate-500">de</span>
-            <input id="sg-dias-pl" type="number" min="0" class="w-20" value="${s.dias_planeados ?? ''}" placeholder="5" onchange="calcPct()">
-            <span class="text-sm text-slate-500">días planeados</span>
-            <span id="sg-pct" class="ml-auto font-bold text-emerald-600 text-sm"></span>
+        <!-- ENTRENO -->
+        <div class="bg-slate-50 rounded-xl p-4 space-y-3">
+          <div class="text-xs font-bold text-slate-600 uppercase">🏋️ Entrenamiento</div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs">Fuerza — planeadas vs ejecutadas</label>
+              <div class="flex items-center gap-2">
+                <input id="sg-fp" type="number" min="0" class="w-16" value="${s.fuerza_planeados ?? ''}" placeholder="3" onchange="recalcScores()">
+                <span class="text-slate-400">→</span>
+                <input id="sg-fe" type="number" min="0" class="w-16" value="${s.fuerza_ejecutados ?? ''}" placeholder="0" onchange="recalcScores()">
+                <span id="sg-f-pct" class="ml-auto text-sm font-bold text-emerald-600"></span>
+              </div>
+            </div>
+            <div>
+              <label class="text-xs">Cardio/deporte — planeadas vs ejecutadas</label>
+              <div class="flex items-center gap-2">
+                <input id="sg-cp" type="number" min="0" class="w-16" value="${s.cardio_planeados ?? ''}" placeholder="2" onchange="recalcScores()">
+                <span class="text-slate-400">→</span>
+                <input id="sg-ce" type="number" min="0" class="w-16" value="${s.cardio_ejecutados ?? ''}" placeholder="0" onchange="recalcScores()">
+                <span id="sg-c-pct" class="ml-auto text-sm font-bold text-emerald-600"></span>
+              </div>
+            </div>
           </div>
         </div>
+
+        <!-- ALIMENTACIÓN -->
+        <div class="bg-slate-50 rounded-xl p-4 space-y-3">
+          <div class="flex items-baseline justify-between">
+            <div class="text-xs font-bold text-slate-600 uppercase">🥗 Alimentación</div>
+            ${cliente.meta_calorias ? `<div class="text-xs text-slate-500">Meta: ${cliente.meta_calorias} kcal · ${cliente.meta_proteina_g}g prote</div>` : '<div class="text-xs text-amber-600">Sin meta definida — edita cliente para calcular</div>'}
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="text-xs">kcal promedio</label>
+              <input id="sg-kcal" type="number" min="0" value="${s.kcal_promedio ?? ''}" placeholder="${cliente.meta_calorias || '—'}" onchange="recalcScores()">
+            </div>
+            <div>
+              <label class="text-xs">Proteína promedio (g)</label>
+              <input id="sg-prote" type="number" min="0" value="${s.proteina_promedio_g ?? ''}" placeholder="${cliente.meta_proteina_g || '—'}" onchange="recalcScores()">
+            </div>
+            <div>
+              <label class="text-xs">Días registro (0-7)</label>
+              <input id="sg-dr" type="number" min="0" max="7" value="${s.dias_registro_alim ?? ''}" placeholder="0" onchange="recalcScores()">
+            </div>
+          </div>
+        </div>
+
+        <!-- SCORES VIVOS -->
+        <div id="sg-scores" class="grid grid-cols-4 gap-2"></div>
+
+        <!-- LESIÓN -->
+        ${cliente.lesion_actual ? `
+        <div class="bg-red-50 rounded-xl p-4 space-y-2">
+          <div class="text-xs font-bold text-red-800 uppercase">⚕️ Lesión: ${escapeHtml(cliente.lesion_actual)}</div>
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="text-xs">Estado esta semana</label>
+              <select id="sg-lesion-est">
+                <option value="">—</option>
+                ${['mejor','igual','peor','resuelta'].map(o => `<option value="${o}" ${s.lesion_estado_semana === o ? 'selected' : ''}>${o}</option>`).join('')}
+              </select>
+            </div>
+            <div class="col-span-2">
+              <label class="text-xs">Actualización</label>
+              <input id="sg-lesion-txt" value="${escapeHtml(s.lesion_actualizacion || '')}" placeholder="Cómo va la evolución…">
+            </div>
+          </div>
+        </div>` : ''}
 
         <div>
           <div class="flex items-center justify-between mb-2">
@@ -1032,18 +1315,9 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
           <p class="text-xs text-slate-500 mt-1">Si alguno se repite, lo puedes promover a "General" desde la lista de Pendientes.</p>
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label>Ánimo</label>
-            <select id="sg-animo">
-              <option value="">—</option>
-              ${['excelente','bien','neutro','bajo','muy bajo'].map(o => `<option ${s.estado_animo === o ? 'selected' : ''}>${o}</option>`).join('')}
-            </select>
-          </div>
-          <div>
-            <label>Fecha del registro</label>
-            <input id="sg-fecha" type="date" value="${s.fecha || fmt.hoy()}">
-          </div>
+        <div>
+          <label>Fecha del registro</label>
+          <input id="sg-fecha" type="date" value="${s.fecha || fmt.hoy()}">
         </div>
 
         <div>
@@ -1104,9 +1378,10 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
       </div>
     </div>
 
-    <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-between gap-2 sticky bottom-0">
+    <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-between gap-2 sticky bottom-0 flex-wrap">
       <div>${s.id ? `<button class="btn btn-danger" onclick="eliminarSeguimiento('${s.id}', '${clienteId}')">Eliminar</button>` : ''}</div>
-      <div class="flex gap-2">
+      <div class="flex gap-2 flex-wrap">
+        <button class="btn btn-secondary" onclick="copiarMensajeWhatsApp('${clienteId}')" title="Genera y copia un borrador de mensaje para pegar en WhatsApp">💬 Copiar mensaje</button>
         <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
         <button class="btn btn-primary" onclick="guardarSeguimiento('${clienteId}', '${semana}', ${s.id ? `'${s.id}'` : 'null'})">Guardar semana</button>
       </div>
@@ -1114,16 +1389,43 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
   `;
 
   openModal(html, { wide: true });
-  setTimeout(calcPct, 0);
+  setTimeout(recalcScores, 0);
   window._segPrev = semanaPrev;
+  window._segCliente = cliente;
 }
 
-window.calcPct = () => {
-  const a = Number($('#sg-dias-as')?.value || 0);
-  const p = Number($('#sg-dias-pl')?.value || 0);
-  const el = $('#sg-pct');
+// Recalcula scores vivos mientras se llena
+window.recalcScores = () => {
+  const seg = {
+    fuerza_planeados: Number($('#sg-fp')?.value) || null,
+    fuerza_ejecutados: Number($('#sg-fe')?.value) || 0,
+    cardio_planeados: Number($('#sg-cp')?.value) || null,
+    cardio_ejecutados: Number($('#sg-ce')?.value) || 0,
+    kcal_promedio: $('#sg-kcal')?.value ? Number($('#sg-kcal').value) : null,
+    proteina_promedio_g: $('#sg-prote')?.value ? Number($('#sg-prote').value) : null,
+    dias_registro_alim: $('#sg-dr')?.value ? Number($('#sg-dr').value) : null,
+  };
+  const scores = calcScores(seg, window._segCliente);
+  const el = $('#sg-scores');
   if (!el) return;
-  el.textContent = p > 0 ? `${Math.round((a / p) * 100)}% adherencia` : '';
+
+  // % individuales
+  const fPct = seg.fuerza_planeados ? Math.min(100, Math.round((seg.fuerza_ejecutados / seg.fuerza_planeados) * 100)) : null;
+  const cPct = seg.cardio_planeados ? Math.min(100, Math.round((seg.cardio_ejecutados / seg.cardio_planeados) * 100)) : null;
+  const fLabel = $('#sg-f-pct'); if (fLabel) fLabel.textContent = fPct !== null ? `${fPct}%` : '';
+  const cLabel = $('#sg-c-pct'); if (cLabel) cLabel.textContent = cPct !== null ? `${cPct}%` : '';
+
+  const card = (titulo, valor, color) => `
+    <div class="rounded-xl p-3 text-center" style="background:${color}15;border:1px solid ${color}40">
+      <div class="text-xs text-slate-500">${titulo}</div>
+      <div class="text-lg font-bold" style="color:${color}">${valor !== null ? Math.round(valor) + '%' : '—'}</div>
+    </div>`;
+  el.innerHTML = `
+    ${card('Entreno', scores.score_entreno, '#10b981')}
+    ${card('Alim · metas', scores.score_alim_metas, '#3b82f6')}
+    ${card('Alim · registro', scores.score_alim_registro, '#8b5cf6')}
+    ${card('Global', scores.score_global, '#0f172a')}
+  `;
 };
 
 window.copiarSemanaAnterior = () => {
@@ -1132,8 +1434,10 @@ window.copiarSemanaAnterior = () => {
   if ($('#sg-avances').value && !confirm('¿Reemplazar el contenido actual?')) return;
   $('#sg-avances').value = prev.avances || '';
   $('#sg-pend').value = prev.pendientes_semana || '';
-  $('#sg-dias-pl').value = prev.dias_planeados ?? '';
-  toast('Avances copiados, ajústalos');
+  if ($('#sg-fp')) $('#sg-fp').value = prev.fuerza_planeados ?? '';
+  if ($('#sg-cp')) $('#sg-cp').value = prev.cardio_planeados ?? '';
+  recalcScores();
+  toast('Copiado, ajusta ejecutados');
 };
 
 window.aplicarPlantilla = (nivel) => {
@@ -1145,18 +1449,29 @@ window.aplicarPlantilla = (nivel) => {
 };
 
 window.guardarSeguimiento = async (cliente_id, semana, id) => {
+  const seg = {
+    fuerza_planeados: $('#sg-fp')?.value ? Number($('#sg-fp').value) : null,
+    fuerza_ejecutados: $('#sg-fe')?.value ? Number($('#sg-fe').value) : null,
+    cardio_planeados: $('#sg-cp')?.value ? Number($('#sg-cp').value) : null,
+    cardio_ejecutados: $('#sg-ce')?.value ? Number($('#sg-ce').value) : null,
+    kcal_promedio: $('#sg-kcal')?.value ? Number($('#sg-kcal').value) : null,
+    proteina_promedio_g: $('#sg-prote')?.value ? Number($('#sg-prote').value) : null,
+    dias_registro_alim: $('#sg-dr')?.value ? Number($('#sg-dr').value) : null,
+  };
+  const scores = calcScores(seg, window._segCliente);
   const row = {
     cliente_id, semana,
     fecha: $('#sg-fecha').value || fmt.hoy(),
-    adherencia_entreno: $('#sg-ent').value ? Number($('#sg-ent').value) : null,
-    adherencia_alimentacion: $('#sg-ali').value ? Number($('#sg-ali').value) : null,
-    adherencia_descanso: $('#sg-des').value ? Number($('#sg-des').value) : null,
-    dias_planeados: $('#sg-dias-pl').value ? Number($('#sg-dias-pl').value) : null,
-    dias_asistidos: $('#sg-dias-as').value ? Number($('#sg-dias-as').value) : null,
+    ...seg,
+    score_entreno: scores.score_entreno,
+    score_alim_metas: scores.score_alim_metas,
+    score_alim_registro: scores.score_alim_registro,
+    score_global: scores.score_global,
     avances: $('#sg-avances').value || null,
     pendientes_semana: $('#sg-pend').value || null,
-    estado_animo: $('#sg-animo').value || null,
     notas: $('#sg-notas').value || null,
+    lesion_estado_semana: $('#sg-lesion-est')?.value || null,
+    lesion_actualizacion: $('#sg-lesion-txt')?.value || null,
     estado: 'hecho',
   };
   await db.seguimientos.upsert(row);
@@ -1168,6 +1483,34 @@ window.guardarSeguimiento = async (cliente_id, semana, id) => {
 window.editarSeguimiento = async (id) => {
   const s = await db.seguimientos.get(id);
   await abrirModalSeguimiento(s.cliente_id, s.semana, s);
+};
+
+window.copiarMensajeWhatsApp = async (cliente_id) => {
+  const seg = {
+    fuerza_planeados: $('#sg-fp')?.value ? Number($('#sg-fp').value) : null,
+    fuerza_ejecutados: $('#sg-fe')?.value ? Number($('#sg-fe').value) : null,
+    cardio_planeados: $('#sg-cp')?.value ? Number($('#sg-cp').value) : null,
+    cardio_ejecutados: $('#sg-ce')?.value ? Number($('#sg-ce').value) : null,
+    kcal_promedio: $('#sg-kcal')?.value ? Number($('#sg-kcal').value) : null,
+    proteina_promedio_g: $('#sg-prote')?.value ? Number($('#sg-prote').value) : null,
+    dias_registro_alim: $('#sg-dr')?.value ? Number($('#sg-dr').value) : null,
+  };
+  const scores = calcScores(seg, window._segCliente);
+  const cliente = window._segCliente;
+  const pendientes = await db.pendientes.listCliente(cliente_id);
+  const segsDesc = (await db.seguimientos.listCliente(cliente_id)).sort((a, b) => b.semana.localeCompare(a.semana));
+  const streaks = {
+    fuerza: calcStreakDim(segsDesc, s => s.fuerza_planeados > 0 && (s.fuerza_ejecutados / s.fuerza_planeados) >= 0.75),
+    cardio: calcStreakDim(segsDesc, s => s.cardio_planeados > 0 && (s.cardio_ejecutados / s.cardio_planeados) >= 0.75),
+  };
+  const texto = borradorWhatsApp(cliente, seg, scores, pendientes, streaks);
+  try {
+    await navigator.clipboard.writeText(texto);
+    toast('✓ Mensaje copiado, pégalo en WhatsApp');
+  } catch (e) {
+    // Fallback: prompt
+    prompt('Copia manualmente:', texto);
+  }
 };
 
 window.eliminarSeguimiento = async (id, clienteId) => {
@@ -1198,14 +1541,16 @@ routes.pagos = async () => {
     map[p.cliente_id][p.mes] = p;
   }
 
-  // Totales — suman TODOS los pagos con monto > 0 (pagados + pendientes)
+  // Totales — pagados siempre suman; pendientes solo si el cliente está activo
   const totalesMes = {};
   let totalAnio = 0;
   for (const mes of meses) {
     let t = 0;
     for (const c of clientes) {
       const p = map[c.id]?.[mes];
-      if (p && Number(p.monto) > 0) t += copConv(p.monto, p.moneda);
+      if (!p || Number(p.monto) <= 0) continue;
+      if (p.pagado) t += copConv(p.monto, p.moneda);
+      else if (c.estado === 'activo') t += copConv(p.monto, p.moneda);
     }
     totalesMes[mes] = t;
     totalAnio += t;
@@ -1342,7 +1687,8 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
                   } else if (p && Number(p.monto) > 0) {
                     cls = monthNum < mesActualNum ? 'pay-overdue' : 'pay-pending';
                     val = fmtVal(p.monto);
-                    totalFila += copConv(p.monto, p.moneda);
+                    // Solo sumar pendientes al total anual si el cliente está activo
+                    if (c.estado === 'activo') totalFila += copConv(p.monto, p.moneda);
                   } else if (monthNum < mesActualNum) {
                     cls = 'pay-overdue';
                     val = '—';
@@ -1725,16 +2071,63 @@ function clienteForm(c = {}) {
           <div class="col-span-2"><label>Objetivo (resumen corto)</label><input id="cl-obj" placeholder="Ej: bajar 5 kg, ganar masa, hábitos…" value="${escapeHtml(c.objetivo || '')}"></div>
           <div class="col-span-2"><label>Meta específica</label><textarea id="cl-meta" rows="2">${escapeHtml(c.meta_especifica || '')}</textarea></div>
           <div><label>Fecha objetivo</label><input id="cl-fobj" type="date" value="${c.fecha_objetivo || ''}"></div>
+          <div><label>Fase del programa</label>
+            <select id="cl-fase">
+              <option value="">—</option>
+              ${FASES_PROGRAMA.map(f => `<option value="${f.key}" ${c.fase_programa === f.key ? 'selected' : ''}>${f.label}</option>`).join('')}
+            </select>
+          </div>
           <div><label>Lugar de entreno</label>
             <select id="cl-lugar">
               <option value="">—</option>
-              ${['casa','gym','aire_libre','mixto'].map(o => `<option ${c.lugar_entreno === o ? 'selected' : ''}>${o.replace('_',' ')}</option>`).join('')}
+              ${['casa','gym_comercial','parque','aire_libre','mixto'].map(o => `<option value="${o}" ${c.lugar_entreno === o ? 'selected' : ''}>${o.replace('_',' ')}</option>`).join('')}
             </select>
           </div>
-          <div class="col-span-2"><label>Restricciones o lesiones</label><textarea id="cl-rest" rows="2" placeholder="Ej: hernia lumbar L4-L5, rodilla derecha…">${escapeHtml(c.restricciones_lesiones || '')}</textarea></div>
-          <div class="col-span-2"><label>Patologías</label><input id="cl-pat" value="${escapeHtml(c.patologias || '')}"></div>
+          <div><label>Estatura (cm)</label><input id="cl-alt" type="number" min="120" max="230" value="${c.estatura_cm || ''}"></div>
+          <div class="col-span-2"><label>Condiciones de salud / patologías</label><textarea id="cl-pat" rows="2" placeholder="Ej: prediabético, hipertensión, hipotiroidismo…">${escapeHtml(c.patologias || '')}</textarea></div>
+          <div class="col-span-2"><label>Restricciones o lesiones (base)</label><textarea id="cl-rest" rows="2" placeholder="Ej: hernia lumbar L4-L5, rodilla derecha…">${escapeHtml(c.restricciones_lesiones || '')}</textarea></div>
+          <div class="col-span-2"><label>Lesión actual (activa hoy)</label><input id="cl-lesion" placeholder="Ej: tendinitis hombro derecho" value="${escapeHtml(c.lesion_actual || '')}"></div>
+          <div><label>Estado de la lesión</label>
+            <select id="cl-lesion-est">
+              <option value="">—</option>
+              ${['activa','en_mejora','resuelta','recaida'].map(o => `<option value="${o}" ${c.lesion_estado === o ? 'selected' : ''}>${o.replace('_',' ')}</option>`).join('')}
+            </select>
+          </div>
           <div><label>Antecedentes deportivos</label><input id="cl-ant" value="${escapeHtml(c.antecedentes_deportivos || '')}"></div>
-          <div><label>Preferencias dietéticas</label><input id="cl-diet" placeholder="Vegetariano, sin gluten…" value="${escapeHtml(c.preferencias_dietetica || '')}"></div>
+          <div class="col-span-2"><label>Preferencias dietéticas</label><input id="cl-diet" placeholder="Vegetariano, sin gluten…" value="${escapeHtml(c.preferencias_dietetica || '')}"></div>
+        </div>
+      </div>
+
+      <div>
+        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">Nutrición · nivel actividad y metas</h4>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label>Nivel de actividad</label>
+            <div class="flex items-center gap-2">
+              <input id="cl-nivel" readonly value="${c.nivel_actividad ? c.nivel_actividad.replace('_',' ') + ' · PAL ' + (c.pal_factor || PAL_MAP[c.nivel_actividad] || '') : ''}" placeholder="—" class="!bg-white">
+              <button type="button" class="btn btn-secondary btn-sm whitespace-nowrap" onclick="abrirEncuestaActividad()">Encuesta</button>
+            </div>
+          </div>
+          <div>
+            <label>Objetivo calórico</label>
+            <select id="cl-objk">
+              <option value="">—</option>
+              ${OBJETIVOS_KCAL.map(o => `<option value="${o.key}" ${c.objetivo_calorico === o.key ? 'selected' : ''}>${o.label}</option>`).join('')}
+            </select>
+          </div>
+          <div class="col-span-2 bg-slate-50 rounded-xl p-3">
+            <div class="flex items-baseline justify-between mb-2">
+              <div class="text-xs font-bold text-slate-600 uppercase">Meta nutricional diaria</div>
+              <button type="button" class="btn btn-primary btn-sm" onclick="recalcularMeta()">🧮 Recalcular</button>
+            </div>
+            <div id="meta-preview" class="text-sm">
+              ${c.meta_calorias ? `
+                <div class="font-bold text-emerald-700 text-base">${c.meta_calorias} kcal · ${c.meta_proteina_g}g prote · ${c.meta_grasas_g}g grasas · ${c.meta_carbos_g}g carbos</div>
+                <div class="text-xs text-slate-500 mt-1">${c.meta_metodo || ''} · Recalculada ${c.meta_calculada_en ? new Date(c.meta_calculada_en).toLocaleDateString('es-CO') : ''}</div>
+                ${c.meta_argumento ? `<details class="mt-2"><summary class="text-xs text-emerald-700 cursor-pointer">Ver argumento del cálculo</summary><pre class="text-xs text-slate-600 mt-1 whitespace-pre-wrap">${escapeHtml(c.meta_argumento)}</pre></details>` : ''}
+              ` : '<div class="text-xs text-slate-500">Sin meta calculada. Llena estatura, sexo, edad, nivel actividad y objetivo calórico, luego click en "Recalcular".</div>'}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1782,6 +2175,9 @@ function clienteForm(c = {}) {
 }
 
 window.nuevoCliente = () => {
+  window._editingClienteId = null;
+  window._pendingEncuesta = null;
+  window._pendingMeta = null;
   openModal(modalShell('Nuevo cliente', clienteForm(), `
     <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
     <button class="btn btn-primary" onclick="guardarCliente()">Guardar</button>
@@ -1790,6 +2186,9 @@ window.nuevoCliente = () => {
 
 window.editarCliente = async (id) => {
   const c = await db.clientes.get(id);
+  window._editingClienteId = id;
+  window._pendingEncuesta = c.nivel_actividad ? { nivel: c.nivel_actividad, pal: c.pal_factor || PAL_MAP[c.nivel_actividad], respuestas: c.nivel_actividad_encuesta } : null;
+  window._pendingMeta = null;
   openModal(modalShell(`Editar · ${c.nombre}`, clienteForm(c), `
     <button class="btn btn-danger mr-auto" onclick="eliminarCliente('${id}')">Eliminar</button>
     <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
@@ -1814,10 +2213,21 @@ window.guardarCliente = async (id = null) => {
     meta_especifica: $('#cl-meta').value.trim() || null,
     fecha_objetivo: $('#cl-fobj').value || null,
     lugar_entreno: $('#cl-lugar').value || null,
+    fase_programa: $('#cl-fase').value || null,
+    estatura_cm: $('#cl-alt').value ? Number($('#cl-alt').value) : null,
     restricciones_lesiones: $('#cl-rest').value.trim() || null,
     patologias: $('#cl-pat').value.trim() || null,
+    lesion_actual: $('#cl-lesion').value.trim() || null,
+    lesion_estado: $('#cl-lesion-est').value || null,
     antecedentes_deportivos: $('#cl-ant').value.trim() || null,
     preferencias_dietetica: $('#cl-diet').value.trim() || null,
+    objetivo_calorico: $('#cl-objk').value || null,
+    ...(window._pendingEncuesta ? {
+      nivel_actividad: window._pendingEncuesta.nivel,
+      pal_factor: window._pendingEncuesta.pal,
+      nivel_actividad_encuesta: window._pendingEncuesta.respuestas,
+    } : {}),
+    ...(window._pendingMeta || {}),
     monto: Number($('#cl-monto').value) || 0,
     moneda: $('#cl-moneda').value,
     dia_pago: $('#cl-dia').value ? Number($('#cl-dia').value) : null,
@@ -1832,9 +2242,126 @@ window.guardarCliente = async (id = null) => {
   if (!row.nombre) { toast('Falta el nombre'); return; }
   if (id) await db.clientes.update(id, row);
   else await db.clientes.insert(row);
+  window._pendingEncuesta = null;
+  window._pendingMeta = null;
   closeModal();
   toast('Guardado');
   navigate('clientes');
+};
+
+// ===== Encuesta nivel de actividad =====
+window.abrirEncuestaActividad = () => {
+  const modalActual = modalContent.innerHTML;  // guardo estado del modal cliente
+  openModal(modalShell('Encuesta · nivel de actividad', `
+    <div class="space-y-4 text-sm">
+      ${ENCUESTA_ACTIVIDAD.map(q => `
+        <div>
+          <label class="mb-1">${q.label}</label>
+          <div class="flex gap-2 flex-wrap">
+            ${q.opts.map(([lbl, val]) => `
+              <label class="flex items-center gap-1.5 bg-slate-50 rounded-lg px-3 py-1.5 cursor-pointer hover:bg-slate-100">
+                <input type="radio" name="${q.key}" value="${val}"> ${lbl}
+              </label>
+            `).join('')}
+          </div>
+        </div>
+      `).join('')}
+      <div id="enc-result" class="hidden bg-emerald-50 rounded-xl p-3 text-emerald-900 text-sm"></div>
+    </div>
+  `, `
+    <button class="btn btn-secondary" onclick="cerrarEncuesta()">Cancelar</button>
+    <button class="btn btn-primary" onclick="calcularEncuesta()">Calcular</button>
+  `), { wide: false });
+  window._modalClienteHTML = modalActual;
+};
+
+window.calcularEncuesta = () => {
+  const respuestas = {};
+  for (const q of ENCUESTA_ACTIVIDAD) {
+    const el = document.querySelector(`input[name="${q.key}"]:checked`);
+    if (!el) { toast(`Falta responder: ${q.label}`); return; }
+    respuestas[q.key] = Number(el.value);
+  }
+  const r = nivelDesdeEncuesta(respuestas);
+  window._pendingEncuesta = { nivel: r.nivel, pal: r.pal, respuestas };
+  const el = $('#enc-result');
+  el.classList.remove('hidden');
+  el.innerHTML = `<strong>Resultado:</strong> nivel <strong>${r.nivel.replace('_',' ')}</strong> · PAL <strong>${r.pal}</strong> · puntaje ${r.total}. Click "Aplicar" para guardarlo en la ficha.`;
+  el.insertAdjacentHTML('afterend', `<div class="flex justify-end mt-3"><button class="btn btn-primary" onclick="aplicarEncuesta()">Aplicar</button></div>`);
+};
+
+window.aplicarEncuesta = () => {
+  // Volver al modal del cliente con el nivel puesto
+  modalContent.innerHTML = window._modalClienteHTML || '';
+  if (window._pendingEncuesta) {
+    const el = $('#cl-nivel');
+    if (el) el.value = `${window._pendingEncuesta.nivel.replace('_',' ')} · PAL ${window._pendingEncuesta.pal}`;
+  }
+  toast('Nivel de actividad aplicado');
+};
+
+window.cerrarEncuesta = () => {
+  modalContent.innerHTML = window._modalClienteHTML || '';
+};
+
+// ===== Recalcular meta nutricional =====
+window.recalcularMeta = async () => {
+  // Datos que vienen del form actual (aún no guardado)
+  const estatura = Number($('#cl-alt').value);
+  const sexo = $('#cl-sexo').value;
+  const fnac = $('#cl-nac').value;
+  const objetivoK = $('#cl-objk').value;
+  const enc = window._pendingEncuesta;
+
+  if (!estatura) { toast('Falta estatura'); return; }
+  if (!sexo) { toast('Falta sexo'); return; }
+  if (!fnac) { toast('Falta fecha de nacimiento'); return; }
+  if (!objetivoK) { toast('Falta objetivo calórico'); return; }
+  if (!enc) { toast('Falta hacer la encuesta de nivel de actividad'); return; }
+
+  const edad = helpers.edadDe(fnac);
+  const objData = OBJETIVOS_KCAL.find(o => o.key === objetivoK);
+
+  // Peso: última medición corporal del cliente, o pregunta
+  let peso = null, grasa = null;
+  const clienteId = window._editingClienteId;
+  if (clienteId) {
+    const meds = await db.mediciones.listCliente(clienteId);
+    const ult = meds[meds.length - 1];
+    if (ult) { peso = ult.peso; grasa = ult.grasa_pct; }
+  }
+  if (!peso) {
+    const p = prompt('¿Peso actual en kg? (aún no tienes medición registrada)');
+    if (!p) return;
+    peso = Number(p);
+  }
+  if (!grasa) {
+    const g = prompt('¿% de grasa corporal? (opcional, deja vacío si no lo sabes)', '');
+    if (g) grasa = Number(g);
+  }
+
+  const meta = calcMetaNutricional({
+    peso, altura: estatura, edad, sexo, grasa_pct: grasa,
+    pal: enc.pal, objetivo_pct: objData.pct,
+  });
+  if (!meta) { toast('Datos insuficientes'); return; }
+
+  window._pendingMeta = {
+    meta_calorias: meta.kcal,
+    meta_proteina_g: meta.proteina,
+    meta_grasas_g: meta.grasas,
+    meta_carbos_g: meta.carbos,
+    meta_metodo: meta.metodo,
+    meta_argumento: meta.argumento,
+    meta_calculada_en: new Date().toISOString(),
+  };
+
+  $('#meta-preview').innerHTML = `
+    <div class="font-bold text-emerald-700 text-base">${meta.kcal} kcal · ${meta.proteina}g prote · ${meta.grasas}g grasas · ${meta.carbos}g carbos</div>
+    <div class="text-xs text-slate-500 mt-1">${meta.metodo} · calculada ahora</div>
+    <details class="mt-2" open><summary class="text-xs text-emerald-700 cursor-pointer">Ver argumento del cálculo</summary><pre class="text-xs text-slate-600 mt-1 whitespace-pre-wrap">${escapeHtml(meta.argumento)}</pre></details>
+    <p class="text-xs text-amber-700 mt-2">⚠️ Aún no guardada. Click en "Guardar" abajo para persistir.</p>
+  `;
 };
 
 window.eliminarCliente = async (id) => {
@@ -1845,15 +2372,30 @@ window.eliminarCliente = async (id) => {
 };
 
 window.verCliente = async (id) => {
-  const [c, segs, pends, pagos] = await Promise.all([
+  const [c, segs, pends, pagos, meds] = await Promise.all([
     db.clientes.get(id),
     db.seguimientos.listCliente(id),
     db.pendientes.listCliente(id),
     sb.from('pagos').select('*').eq('cliente_id', id).order('mes', { ascending: false }),
+    db.mediciones.listCliente(id),
   ]);
-  const adh = segs.slice(0, 4).map(helpers.promedioAdh).filter(v => v !== null);
-  const promAdh = adh.length ? adh.reduce((a, b) => a + b, 0) / adh.length : null;
   const edad = helpers.edadDe(c.fecha_nacimiento);
+
+  // Adherencia promedio: usar score_global si existe, fallback a promedioAdh viejo
+  const adhVals = segs.slice(0, 4).map(s => s.score_global ?? (helpers.promedioAdh(s) !== null ? helpers.promedioAdh(s) * 10 : null)).filter(v => v !== null);
+  const promAdh = adhVals.length ? adhVals.reduce((a, b) => a + b, 0) / adhVals.length : null;
+
+  // Streaks
+  const segsDesc = segs.slice().sort((a, b) => b.semana.localeCompare(a.semana));
+  const streakF = calcStreakDim(segsDesc, s => s.fuerza_planeados > 0 && (s.fuerza_ejecutados / s.fuerza_planeados) >= 0.75);
+  const streakC = calcStreakDim(segsDesc, s => s.cardio_planeados > 0 && (s.cardio_ejecutados / s.cardio_planeados) >= 0.75);
+  const streakGlobal = calcStreakDim(segsDesc, s => (s.score_global ?? 0) >= 75);
+
+  // Serie de mediciones para gráfica
+  const medsAsc = meds.slice().sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const labelsMed = medsAsc.map(m => fmt.fechaCorta(m.fecha));
+  const pesos = medsAsc.map(m => m.peso ?? null).filter(v => v !== null);
+  const grasas = medsAsc.map(m => m.grasa_pct ?? null).filter(v => v !== null);
 
   openModal(modalShell(c.nombre, `
     <div class="space-y-4">
@@ -1861,7 +2403,15 @@ window.verCliente = async (id) => {
         <button class="btn btn-secondary btn-sm" onclick="editarCliente('${c.id}')">✎ Editar</button>
         <button class="btn btn-secondary btn-sm" onclick="abrirNuevoSeguimiento('${c.id}')">+ Nueva semana</button>
         <button class="btn btn-secondary btn-sm" onclick="nuevoPendiente('${c.id}')">+ Pendiente</button>
+        <button class="btn btn-secondary btn-sm" onclick="nuevaMedicion('${c.id}')">+ Medición corporal</button>
       </div>
+
+      ${streakF > 1 || streakC > 1 || streakGlobal > 1 ? `
+      <div class="flex gap-2 flex-wrap">
+        ${streakF > 1 ? `<span class="tag tag-green">🔥 ${streakF} sem fuerza</span>` : ''}
+        ${streakC > 1 ? `<span class="tag tag-green">🔥 ${streakC} sem cardio</span>` : ''}
+        ${streakGlobal > 1 ? `<span class="tag tag-violet">🏆 ${streakGlobal} sem cumpliendo global</span>` : ''}
+      </div>` : ''}
 
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
         <div><span class="text-slate-500 text-xs">Estado:</span><br><strong>${c.estado}</strong></div>
@@ -1924,6 +2474,45 @@ window.verCliente = async (id) => {
           }).join('')}
       </div>
 
+      ${c.meta_calorias ? `
+        <div class="bg-blue-50 rounded-xl p-3 text-sm">
+          <div class="text-xs font-bold text-blue-800 mb-1">🥗 Meta nutricional diaria</div>
+          <div class="text-blue-900 font-semibold">${c.meta_calorias} kcal · ${c.meta_proteina_g}g prote · ${c.meta_grasas_g}g grasas · ${c.meta_carbos_g}g carbos</div>
+          <div class="text-xs text-blue-700 mt-1">${c.meta_metodo || ''} · Nivel: ${c.nivel_actividad?.replace('_',' ') || '—'} · PAL ${c.pal_factor || '—'}</div>
+          ${c.meta_argumento ? `<details class="mt-2"><summary class="text-xs text-blue-700 cursor-pointer">Ver argumento del cálculo</summary><pre class="text-xs text-slate-600 mt-1 whitespace-pre-wrap">${escapeHtml(c.meta_argumento)}</pre></details>` : ''}
+        </div>` : ''}
+
+      <div>
+        <div class="flex items-baseline justify-between mb-2">
+          <h4 class="text-xs font-bold text-slate-500 uppercase">📏 Mediciones corporales (${meds.length})</h4>
+          <button class="text-xs text-emerald-600 font-semibold hover:underline" onclick="nuevaMedicion('${c.id}')">+ Agregar</button>
+        </div>
+        ${meds.length === 0 ? '<p class="text-xs text-slate-500">Sin mediciones registradas.</p>' : `
+          ${pesos.length >= 2 ? `
+            <div class="bg-slate-50 rounded-xl p-3 mb-2">
+              <div class="text-xs font-bold text-slate-700 mb-2">Evolución peso ${grasas.length >= 2 ? '· % grasa' : ''}</div>
+              ${(() => {
+                const series = [{ label: 'Peso', color: '#10b981', points: medsAsc.map(m => m.peso ?? null) }];
+                const minP = Math.min(...pesos), maxP = Math.max(...pesos);
+                const opts = { yMin: Math.floor(minP - 3), yMax: Math.ceil(maxP + 3), height: 160 };
+                if (grasas.length >= 2) {
+                  series.push({ label: '% grasa', color: '#f59e0b', points: medsAsc.map(m => m.grasa_pct ?? null) });
+                }
+                return lineChart(series, labelsMed, opts);
+              })()}
+            </div>` : ''}
+          <table><thead><tr><th>Fecha</th><th>Peso</th><th>% grasa</th><th>Cintura</th><th></th></tr></thead><tbody>
+            ${meds.slice().reverse().slice(0, 6).map(m => `
+              <tr>
+                <td>${fmt.fechaCorta(m.fecha)}</td>
+                <td>${m.peso ?? '—'}</td>
+                <td>${m.grasa_pct ?? '—'}</td>
+                <td>${m.cintura ?? '—'}</td>
+                <td class="text-right"><button class="btn btn-ghost text-xs" onclick="eliminarMedicion('${m.id}', '${c.id}')">✕</button></td>
+              </tr>`).join('')}
+          </tbody></table>`}
+      </div>
+
       <div>
         <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">Últimos pagos</h4>
         ${(pagos.data || []).length === 0 ? '<p class="text-xs text-slate-500">Sin pagos.</p>' :
@@ -1940,6 +2529,49 @@ window.verCliente = async (id) => {
       ${c.notas ? `<div class="bg-slate-50 rounded-xl p-3 text-sm whitespace-pre-line"><div class="text-xs font-bold text-slate-500 uppercase mb-1">Notas</div>${escapeHtml(c.notas)}</div>` : ''}
     </div>
   `, `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>`), { wide: true });
+};
+
+// ===== Mediciones corporales =====
+window.nuevaMedicion = (clienteId) => {
+  openModal(modalShell('Nueva medición corporal', `
+    <div class="grid grid-cols-2 gap-3">
+      <div><label>Fecha</label><input id="me-fecha" type="date" value="${fmt.hoy()}"></div>
+      <div><label>Peso (kg)</label><input id="me-peso" type="number" step="0.1" placeholder="78.5"></div>
+      <div><label>% Grasa</label><input id="me-grasa" type="number" step="0.1" placeholder="18.5"></div>
+      <div><label>Cintura (cm)</label><input id="me-cin" type="number" step="0.1"></div>
+      <div><label>Cadera (cm)</label><input id="me-cad" type="number" step="0.1"></div>
+      <div><label>Pecho (cm)</label><input id="me-pec" type="number" step="0.1"></div>
+      <div><label>Brazo (cm)</label><input id="me-bra" type="number" step="0.1"></div>
+      <div><label>Pierna (cm)</label><input id="me-pie" type="number" step="0.1"></div>
+      <div class="col-span-2"><label>Notas</label><textarea id="me-notas" rows="2"></textarea></div>
+    </div>
+  `, `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarMedicion('${clienteId}')">Guardar</button>`));
+};
+
+window.guardarMedicion = async (clienteId) => {
+  const num = (sel) => { const v = $(sel).value; return v ? Number(v) : null; };
+  await db.mediciones.insert({
+    cliente_id: clienteId,
+    fecha: $('#me-fecha').value || fmt.hoy(),
+    peso: num('#me-peso'),
+    grasa_pct: num('#me-grasa'),
+    cintura: num('#me-cin'),
+    cadera: num('#me-cad'),
+    pecho: num('#me-pec'),
+    brazo: num('#me-bra'),
+    pierna: num('#me-pie'),
+    notas: $('#me-notas').value || null,
+  });
+  closeModal();
+  toast('Medición guardada');
+  verCliente(clienteId);
+};
+
+window.eliminarMedicion = async (id, clienteId) => {
+  if (!confirm('¿Eliminar esta medición?')) return;
+  await db.mediciones.remove(id);
+  verCliente(clienteId);
 };
 
 window.togglePendienteFicha = async (id, estado, clienteId) => {
@@ -2200,6 +2832,21 @@ routes.ajustes = async () => {
       </div>
     </div>
 
+    <div class="card max-w-xl mb-4">
+      <h3 class="font-bold text-slate-900 mb-1">Conexión Mealtracker (opcional)</h3>
+      <p class="text-xs text-slate-500 mb-4">Si tus clientes registran su alimentación en otro Supabase, pon aquí sus credenciales y en cada cliente su <code>mealtracker_id</code>. El CRM leerá los promedios semanales automáticamente.</p>
+      <div class="space-y-3">
+        <div>
+          <label>Mealtracker Project URL</label>
+          <input id="st-mt-url" placeholder="https://xxxx.supabase.co" value="${escapeHtml(_settings.mealtracker_url || '')}">
+        </div>
+        <div>
+          <label>Mealtracker anon key</label>
+          <input id="st-mt-key" type="password" placeholder="eyJ..." value="${escapeHtml(_settings.mealtracker_anon_key || '')}">
+        </div>
+      </div>
+    </div>
+
     <div class="flex gap-2 max-w-xl">
       <button class="btn btn-primary" onclick="guardarAjustes()">Guardar ajustes</button>
       <button class="btn btn-danger ml-auto" id="lo">Cerrar sesión</button>
@@ -2212,6 +2859,8 @@ window.guardarAjustes = async () => {
   await db.settings.save({
     usd_cop_rate: Number($('#st-rate').value) || 4000,
     nombre_coach: $('#st-nombre').value.trim() || 'Coach',
+    mealtracker_url: $('#st-mt-url').value.trim() || null,
+    mealtracker_anon_key: $('#st-mt-key').value.trim() || null,
   });
   toast('Guardado');
 };
