@@ -1,7 +1,14 @@
 // =============================================
 // CONFIGURACIÓN DE SUPABASE
-// Reemplaza estos dos valores con los de tu proyecto:
+// Reemplaza estos valores con los de tus proyectos:
 // Supabase Dashboard → Settings → API → Project URL y "anon" public key
 // =============================================
-window.SUPABASE_URL  = 'https://evabivmzrdclhwlpqdoy.supabase.co';
-window.SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV2YWJpdm16cmRjbGh3bHBxZG95Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3MzY1ODAsImV4cCI6MjA5ODMxMjU4MH0.ZgWQhiCaRyEcwe6W-J_iRtHguPr2ACjCoekdL9cbICo';
+
+// --- CRM principal (obligatorio) ---
+window.SUPABASE_URL      = 'https://TU-PROYECTO.supabase.co';
+window.SUPABASE_ANON_KEY = 'TU_ANON_KEY';
+
+// --- Mealtracker (opcional, para leer los registros de comida) ---
+// Si no lo usas, déjalos vacíos.
+window.MEALTRACKER_URL      = '';
+window.MEALTRACKER_ANON_KEY = '';

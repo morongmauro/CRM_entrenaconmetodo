@@ -5,11 +5,16 @@
 const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 
 // ===== Cliente Supabase secundario: Mealtracker externo =====
+// Las credenciales pueden venir de config.js (window.MEALTRACKER_URL/KEY)
+// o del panel de Ajustes (_settings.mealtracker_url/_key). config.js tiene prioridad.
 let _mtClient = null;
 let _mtClientKey = null;
+let _mtUsersCache = null;
+let _mtUsersCacheTime = 0;
+
 function mtClient() {
-  const url = _settings?.mealtracker_url;
-  const key = _settings?.mealtracker_anon_key;
+  const url = window.MEALTRACKER_URL || _settings?.mealtracker_url;
+  const key = window.MEALTRACKER_ANON_KEY || _settings?.mealtracker_anon_key;
   if (!url || !key) { _mtClient = null; return null; }
   const cacheKey = `${url}|${key}`;
   if (_mtClient && _mtClientKey === cacheKey) return _mtClient;
@@ -73,12 +78,49 @@ async function getMealtrackerWeek(mealtrackerId, semanaISO) {
   };
 }
 
-// Lista todos los clientes del mealtracker (para sync)
-async function listarClientesMealtracker() {
+// Lista todos los clientes del mealtracker (con cache de 60s)
+async function listarClientesMealtracker(force = false) {
   const mt = mtClient();
   if (!mt) return [];
+  const ahora = Date.now();
+  if (!force && _mtUsersCache && (ahora - _mtUsersCacheTime) < 60000) return _mtUsersCache;
   const { data } = await mt.from('user_data').select('user_id, name, updated_at').order('updated_at', { ascending: false });
-  return data || [];
+  _mtUsersCache = data || [];
+  _mtUsersCacheTime = ahora;
+  return _mtUsersCache;
+}
+
+// Auto-match transparente por nombre. Devuelve el mealtracker_id resuelto (usando
+// el guardado si existe, o buscando por nombre y guardándolo si hay match ≥85%).
+async function resolverMealtrackerId(cliente) {
+  if (!cliente) return null;
+  if (cliente.mealtracker_id) return cliente.mealtracker_id;
+  const mt = mtClient();
+  if (!mt) return null;
+
+  const users = await listarClientesMealtracker();
+  if (!users.length) return null;
+
+  // Buscar mejor match por nombre. Si hay varias filas del mismo nombre, tomar la más reciente.
+  const nombresNorm = {};
+  for (const u of users) {
+    const n = normalizeName(u.name);
+    if (!nombresNorm[n] || u.updated_at > nombresNorm[n].updated_at) nombresNorm[n] = u;
+  }
+
+  let mejor = null;
+  for (const u of Object.values(nombresNorm)) {
+    const score = similitudNombre(cliente.nombre, u.name);
+    if (!mejor || score > mejor.score) mejor = { ...u, score };
+  }
+
+  if (mejor && mejor.score >= 85) {
+    // Guardar el vínculo en el cliente
+    await sb.from('clientes').update({ mealtracker_id: mejor.user_id }).eq('id', cliente.id);
+    _clientesCache = null;
+    return mejor.user_id;
+  }
+  return null;
 }
 
 function normalizeName(s) {
@@ -1349,7 +1391,7 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
           <div class="flex items-baseline justify-between flex-wrap gap-2">
             <div class="text-xs font-bold text-slate-600 uppercase">🥗 Alimentación</div>
             <div class="flex items-center gap-2">
-              ${cliente.mealtracker_id ? `<button type="button" class="btn btn-secondary btn-sm" onclick="jalarMealtracker('${cliente.mealtracker_id}', '${semana}')">🔄 Jalar del Mealtracker</button>` : ''}
+              ${mtClient() ? `<button type="button" class="btn btn-secondary btn-sm" onclick="jalarMealtrackerAuto('${cliente.id}', '${semana}')">🔄 ${cliente.mealtracker_id ? 'Actualizar' : 'Buscar'} Mealtracker</button>` : ''}
               ${cliente.meta_calorias ? `<div class="text-xs text-slate-500">Meta: ${cliente.meta_calorias} kcal · ${cliente.meta_proteina_g}g prote</div>` : '<div class="text-xs text-amber-600">Sin meta definida</div>'}
             </div>
           </div>
@@ -1489,9 +1531,17 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
   window._segPrev = semanaPrev;
   window._segCliente = cliente;
 
-  // Auto-jalar del Mealtracker si el cliente está vinculado y aún no hay data
-  if (cliente.mealtracker_id && mtClient() && !s.kcal_promedio && !s.proteina_promedio_g) {
-    setTimeout(() => window.jalarMealtracker(cliente.mealtracker_id, semana), 200);
+  // Auto-resolver y jalar del Mealtracker si aún no hay data
+  if (mtClient() && !s.kcal_promedio && !s.proteina_promedio_g) {
+    setTimeout(async () => {
+      const mtId = await resolverMealtrackerId(cliente);
+      if (mtId) {
+        // Actualizar el objeto cliente en memoria por si volvemos a abrir
+        cliente.mealtracker_id = mtId;
+        window._segCliente = cliente;
+        window.jalarMealtracker(mtId, semana);
+      }
+    }, 200);
   }
 }
 
@@ -1584,6 +1634,20 @@ window.guardarSeguimiento = async (cliente_id, semana, id) => {
 window.editarSeguimiento = async (id) => {
   const s = await db.seguimientos.get(id);
   await abrirModalSeguimiento(s.cliente_id, s.semana, s);
+};
+
+// Wrapper que auto-resuelve el mealtracker_id si no existe
+window.jalarMealtrackerAuto = async (clienteId, semana) => {
+  const info = $('#sg-mt-info');
+  if (info) { info.classList.remove('hidden'); info.textContent = '⏳ Buscando cliente en el Mealtracker…'; }
+  const cliente = await db.clientes.get(clienteId);
+  const mtId = await resolverMealtrackerId(cliente);
+  if (!mtId) {
+    if (info) info.innerHTML = '<span class="text-amber-600">⚠️ No encontré un cliente con este nombre en el Mealtracker. Ve a Ajustes → "Sincronizar clientes" para vincular manualmente.</span>';
+    return;
+  }
+  if (window._segCliente) window._segCliente.mealtracker_id = mtId;
+  await window.jalarMealtracker(mtId, semana);
 };
 
 window.jalarMealtracker = async (mealtrackerId, semana) => {
@@ -2953,24 +3017,19 @@ routes.ajustes = async () => {
     </div>
 
     <div class="card max-w-xl mb-4">
-      <h3 class="font-bold text-slate-900 mb-1">Conexión Mealtracker (opcional)</h3>
-      <p class="text-xs text-slate-500 mb-4">Si tus clientes registran su alimentación en otro Supabase, pon aquí sus credenciales. El CRM leerá los promedios semanales automáticamente en cada seguimiento.</p>
-      <div class="space-y-3">
-        <div>
-          <label>Mealtracker Project URL</label>
-          <input id="st-mt-url" placeholder="https://xxxx.supabase.co" value="${escapeHtml(_settings.mealtracker_url || '')}">
+      <h3 class="font-bold text-slate-900 mb-1">Conexión Mealtracker</h3>
+      ${window.MEALTRACKER_URL && window.MEALTRACKER_ANON_KEY ? `
+        <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-900 mb-3">
+          ✓ Credenciales configuradas en <code>config.js</code>. El CRM se conecta automáticamente al Mealtracker.
         </div>
-        <div>
-          <label>Mealtracker anon key</label>
-          <input id="st-mt-key" type="password" placeholder="eyJ..." value="${escapeHtml(_settings.mealtracker_anon_key || '')}">
-        </div>
-      </div>
-      ${_settings.mealtracker_url && _settings.mealtracker_anon_key ? `
-        <div class="mt-4 pt-4 border-t border-slate-100">
-          <p class="text-xs text-slate-500 mb-2">Vincula cada cliente del CRM con su usuario del mealtracker (matching por nombre).</p>
-          <button class="btn btn-secondary" onclick="abrirSyncMealtracker()">🔗 Sincronizar clientes</button>
-        </div>
-      ` : ''}
+        <p class="text-xs text-slate-500 mb-3">Los clientes se vinculan solos cuando el nombre coincide. Si algún nombre no coincide 100%, puedes vincularlos a mano:</p>
+        <button class="btn btn-secondary" onclick="abrirSyncMealtracker()">🔗 Revisar / vincular manualmente</button>
+      ` : `
+        <p class="text-xs text-slate-500 mb-3">Para conectar el Mealtracker, edita el archivo <code>config.js</code> en tu repo de GitHub y pon ahí:</p>
+        <pre class="bg-slate-900 text-slate-100 rounded-xl p-3 text-xs overflow-x-auto"><code>window.MEALTRACKER_URL      = 'https://xxxxx.supabase.co';
+window.MEALTRACKER_ANON_KEY = 'eyJ...';</code></pre>
+        <p class="text-xs text-slate-500 mt-3">La anon key es pública y segura de subir a GitHub (Supabase la llama "public anon key"). Vercel redeploya solo al guardar el archivo.</p>
+      `}
     </div>
 
     <div class="flex gap-2 max-w-xl">
@@ -2985,10 +3044,7 @@ window.guardarAjustes = async () => {
   await db.settings.save({
     usd_cop_rate: Number($('#st-rate').value) || 4000,
     nombre_coach: $('#st-nombre').value.trim() || 'Coach',
-    mealtracker_url: $('#st-mt-url').value.trim() || null,
-    mealtracker_anon_key: $('#st-mt-key').value.trim() || null,
   });
-  _mtClient = null; // forzar recreación con las nuevas credenciales
   toast('Guardado');
   routes.ajustes();
 };
@@ -3006,7 +3062,7 @@ window.abrirSyncMealtracker = async () => {
 
   const [clientes, mtUsers] = await Promise.all([
     db.clientes.list(),
-    listarClientesMealtracker(),
+    listarClientesMealtracker(true), // force refresh
   ]);
 
   if (mtUsers.length === 0) {
