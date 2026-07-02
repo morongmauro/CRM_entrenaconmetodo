@@ -224,7 +224,7 @@ const helpers = {
   avatarBig: (nombre) => `<div class="w-14 h-14 rounded-2xl bg-gradient-to-br ${helpers.color(nombre)} flex items-center justify-center text-white font-bold text-xl shadow-sm">${helpers.iniciales(nombre)}</div>`,
   promedioAdh: (s) => {
     if (!s) return null;
-    const vals = [s.adherencia_entreno, s.adherencia_alimentacion, s.adherencia_descanso].filter(v => v !== null && v !== undefined);
+    const vals = [s.adherencia_entreno, s.adherencia_alimentacion].filter(v => v !== null && v !== undefined);
     if (!vals.length) return null;
     return vals.reduce((a, b) => a + b, 0) / vals.length;
   },
@@ -1183,7 +1183,6 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
   const labels = ult8.map(s => fmt.labelSemana(s.semana));
   const ptsEnt = ult8.map(s => s.adherencia_entreno ?? null);
   const ptsAli = ult8.map(s => s.adherencia_alimentacion ?? null);
-  const ptsDes = ult8.map(s => s.adherencia_descanso ?? null);
   const hayDatos = ult8.length >= 2;
 
   // Promedios desglosados últimas 4 sem
@@ -1193,7 +1192,32 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
   };
   const pEnt = promDim('adherencia_entreno');
   const pAli = promDim('adherencia_alimentacion');
-  const pDes = promDim('adherencia_descanso');
+
+  // Scores promedio últimas 4 sem (objetivos %)
+  const promScore = (campo) => {
+    const vals = segs.slice(0, 4).map(s => s[campo]).filter(v => v !== null && v !== undefined);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  };
+  const sEnt = promScore('score_entreno');
+  const sAlimMetas = promScore('score_alim_metas');
+  const sAlimReg = promScore('score_alim_registro');
+
+  const alignBar = (label, adherencia, score, color) => {
+    const adhVal = adherencia !== null ? adherencia.toFixed(1) : '—';
+    const scorePct = score !== null ? Math.round(score) : null;
+    const barWidth = score !== null ? Math.round(score) : (adherencia !== null ? adherencia * 10 : 0);
+    const barColor = barWidth >= 75 ? 'bg-emerald-500' : barWidth >= 50 ? 'bg-amber-500' : 'bg-red-500';
+    return `<div class="flex-1 min-w-[140px]">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-xs font-semibold text-slate-600">${label}</span>
+        <span class="text-xs font-bold" style="color:${color}">${scorePct !== null ? scorePct + '%' : adhVal + '/10'}</span>
+      </div>
+      <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
+        <div class="h-full rounded-full ${barColor}" style="width:${barWidth}%"></div>
+      </div>
+      ${scorePct !== null && adherencia !== null ? `<div class="text-right text-[10px] text-slate-400 mt-0.5">subjetivo: ${adhVal}/10</div>` : ''}
+    </div>`;
+  };
 
   return `
     <div class="card">
@@ -1226,15 +1250,22 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
           <div>
             ${legendDot('#10b981', `Entreno · ${pEnt !== null ? pEnt.toFixed(1) : '—'}/10`)}
             ${legendDot('#3b82f6', `Alimentación · ${pAli !== null ? pAli.toFixed(1) : '—'}/10`)}
-            ${legendDot('#8b5cf6', `Descanso · ${pDes !== null ? pDes.toFixed(1) : '—'}/10`)}
           </div>
         </div>
         ${lineChart([
           { label: 'Entreno', color: '#10b981', points: ptsEnt },
           { label: 'Alimentación', color: '#3b82f6', points: ptsAli },
-          { label: 'Descanso', color: '#8b5cf6', points: ptsDes },
         ], labels, { height: 160 })}
       </div>` : ''}
+
+      <div class="mt-4 pt-4 border-t border-slate-100">
+        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Alineación 4 semanas</h4>
+        <div class="flex gap-4 flex-wrap">
+          ${alignBar('Entrenamiento', pEnt, sEnt, '#10b981')}
+          ${alignBar('Alimentación · metas', pAli, sAlimMetas, '#3b82f6')}
+          ${alignBar('Alimentación · registro', null, sAlimReg, '#8b5cf6')}
+        </div>
+      </div>
 
       ${c.meta_calorias ? `
       <div class="mt-4 pt-4 border-t border-slate-100 bg-blue-50/50 -mx-5 -mb-5 px-5 py-3 rounded-b-2xl">
@@ -1276,10 +1307,17 @@ function seguimientoCard(s) {
           ${animo ? `<span class="text-xs text-slate-500">${animo} ${s.estado_animo}</span>` : ''}
         </div>
       </div>
-      <div class="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-100 text-xs">
-        <div class="text-center"><div class="text-slate-400">Entreno</div><div class="font-bold ${(s.adherencia_entreno || 0) >= 7 ? 'text-emerald-600' : (s.adherencia_entreno || 0) >= 4 ? 'text-amber-600' : 'text-red-600'}">${s.adherencia_entreno ?? '—'}/10</div></div>
-        <div class="text-center"><div class="text-slate-400">Alimentación</div><div class="font-bold ${(s.adherencia_alimentacion || 0) >= 7 ? 'text-emerald-600' : (s.adherencia_alimentacion || 0) >= 4 ? 'text-amber-600' : 'text-red-600'}">${s.adherencia_alimentacion ?? '—'}/10</div></div>
-        <div class="text-center"><div class="text-slate-400">Descanso</div><div class="font-bold ${(s.adherencia_descanso || 0) >= 7 ? 'text-emerald-600' : (s.adherencia_descanso || 0) >= 4 ? 'text-amber-600' : 'text-red-600'}">${s.adherencia_descanso ?? '—'}/10</div></div>
+      <div class="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-slate-100 text-xs">
+        <div>
+          <div class="flex items-center justify-between mb-1"><span class="text-slate-400">Entreno</span><span class="font-bold ${(s.adherencia_entreno || 0) >= 7 ? 'text-emerald-600' : (s.adherencia_entreno || 0) >= 4 ? 'text-amber-600' : 'text-red-600'}">${s.adherencia_entreno ?? '—'}/10</span></div>
+          <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full rounded-full ${(s.adherencia_entreno || 0) >= 7 ? 'bg-emerald-500' : (s.adherencia_entreno || 0) >= 4 ? 'bg-amber-500' : 'bg-red-500'}" style="width:${(s.adherencia_entreno || 0) * 10}%"></div></div>
+          ${s.score_entreno != null ? `<div class="text-right mt-0.5 font-semibold" style="color:#10b981">${Math.round(s.score_entreno)}%</div>` : ''}
+        </div>
+        <div>
+          <div class="flex items-center justify-between mb-1"><span class="text-slate-400">Alimentación</span><span class="font-bold ${(s.adherencia_alimentacion || 0) >= 7 ? 'text-emerald-600' : (s.adherencia_alimentacion || 0) >= 4 ? 'text-amber-600' : 'text-red-600'}">${s.adherencia_alimentacion ?? '—'}/10</span></div>
+          <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full rounded-full ${(s.adherencia_alimentacion || 0) >= 7 ? 'bg-emerald-500' : (s.adherencia_alimentacion || 0) >= 4 ? 'bg-amber-500' : 'bg-red-500'}" style="width:${(s.adherencia_alimentacion || 0) * 10}%"></div></div>
+          ${s.score_alim_metas != null ? `<div class="text-right mt-0.5 font-semibold" style="color:#3b82f6">${Math.round(s.score_alim_metas)}%</div>` : ''}
+        </div>
       </div>
     </div>
   `;
@@ -1667,6 +1705,130 @@ window.jalarMealtracker = async (mealtrackerId, semana) => {
   $('#sg-dr').value = r.dias;
   recalcScores();
   if (info) info.innerHTML = `✓ <strong>${r.dias} días</strong> registrados · promedio <strong>${r.kcal_avg} kcal</strong> · <strong>${r.prote_avg}g</strong> proteína · rango ${r.rango[0]} → ${r.rango[1]}`;
+};
+
+window.abrirNutricionCliente = async (clienteId) => {
+  const c = await db.clientes.get(clienteId);
+  if (!c) { toast('Cliente no encontrado'); return; }
+  const mtId = c.mealtracker_id || await resolverMealtrackerId(c);
+  if (!mtId) { toast('Sin conexión a Mealtracker'); return; }
+
+  const mt = mtClient();
+  if (!mt) { toast('Mealtracker no configurado'); return; }
+
+  const { data: row } = await mt.from('user_data').select('data').eq('user_id', mtId).maybeSingle();
+  if (!row) { toast('Sin datos en Mealtracker'); return; }
+
+  const d = row.data || {};
+  const goals = d.goals || {};
+  const history = d.history || {};
+
+  const hoy = new Date();
+  const ultimas4Sem = [];
+  for (let i = 0; i < 4; i++) {
+    const ref = new Date(hoy); ref.setDate(hoy.getDate() - i * 7);
+    const sem = fmt.semanaISO(ref);
+    const r = await getMealtrackerWeek(mtId, sem);
+    if (r) ultimas4Sem.push({ semana: sem, ...r });
+  }
+
+  const ultimos14 = [];
+  const sortedDates = Object.keys(history).sort().reverse().slice(0, 14);
+  for (const fecha of sortedDates) {
+    const tot = history[fecha];
+    if (tot && Number(tot.kcal) > 0) {
+      ultimos14.push({ fecha, kcal: Number(tot.kcal), p: Number(tot.p || 0), c: Number(tot.c || 0), g: Number(tot.g || 0) });
+    }
+  }
+  ultimos14.reverse();
+
+  const metaKcal = c.meta_calorias || (goals.calories ? Number(goals.calories) : null);
+  const metaProte = c.meta_proteina_g || (goals.protein ? Number(goals.protein) : null);
+
+  const macroBar = (label, valor, meta, color, unit) => {
+    const pct = meta ? Math.min(100, Math.round((valor / meta) * 100)) : null;
+    const barColor = pct === null ? 'bg-slate-300' : pct >= 90 && pct <= 110 ? 'bg-emerald-500' : pct >= 75 ? 'bg-amber-500' : 'bg-red-500';
+    return `<div class="mb-2">
+      <div class="flex justify-between text-xs mb-0.5">
+        <span class="text-slate-600 font-semibold">${label}</span>
+        <span class="font-bold" style="color:${color}">${valor}${unit} ${meta ? `/ ${meta}${unit}` : ''} ${pct !== null ? `(${pct}%)` : ''}</span>
+      </div>
+      <div class="h-2 bg-slate-100 rounded-full overflow-hidden"><div class="h-full rounded-full ${barColor}" style="width:${pct || 50}%"></div></div>
+    </div>`;
+  };
+
+  const todayData = d.today_totals && Number(d.today_totals?.kcal) > 0 ? d.today_totals : null;
+
+  openModal(modalShell(`Alimentación · ${c.nombre}`, `
+    <div class="space-y-4">
+      ${todayData ? `
+      <div class="bg-blue-50 rounded-xl p-4">
+        <div class="text-xs font-bold text-blue-800 uppercase mb-2">Hoy (${d.today || 'hoy'})</div>
+        ${macroBar('Calorías', Math.round(Number(todayData.kcal)), metaKcal, '#3b82f6', ' kcal')}
+        ${macroBar('Proteína', Math.round(Number(todayData.p || 0)), metaProte, '#10b981', 'g')}
+        ${macroBar('Carbos', Math.round(Number(todayData.c || 0)), c.meta_carbos_g, '#f59e0b', 'g')}
+        ${macroBar('Grasas', Math.round(Number(todayData.g || 0)), c.meta_grasas_g, '#ef4444', 'g')}
+      </div>` : '<div class="bg-slate-50 rounded-xl p-3 text-sm text-slate-500">Sin registro hoy.</div>'}
+
+      ${ultimas4Sem.length > 0 ? `
+      <div>
+        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">Resumen semanal (últimas 4 semanas)</h4>
+        <div class="space-y-2">
+          ${ultimas4Sem.map(w => {
+            const kcalPct = metaKcal && w.kcal_avg ? Math.round(Math.max(0, 100 - Math.abs((w.kcal_avg - metaKcal) / metaKcal * 100))) : null;
+            const protePct = metaProte && w.prote_avg ? Math.min(100, Math.round((w.prote_avg / metaProte) * 100)) : null;
+            const regPct = Math.round((w.dias / 7) * 100);
+            return `<div class="bg-slate-50 rounded-xl p-3">
+              <div class="flex justify-between items-center mb-2">
+                <span class="text-xs font-bold text-slate-700">${fmt.labelSemana(w.semana)}</span>
+                <span class="text-xs text-slate-500">${w.dias}/7 días registrados (${regPct}%)</span>
+              </div>
+              <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                <div>
+                  <div class="text-slate-400">Kcal prom</div>
+                  <div class="font-bold ${kcalPct !== null && kcalPct >= 85 ? 'text-emerald-600' : kcalPct !== null && kcalPct >= 65 ? 'text-amber-600' : 'text-red-600'}">${w.kcal_avg || '—'}</div>
+                  ${kcalPct !== null ? `<div class="h-1 bg-slate-200 rounded-full mt-1"><div class="h-full rounded-full ${kcalPct >= 85 ? 'bg-emerald-500' : kcalPct >= 65 ? 'bg-amber-500' : 'bg-red-500'}" style="width:${kcalPct}%"></div></div>` : ''}
+                </div>
+                <div>
+                  <div class="text-slate-400">Prote prom</div>
+                  <div class="font-bold ${protePct !== null && protePct >= 90 ? 'text-emerald-600' : protePct !== null && protePct >= 70 ? 'text-amber-600' : 'text-red-600'}">${w.prote_avg || '—'}g</div>
+                  ${protePct !== null ? `<div class="h-1 bg-slate-200 rounded-full mt-1"><div class="h-full rounded-full ${protePct >= 90 ? 'bg-emerald-500' : protePct >= 70 ? 'bg-amber-500' : 'bg-red-500'}" style="width:${protePct}%"></div></div>` : ''}
+                </div>
+                <div>
+                  <div class="text-slate-400">Registro</div>
+                  <div class="font-bold ${regPct >= 85 ? 'text-emerald-600' : regPct >= 57 ? 'text-amber-600' : 'text-red-600'}">${w.dias}/7</div>
+                  <div class="h-1 bg-slate-200 rounded-full mt-1"><div class="h-full rounded-full ${regPct >= 85 ? 'bg-emerald-500' : regPct >= 57 ? 'bg-amber-500' : 'bg-red-500'}" style="width:${regPct}%"></div></div>
+                </div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>` : ''}
+
+      ${ultimos14.length >= 2 ? `
+      <div>
+        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">Tendencia diaria (últimos ${ultimos14.length} días)</h4>
+        <div class="bg-slate-50 rounded-xl p-3">
+          ${lineChart([
+            { label: 'Kcal', color: '#3b82f6', points: ultimos14.map(d => d.kcal) },
+            ...(metaKcal ? [{ label: 'Meta', color: '#94a3b8', points: ultimos14.map(() => metaKcal) }] : []),
+          ], ultimos14.map(d => d.fecha.slice(5)), { height: 160, yMin: 0 })}
+        </div>
+      </div>` : ''}
+
+      ${c.meta_calorias ? `
+      <div class="bg-blue-50 rounded-xl p-3 text-sm">
+        <div class="text-xs font-bold text-blue-800 mb-1">🥗 Meta nutricional configurada</div>
+        <div class="text-blue-900 font-semibold">${c.meta_calorias} kcal · ${c.meta_proteina_g}g prote · ${c.meta_grasas_g}g grasas · ${c.meta_carbos_g}g carbos</div>
+      </div>` : ''}
+
+      ${goals && Object.keys(goals).length > 0 ? `
+      <div class="bg-violet-50 rounded-xl p-3 text-sm">
+        <div class="text-xs font-bold text-violet-800 mb-1">🎯 Metas en Mealtracker</div>
+        <div class="text-violet-900 font-semibold">${goals.calories || '—'} kcal · ${goals.protein || '—'}g prote · ${goals.carbs || '—'}g carbos · ${goals.fat || '—'}g grasas</div>
+      </div>` : ''}
+    </div>
+  `));
 };
 
 window.copiarMensajeWhatsApp = async (cliente_id) => {
@@ -2658,12 +2820,37 @@ window.verCliente = async (id) => {
           }).join('')}
       </div>
 
+      ${(() => {
+        const sEnt4 = segs.slice(0, 4).map(s => s.score_entreno).filter(v => v != null);
+        const sAlimM4 = segs.slice(0, 4).map(s => s.score_alim_metas).filter(v => v != null);
+        const sAlimR4 = segs.slice(0, 4).map(s => s.score_alim_registro).filter(v => v != null);
+        const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null;
+        const avgEnt = avg(sEnt4), avgAlimM = avg(sAlimM4), avgAlimR = avg(sAlimR4);
+        const hasScores = avgEnt !== null || avgAlimM !== null || avgAlimR !== null;
+        if (!hasScores) return '';
+        const scoreBar = (label, val, color) => {
+          const pct = val !== null ? Math.round(val) : 0;
+          const barColor = pct >= 75 ? 'bg-emerald-500' : pct >= 50 ? 'bg-amber-500' : 'bg-red-500';
+          return `<div>
+            <div class="flex justify-between text-xs mb-1"><span class="text-slate-600 font-semibold">${label}</span><span class="font-bold" style="color:${color}">${val !== null ? pct + '%' : '—'}</span></div>
+            <div class="h-2 bg-slate-100 rounded-full overflow-hidden"><div class="h-full rounded-full ${barColor}" style="width:${pct}%"></div></div>
+          </div>`;
+        };
+        return `<div class="bg-slate-50 rounded-xl p-4 text-sm space-y-2">
+          <div class="text-xs font-bold text-slate-500 uppercase mb-2">Alineación 4 semanas</div>
+          ${scoreBar('Entrenamiento', avgEnt, '#10b981')}
+          ${scoreBar('Alimentación · metas', avgAlimM, '#3b82f6')}
+          ${scoreBar('Alimentación · registro', avgAlimR, '#8b5cf6')}
+        </div>`;
+      })()}
+
       ${c.meta_calorias ? `
         <div class="bg-blue-50 rounded-xl p-3 text-sm">
           <div class="text-xs font-bold text-blue-800 mb-1">🥗 Meta nutricional diaria</div>
           <div class="text-blue-900 font-semibold">${c.meta_calorias} kcal · ${c.meta_proteina_g}g prote · ${c.meta_grasas_g}g grasas · ${c.meta_carbos_g}g carbos</div>
           <div class="text-xs text-blue-700 mt-1">${c.meta_metodo || ''} · Nivel: ${c.nivel_actividad?.replace('_',' ') || '—'} · PAL ${c.pal_factor || '—'}</div>
           ${c.meta_argumento ? `<details class="mt-2"><summary class="text-xs text-blue-700 cursor-pointer">Ver argumento del cálculo</summary><pre class="text-xs text-slate-600 mt-1 whitespace-pre-wrap">${escapeHtml(c.meta_argumento)}</pre></details>` : ''}
+          ${c.mealtracker_id ? `<button class="mt-2 text-xs text-blue-700 font-semibold hover:underline" onclick="abrirNutricionCliente('${c.id}')">📊 Ver dashboard de alimentación</button>` : ''}
         </div>` : ''}
 
       <div>
@@ -2915,13 +3102,11 @@ routes.negocio = async () => {
           <div>
             ${legendDot('#10b981', 'Entreno')}
             ${legendDot('#3b82f6', 'Alimentación')}
-            ${legendDot('#8b5cf6', 'Descanso')}
           </div>
         </div>
         ${lineChart([
           { label: 'Entreno', color: '#10b981', points: promPorSem('adherencia_entreno') },
           { label: 'Alimentación', color: '#3b82f6', points: promPorSem('adherencia_alimentacion') },
-          { label: 'Descanso', color: '#8b5cf6', points: promPorSem('adherencia_descanso') },
         ], labelsSem, { height: 200 })}
       </div>
 
