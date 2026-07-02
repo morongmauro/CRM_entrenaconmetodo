@@ -4,6 +4,98 @@
 
 const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 
+// ===== Cliente Supabase secundario: Mealtracker externo =====
+let _mtClient = null;
+let _mtClientKey = null;
+function mtClient() {
+  const url = _settings?.mealtracker_url;
+  const key = _settings?.mealtracker_anon_key;
+  if (!url || !key) { _mtClient = null; return null; }
+  const cacheKey = `${url}|${key}`;
+  if (_mtClient && _mtClientKey === cacheKey) return _mtClient;
+  _mtClient = window.supabase.createClient(url, key);
+  _mtClientKey = cacheKey;
+  return _mtClient;
+}
+
+// Convierte semana ISO (YYYY-Www) a rango [fecha_lunes, fecha_domingo]
+function semanaISOToRange(semanaISO) {
+  const [y, w] = semanaISO.split('-W').map(Number);
+  // 4 de enero está siempre en la semana ISO 1
+  const jan4 = new Date(Date.UTC(y, 0, 4));
+  const jan4Dow = jan4.getUTCDay() || 7;
+  const week1Mon = new Date(jan4);
+  week1Mon.setUTCDate(jan4.getUTCDate() - (jan4Dow - 1));
+  const start = new Date(week1Mon);
+  start.setUTCDate(week1Mon.getUTCDate() + (w - 1) * 7);
+  const end = new Date(start);
+  end.setUTCDate(start.getUTCDate() + 6);
+  return [start.toISOString().slice(0, 10), end.toISOString().slice(0, 10)];
+}
+
+// Trae el resumen de una semana desde el mealtracker externo
+async function getMealtrackerWeek(mealtrackerId, semanaISO) {
+  const mt = mtClient();
+  if (!mt || !mealtrackerId) return null;
+  const { data: row, error } = await mt.from('user_data').select('data').eq('user_id', mealtrackerId).maybeSingle();
+  if (error || !row) return null;
+
+  const d = row.data || {};
+  const goals = d.goals || {};
+  const history = d.history || {};
+  const [ini, fin] = semanaISOToRange(semanaISO);
+
+  const dias = [];
+  for (const [fecha, tot] of Object.entries(history)) {
+    if (fecha >= ini && fecha <= fin && tot && Number(tot.kcal) > 0) {
+      dias.push({ fecha, kcal: Number(tot.kcal), p: Number(tot.p || 0), c: Number(tot.c || 0), g: Number(tot.g || 0) });
+    }
+  }
+  if (d.today && d.today >= ini && d.today <= fin && d.today_totals && Number(d.today_totals.kcal) > 0) {
+    if (!dias.find(x => x.fecha === d.today)) {
+      const t = d.today_totals;
+      dias.push({ fecha: d.today, kcal: Number(t.kcal), p: Number(t.p || 0), c: Number(t.c || 0), g: Number(t.g || 0) });
+    }
+  }
+
+  if (dias.length === 0) {
+    return { dias: 0, kcal_avg: null, prote_avg: null, carbos_avg: null, grasas_avg: null, goals, rango: [ini, fin] };
+  }
+  const avg = (k) => Math.round(dias.reduce((a, b) => a + b[k], 0) / dias.length);
+  return {
+    dias: dias.length,
+    kcal_avg: avg('kcal'),
+    prote_avg: avg('p'),
+    carbos_avg: avg('c'),
+    grasas_avg: avg('g'),
+    goals,
+    rango: [ini, fin],
+  };
+}
+
+// Lista todos los clientes del mealtracker (para sync)
+async function listarClientesMealtracker() {
+  const mt = mtClient();
+  if (!mt) return [];
+  const { data } = await mt.from('user_data').select('user_id, name, updated_at').order('updated_at', { ascending: false });
+  return data || [];
+}
+
+function normalizeName(s) {
+  return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+// Similitud de nombres para matching (0-100)
+function similitudNombre(a, b) {
+  const na = normalizeName(a), nb = normalizeName(b);
+  if (na === nb) return 100;
+  const ta = new Set(na.split(' ')), tb = new Set(nb.split(' '));
+  const inter = [...ta].filter(x => tb.has(x)).length;
+  const union = new Set([...ta, ...tb]).size;
+  return Math.round((inter / union) * 100);
+}
+
+
 const $  = (s, c = document) => c.querySelector(s);
 const $$ = (s, c = document) => Array.from(c.querySelectorAll(s));
 const view = $('#view');
@@ -15,7 +107,7 @@ const loginScreen = $('#login-screen');
 const appScreen = $('#app-screen');
 const bootScreen = $('#boot-screen');
 
-let _settings = { usd_cop_rate: 4000, nombre_coach: 'Coach' };
+let _settings = { usd_cop_rate: 4000, nombre_coach: 'Coach', mealtracker_url: '', mealtracker_anon_key: '' };
 let _clientesCache = null;
 let _selectedClienteId = null;
 let _segView = 'focus';
@@ -1254,9 +1346,12 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
 
         <!-- ALIMENTACIÓN -->
         <div class="bg-slate-50 rounded-xl p-4 space-y-3">
-          <div class="flex items-baseline justify-between">
+          <div class="flex items-baseline justify-between flex-wrap gap-2">
             <div class="text-xs font-bold text-slate-600 uppercase">🥗 Alimentación</div>
-            ${cliente.meta_calorias ? `<div class="text-xs text-slate-500">Meta: ${cliente.meta_calorias} kcal · ${cliente.meta_proteina_g}g prote</div>` : '<div class="text-xs text-amber-600">Sin meta definida — edita cliente para calcular</div>'}
+            <div class="flex items-center gap-2">
+              ${cliente.mealtracker_id ? `<button type="button" class="btn btn-secondary btn-sm" onclick="jalarMealtracker('${cliente.mealtracker_id}', '${semana}')">🔄 Jalar del Mealtracker</button>` : ''}
+              ${cliente.meta_calorias ? `<div class="text-xs text-slate-500">Meta: ${cliente.meta_calorias} kcal · ${cliente.meta_proteina_g}g prote</div>` : '<div class="text-xs text-amber-600">Sin meta definida</div>'}
+            </div>
           </div>
           <div class="grid grid-cols-3 gap-3">
             <div>
@@ -1272,6 +1367,7 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
               <input id="sg-dr" type="number" min="0" max="7" value="${s.dias_registro_alim ?? ''}" placeholder="0" onchange="recalcScores()">
             </div>
           </div>
+          <div id="sg-mt-info" class="text-xs text-slate-500 hidden"></div>
         </div>
 
         <!-- SCORES VIVOS -->
@@ -1392,6 +1488,11 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
   setTimeout(recalcScores, 0);
   window._segPrev = semanaPrev;
   window._segCliente = cliente;
+
+  // Auto-jalar del Mealtracker si el cliente está vinculado y aún no hay data
+  if (cliente.mealtracker_id && mtClient() && !s.kcal_promedio && !s.proteina_promedio_g) {
+    setTimeout(() => window.jalarMealtracker(cliente.mealtracker_id, semana), 200);
+  }
 }
 
 // Recalcula scores vivos mientras se llena
@@ -1483,6 +1584,25 @@ window.guardarSeguimiento = async (cliente_id, semana, id) => {
 window.editarSeguimiento = async (id) => {
   const s = await db.seguimientos.get(id);
   await abrirModalSeguimiento(s.cliente_id, s.semana, s);
+};
+
+window.jalarMealtracker = async (mealtrackerId, semana) => {
+  const info = $('#sg-mt-info');
+  if (info) { info.classList.remove('hidden'); info.textContent = '⏳ Consultando mealtracker…'; }
+  const r = await getMealtrackerWeek(mealtrackerId, semana);
+  if (!r) {
+    if (info) info.innerHTML = '<span class="text-red-600">✗ No se pudo conectar al mealtracker.</span>';
+    return;
+  }
+  if (r.dias === 0) {
+    if (info) info.innerHTML = `<span class="text-amber-600">⚠️ Sin registros para esa semana (${r.rango[0]} → ${r.rango[1]}).</span>`;
+    return;
+  }
+  $('#sg-kcal').value = r.kcal_avg;
+  $('#sg-prote').value = r.prote_avg;
+  $('#sg-dr').value = r.dias;
+  recalcScores();
+  if (info) info.innerHTML = `✓ <strong>${r.dias} días</strong> registrados · promedio <strong>${r.kcal_avg} kcal</strong> · <strong>${r.prote_avg}g</strong> proteína · rango ${r.rango[0]} → ${r.rango[1]}`;
 };
 
 window.copiarMensajeWhatsApp = async (cliente_id) => {
@@ -2834,7 +2954,7 @@ routes.ajustes = async () => {
 
     <div class="card max-w-xl mb-4">
       <h3 class="font-bold text-slate-900 mb-1">Conexión Mealtracker (opcional)</h3>
-      <p class="text-xs text-slate-500 mb-4">Si tus clientes registran su alimentación en otro Supabase, pon aquí sus credenciales y en cada cliente su <code>mealtracker_id</code>. El CRM leerá los promedios semanales automáticamente.</p>
+      <p class="text-xs text-slate-500 mb-4">Si tus clientes registran su alimentación en otro Supabase, pon aquí sus credenciales. El CRM leerá los promedios semanales automáticamente en cada seguimiento.</p>
       <div class="space-y-3">
         <div>
           <label>Mealtracker Project URL</label>
@@ -2845,6 +2965,12 @@ routes.ajustes = async () => {
           <input id="st-mt-key" type="password" placeholder="eyJ..." value="${escapeHtml(_settings.mealtracker_anon_key || '')}">
         </div>
       </div>
+      ${_settings.mealtracker_url && _settings.mealtracker_anon_key ? `
+        <div class="mt-4 pt-4 border-t border-slate-100">
+          <p class="text-xs text-slate-500 mb-2">Vincula cada cliente del CRM con su usuario del mealtracker (matching por nombre).</p>
+          <button class="btn btn-secondary" onclick="abrirSyncMealtracker()">🔗 Sincronizar clientes</button>
+        </div>
+      ` : ''}
     </div>
 
     <div class="flex gap-2 max-w-xl">
@@ -2862,7 +2988,108 @@ window.guardarAjustes = async () => {
     mealtracker_url: $('#st-mt-url').value.trim() || null,
     mealtracker_anon_key: $('#st-mt-key').value.trim() || null,
   });
+  _mtClient = null; // forzar recreación con las nuevas credenciales
   toast('Guardado');
+  routes.ajustes();
+};
+
+// ===== Sincronización con Mealtracker =====
+window.abrirSyncMealtracker = async () => {
+  openModal(modalShell('🔗 Sincronizar clientes con Mealtracker', `
+    <div class="text-sm text-slate-600 mb-4">Buscando usuarios en el Mealtracker…</div>
+    <div id="sync-loading" class="text-center py-6">
+      <div class="text-slate-400">⏳ Cargando…</div>
+    </div>
+    <div id="sync-content" class="hidden"></div>
+  `, `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button id="sync-save-btn" class="btn btn-primary hidden" onclick="guardarSyncMealtracker()">Guardar vínculos</button>`), { wide: true });
+
+  const [clientes, mtUsers] = await Promise.all([
+    db.clientes.list(),
+    listarClientesMealtracker(),
+  ]);
+
+  if (mtUsers.length === 0) {
+    $('#sync-loading').innerHTML = '<div class="text-red-600 text-sm">No se pudo conectar al Mealtracker o no hay usuarios. Verifica las credenciales en Ajustes.</div>';
+    return;
+  }
+
+  // Agrupar usuarios del mealtracker por nombre normalizado (uso el más reciente si hay dupes)
+  const mtPorNombre = {};
+  for (const u of mtUsers) {
+    const n = normalizeName(u.name);
+    if (!mtPorNombre[n]) mtPorNombre[n] = [];
+    mtPorNombre[n].push(u);
+  }
+
+  // Matching por cada cliente CRM
+  const matches = clientes.map(c => {
+    const opciones = mtUsers.map(u => ({
+      user_id: u.user_id,
+      name: u.name,
+      score: similitudNombre(c.nombre, u.name),
+    })).sort((a, b) => b.score - a.score);
+    const top = opciones[0];
+    const sugerido = top && top.score >= 60 ? top : null;
+    return { cliente: c, sugerido, opciones: opciones.slice(0, 5), yaVinculado: c.mealtracker_id };
+  });
+
+  window._syncMatches = matches;
+
+  $('#sync-loading').classList.add('hidden');
+  $('#sync-save-btn').classList.remove('hidden');
+  $('#sync-content').classList.remove('hidden');
+  $('#sync-content').innerHTML = `
+    <p class="text-xs text-slate-500 mb-3">
+      Encontré <strong>${mtUsers.length}</strong> usuarios en el Mealtracker.
+      Confirma o corrige los matches sugeridos.
+    </p>
+    <div class="space-y-2 max-h-[60vh] overflow-y-auto scrollbar-thin">
+      ${matches.map((m, i) => {
+        const c = m.cliente;
+        const s = m.sugerido;
+        const yaOK = c.mealtracker_id && m.opciones.find(o => o.user_id === c.mealtracker_id);
+        return `
+          <div class="flex items-center gap-3 p-3 rounded-xl ${yaOK ? 'bg-emerald-50' : (s ? 'bg-white ring-1 ring-slate-200' : 'bg-amber-50')}">
+            <div class="w-40 shrink-0 font-semibold text-sm">${c.nombre}</div>
+            <div class="flex-1">
+              <select id="sync-sel-${i}" class="text-xs" data-cliente-id="${c.id}">
+                <option value="">— sin vincular —</option>
+                ${m.opciones.map(o => {
+                  const preSel = c.mealtracker_id === o.user_id || (s && s.user_id === o.user_id && !c.mealtracker_id);
+                  return `<option value="${o.user_id}" ${preSel ? 'selected' : ''}>${escapeHtml(o.name)} · ${o.score}% · ${o.user_id.slice(0, 8)}…</option>`;
+                }).join('')}
+              </select>
+            </div>
+            <div class="w-16 text-right text-xs ${yaOK ? 'text-emerald-700 font-semibold' : (s?.score >= 90 ? 'text-emerald-700 font-semibold' : s?.score >= 70 ? 'text-amber-700' : 'text-slate-500')}">
+              ${yaOK ? '✓ vinculado' : (s ? s.score + '% match' : 'sin match')}
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+};
+
+window.guardarSyncMealtracker = async () => {
+  const matches = window._syncMatches || [];
+  let vinculados = 0, desvinculados = 0;
+  for (let i = 0; i < matches.length; i++) {
+    const sel = $(`#sync-sel-${i}`);
+    if (!sel) continue;
+    const nuevoId = sel.value || null;
+    const clienteId = sel.dataset.clienteId;
+    const yaTenia = matches[i].cliente.mealtracker_id;
+    if (nuevoId !== yaTenia) {
+      await sb.from('clientes').update({ mealtracker_id: nuevoId }).eq('id', clienteId);
+      if (nuevoId) vinculados++;
+      else desvinculados++;
+    }
+  }
+  _clientesCache = null;
+  closeModal();
+  toast(`✓ ${vinculados} vinculado(s) · ${desvinculados} desvinculado(s)`);
+  routes.ajustes();
 };
 
 // =====================================================
