@@ -378,6 +378,58 @@ Carbos: resto = ${carbos} g`;
   return { kcal, proteina, grasas, carbos, metodo, argumento, bmr: Math.round(bmr), tdee: Math.round(tdee) };
 }
 
+// ===== Composición corporal =====
+// Estimaciones basadas en fórmulas científicamente respaldadas.
+// IMPORTANTE: son ESTIMACIONES, no mediciones directas. El gold standard es DEXA.
+// Precisión: aceptable para trackear tendencias, no para diagnóstico clínico.
+function calcComposicionCorporal({ peso, grasa_pct, edad, sexo, altura_cm }) {
+  const w = Number(peso), gp = Number(grasa_pct), a = Number(edad), h = Number(altura_cm);
+  if (!w || w <= 0) return null;
+
+  const out = { peso_kg: w };
+
+  // 1. Masa grasa y magra (trivial, exacta si %grasa es correcto)
+  if (gp != null && gp > 0 && gp < 60) {
+    out.masa_grasa_kg = +(w * gp / 100).toFixed(2);
+    out.masa_magra_kg = +(w - out.masa_grasa_kg).toFixed(2);
+  }
+
+  // 2. Masa muscular esquelética · Lee et al. (2000) J Appl Physiol 89:465-471
+  //    SMM (kg) = (altura² × 0.0553) + (peso × 0.244) + (edad × -0.130) + (sexo × 6.15) - 22.7
+  //    donde altura en m, sexo: 1=H, 0=M. R² = 0.86 vs. MRI.
+  if (h && a && sexo) {
+    const sx = sexo === 'M' ? 1 : sexo === 'F' ? 0 : 0.5;
+    const hM = h / 100;
+    const smm = (hM * hM * 0.0553 * 100) + (w * 0.244) + (a * -0.130) + (sx * 6.15) - 22.7;
+    if (smm > 0) out.masa_muscular_smm_kg = +smm.toFixed(2);
+  }
+
+  // 3. Masa ósea · Wagner & Heyward (2000) Med Sci Sports Exerc 32(9)
+  //    H: peso × 0.04 · M: peso × 0.035  (aprox 3-5% del peso corporal)
+  if (sexo === 'M') out.masa_osea_kg = +(w * 0.04).toFixed(2);
+  else if (sexo === 'F') out.masa_osea_kg = +(w * 0.035).toFixed(2);
+  else out.masa_osea_kg = +(w * 0.0375).toFixed(2);
+
+  // 4. Agua corporal total · Watson et al. (1980) Am J Clin Nutr 33:27-39
+  //    H: 2.447 - 0.09156×edad + 0.1074×altura + 0.3362×peso
+  //    M: -2.097 + 0.1069×altura + 0.2466×peso
+  if (h && sexo) {
+    let tbw;
+    if (sexo === 'M' && a) tbw = 2.447 - 0.09156 * a + 0.1074 * h + 0.3362 * w;
+    else if (sexo === 'F') tbw = -2.097 + 0.1069 * h + 0.2466 * w;
+    if (tbw && tbw > 0) out.agua_corporal_L = +tbw.toFixed(2);
+  }
+
+  // 5. Masa residual (órganos, líquidos no calculados, tejido conectivo)
+  //    = peso - (grasa + músculo + hueso). Modelo 5-compartimentos.
+  if (out.masa_grasa_kg && out.masa_muscular_smm_kg && out.masa_osea_kg) {
+    const resid = w - out.masa_grasa_kg - out.masa_muscular_smm_kg - out.masa_osea_kg;
+    if (resid > 0) out.masa_residual_kg = +resid.toFixed(2);
+  }
+
+  return out;
+}
+
 // ===== Scores calculados a partir de indicadores objetivos =====
 function calcScores(s, cliente) {
   const pctSafe = (num, den) => den > 0 ? Math.min(100, (num / den) * 100) : null;
@@ -1453,6 +1505,32 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
         <!-- SCORES VIVOS -->
         <div id="sg-scores" class="grid grid-cols-4 gap-2"></div>
 
+        <!-- COMPOSICIÓN CORPORAL (opcional en seguimiento semanal) -->
+        <div class="bg-slate-50 rounded-xl p-4 space-y-3">
+          <div class="flex items-baseline justify-between flex-wrap gap-2">
+            <div class="text-xs font-bold text-slate-600 uppercase">🧬 Composición corporal (opcional)</div>
+            <div class="text-xs text-slate-500">Si mediste esta semana, guarda aquí. Se crea una medición automáticamente.</div>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="text-xs">Peso (kg)</label>
+              <input id="sg-peso" type="number" step="0.1" placeholder="78.5" oninput="recalcCompSeg()">
+            </div>
+            <div>
+              <label class="text-xs">% Grasa</label>
+              <input id="sg-grasa" type="number" step="0.1" placeholder="18.5" oninput="recalcCompSeg()">
+            </div>
+            <div>
+              <label class="text-xs">Cintura (cm)</label>
+              <input id="sg-cin" type="number" step="0.1" placeholder="—">
+            </div>
+          </div>
+          <div id="sg-comp-preview" class="hidden text-xs bg-white rounded-lg p-2 ring-1 ring-slate-200">
+            <div class="font-semibold text-slate-700 mb-1">Estimaciones al vuelo:</div>
+            <div id="sg-comp-body"></div>
+          </div>
+        </div>
+
         <!-- LESIÓN -->
         ${cliente.lesion_actual ? `
         <div class="bg-red-50 rounded-xl p-4 space-y-2">
@@ -1664,8 +1742,25 @@ window.guardarSeguimiento = async (cliente_id, semana, id) => {
     estado: 'hecho',
   };
   await db.seguimientos.upsert(row);
+
+  // Si el coach llenó peso/grasa en el seguimiento, crear una medición corporal
+  const pesoSeg = Number($('#sg-peso')?.value);
+  const grasaSeg = Number($('#sg-grasa')?.value);
+  const cinSeg = Number($('#sg-cin')?.value);
+  if (pesoSeg > 0) {
+    await db.mediciones.insert({
+      cliente_id,
+      fecha: row.fecha,
+      peso: pesoSeg,
+      grasa_pct: grasaSeg || null,
+      cintura: cinSeg || null,
+      notas: `Registrado desde seguimiento semanal ${semana}`,
+    });
+    toast('Semana + medición corporal guardadas');
+  } else {
+    toast('Semana guardada');
+  }
   closeModal();
-  toast('Semana guardada');
   navigate('seguimiento');
 };
 
@@ -2363,7 +2458,7 @@ routes.clientes = async () => {
               ${helpers.avatar(c.nombre, 12).replace('rounded-full','rounded-2xl')}
               <div class="flex-1 min-w-0">
                 <div class="font-bold text-slate-900 truncate">${c.nombre}</div>
-                <div class="text-xs text-slate-500 truncate">${c.telefono || c.email || '—'}</div>
+                <div class="text-xs text-slate-500 truncate">${c.ciudad || c.profesion || '—'}</div>
               </div>
               <span class="status-pill ${c.estado === 'activo' ? 'status-active' : c.estado === 'pausa' ? 'status-hold' : 'status-end'}"><span class="w-1.5 h-1.5 rounded-full ${c.estado === 'activo' ? 'bg-emerald-500' : c.estado === 'pausa' ? 'bg-orange-500' : 'bg-slate-500'}"></span>${c.estado}</span>
             </div>
@@ -2385,13 +2480,12 @@ routes.clientes = async () => {
 
 function clienteForm(c = {}) {
   return `
-    <div class="space-y-4">
+    <div class="space-y-5">
+      <!-- 1. IDENTIDAD -->
       <div>
-        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">Identidad</h4>
+        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">1 · Identidad</h4>
         <div class="grid grid-cols-2 gap-3">
           <div class="col-span-2"><label>Nombre *</label><input id="cl-nombre" value="${escapeHtml(c.nombre || '')}" required></div>
-          <div><label>Teléfono</label><input id="cl-tel" value="${escapeHtml(c.telefono || '')}"></div>
-          <div><label>Email</label><input id="cl-email" type="email" value="${escapeHtml(c.email || '')}"></div>
           <div><label>Fecha de nacimiento</label><input id="cl-nac" type="date" value="${c.fecha_nacimiento || ''}"></div>
           <div><label>Sexo</label>
             <select id="cl-sexo">
@@ -2400,62 +2494,59 @@ function clienteForm(c = {}) {
             </select>
           </div>
           <div><label>Ciudad</label><input id="cl-ciudad" value="${escapeHtml(c.ciudad || '')}"></div>
-          <div><label>Zona horaria</label><input id="cl-tz" placeholder="GMT-5" value="${escapeHtml(c.zona_horaria || '')}"></div>
           <div><label>Profesión</label><input id="cl-prof" value="${escapeHtml(c.profesion || '')}"></div>
-          <div><label>Horario laboral</label>
-            <select id="cl-horario">
-              <option value="">—</option>
-              ${['mañana','tarde','noche','mixto'].map(o => `<option ${c.horario_laboral === o ? 'selected' : ''}>${o}</option>`).join('')}
-            </select>
-          </div>
         </div>
       </div>
 
+      <!-- 2. OBJETIVO Y FASE -->
       <div>
-        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">Coaching</h4>
+        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">2 · Objetivo y fase</h4>
         <div class="grid grid-cols-2 gap-3">
           <div class="col-span-2"><label>Objetivo (resumen corto)</label><input id="cl-obj" placeholder="Ej: bajar 5 kg, ganar masa, hábitos…" value="${escapeHtml(c.objetivo || '')}"></div>
           <div class="col-span-2"><label>Meta específica</label><textarea id="cl-meta" rows="2">${escapeHtml(c.meta_especifica || '')}</textarea></div>
-          <div><label>Fecha objetivo</label><input id="cl-fobj" type="date" value="${c.fecha_objetivo || ''}"></div>
-          <div><label>Fase del programa</label>
+          <div class="col-span-2"><label>Fase del programa</label>
             <select id="cl-fase">
               <option value="">—</option>
               ${FASES_PROGRAMA.map(f => `<option value="${f.key}" ${c.fase_programa === f.key ? 'selected' : ''}>${f.label}</option>`).join('')}
             </select>
           </div>
-          <div><label>Lugar de entreno</label>
-            <select id="cl-lugar">
-              <option value="">—</option>
-              ${['casa','gym_comercial','parque','aire_libre','mixto'].map(o => `<option value="${o}" ${c.lugar_entreno === o ? 'selected' : ''}>${o.replace('_',' ')}</option>`).join('')}
-            </select>
-          </div>
-          <div><label>Estatura (cm)</label><input id="cl-alt" type="number" min="120" max="230" value="${c.estatura_cm || ''}"></div>
-          <div class="col-span-2"><label>Condiciones de salud / patologías</label><textarea id="cl-pat" rows="2" placeholder="Ej: prediabético, hipertensión, hipotiroidismo…">${escapeHtml(c.patologias || '')}</textarea></div>
-          <div class="col-span-2"><label>Restricciones o lesiones (base)</label><textarea id="cl-rest" rows="2" placeholder="Ej: hernia lumbar L4-L5, rodilla derecha…">${escapeHtml(c.restricciones_lesiones || '')}</textarea></div>
-          <div class="col-span-2"><label>Lesión actual (activa hoy)</label><input id="cl-lesion" placeholder="Ej: tendinitis hombro derecho" value="${escapeHtml(c.lesion_actual || '')}"></div>
-          <div><label>Estado de la lesión</label>
-            <select id="cl-lesion-est">
-              <option value="">—</option>
-              ${['activa','en_mejora','resuelta','recaida'].map(o => `<option value="${o}" ${c.lesion_estado === o ? 'selected' : ''}>${o.replace('_',' ')}</option>`).join('')}
-            </select>
-          </div>
-          <div><label>Antecedentes deportivos</label><input id="cl-ant" value="${escapeHtml(c.antecedentes_deportivos || '')}"></div>
-          <div class="col-span-2"><label>Preferencias dietéticas</label><input id="cl-diet" placeholder="Vegetariano, sin gluten…" value="${escapeHtml(c.preferencias_dietetica || '')}"></div>
         </div>
       </div>
 
+      <!-- 3. COMPOSICIÓN CORPORAL -->
       <div>
-        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">Nutrición · nivel actividad y metas</h4>
+        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">3 · Composición corporal</h4>
         <div class="grid grid-cols-2 gap-3">
-          <div>
+          <div><label>Estatura (cm)</label><input id="cl-alt" type="number" min="120" max="230" value="${c.estatura_cm || ''}"></div>
+        </div>
+        <p class="text-xs text-slate-500 mt-2">📏 Las mediciones (peso, %grasa) se registran desde el perfil del cliente o desde el seguimiento semanal. Las demás variables (masa muscular, agua corporal, masa ósea) se estiman automáticamente.</p>
+      </div>
+
+      <!-- 4. NIVEL DE ACTIVIDAD -->
+      <div>
+        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">4 · Nivel de actividad</h4>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="col-span-2">
             <label>Nivel de actividad</label>
             <div class="flex items-center gap-2">
               <input id="cl-nivel" readonly value="${c.nivel_actividad ? c.nivel_actividad.replace('_',' ') + ' · PAL ' + (c.pal_factor || PAL_MAP[c.nivel_actividad] || '') : ''}" placeholder="—" class="!bg-white">
               <button type="button" class="btn btn-secondary btn-sm whitespace-nowrap" onclick="abrirEncuestaActividad()">Encuesta</button>
             </div>
           </div>
-          <div>
-            <label>Objetivo calórico</label>
+          <div class="col-span-2"><label>Lugar de entreno</label>
+            <select id="cl-lugar">
+              <option value="">—</option>
+              ${['casa','gym_comercial','parque','aire_libre','mixto'].map(o => `<option value="${o}" ${c.lugar_entreno === o ? 'selected' : ''}>${o.replace('_',' ')}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. META NUTRICIONAL -->
+      <div>
+        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">5 · Meta nutricional</h4>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="col-span-2"><label>Objetivo calórico</label>
             <select id="cl-objk">
               <option value="">—</option>
               ${OBJETIVOS_KCAL.map(o => `<option value="${o.key}" ${c.objetivo_calorico === o.key ? 'selected' : ''}>${o.label}</option>`).join('')}
@@ -2477,8 +2568,31 @@ function clienteForm(c = {}) {
         </div>
       </div>
 
+      <!-- 6. CONDICIONES MÉDICAS / LESIONES -->
       <div>
-        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">Comercial</h4>
+        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">6 · Condiciones médicas / lesiones</h4>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="col-span-2"><label>Condiciones de salud / patologías</label><textarea id="cl-pat" rows="2" placeholder="Ej: prediabético, hipertensión, hipotiroidismo…">${escapeHtml(c.patologias || '')}</textarea></div>
+          <div class="col-span-2"><label>Restricciones o lesiones (base)</label><textarea id="cl-rest" rows="2" placeholder="Ej: hernia lumbar L4-L5, rodilla derecha…">${escapeHtml(c.restricciones_lesiones || '')}</textarea></div>
+          <div class="col-span-2"><label>Lesión actual (activa hoy)</label><input id="cl-lesion" placeholder="Ej: tendinitis hombro derecho" value="${escapeHtml(c.lesion_actual || '')}"></div>
+          <div><label>Estado de la lesión</label>
+            <select id="cl-lesion-est">
+              <option value="">—</option>
+              ${['activa','en_mejora','resuelta','recaida'].map(o => `<option value="${o}" ${c.lesion_estado === o ? 'selected' : ''}>${o.replace('_',' ')}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- 7. ANTECEDENTES DEPORTIVOS -->
+      <div>
+        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">7 · Antecedentes deportivos</h4>
+        <textarea id="cl-ant" rows="2" placeholder="Deportes previos, nivel, años…">${escapeHtml(c.antecedentes_deportivos || '')}</textarea>
+      </div>
+
+      <!-- 8. COMERCIAL -->
+      <div>
+        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">8 · Comercial</h4>
         <div class="grid grid-cols-2 gap-3">
           <div><label>Monto mensual</label><input id="cl-monto" type="number" step="0.01" value="${c.monto || ''}"></div>
           <div><label>Moneda</label>
@@ -2500,20 +2614,30 @@ function clienteForm(c = {}) {
               ${['instagram','referido','web','otro'].map(o => `<option ${c.canal_adquisicion === o ? 'selected' : ''}>${o}</option>`).join('')}
             </select>
           </div>
-          <div><label>Método de pago preferido</label><input id="cl-mpago" placeholder="Transferencia, Nequi…" value="${escapeHtml(c.metodo_pago_preferido || '')}"></div>
+          <div><label>Método de pago</label>
+            <select id="cl-mpago">
+              <option value="">—</option>
+              <option value="paypal" ${c.metodo_pago_preferido === 'paypal' ? 'selected' : ''}>PayPal</option>
+              <option value="transferencia" ${c.metodo_pago_preferido === 'transferencia' ? 'selected' : ''}>Transferencia bancaria nacional</option>
+            </select>
+          </div>
           <div><label>Días de gracia</label><input id="cl-gracia" type="number" value="${c.dias_gracia ?? 3}"></div>
         </div>
       </div>
 
+      <!-- 9. ENTREVISTA INICIAL Y TAGS -->
       <div>
-        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">Otros</h4>
-        <div>
-          <label>Tags (separa con comas)</label>
-          <input id="cl-tags" placeholder="viajero, principiante, motivado…" value="${(c.tags || []).join(', ')}">
-        </div>
-        <div class="mt-3">
-          <label>Notas generales</label>
-          <textarea id="cl-notas" rows="3">${escapeHtml(c.notas || '')}</textarea>
+        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">9 · Entrevista inicial y tags</h4>
+        <div class="space-y-3">
+          <div>
+            <label>Entrevista inicial / notas (registro largo)</label>
+            <textarea id="cl-notas" rows="8" placeholder="Descripción completa de la primera entrevista: hábitos, historia, contexto, expectativas, y cualquier nota permanente sobre el cliente…">${escapeHtml(c.notas || '')}</textarea>
+            <p class="text-xs text-slate-500 mt-1">💡 Todo lo que captaste en la entrevista inicial + notas permanentes. Sirve como referencia del contexto del cliente.</p>
+          </div>
+          <div>
+            <label>Tags (separa con comas)</label>
+            <input id="cl-tags" placeholder="viajero, principiante, motivado…" value="${(c.tags || []).join(', ')}">
+          </div>
         </div>
       </div>
     </div>
@@ -2547,17 +2671,12 @@ window.guardarCliente = async (id = null) => {
   const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
   const row = {
     nombre: $('#cl-nombre').value.trim(),
-    telefono: $('#cl-tel').value.trim() || null,
-    email: $('#cl-email').value.trim() || null,
     fecha_nacimiento: $('#cl-nac').value || null,
     sexo: $('#cl-sexo').value || null,
     ciudad: $('#cl-ciudad').value.trim() || null,
-    zona_horaria: $('#cl-tz').value.trim() || null,
     profesion: $('#cl-prof').value.trim() || null,
-    horario_laboral: $('#cl-horario').value || null,
     objetivo: $('#cl-obj').value.trim() || null,
     meta_especifica: $('#cl-meta').value.trim() || null,
-    fecha_objetivo: $('#cl-fobj').value || null,
     lugar_entreno: $('#cl-lugar').value || null,
     fase_programa: $('#cl-fase').value || null,
     estatura_cm: $('#cl-alt').value ? Number($('#cl-alt').value) : null,
@@ -2566,7 +2685,6 @@ window.guardarCliente = async (id = null) => {
     lesion_actual: $('#cl-lesion').value.trim() || null,
     lesion_estado: $('#cl-lesion-est').value || null,
     antecedentes_deportivos: $('#cl-ant').value.trim() || null,
-    preferencias_dietetica: $('#cl-diet').value.trim() || null,
     objetivo_calorico: $('#cl-objk').value || null,
     ...(window._pendingEncuesta ? {
       nivel_actividad: window._pendingEncuesta.nivel,
@@ -2580,7 +2698,7 @@ window.guardarCliente = async (id = null) => {
     fecha_inicio: $('#cl-inicio').value || null,
     estado: $('#cl-estado').value,
     canal_adquisicion: $('#cl-canal').value || null,
-    metodo_pago_preferido: $('#cl-mpago').value.trim() || null,
+    metodo_pago_preferido: $('#cl-mpago').value || null,
     dias_gracia: $('#cl-gracia').value ? Number($('#cl-gracia').value) : 3,
     tags,
     notas: $('#cl-notas').value.trim() || null,
@@ -2743,6 +2861,25 @@ window.verCliente = async (id) => {
   const pesos = medsAsc.map(m => m.peso ?? null).filter(v => v !== null);
   const grasas = medsAsc.map(m => m.grasa_pct ?? null).filter(v => v !== null);
 
+  // Composición corporal: última medición + estimaciones
+  const ultMed = meds.length ? meds[meds.length - 1] : null;
+  const comp = ultMed ? calcComposicionCorporal({
+    peso: ultMed.peso,
+    grasa_pct: ultMed.grasa_pct,
+    edad,
+    sexo: c.sexo,
+    altura_cm: c.estatura_cm,
+  }) : null;
+
+  // Historial de composición corporal para gráfica de barras estimadas
+  const compHist = medsAsc.map(m => calcComposicionCorporal({
+    peso: m.peso,
+    grasa_pct: m.grasa_pct,
+    edad,
+    sexo: c.sexo,
+    altura_cm: c.estatura_cm,
+  })).filter(x => x);
+
   openModal(modalShell(c.nombre, `
     <div class="space-y-4">
       <div class="flex gap-2 flex-wrap">
@@ -2768,33 +2905,79 @@ window.verCliente = async (id) => {
         <div><span class="text-slate-500 text-xs">Canal:</span><br><strong class="capitalize">${c.canal_adquisicion || '—'}</strong></div>
       </div>
 
+      <!-- 1. IDENTIDAD -->
       ${edad || c.ciudad || c.profesion ? `
         <div class="bg-slate-50 rounded-xl p-3 text-sm space-y-1">
+          <div class="text-xs font-bold text-slate-500 uppercase mb-1">1 · Identidad</div>
           ${edad ? `<div><span class="text-slate-500">Edad:</span> <strong>${edad} años</strong> ${c.sexo ? `(${c.sexo})` : ''}</div>` : ''}
-          ${c.ciudad ? `<div><span class="text-slate-500">Ciudad:</span> <strong>${c.ciudad}</strong> ${c.zona_horaria ? `(${c.zona_horaria})` : ''}</div>` : ''}
-          ${c.profesion ? `<div><span class="text-slate-500">Profesión:</span> <strong>${c.profesion}</strong> ${c.horario_laboral ? `· ${c.horario_laboral}` : ''}</div>` : ''}
+          ${c.ciudad ? `<div><span class="text-slate-500">Ciudad:</span> <strong>${c.ciudad}</strong></div>` : ''}
+          ${c.profesion ? `<div><span class="text-slate-500">Profesión:</span> <strong>${c.profesion}</strong></div>` : ''}
         </div>` : ''}
 
-      ${c.objetivo || c.meta_especifica ? `
+      <!-- 2. OBJETIVO Y FASE -->
+      ${c.objetivo || c.meta_especifica || c.fase_programa ? `
         <div class="bg-emerald-50 rounded-xl p-3 text-sm">
-          <div class="text-xs font-bold text-emerald-900 mb-1">🎯 Objetivo</div>
+          <div class="text-xs font-bold text-emerald-900 mb-1">2 · 🎯 Objetivo y fase</div>
           ${c.objetivo ? `<div class="text-emerald-800">${escapeHtml(c.objetivo)}</div>` : ''}
-          ${c.meta_especifica ? `<div class="text-emerald-700 text-xs mt-1">${escapeHtml(c.meta_especifica)}${c.fecha_objetivo ? ' · para ' + fmt.fecha(c.fecha_objetivo) : ''}</div>` : ''}
+          ${c.meta_especifica ? `<div class="text-emerald-700 text-xs mt-1">${escapeHtml(c.meta_especifica)}</div>` : ''}
+          ${c.fase_programa ? `<div class="text-emerald-700 text-xs mt-1"><span class="text-emerald-600">Fase:</span> ${FASES_PROGRAMA.find(f => f.key === c.fase_programa)?.label || c.fase_programa}</div>` : ''}
         </div>` : ''}
 
-      ${c.restricciones_lesiones || c.patologias ? `
-        <div class="bg-red-50 rounded-xl p-3 text-sm">
-          <div class="text-xs font-bold text-red-800 mb-1">⚕️ Cuidado físico</div>
-          ${c.restricciones_lesiones ? `<div class="text-red-700">${escapeHtml(c.restricciones_lesiones)}</div>` : ''}
-          ${c.patologias ? `<div class="text-red-700 text-xs mt-1">Patologías: ${escapeHtml(c.patologias)}</div>` : ''}
-        </div>` : ''}
+      <!-- 3. COMPOSICIÓN CORPORAL -->
+      <div class="bg-white ring-1 ring-slate-200 rounded-xl p-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-xs font-bold text-slate-500 uppercase">3 · 🧬 Composición corporal</div>
+          <button class="text-xs text-emerald-600 font-semibold hover:underline" onclick="nuevaMedicion('${c.id}')">+ Nueva medición</button>
+        </div>
+        ${!comp ? `<p class="text-xs text-slate-500">Sin mediciones. ${c.estatura_cm ? '' : 'Falta estatura en el perfil. '}Registra la primera para ver estimaciones.</p>` : `
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+            <div><div class="text-xs text-slate-500">Peso</div><div class="font-bold text-lg text-slate-900">${comp.peso_kg} kg</div></div>
+            ${comp.masa_grasa_kg != null ? `<div><div class="text-xs text-slate-500">Masa grasa</div><div class="font-bold text-lg" style="color:#f59e0b">${comp.masa_grasa_kg} kg <span class="text-xs text-slate-400">(${ultMed.grasa_pct}%)</span></div></div>` : ''}
+            ${comp.masa_magra_kg != null ? `<div><div class="text-xs text-slate-500">Masa magra</div><div class="font-bold text-lg" style="color:#10b981">${comp.masa_magra_kg} kg</div></div>` : ''}
+            ${comp.masa_muscular_smm_kg != null ? `<div><div class="text-xs text-slate-500">Músculo esquelético <span class="text-slate-400" title="Estimado con fórmula de Lee 2000">ℹ️</span></div><div class="font-bold text-lg" style="color:#3b82f6">${comp.masa_muscular_smm_kg} kg</div></div>` : ''}
+            ${comp.masa_osea_kg != null ? `<div><div class="text-xs text-slate-500">Masa ósea <span class="text-slate-400" title="Estimado con fórmula de Wagner & Heyward 2000">ℹ️</span></div><div class="font-bold text-lg" style="color:#8b5cf6">${comp.masa_osea_kg} kg</div></div>` : ''}
+            ${comp.agua_corporal_L != null ? `<div><div class="text-xs text-slate-500">Agua corporal <span class="text-slate-400" title="Estimado con fórmula de Watson 1980">ℹ️</span></div><div class="font-bold text-lg" style="color:#0ea5e9">${comp.agua_corporal_L} L</div></div>` : ''}
+            ${comp.masa_residual_kg != null ? `<div><div class="text-xs text-slate-500">Masa residual <span class="text-slate-400" title="Órganos, tejido conectivo, líquidos no incluidos en agua libre. Calculado por resta (modelo 5-compartimentos)">ℹ️</span></div><div class="font-bold text-lg" style="color:#64748b">${comp.masa_residual_kg} kg</div></div>` : ''}
+          </div>
+          <details class="mt-3">
+            <summary class="text-xs text-slate-500 cursor-pointer">Ver fórmulas usadas</summary>
+            <div class="text-xs text-slate-600 mt-2 space-y-1">
+              <div><strong>Masa magra/grasa:</strong> peso × (%grasa/100) — exacta dado %grasa correcto</div>
+              <div><strong>Músculo esquelético (SMM):</strong> Lee et al. (2000) J Appl Physiol 89:465-471. Validado vs. MRI (R²=0.86)</div>
+              <div><strong>Masa ósea:</strong> Wagner & Heyward (2000) Med Sci Sports Exerc 32(9). Estimación por peso corporal</div>
+              <div><strong>Agua corporal:</strong> Watson et al. (1980) Am J Clin Nutr 33:27-39. Estándar clínico</div>
+              <div><strong>Masa residual:</strong> peso − (grasa + músculo + hueso). Modelo 5-compartimentos</div>
+              <div class="text-amber-700 mt-2">⚠️ Son ESTIMACIONES basadas en fórmulas científicamente validadas. No reemplazan un DEXA scan. Útiles para trackear tendencias, no para diagnóstico clínico.</div>
+            </div>
+          </details>
+        `}
+      </div>
 
-      ${c.lugar_entreno || c.preferencias_dietetica || c.antecedentes_deportivos ? `
-        <div class="text-sm space-y-1">
+      <!-- 4. NIVEL DE ACTIVIDAD -->
+      ${c.nivel_actividad || c.lugar_entreno ? `
+        <div class="bg-slate-50 rounded-xl p-3 text-sm space-y-1">
+          <div class="text-xs font-bold text-slate-500 uppercase mb-1">4 · Nivel de actividad</div>
+          ${c.nivel_actividad ? `<div><span class="text-slate-500">Nivel:</span> <strong class="capitalize">${c.nivel_actividad.replace('_',' ')}</strong> · PAL ${c.pal_factor || '—'}</div>` : ''}
           ${c.lugar_entreno ? `<div><span class="text-slate-500">Lugar entreno:</span> <strong class="capitalize">${c.lugar_entreno.replace('_',' ')}</strong></div>` : ''}
-          ${c.preferencias_dietetica ? `<div><span class="text-slate-500">Dieta:</span> <strong>${escapeHtml(c.preferencias_dietetica)}</strong></div>` : ''}
-          ${c.antecedentes_deportivos ? `<div><span class="text-slate-500">Deportes previos:</span> <strong>${escapeHtml(c.antecedentes_deportivos)}</strong></div>` : ''}
         </div>` : ''}
+
+      <!-- 6. CONDICIONES MÉDICAS / LESIONES -->
+      ${c.restricciones_lesiones || c.patologias || c.lesion_actual ? `
+        <div class="bg-red-50 rounded-xl p-3 text-sm">
+          <div class="text-xs font-bold text-red-800 mb-1">6 · ⚕️ Condiciones médicas / lesiones</div>
+          ${c.patologias ? `<div class="text-red-700 text-xs"><span class="font-semibold">Patologías:</span> ${escapeHtml(c.patologias)}</div>` : ''}
+          ${c.restricciones_lesiones ? `<div class="text-red-700 text-xs mt-1"><span class="font-semibold">Restricciones:</span> ${escapeHtml(c.restricciones_lesiones)}</div>` : ''}
+          ${c.lesion_actual ? `<div class="text-red-700 text-xs mt-1"><span class="font-semibold">Lesión actual:</span> ${escapeHtml(c.lesion_actual)}${c.lesion_estado ? ` (${c.lesion_estado.replace('_',' ')})` : ''}</div>` : ''}
+        </div>` : ''}
+
+      <!-- 7. ANTECEDENTES DEPORTIVOS -->
+      ${c.antecedentes_deportivos ? `
+        <div class="text-sm">
+          <div class="text-xs font-bold text-slate-500 uppercase mb-1">7 · Antecedentes deportivos</div>
+          <div class="text-slate-700">${escapeHtml(c.antecedentes_deportivos)}</div>
+        </div>` : ''}
+
+      ${(c.tags && c.tags.length) ? `<div>${c.tags.map(t => `<span class="tag-pill">${t}</span>`).join('')}</div>` : ''}
 
       ${(c.tags && c.tags.length) ? `<div>${c.tags.map(t => `<span class="tag-pill">${t}</span>`).join('')}</div>` : ''}
 
@@ -2872,6 +3055,25 @@ window.verCliente = async (id) => {
                 return lineChart(series, labelsMed, opts);
               })()}
             </div>` : ''}
+          ${compHist.length >= 2 && compHist.some(x => x.masa_muscular_smm_kg) ? `
+            <div class="bg-slate-50 rounded-xl p-3 mb-2">
+              <div class="text-xs font-bold text-slate-700 mb-2">Evolución composición corporal (estimada)</div>
+              ${(() => {
+                const magrasVals = compHist.map(x => x.masa_magra_kg ?? null);
+                const grasasKgVals = compHist.map(x => x.masa_grasa_kg ?? null);
+                const smmVals = compHist.map(x => x.masa_muscular_smm_kg ?? null);
+                const allVals = [...magrasVals, ...grasasKgVals, ...smmVals].filter(v => v !== null);
+                if (!allVals.length) return '';
+                const minV = Math.min(...allVals), maxV = Math.max(...allVals);
+                const labelsComp = medsAsc.map(m => fmt.fechaCorta(m.fecha));
+                return lineChart([
+                  { label: 'Masa magra', color: '#10b981', points: magrasVals },
+                  { label: 'Músculo esquel.', color: '#3b82f6', points: smmVals },
+                  { label: 'Masa grasa', color: '#f59e0b', points: grasasKgVals },
+                ], labelsComp, { yMin: Math.max(0, Math.floor(minV - 3)), yMax: Math.ceil(maxV + 3), height: 160 });
+              })()}
+              <div class="text-[10px] text-slate-500 mt-1">Fórmulas: Lee (SMM), peso × (1-%grasa) (magra)</div>
+            </div>` : ''}
           <table><thead><tr><th>Fecha</th><th>Peso</th><th>% grasa</th><th>Cintura</th><th></th></tr></thead><tbody>
             ${meds.slice().reverse().slice(0, 6).map(m => `
               <tr>
@@ -2897,18 +3099,27 @@ window.verCliente = async (id) => {
             </tr>`).join('')}</tbody></table>`}
       </div>
 
-      ${c.notas ? `<div class="bg-slate-50 rounded-xl p-3 text-sm whitespace-pre-line"><div class="text-xs font-bold text-slate-500 uppercase mb-1">Notas</div>${escapeHtml(c.notas)}</div>` : ''}
+      ${c.notas ? `
+        <div class="bg-amber-50 rounded-xl p-4 text-sm">
+          <div class="text-xs font-bold text-amber-800 uppercase mb-2">9 · 📋 Entrevista inicial / notas</div>
+          <details ${c.notas.length < 400 ? 'open' : ''}>
+            <summary class="text-xs text-amber-700 cursor-pointer mb-2">${c.notas.length < 400 ? 'Ocultar' : 'Ver registro completo'} (${c.notas.length} caracteres)</summary>
+            <div class="text-slate-700 whitespace-pre-line text-xs bg-white rounded-lg p-3 mt-2 max-h-96 overflow-y-auto">${escapeHtml(c.notas)}</div>
+          </details>
+        </div>` : ''}
     </div>
   `, `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>`), { wide: true });
 };
 
 // ===== Mediciones corporales =====
-window.nuevaMedicion = (clienteId) => {
+window.nuevaMedicion = async (clienteId) => {
+  const c = await db.clientes.get(clienteId);
+  window._medCliente = c;
   openModal(modalShell('Nueva medición corporal', `
     <div class="grid grid-cols-2 gap-3">
       <div><label>Fecha</label><input id="me-fecha" type="date" value="${fmt.hoy()}"></div>
-      <div><label>Peso (kg)</label><input id="me-peso" type="number" step="0.1" placeholder="78.5"></div>
-      <div><label>% Grasa</label><input id="me-grasa" type="number" step="0.1" placeholder="18.5"></div>
+      <div><label>Peso (kg)</label><input id="me-peso" type="number" step="0.1" placeholder="78.5" oninput="recalcComp()"></div>
+      <div><label>% Grasa</label><input id="me-grasa" type="number" step="0.1" placeholder="18.5" oninput="recalcComp()"></div>
       <div><label>Cintura (cm)</label><input id="me-cin" type="number" step="0.1"></div>
       <div><label>Cadera (cm)</label><input id="me-cad" type="number" step="0.1"></div>
       <div><label>Pecho (cm)</label><input id="me-pec" type="number" step="0.1"></div>
@@ -2916,8 +3127,58 @@ window.nuevaMedicion = (clienteId) => {
       <div><label>Pierna (cm)</label><input id="me-pie" type="number" step="0.1"></div>
       <div class="col-span-2"><label>Notas</label><textarea id="me-notas" rows="2"></textarea></div>
     </div>
+    <div id="me-comp-preview" class="mt-4 hidden bg-slate-50 rounded-xl p-3 text-xs">
+      <div class="font-bold text-slate-700 mb-2">🧬 Estimaciones de composición corporal</div>
+      <div id="me-comp-body"></div>
+      <div class="text-slate-500 mt-2">Basado en peso + %grasa + edad + sexo + estatura del perfil. Estimaciones, no diagnóstico.</div>
+    </div>
   `, `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-primary" onclick="guardarMedicion('${clienteId}')">Guardar</button>`));
+};
+
+// Cálculo de composición en el modal de seguimiento semanal
+window.recalcCompSeg = () => {
+  const c = window._segCliente;
+  if (!c) return;
+  const peso = Number($('#sg-peso')?.value);
+  const grasa = Number($('#sg-grasa')?.value);
+  if (!peso) { $('#sg-comp-preview')?.classList.add('hidden'); return; }
+  const edad = helpers.edadDe(c.fecha_nacimiento);
+  const comp = calcComposicionCorporal({ peso, grasa_pct: grasa || null, edad, sexo: c.sexo, altura_cm: c.estatura_cm });
+  if (!comp) { $('#sg-comp-preview')?.classList.add('hidden'); return; }
+  const body = $('#sg-comp-body');
+  if (!body) return;
+  const parts = [];
+  if (comp.masa_grasa_kg != null) parts.push(`Grasa: <strong style="color:#f59e0b">${comp.masa_grasa_kg} kg</strong>`);
+  if (comp.masa_magra_kg != null) parts.push(`Magra: <strong style="color:#10b981">${comp.masa_magra_kg} kg</strong>`);
+  if (comp.masa_muscular_smm_kg != null) parts.push(`SMM: <strong style="color:#3b82f6">${comp.masa_muscular_smm_kg} kg</strong>`);
+  if (comp.masa_osea_kg != null) parts.push(`Hueso: <strong style="color:#8b5cf6">${comp.masa_osea_kg} kg</strong>`);
+  if (comp.agua_corporal_L != null) parts.push(`Agua: <strong style="color:#0ea5e9">${comp.agua_corporal_L} L</strong>`);
+  body.innerHTML = parts.join(' · ');
+  $('#sg-comp-preview')?.classList.remove('hidden');
+};
+
+window.recalcComp = () => {
+  const c = window._medCliente;
+  if (!c) return;
+  const peso = Number($('#me-peso')?.value);
+  const grasa = Number($('#me-grasa')?.value);
+  if (!peso) { $('#me-comp-preview')?.classList.add('hidden'); return; }
+  const edad = helpers.edadDe(c.fecha_nacimiento);
+  const comp = calcComposicionCorporal({ peso, grasa_pct: grasa || null, edad, sexo: c.sexo, altura_cm: c.estatura_cm });
+  if (!comp) { $('#me-comp-preview')?.classList.add('hidden'); return; }
+  const body = $('#me-comp-body');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="grid grid-cols-2 gap-2">
+      ${comp.masa_grasa_kg != null ? `<div><span class="text-slate-500">Masa grasa:</span> <strong style="color:#f59e0b">${comp.masa_grasa_kg} kg</strong></div>` : ''}
+      ${comp.masa_magra_kg != null ? `<div><span class="text-slate-500">Masa magra:</span> <strong style="color:#10b981">${comp.masa_magra_kg} kg</strong></div>` : ''}
+      ${comp.masa_muscular_smm_kg != null ? `<div><span class="text-slate-500">Músculo esquel.:</span> <strong style="color:#3b82f6">${comp.masa_muscular_smm_kg} kg</strong></div>` : ''}
+      ${comp.masa_osea_kg != null ? `<div><span class="text-slate-500">Masa ósea:</span> <strong style="color:#8b5cf6">${comp.masa_osea_kg} kg</strong></div>` : ''}
+      ${comp.agua_corporal_L != null ? `<div><span class="text-slate-500">Agua corporal:</span> <strong style="color:#0ea5e9">${comp.agua_corporal_L} L</strong></div>` : ''}
+      ${comp.masa_residual_kg != null ? `<div><span class="text-slate-500">Residual:</span> <strong style="color:#64748b">${comp.masa_residual_kg} kg</strong></div>` : ''}
+    </div>`;
+  $('#me-comp-preview')?.classList.remove('hidden');
 };
 
 window.guardarMedicion = async (clienteId) => {

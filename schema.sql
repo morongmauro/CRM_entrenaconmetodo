@@ -10,21 +10,15 @@ create table if not exists clientes (
 
   -- Identidad
   nombre text not null,
-  telefono text,
-  email text,
   fecha_nacimiento date,
   sexo text,                         -- M | F | otro
   ciudad text,
-  zona_horaria text,
   profesion text,
-  horario_laboral text,              -- mañana | tarde | noche | mixto
 
   -- Coaching
   meta_especifica text,
-  fecha_objetivo date,
   lugar_entreno text,                -- casa | gym | aire_libre | mixto
   antecedentes_deportivos text,
-  preferencias_dietetica text,
   restricciones_lesiones text,
   patologias text,
   objetivo text,                     -- objetivo corto resumen
@@ -36,7 +30,7 @@ create table if not exists clientes (
   fecha_inicio date,
   estado text default 'activo',      -- activo | pausa | finalizado
   canal_adquisicion text,            -- instagram | referido | web | otro
-  metodo_pago_preferido text,        -- transferencia | nequi | pse | zelle | paypal | otro
+  metodo_pago_preferido text,        -- paypal | transferencia
   dias_gracia int default 3,
 
   -- Otros
