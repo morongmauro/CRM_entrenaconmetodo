@@ -18,6 +18,9 @@ create table if not exists clientes (
   -- Coaching
   meta_especifica text,
   lugar_entreno text,                -- casa | gym | aire_libre | mixto
+  dias_entreno_cantidad int,         -- meta: cuántos días/semana entrena
+  dias_entreno text[] default '{}',  -- qué días: L,M,X,J,V,S,D
+  proteina_g_kg numeric,             -- g de proteína por kg (default 1.8 en la app)
   antecedentes_deportivos text,
   restricciones_lesiones text,
   patologias text,
@@ -73,6 +76,7 @@ create table if not exists seguimientos (
   -- Asistencia entreno
   dias_planeados int,
   dias_asistidos int,
+  dias_entrenados text[] default '{}', -- qué días marcó: L,M,X,J,V,S,D
 
   -- Estado y contenido
   estado text default 'hecho',        -- hecho (registrado) | la ausencia de registro = falta
@@ -105,6 +109,10 @@ create table if not exists settings (
   user_id uuid primary key default auth.uid() references auth.users on delete cascade,
   usd_cop_rate numeric default 4000,
   nombre_coach text,
+  mealtracker_url text,
+  mealtracker_anon_key text,
+  mealtracker_app_url text,          -- URL de la app Mealtracker en Vercel (API segura)
+  mealtracker_coach_password text,   -- COACH_PASSWORD del dashboard de coach
   updated_at timestamptz default now()
 );
 

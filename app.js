@@ -12,6 +12,56 @@ let _mtClientKey = null;
 let _mtUsersCache = null;
 let _mtUsersCacheTime = 0;
 
+// --- Modo seguro (recomendado): API de coach del Mealtracker ---
+// El CRM se autentica con la contraseña del dashboard de coach
+// (COACH_PASSWORD) contra /api/coach-auth y lee vía /api/coach-data.
+// Así la anon key deja de ser necesaria y se puede activar RLS en user_data.
+function mtApiBase() {
+  const url = (_settings?.mealtracker_app_url || '').trim().replace(/\/+$/, '');
+  const pass = _settings?.mealtracker_coach_password || '';
+  return (url && pass) ? { url, pass } : null;
+}
+
+async function mtApiToken(force = false) {
+  const cfg = mtApiBase();
+  if (!cfg) return null;
+  if (!force) {
+    try {
+      const saved = JSON.parse(localStorage.getItem('mt_coach_token') || 'null');
+      if (saved && saved.url === cfg.url && saved.expiresAt > Date.now() + 60000) return saved.token;
+    } catch (e) { /* token corrupto, re-login */ }
+  }
+  try {
+    const r = await fetch(`${cfg.url}/api/coach-auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: cfg.pass }),
+    });
+    if (!r.ok) return null;
+    const d = await r.json();
+    localStorage.setItem('mt_coach_token', JSON.stringify({ token: d.token, expiresAt: d.expiresAt, url: cfg.url }));
+    return d.token;
+  } catch (e) { return null; }
+}
+
+async function mtApiGet(path) {
+  const cfg = mtApiBase();
+  if (!cfg) return null;
+  let token = await mtApiToken();
+  if (!token) return null;
+  const call = (t) => fetch(`${cfg.url}${path}`, { headers: { Authorization: `Bearer ${t}` } }).catch(() => null);
+  let r = await call(token);
+  if (r && r.status === 401) {          // token vencido → re-login una vez
+    token = await mtApiToken(true);
+    if (!token) return null;
+    r = await call(token);
+  }
+  if (!r || !r.ok) return null;
+  return r.json().catch(() => null);
+}
+
+// --- Modo directo (legado): lectura con anon key. Deja de funcionar si
+// activas RLS en el Mealtracker; migra al modo seguro en Ajustes. ---
 function mtClient() {
   const url = window.MEALTRACKER_URL || _settings?.mealtracker_url;
   const key = window.MEALTRACKER_ANON_KEY || _settings?.mealtracker_anon_key;
@@ -21,6 +71,25 @@ function mtClient() {
   _mtClient = window.supabase.createClient(url, key);
   _mtClientKey = cacheKey;
   return _mtClient;
+}
+
+// ¿Hay alguna conexión al Mealtracker disponible (API segura o directa)?
+function mtConfigured() {
+  return !!(mtApiBase() || mtClient());
+}
+
+// Trae el blob `data` de un usuario del Mealtracker, por el modo disponible
+async function getMealtrackerUserData(mealtrackerId) {
+  if (!mealtrackerId) return null;
+  if (mtApiBase()) {
+    const res = await mtApiGet(`/api/coach-data?action=detail&user_id=${encodeURIComponent(mealtrackerId)}`);
+    return res?.client?.data || null;
+  }
+  const mt = mtClient();
+  if (!mt) return null;
+  const { data: row, error } = await mt.from('user_data').select('data').eq('user_id', mealtrackerId).maybeSingle();
+  if (error || !row) return null;
+  return row.data || null;
 }
 
 // Convierte semana ISO (YYYY-Www) a rango [fecha_lunes, fecha_domingo]
@@ -40,12 +109,9 @@ function semanaISOToRange(semanaISO) {
 
 // Trae el resumen de una semana desde el mealtracker externo
 async function getMealtrackerWeek(mealtrackerId, semanaISO) {
-  const mt = mtClient();
-  if (!mt || !mealtrackerId) return null;
-  const { data: row, error } = await mt.from('user_data').select('data').eq('user_id', mealtrackerId).maybeSingle();
-  if (error || !row) return null;
+  const d = await getMealtrackerUserData(mealtrackerId);
+  if (!d) return null;
 
-  const d = row.data || {};
   const goals = d.goals || {};
   const history = d.history || {};
   const [ini, fin] = semanaISOToRange(semanaISO);
@@ -80,10 +146,16 @@ async function getMealtrackerWeek(mealtrackerId, semanaISO) {
 
 // Lista todos los clientes del mealtracker (con cache de 60s)
 async function listarClientesMealtracker(force = false) {
-  const mt = mtClient();
-  if (!mt) return [];
+  if (!mtConfigured()) return [];
   const ahora = Date.now();
   if (!force && _mtUsersCache && (ahora - _mtUsersCacheTime) < 60000) return _mtUsersCache;
+  if (mtApiBase()) {
+    const res = await mtApiGet('/api/coach-data?action=list');
+    _mtUsersCache = (res?.clients || []).map(c => ({ user_id: c.user_id, name: c.name, updated_at: c.updated_at }));
+    _mtUsersCacheTime = ahora;
+    return _mtUsersCache;
+  }
+  const mt = mtClient();
   const { data } = await mt.from('user_data').select('user_id, name, updated_at').order('updated_at', { ascending: false });
   _mtUsersCache = data || [];
   _mtUsersCacheTime = ahora;
@@ -95,8 +167,7 @@ async function listarClientesMealtracker(force = false) {
 async function resolverMealtrackerId(cliente) {
   if (!cliente) return null;
   if (cliente.mealtracker_id) return cliente.mealtracker_id;
-  const mt = mtClient();
-  if (!mt) return null;
+  if (!mtConfigured()) return null;
 
   const users = await listarClientesMealtracker();
   if (!users.length) return null;
@@ -161,8 +232,12 @@ let _pendientesFilter = 'todos';
 // UTILS
 // =====================================================
 const fmt = {
-  hoy: () => new Date().toISOString().slice(0, 10),
-  mesActual: () => new Date().toISOString().slice(0, 7),
+  // Fecha local (no UTC): con toISOString() en Colombia el día/mes cambiaba desde las 7pm
+  hoy: () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  },
+  mesActual: () => fmt.hoy().slice(0, 7),
   fecha: (s) => s ? new Date(s + (String(s).length === 10 ? 'T00:00:00' : '')).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) : '—',
   fechaCorta: (s) => s ? new Date(s + 'T00:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }) : '—',
   money: (n, m = 'COP') => {
@@ -188,9 +263,11 @@ const fmt = {
     return `${date.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
   },
   semanaPrev: (s) => {
-    const [y, w] = s.split('-W').map(Number);
-    if (w > 1) return `${y}-W${String(w - 1).padStart(2, '0')}`;
-    return `${y - 1}-W52`;
+    // Restar 7 días al lunes de la semana y rederivar (algunos años tienen 53 semanas ISO)
+    const [ini] = semanaISOToRange(s);
+    const d = new Date(ini + 'T00:00:00');
+    d.setDate(d.getDate() - 7);
+    return fmt.semanaISO(d);
   },
   labelSemana: (s) => {
     const [y, w] = s.split('-W').map(Number);
@@ -220,8 +297,8 @@ const helpers = {
     for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % PALETA.length;
     return PALETA[Math.abs(h)];
   },
-  avatar: (nombre, size = 10) => `<div class="w-${size} h-${size} rounded-full bg-gradient-to-br ${helpers.color(nombre)} flex items-center justify-center text-white font-bold flex-shrink-0" style="font-size:${size <= 9 ? '0.75rem' : '0.95rem'}">${helpers.iniciales(nombre)}</div>`,
-  avatarBig: (nombre) => `<div class="w-14 h-14 rounded-2xl bg-gradient-to-br ${helpers.color(nombre)} flex items-center justify-center text-white font-bold text-xl shadow-sm">${helpers.iniciales(nombre)}</div>`,
+  avatar: (nombre, size = 10) => `<div class="w-${size} h-${size} rounded-full bg-gradient-to-br ${helpers.color(nombre)} flex items-center justify-center text-white font-bold flex-shrink-0" style="font-size:${size <= 9 ? '0.75rem' : '0.95rem'}">${escapeHtml(helpers.iniciales(nombre))}</div>`,
+  avatarBig: (nombre) => `<div class="w-14 h-14 rounded-2xl bg-gradient-to-br ${helpers.color(nombre)} flex items-center justify-center text-white font-bold text-xl shadow-sm">${escapeHtml(helpers.iniciales(nombre))}</div>`,
   promedioAdh: (s) => {
     if (!s) return null;
     const vals = [s.adherencia_entreno, s.adherencia_alimentacion].filter(v => v !== null && v !== undefined);
@@ -343,8 +420,9 @@ function nivelDesdeEncuesta(respuestas) {
 }
 
 // ===== Cálculo de meta nutricional =====
-function calcMetaNutricional({ peso, altura, edad, sexo, grasa_pct, pal, objetivo_pct }) {
+function calcMetaNutricional({ peso, altura, edad, sexo, grasa_pct, pal, objetivo_pct, proteina_g_kg }) {
   const w = Number(peso), h = Number(altura), a = Number(edad), g = grasa_pct != null && grasa_pct !== '' ? Number(grasa_pct) : null;
+  const gkg = Number(proteina_g_kg) || 1.8;
   if (!w || !h || !a || !sexo || !pal || objetivo_pct == null) return null;
 
   let bmr, metodo, formula;
@@ -362,7 +440,7 @@ function calcMetaNutricional({ peso, altura, edad, sexo, grasa_pct, pal, objetiv
 
   const tdee = bmr * pal;
   const kcal = Math.round(tdee * (1 + objetivo_pct));
-  const proteina = Math.round(w * 1.8);
+  const proteina = Math.round(w * gkg);
   const grasas = Math.round(kcal * 0.25 / 9);
   const carbos = Math.round((kcal - proteina * 4 - grasas * 9) / 4);
 
@@ -371,7 +449,7 @@ function calcMetaNutricional({ peso, altura, edad, sexo, grasa_pct, pal, objetiv
 ${formula}
 TDEE = BMR × PAL(${pal}) = ${tdee.toFixed(0)} kcal
 Meta = TDEE × (1 ${signo}${(objetivo_pct * 100).toFixed(0)}%) = ${kcal} kcal
-Proteína: ${w} kg × 1.8 g = ${proteina} g
+Proteína: ${w} kg × ${gkg} g/kg = ${proteina} g
 Grasas: 25% de kcal = ${grasas} g
 Carbos: resto = ${carbos} g`;
 
@@ -462,17 +540,6 @@ function calcScores(s, cliente) {
 }
 
 // ===== Streaks (rachas de cumplimiento) =====
-function calcStreaks(segsOrdenadosDesc) {
-  const streak = { fuerza: 0, cardio: 0, alim: 0, global: 0 };
-  const cumple = (v) => v !== null && v !== undefined && v >= 75;
-  for (const s of segsOrdenadosDesc) {
-    const scoreF = s.fuerza_planeados > 0 ? (s.fuerza_ejecutados / s.fuerza_planeados) * 100 : null;
-    const scoreC = s.cardio_planeados > 0 ? (s.cardio_ejecutados / s.cardio_planeados) * 100 : null;
-    if (cumple(scoreF)) streak.fuerza++; else if (streak.fuerza === 0) {} else break;
-  }
-  return streak;
-}
-
 function calcStreakDim(segs, evaluador) {
   // segs desc por semana, evaluador(s) => bool
   let count = 0;
@@ -551,15 +618,15 @@ function lineChart(series, xLabels = [], opts = {}) {
     svg += `<line x1="${pad.left}" y1="${yy}" x2="${w - pad.right}" y2="${yy}" stroke="#e2e8f0" stroke-width="1"/>`;
     svg += `<text x="${pad.left - 6}" y="${yy + 3}" text-anchor="end" font-size="10" fill="#94a3b8">${yv.toFixed(0)}</text>`;
   }
-  // Series
+  // Series: línea continua (une puntos aunque haya semanas sin dato) + puntos discretos
   for (const s of series) {
     const pts = s.points
       .map((y, i) => y === null || y === undefined ? null : `${sx(i)},${sy(y)}`)
       .filter(Boolean).join(' ');
-    if (pts) svg += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    if (pts) svg += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
     s.points.forEach((y, i) => {
       if (y !== null && y !== undefined) {
-        svg += `<circle cx="${sx(i)}" cy="${sy(y)}" r="3" fill="${s.color}"/>`;
+        svg += `<circle cx="${sx(i)}" cy="${sy(y)}" r="2.5" fill="${s.color}" stroke="white" stroke-width="1"/>`;
       }
     });
   }
@@ -576,6 +643,53 @@ function lineChart(series, xLabels = [], opts = {}) {
 function legendDot(color, label) {
   return `<span class="inline-flex items-center gap-1.5 text-xs text-slate-600 mr-3"><span class="w-2.5 h-2.5 rounded-full" style="background:${color}"></span>${label}</span>`;
 }
+
+// ===== Días de entreno =====
+const DIAS_SEMANA = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+function metaDiasEntreno(cliente) {
+  if (!cliente) return null;
+  return cliente.dias_entreno_cantidad || (cliente.dias_entreno || []).length || null;
+}
+
+// ===== Checklist sobre texto libre =====
+// Cada línea del texto es un ítem; el prefijo "[x] " marca el ítem como hecho.
+function parseChecklist(texto) {
+  return (texto || '').split('\n').map(l => l.trim()).filter(Boolean).map(l => ({
+    done: /^\[x\]/i.test(l),
+    texto: l.replace(/^\[( |x)?\]\s*/i, '').replace(/^[-•]\s*/, ''),
+  }));
+}
+function serializeChecklist(items) {
+  return items.map(i => `${i.done ? '[x] ' : ''}${i.texto}`).join('\n');
+}
+// Versión solo-lectura: ✓ hecho · ○ pendiente
+function checklistTextoPlano(texto) {
+  return parseChecklist(texto).map(i => `${i.done ? '✓' : '○'} ${i.texto}`).join('\n');
+}
+function checklistHtml(texto, segId) {
+  const items = parseChecklist(texto);
+  if (!items.length) return '';
+  const hechos = items.filter(i => i.done).length;
+  return `
+    <div class="space-y-1" onclick="event.stopPropagation()">
+      ${items.map((it, i) => `
+        <label class="flex items-start gap-2 text-xs cursor-pointer">
+          <input type="checkbox" class="mt-0.5 rounded" ${it.done ? 'checked' : ''} onchange="toggleChecklistSemana('${segId}', ${i})">
+          <span class="${it.done ? 'line-through text-slate-400' : 'text-amber-900'}">${escapeHtml(it.texto)}</span>
+        </label>`).join('')}
+      ${items.length > 1 ? `<div class="text-[10px] text-slate-400 pt-0.5">${hechos}/${items.length} completados</div>` : ''}
+    </div>`;
+}
+window.toggleChecklistSemana = async (segId, idx) => {
+  const s = await db.seguimientos.get(segId);
+  const items = parseChecklist(s?.pendientes_semana);
+  if (!items[idx]) return;
+  items[idx].done = !items[idx].done;
+  const { error } = await sb.from('seguimientos').update({ pendientes_semana: serializeChecklist(items) }).eq('id', segId);
+  if (error) { toast(error.message); return; }
+  toast(items[idx].done ? '✓ Completado' : 'Reabierto');
+  navigate('seguimiento');
+};
 
 const PLANTILLAS = {
   alta: `Excelente semana! Cumpliste muy bien con el plan.
@@ -714,6 +828,8 @@ async function loadSettings() {
     nombre_coach: data.nombre_coach || 'Coach',
     mealtracker_url: data.mealtracker_url || '',
     mealtracker_anon_key: data.mealtracker_anon_key || '',
+    mealtracker_app_url: data.mealtracker_app_url || '',
+    mealtracker_coach_password: data.mealtracker_coach_password || '',
   };
 }
 
@@ -859,9 +975,14 @@ routes.dashboard = async () => {
   // Cobrado y pendiente del mes
   const pagadosMes = pagosMes.filter(p => p.pagado);
   const cobrado = pagadosMes.reduce((s, p) => s + copConv(p.monto, p.moneda), 0);
-  const conPagoMes = new Set(pagosMes.map(p => p.cliente_id));
-  const porCobrar = activos.filter(c => !conPagoMes.has(c.id) || pagosMes.find(p => p.cliente_id === c.id && !p.pagado))
-    .reduce((s, c) => s + copConv(c.monto, c.moneda), 0);
+  const porCobrar = activos.reduce((s, c) => {
+    const p = pagosMes.find(pp => pp.cliente_id === c.id);
+    if (p && p.pagado) return s;
+    // Si hay un pago pendiente registrado, usar su monto; si no, el de la ficha
+    const monto = p && Number(p.monto) > 0 ? p.monto : c.monto;
+    const moneda = (p && p.moneda) || c.moneda;
+    return s + copConv(monto, moneda);
+  }, 0);
 
   // Vencidos: cliente activo cuyo día_pago ya pasó este mes y no tiene pago marcado
   const diaHoy = new Date().getDate();
@@ -869,7 +990,7 @@ routes.dashboard = async () => {
     if (!c.dia_pago || c.dia_pago > diaHoy) return false;
     const p = pagosMes.find(pp => pp.cliente_id === c.id);
     return !p || !p.pagado;
-  }).map(c => ({ ...c, dias_vencido: diaHoy - c.dia_pago + (c.dias_gracia || 0) >= 0 ? diaHoy - c.dia_pago : 0 }))
+  }).map(c => ({ ...c, dias_vencido: Math.max(0, diaHoy - c.dia_pago) }))
     .filter(c => c.dias_vencido > (c.dias_gracia || 0));
 
   // Próximos 7 días
@@ -894,7 +1015,7 @@ routes.dashboard = async () => {
 
   view.innerHTML = `
     <div class="mb-6">
-      <h2 class="text-2xl font-bold text-slate-900">Hola, ${_settings.nombre_coach} 👋</h2>
+      <h2 class="text-2xl font-bold text-slate-900">Hola, ${escapeHtml(_settings.nombre_coach)} 👋</h2>
       <p class="text-sm text-slate-500">${new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })} · semana ${semana.split('-W')[1]} · 1 USD = COP ${_settings.usd_cop_rate.toLocaleString('es-CO')}</p>
     </div>
 
@@ -933,7 +1054,7 @@ routes.dashboard = async () => {
             <div class="flex items-center gap-3 p-3 hover:bg-slate-50 rounded-xl cursor-pointer" onclick="abrirNuevoSeguimiento('${c.id}')">
               ${helpers.avatar(c.nombre, 10)}
               <div class="flex-1 min-w-0">
-                <div class="font-medium text-sm truncate">${c.nombre}</div>
+                <div class="font-medium text-sm truncate">${escapeHtml(c.nombre)}</div>
                 <div class="text-xs ${(c.dias_desde || 999) > 14 ? 'text-red-600' : 'text-slate-500'}">${c.dias_desde !== null ? `Último seguimiento hace ${c.dias_desde} días` : 'Sin seguimientos previos'}</div>
               </div>
               <button class="btn btn-primary btn-sm">Registrar</button>
@@ -957,10 +1078,11 @@ routes.dashboard = async () => {
                 <div class="flex items-center gap-3 flex-1 min-w-0">
                   ${helpers.avatar(c.nombre, 9)}
                   <div class="min-w-0">
-                    <div class="font-medium text-sm truncate">${c.nombre}</div>
+                    <div class="font-medium text-sm truncate">${escapeHtml(c.nombre)}</div>
                     <div class="text-xs text-red-700">Día ${c.dia_pago} · ${fmt.money(c.monto, c.moneda)}</div>
                   </div>
                 </div>
+                <button class="btn btn-ghost btn-sm" title="Copiar recordatorio de pago para WhatsApp" onclick="copiarRecordatorioPago('${c.id}')">💬</button>
                 <button class="btn btn-dark btn-sm" onclick="marcarPagoRapido('${c.id}')">Marcar pagado</button>
               </div>`).join('')}
           </div>
@@ -978,7 +1100,7 @@ routes.dashboard = async () => {
                 <div class="flex items-center gap-3 flex-1 min-w-0">
                   ${helpers.avatar(c.nombre, 9)}
                   <div class="min-w-0">
-                    <div class="font-medium text-sm truncate">${c.nombre}</div>
+                    <div class="font-medium text-sm truncate">${escapeHtml(c.nombre)}</div>
                     <div class="text-xs text-amber-700">En ${c.dias_falta} día(s) · ${fmt.money(c.monto, c.moneda)}</div>
                   </div>
                 </div>
@@ -998,7 +1120,7 @@ routes.dashboard = async () => {
               <div class="flex items-center gap-3 p-3 hover:bg-slate-50 rounded-xl cursor-pointer" onclick="abrirNuevoSeguimiento('${c.id}')">
                 ${helpers.avatar(c.nombre, 9)}
                 <div class="flex-1 min-w-0">
-                  <div class="font-medium text-sm truncate">${c.nombre}</div>
+                  <div class="font-medium text-sm truncate">${escapeHtml(c.nombre)}</div>
                   <div class="text-xs text-orange-700">Reactivar contacto</div>
                 </div>
                 <button class="btn btn-secondary btn-sm">Abrir</button>
@@ -1017,8 +1139,8 @@ routes.dashboard = async () => {
               <div class="flex items-start gap-3 p-3 hover:bg-slate-50 rounded-xl">
                 <input type="checkbox" class="mt-1 rounded" onchange="togglePendienteDash('${p.id}', '${p.estado}')">
                 <div class="flex-1 min-w-0">
-                  <div class="font-medium text-sm">${p.descripcion}</div>
-                  <div class="text-xs text-slate-500">${p.clientes?.nombre || ''} · ${p.scope === 'semana' ? '<span class="text-violet-600 font-semibold">Semanal</span>' : '<span class="text-emerald-600 font-semibold">General</span>'} ${p.fecha_limite ? '· vence ' + fmt.fechaCorta(p.fecha_limite) : ''}</div>
+                  <div class="font-medium text-sm">${escapeHtml(p.descripcion)}</div>
+                  <div class="text-xs text-slate-500">${escapeHtml(p.clientes?.nombre || '')} · ${p.scope === 'semana' ? '<span class="text-violet-600 font-semibold">Semanal</span>' : '<span class="text-emerald-600 font-semibold">General</span>'} ${p.fecha_limite ? '· vence ' + fmt.fechaCorta(p.fecha_limite) : ''}</div>
                 </div>
                 <span class="tag ${p.prioridad === 'alta' ? 'tag-red' : p.prioridad === 'baja' ? 'tag-gray' : 'tag-yellow'}">${p.prioridad}</span>
               </div>`).join('')}
@@ -1038,7 +1160,7 @@ routes.dashboard = async () => {
               <div class="flex items-center gap-3 p-3 hover:bg-slate-50 rounded-xl">
                 ${helpers.avatar(c.nombre, 9)}
                 <div class="flex-1">
-                  <div class="font-medium text-sm">${c.nombre}</div>
+                  <div class="font-medium text-sm">${escapeHtml(c.nombre)}</div>
                   <div class="text-xs text-pink-700">🎂 ${d === 0 ? '¡Hoy!' : d === 1 ? 'Mañana' : `En ${d} días`}</div>
                 </div>
               </div>`;
@@ -1059,10 +1181,31 @@ window.togglePendienteDash = async (id, estado) => {
   navigate('dashboard');
 };
 
+// Genera y copia un recordatorio de pago amable para pegar en WhatsApp
+window.copiarRecordatorioPago = async (clienteId) => {
+  const c = await db.clientes.get(clienteId);
+  if (!c) return;
+  const nombre = (c.nombre || '').split(' ')[0];
+  const partes = [
+    `Hola ${nombre}! 👋`,
+    '',
+    `Te escribo para recordarte la mensualidad de ${fmt.mesEsLargo(fmt.mesActual())} (${fmt.money(c.monto, c.moneda)}).`,
+  ];
+  if (c.metodo_pago_preferido) partes.push(`Puedes hacerlo por ${c.metodo_pago_preferido === 'paypal' ? 'PayPal' : 'transferencia'} como siempre.`);
+  partes.push('', 'Cualquier cosa me dices. ¡Seguimos con toda! 💪');
+  const texto = partes.join('\n');
+  try {
+    await navigator.clipboard.writeText(texto);
+    toast('✓ Recordatorio copiado, pégalo en WhatsApp');
+  } catch (e) {
+    prompt('Copia manualmente:', texto);
+  }
+};
+
 window.marcarPagoRapido = async (clienteId) => {
   const cliente = await db.clientes.get(clienteId);
   const mes = fmt.mesActual();
-  openModal(modalShell(`Registrar pago · ${cliente.nombre}`, `
+  openModal(modalShell(`Registrar pago · ${escapeHtml(cliente.nombre)}`, `
     <div class="space-y-3">
       <div class="bg-slate-50 rounded-xl p-3 text-sm">
         Mes: <strong>${fmt.mesEsLargo(mes)}</strong> · Monto sugerido: <strong>${fmt.money(cliente.monto, cliente.moneda)}</strong>
@@ -1205,10 +1348,10 @@ function clienteSidebarItem(c, ult) {
   }
   const active = c.id === _selectedClienteId;
   return `
-    <button class="w-full flex items-center gap-3 p-2.5 rounded-xl ${active ? 'bg-emerald-50 ring-1 ring-emerald-200' : 'hover:bg-slate-50'}" onclick="seleccionarCliente('${c.id}')" data-nombre="${c.nombre.toLowerCase()}">
+    <button class="w-full flex items-center gap-3 p-2.5 rounded-xl ${active ? 'bg-emerald-50 ring-1 ring-emerald-200' : 'hover:bg-slate-50'}" onclick="seleccionarCliente('${c.id}')" data-nombre="${escapeHtml(c.nombre.toLowerCase())}">
       ${helpers.avatar(c.nombre, 10)}
       <div class="flex-1 text-left min-w-0">
-        <div class="font-medium text-sm text-slate-900 truncate">${c.nombre}${c.estado !== 'activo' ? ` <span class="text-xs text-slate-400">(${c.estado})</span>` : ''}</div>
+        <div class="font-medium text-sm text-slate-900 truncate">${escapeHtml(c.nombre)}${c.estado !== 'activo' ? ` <span class="text-xs text-slate-400">(${c.estado})</span>` : ''}</div>
         <div class="text-xs truncate ${dias > 14 ? 'text-red-600' : 'text-slate-500'}">${label}</div>
       </div>
       <span class="w-2 h-2 rounded-full ${dot} flex-shrink-0"></span>
@@ -1230,12 +1373,16 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
   const semanas = segs.length;
   const inicio = c.fecha_inicio ? fmt.fecha(c.fecha_inicio) : '—';
 
-  // Últimas 8 semanas (más antiguas a la izquierda)
+  // Últimas 8 semanas (más antiguas a la izquierda) · scores 0-100
+  // Fallback: si la semana no tiene score calculado, usar la adherencia subjetiva ×10
   const ult8 = segs.slice(0, 8).reverse();
   const labels = ult8.map(s => fmt.labelSemana(s.semana));
-  const ptsEnt = ult8.map(s => s.adherencia_entreno ?? null);
-  const ptsAli = ult8.map(s => s.adherencia_alimentacion ?? null);
-  const hayDatos = ult8.length >= 2;
+  const scoreDe = (s, scoreCampo, adhCampo) =>
+    s[scoreCampo] != null ? s[scoreCampo] : (s[adhCampo] != null ? s[adhCampo] * 10 : null);
+  const ptsEnt = ult8.map(s => scoreDe(s, 'score_entreno', 'adherencia_entreno'));
+  const ptsAli = ult8.map(s => scoreDe(s, 'score_alim_metas', 'adherencia_alimentacion'));
+  const ptsGlob = ult8.map(s => s.score_global ?? null);
+  const hayDatos = ult8.length >= 2 && [...ptsEnt, ...ptsAli, ...ptsGlob].some(v => v !== null);
 
   // Promedios desglosados últimas 4 sem
   const promDim = (campo) => {
@@ -1276,17 +1423,18 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
       <div class="flex items-start gap-4 flex-wrap">
         ${helpers.avatarBig(c.nombre)}
         <div class="flex-1 min-w-0">
-          <h3 class="text-xl font-bold text-slate-900">${c.nombre}</h3>
+          <h3 class="text-xl font-bold text-slate-900">${escapeHtml(c.nombre)}</h3>
           <div class="flex gap-2 mt-1 text-xs text-slate-500 flex-wrap">
             ${edad ? `<span>${edad} años</span><span>·</span>` : ''}
-            ${c.ciudad ? `<span>${c.ciudad}</span><span>·</span>` : ''}
+            ${c.ciudad ? `<span>${escapeHtml(c.ciudad)}</span><span>·</span>` : ''}
             <span>Inició ${inicio} · ${semanas} sem</span>
             <span>·</span>
             <span>${fmt.money(c.monto, c.moneda)}/mes · día ${c.dia_pago || '—'}</span>
+            ${metaDiasEntreno(c) ? `<span>·</span><span>📆 ${metaDiasEntreno(c)} días/sem${(c.dias_entreno || []).length ? ` (${c.dias_entreno.join('·')})` : ''}</span>` : ''}
           </div>
-          ${c.objetivo ? `<p class="text-xs text-slate-600 mt-2 italic">🎯 ${c.objetivo}</p>` : ''}
-          ${c.restricciones_lesiones ? `<p class="text-xs text-red-700 mt-1">⚕️ ${c.restricciones_lesiones}</p>` : ''}
-          ${(c.tags && c.tags.length) ? `<div class="mt-2">${c.tags.map(t => `<span class="tag-pill">${t}</span>`).join('')}</div>` : ''}
+          ${c.objetivo ? `<p class="text-xs text-slate-600 mt-2 italic">🎯 ${escapeHtml(c.objetivo)}</p>` : ''}
+          ${c.restricciones_lesiones ? `<p class="text-xs text-red-700 mt-1">⚕️ ${escapeHtml(c.restricciones_lesiones)}</p>` : ''}
+          ${(c.tags && c.tags.length) ? `<div class="mt-2">${c.tags.map(t => `<span class="tag-pill">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
         </div>
         <div class="text-right">
           <div class="text-xs text-slate-500">Adherencia 4 sem</div>
@@ -1298,16 +1446,18 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
       ${hayDatos ? `
       <div class="mt-5 pt-5 border-t border-slate-100">
         <div class="flex items-baseline justify-between mb-2 flex-wrap gap-2">
-          <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider">Compliance últimas 8 semanas</h4>
+          <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider">Scores últimas 8 semanas (%)</h4>
           <div>
-            ${legendDot('#10b981', `Entreno · ${pEnt !== null ? pEnt.toFixed(1) : '—'}/10`)}
-            ${legendDot('#3b82f6', `Alimentación · ${pAli !== null ? pAli.toFixed(1) : '—'}/10`)}
+            ${legendDot('#10b981', 'Entreno')}
+            ${legendDot('#3b82f6', 'Alimentación')}
+            ${legendDot('#0f172a', 'Global')}
           </div>
         </div>
         ${lineChart([
           { label: 'Entreno', color: '#10b981', points: ptsEnt },
           { label: 'Alimentación', color: '#3b82f6', points: ptsAli },
-        ], labels, { height: 160 })}
+          { label: 'Global', color: '#0f172a', points: ptsGlob },
+        ], labels, { height: 170, yMax: 100 })}
       </div>` : ''}
 
       <div class="mt-4 pt-4 border-t border-slate-100">
@@ -1348,10 +1498,10 @@ function seguimientoCard(s) {
           <div class="flex items-center gap-2 mb-1 flex-wrap">
             <span class="font-bold text-slate-900">${fmt.labelSemana(s.semana)}</span>
             <span class="text-xs text-slate-400">· ${fmt.fecha(s.fecha)}</span>
-            ${pctAsis !== null ? `<span class="tag tag-blue">Entreno ${s.dias_asistidos}/${s.dias_planeados} · ${pctAsis}%</span>` : ''}
+            ${pctAsis !== null ? `<span class="tag ${pctAsis >= 90 ? 'tag-green' : pctAsis >= 60 ? 'tag-yellow' : 'tag-red'}">📆 ${s.dias_asistidos}/${s.dias_planeados} días · ${pctAsis}%</span>` : ''}
           </div>
           ${s.avances ? `<p class="text-sm text-slate-700 mb-2 whitespace-pre-line">${escapeHtml(s.avances)}</p>` : '<p class="text-sm text-slate-400 italic">Sin avances escritos</p>'}
-          ${s.pendientes_semana ? `<div class="bg-amber-50 rounded-lg px-3 py-2 mt-2"><div class="text-xs font-bold text-amber-800 mb-1">Le pediste:</div><div class="text-xs text-amber-900 whitespace-pre-line">${escapeHtml(s.pendientes_semana)}</div></div>` : ''}
+          ${s.pendientes_semana ? `<div class="bg-amber-50 rounded-lg px-3 py-2 mt-2"><div class="text-xs font-bold text-amber-800 mb-1">Le pediste:</div>${checklistHtml(s.pendientes_semana, s.id)}</div>` : ''}
           ${s.notas ? `<p class="text-xs text-slate-500 mt-2 whitespace-pre-line">📝 ${escapeHtml(s.notas)}</p>` : ''}
         </div>
         <div class="flex flex-col items-end gap-1 flex-shrink-0">
@@ -1391,7 +1541,7 @@ function renderSegBoard(clientes, allSegs) {
             <div class="flex items-center gap-2 px-2 py-1">
               ${helpers.avatar(c.nombre, 8)}
               <div class="flex-1 min-w-0">
-                <div class="font-semibold text-sm truncate">${c.nombre}</div>
+                <div class="font-semibold text-sm truncate">${escapeHtml(c.nombre)}</div>
                 <div class="text-xs text-slate-500">${segs.length} semana(s)</div>
               </div>
               <button class="text-emerald-600 font-bold text-lg" onclick="abrirNuevoSeguimiento('${c.id}')">+</button>
@@ -1403,7 +1553,7 @@ function renderSegBoard(clientes, allSegs) {
                 <div class="bg-white rounded-xl p-3 ring-1 ring-slate-100 ${ring} cursor-pointer" onclick="editarSeguimiento('${s.id}')">
                   <div class="text-xs text-slate-400 mb-1">${fmt.labelSemana(s.semana)} · ${fmt.fechaCorta(s.fecha)} · ${prom !== null ? prom.toFixed(1) + '/10' : '—'}</div>
                   ${s.avances ? `<div class="text-sm text-slate-700 line-clamp-3">${escapeHtml(s.avances)}</div>` : '<div class="text-xs text-slate-400 italic">Sin avances</div>'}
-                  ${s.pendientes_semana ? `<div class="bg-red-50 text-red-800 text-xs rounded px-2 py-1 mt-2 line-clamp-2">⚠ ${escapeHtml(s.pendientes_semana)}</div>` : ''}
+                  ${s.pendientes_semana ? `<div class="bg-red-50 text-red-800 text-xs rounded px-2 py-1 mt-2 line-clamp-2 whitespace-pre-line">${escapeHtml(checklistTextoPlano(s.pendientes_semana))}</div>` : ''}
                 </div>
               `;
             }).join('')}
@@ -1440,7 +1590,7 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
       <div class="flex items-center gap-3">
         ${helpers.avatar(cliente.nombre, 10)}
         <div>
-          <h3 class="font-bold text-slate-900">${s.id ? 'Editar' : 'Nueva'} semana · ${cliente.nombre}</h3>
+          <h3 class="font-bold text-slate-900">${s.id ? 'Editar' : 'Nueva'} semana · ${escapeHtml(cliente.nombre)}</h3>
           <p class="text-xs text-slate-500">${fmt.labelSemana(semana)} · ${fmt.fecha(s.fecha || fmt.hoy())}</p>
         </div>
       </div>
@@ -1451,6 +1601,24 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
 
       <!-- FORM -->
       <div class="col-span-12 lg:col-span-7 p-6 overflow-y-auto space-y-4">
+        <!-- DÍAS ENTRENADOS -->
+        <div class="bg-slate-50 rounded-xl p-4 space-y-3">
+          <div class="flex items-baseline justify-between flex-wrap gap-2">
+            <div class="text-xs font-bold text-slate-600 uppercase">📆 Días entrenados esta semana</div>
+            <div class="text-xs text-slate-500">${metaDiasEntreno(cliente)
+              ? `Meta: <strong>${metaDiasEntreno(cliente)} días</strong>${(cliente.dias_entreno || []).length ? ` (${cliente.dias_entreno.join(' · ')})` : ''}`
+              : 'Sin meta configurada · defínela en la ficha del cliente'}</div>
+          </div>
+          <div class="flex gap-1.5 flex-wrap" id="sg-dias-sem">
+            ${DIAS_SEMANA.map(d => `
+              <label class="day-chip">
+                <input type="checkbox" value="${d}" class="hidden" ${(s.dias_entrenados || []).includes(d) ? 'checked' : ''} onchange="recalcDiasEntreno()">
+                <span class="${(cliente.dias_entreno || []).includes(d) ? 'plan' : ''}" title="${(cliente.dias_entreno || []).includes(d) ? 'Día planificado' : ''}">${d}</span>
+              </label>`).join('')}
+          </div>
+          <div id="sg-dias-res" class="text-xs"></div>
+        </div>
+
         <!-- ENTRENO -->
         <div class="bg-slate-50 rounded-xl p-4 space-y-3">
           <div class="text-xs font-bold text-slate-600 uppercase">🏋️ Entrenamiento</div>
@@ -1481,7 +1649,7 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
           <div class="flex items-baseline justify-between flex-wrap gap-2">
             <div class="text-xs font-bold text-slate-600 uppercase">🥗 Alimentación</div>
             <div class="flex items-center gap-2">
-              ${mtClient() ? `<button type="button" class="btn btn-secondary btn-sm" onclick="jalarMealtrackerAuto('${cliente.id}', '${semana}')">🔄 ${cliente.mealtracker_id ? 'Actualizar' : 'Buscar'} Mealtracker</button>` : ''}
+              ${mtConfigured() ? `<button type="button" class="btn btn-secondary btn-sm" onclick="jalarMealtrackerAuto('${cliente.id}', '${semana}')">🔄 ${cliente.mealtracker_id ? 'Actualizar' : 'Buscar'} Mealtracker</button>` : ''}
               ${cliente.meta_calorias ? `<div class="text-xs text-slate-500">Meta: ${cliente.meta_calorias} kcal · ${cliente.meta_proteina_g}g prote</div>` : '<div class="text-xs text-amber-600">Sin meta definida</div>'}
             </div>
           </div>
@@ -1565,8 +1733,8 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
 
         <div>
           <label>Pendientes que le pediste esta semana</label>
-          <textarea id="sg-pend" rows="3" placeholder="Lo que tiene que hacer / entregar…">${escapeHtml(s.pendientes_semana || '')}</textarea>
-          <p class="text-xs text-slate-500 mt-1">Si alguno se repite, lo puedes promover a "General" desde la lista de Pendientes.</p>
+          <textarea id="sg-pend" rows="3" placeholder="Uno por línea — se vuelven checklist en el timeline…">${escapeHtml(s.pendientes_semana || '')}</textarea>
+          <p class="text-xs text-slate-500 mt-1">✅ Cada línea se muestra como checklist marcable en el timeline. El prefijo "[x]" indica completado.</p>
         </div>
 
         <div>
@@ -1623,7 +1791,7 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
                   ${prom !== null ? `<span class="text-xs font-bold ${prom >= 7.5 ? 'text-emerald-600' : prom >= 5 ? 'text-amber-600' : 'text-red-600'}">${prom.toFixed(1)}/10</span>` : ''}
                 </div>
                 ${s2.avances ? `<p class="text-xs text-slate-600 line-clamp-3">${escapeHtml(s2.avances)}</p>` : ''}
-                ${s2.pendientes_semana ? `<div class="text-xs text-red-700 mt-1 line-clamp-2">⚠ ${escapeHtml(s2.pendientes_semana)}</div>` : ''}
+                ${s2.pendientes_semana ? `<div class="text-xs text-red-700 mt-1 line-clamp-2 whitespace-pre-line">${escapeHtml(checklistTextoPlano(s2.pendientes_semana))}</div>` : ''}
               </div>
             `;
           }).join('')}
@@ -1643,12 +1811,12 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
   `;
 
   openModal(html, { wide: true });
-  setTimeout(recalcScores, 0);
   window._segPrev = semanaPrev;
   window._segCliente = cliente;
+  setTimeout(() => { recalcScores(); recalcDiasEntreno(); }, 0);
 
   // Auto-resolver y jalar del Mealtracker si aún no hay data
-  if (mtClient() && !s.kcal_promedio && !s.proteina_promedio_g) {
+  if (mtConfigured() && !s.kcal_promedio && !s.proteina_promedio_g) {
     setTimeout(async () => {
       const mtId = await resolverMealtrackerId(cliente);
       if (mtId) {
@@ -1695,6 +1863,21 @@ window.recalcScores = () => {
   `;
 };
 
+// Compara los días marcados contra la meta configurada en la ficha del cliente
+window.recalcDiasEntreno = () => {
+  const cont = $('#sg-dias-res');
+  if (!cont) return;
+  const marcados = $$('#sg-dias-sem input:checked').length;
+  const meta = metaDiasEntreno(window._segCliente);
+  if (!meta) {
+    cont.innerHTML = marcados ? `<span class="text-slate-500">${marcados} día(s) entrenado(s)</span>` : '';
+    return;
+  }
+  const pct = Math.min(100, Math.round((marcados / meta) * 100));
+  const color = pct >= 90 ? 'text-emerald-600' : pct >= 60 ? 'text-amber-600' : 'text-red-600';
+  cont.innerHTML = `<span class="font-bold ${color}">${marcados}/${meta} días · ${pct}% de cumplimiento</span>${marcados > meta ? ' <span class="text-slate-400">(superó la meta 💪)</span>' : ''}`;
+};
+
 window.copiarSemanaAnterior = () => {
   const prev = window._segPrev;
   if (!prev) return;
@@ -1726,10 +1909,15 @@ window.guardarSeguimiento = async (cliente_id, semana, id) => {
     dias_registro_alim: $('#sg-dr')?.value ? Number($('#sg-dr').value) : null,
   };
   const scores = calcScores(seg, window._segCliente);
+  const diasEntrenados = $$('#sg-dias-sem input:checked').map(i => i.value);
+  const metaDias = metaDiasEntreno(window._segCliente);
   const row = {
     cliente_id, semana,
     fecha: $('#sg-fecha').value || fmt.hoy(),
     ...seg,
+    dias_entrenados: diasEntrenados,
+    dias_planeados: metaDias,
+    dias_asistidos: (metaDias != null || diasEntrenados.length) ? diasEntrenados.length : null,
     score_entreno: scores.score_entreno,
     score_alim_metas: scores.score_alim_metas,
     score_alim_registro: scores.score_alim_registro,
@@ -1808,13 +1996,9 @@ window.abrirNutricionCliente = async (clienteId) => {
   const mtId = c.mealtracker_id || await resolverMealtrackerId(c);
   if (!mtId) { toast('Sin conexión a Mealtracker'); return; }
 
-  const mt = mtClient();
-  if (!mt) { toast('Mealtracker no configurado'); return; }
+  const d = await getMealtrackerUserData(mtId);
+  if (!d) { toast('Sin datos en Mealtracker'); return; }
 
-  const { data: row } = await mt.from('user_data').select('data').eq('user_id', mtId).maybeSingle();
-  if (!row) { toast('Sin datos en Mealtracker'); return; }
-
-  const d = row.data || {};
   const goals = d.goals || {};
   const history = d.history || {};
 
@@ -1837,8 +2021,9 @@ window.abrirNutricionCliente = async (clienteId) => {
   }
   ultimos14.reverse();
 
-  const metaKcal = c.meta_calorias || (goals.calories ? Number(goals.calories) : null);
-  const metaProte = c.meta_proteina_g || (goals.protein ? Number(goals.protein) : null);
+  // Las metas del Mealtracker usan claves kcal/p/c/g (formato viejo: calories/protein/…)
+  const metaKcal = c.meta_calorias || Number(goals.kcal ?? goals.calories) || null;
+  const metaProte = c.meta_proteina_g || Number(goals.p ?? goals.protein) || null;
 
   const macroBar = (label, valor, meta, color, unit) => {
     const pct = meta ? Math.min(100, Math.round((valor / meta) * 100)) : null;
@@ -1854,7 +2039,7 @@ window.abrirNutricionCliente = async (clienteId) => {
 
   const todayData = d.today_totals && Number(d.today_totals?.kcal) > 0 ? d.today_totals : null;
 
-  openModal(modalShell(`Alimentación · ${c.nombre}`, `
+  openModal(modalShell(`Alimentación · ${escapeHtml(c.nombre)}`, `
     <div class="space-y-4">
       ${todayData ? `
       <div class="bg-blue-50 rounded-xl p-4">
@@ -1920,7 +2105,7 @@ window.abrirNutricionCliente = async (clienteId) => {
       ${goals && Object.keys(goals).length > 0 ? `
       <div class="bg-violet-50 rounded-xl p-3 text-sm">
         <div class="text-xs font-bold text-violet-800 mb-1">🎯 Metas en Mealtracker</div>
-        <div class="text-violet-900 font-semibold">${goals.calories || '—'} kcal · ${goals.protein || '—'}g prote · ${goals.carbs || '—'}g carbos · ${goals.fat || '—'}g grasas</div>
+        <div class="text-violet-900 font-semibold">${goals.kcal ?? goals.calories ?? '—'} kcal · ${goals.p ?? goals.protein ?? '—'}g prote · ${goals.c ?? goals.carbs ?? '—'}g carbos · ${goals.g ?? goals.fat ?? '—'}g grasas</div>
       </div>` : ''}
     </div>
   `));
@@ -2145,7 +2330,7 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
                 return `
                   <tr>
                     <td class="name-cell" style="position:sticky; left:0; background:white; z-index:2;">
-                      <a class="text-emerald-700 cursor-pointer hover:underline" onclick="verCliente('${c.id}')">${c.nombre}</a>
+                      <a class="text-emerald-700 cursor-pointer hover:underline" onclick="verCliente('${c.id}')">${escapeHtml(c.nombre)}</a>
                       <div class="text-xs text-slate-400 font-normal">${c.moneda}</div>
                     </td>
                     <td class="px-2"><span class="status-pill ${c.estado === 'activo' ? 'status-active' : c.estado === 'pausa' ? 'status-hold' : 'status-end'}"><span class="w-1.5 h-1.5 rounded-full ${c.estado === 'activo' ? 'bg-emerald-500' : c.estado === 'pausa' ? 'bg-orange-500' : 'bg-slate-500'}"></span>${c.estado}</span></td>
@@ -2203,7 +2388,7 @@ function renderPagosCards(clientes, map, mesActual) {
             <div class="flex items-center gap-3 mb-4">
               ${helpers.avatar(c.nombre, 12).replace('rounded-full','rounded-2xl')}
               <div class="flex-1 min-w-0">
-                <div class="font-bold text-slate-900 truncate cursor-pointer hover:text-emerald-700" onclick="verCliente('${c.id}')">${c.nombre}</div>
+                <div class="font-bold text-slate-900 truncate cursor-pointer hover:text-emerald-700" onclick="verCliente('${c.id}')">${escapeHtml(c.nombre)}</div>
                 <div class="text-xs text-slate-500">Día ${c.dia_pago || '—'} · ${c.moneda}</div>
               </div>
             </div>
@@ -2214,7 +2399,10 @@ function renderPagosCards(clientes, map, mesActual) {
             </div>
             ${estado === 'paid'
               ? `<button class="btn btn-secondary w-full" onclick="abrirPago('${c.id}', '${mesActual}')">Ver / editar</button>`
-              : `<button class="btn btn-dark w-full" onclick="abrirPago('${c.id}', '${mesActual}')">Marcar pagado</button>`}
+              : `<div class="flex gap-2">
+                  <button class="btn btn-dark flex-1" onclick="abrirPago('${c.id}', '${mesActual}')">Marcar pagado</button>
+                  <button class="btn btn-secondary" title="Copiar recordatorio de pago para WhatsApp" onclick="copiarRecordatorioPago('${c.id}')">💬</button>
+                </div>`}
           </div>
         </div>
       `).join('')}
@@ -2234,7 +2422,7 @@ window.abrirPago = async (cliente_id, mes) => {
     if (ult) { montoSug = ult.monto; monedaSug = ult.moneda; }
   }
 
-  openModal(modalShell(`Pago · ${cliente.nombre} · ${fmt.mesEsLargo(mes)}`, `
+  openModal(modalShell(`Pago · ${escapeHtml(cliente.nombre)} · ${fmt.mesEsLargo(mes)}`, `
     <div class="space-y-3">
       <div class="flex items-center gap-3 mb-2">
         <input type="checkbox" id="pg-pagado" ${p?.pagado ? 'checked' : ''} class="w-5 h-5 rounded">
@@ -2248,6 +2436,8 @@ window.abrirPago = async (cliente_id, mes) => {
             <option value="USD" ${monedaSug === 'USD' ? 'selected' : ''}>USD</option>
           </select>
         </div>
+        <div><label>Fecha del pago</label><input id="pg-fecha" type="date" value="${p?.fecha_pago || fmt.hoy()}"></div>
+        <div><label>Método</label><input id="pg-metodo" placeholder="Transferencia, Nequi…" value="${escapeHtml(p?.metodo || cliente.metodo_pago_preferido || '')}"></div>
       </div>
       <p class="text-xs text-slate-500">Si guardas sin marcar pagado, queda como pendiente del mes (amarillo).</p>
       <div><label>Nota</label><input id="pg-nota" value="${escapeHtml(p?.nota || '')}"></div>
@@ -2265,7 +2455,8 @@ window.guardarPago = async (cliente_id, mes) => {
     cliente_id, mes, pagado,
     monto: Number($('#pg-monto').value) || 0,
     moneda: $('#pg-moneda').value,
-    fecha_pago: pagado ? fmt.hoy() : null,
+    fecha_pago: pagado ? ($('#pg-fecha').value || fmt.hoy()) : null,
+    metodo: $('#pg-metodo').value || null,
     nota: $('#pg-nota').value || null,
   });
   closeModal();
@@ -2319,7 +2510,7 @@ routes.pendientes = async () => {
               <div class="flex-1 min-w-0">
                 <div class="font-medium text-sm ${p.estado === 'completado' ? 'line-through text-slate-400' : 'text-slate-900'}">${escapeHtml(p.descripcion)}</div>
                 <div class="text-xs text-slate-500 mt-0.5">
-                  ${p.clientes?.nombre || ''} ·
+                  ${escapeHtml(p.clientes?.nombre || '')} ·
                   ${p.scope === 'semana' ? '<span class="text-violet-600 font-semibold">Semanal</span>' : '<span class="text-emerald-600 font-semibold">📌 General</span>'}
                   ${p.fecha_limite ? ' · vence ' + fmt.fechaCorta(p.fecha_limite) : ''}
                   ${p.estado === 'completado' && p.completado_en ? ' · ✓ ' + fmt.fechaCorta(p.completado_en) : ''}
@@ -2352,7 +2543,7 @@ window.hacerGeneral = async (id) => {
 
 window.nuevoPendiente = async (clienteId = null) => {
   const clientes = await db.clientes.list();
-  const opciones = clientes.map(c => `<option value="${c.id}" ${clienteId === c.id ? 'selected' : ''}>${c.nombre}</option>`).join('');
+  const opciones = clientes.map(c => `<option value="${c.id}" ${clienteId === c.id ? 'selected' : ''}>${escapeHtml(c.nombre)}</option>`).join('');
   openModal(modalShell('Nuevo pendiente', `
     <div class="space-y-3">
       <div><label>Cliente *</label><select id="pn-cliente"><option value="">— elegir —</option>${opciones}</select></div>
@@ -2388,7 +2579,7 @@ window.guardarPendiente = async () => {
 window.editarPendiente = async (id) => {
   const { data: p } = await sb.from('pendientes').select('*').eq('id', id).single();
   const clientes = await db.clientes.list();
-  const opciones = clientes.map(c => `<option value="${c.id}" ${p.cliente_id === c.id ? 'selected' : ''}>${c.nombre}</option>`).join('');
+  const opciones = clientes.map(c => `<option value="${c.id}" ${p.cliente_id === c.id ? 'selected' : ''}>${escapeHtml(c.nombre)}</option>`).join('');
   openModal(modalShell('Editar pendiente', `
     <div class="space-y-3">
       <div><label>Cliente *</label><select id="pn-cliente">${opciones}</select></div>
@@ -2457,8 +2648,8 @@ routes.clientes = async () => {
             <div class="flex items-start gap-3 mb-3">
               ${helpers.avatar(c.nombre, 12).replace('rounded-full','rounded-2xl')}
               <div class="flex-1 min-w-0">
-                <div class="font-bold text-slate-900 truncate">${c.nombre}</div>
-                <div class="text-xs text-slate-500 truncate">${c.ciudad || c.profesion || '—'}</div>
+                <div class="font-bold text-slate-900 truncate">${escapeHtml(c.nombre)}</div>
+                <div class="text-xs text-slate-500 truncate">${escapeHtml(c.ciudad || c.profesion || '—')}</div>
               </div>
               <span class="status-pill ${c.estado === 'activo' ? 'status-active' : c.estado === 'pausa' ? 'status-hold' : 'status-end'}"><span class="w-1.5 h-1.5 rounded-full ${c.estado === 'activo' ? 'bg-emerald-500' : c.estado === 'pausa' ? 'bg-orange-500' : 'bg-slate-500'}"></span>${c.estado}</span>
             </div>
@@ -2469,7 +2660,7 @@ routes.clientes = async () => {
               <div class="flex justify-between"><span class="text-slate-500">Inicio</span><span class="font-medium">${c.fecha_inicio ? fmt.fechaCorta(c.fecha_inicio) : '—'}</span></div>
               <div class="flex justify-between"><span class="text-slate-500">Canal</span><span class="font-medium capitalize">${c.canal_adquisicion || '—'}</span></div>
             </div>
-            ${(c.tags && c.tags.length) ? `<div class="mt-3 pt-3 border-t border-slate-100">${c.tags.map(t => `<span class="tag-pill">${t}</span>`).join('')}</div>` : ''}
+            ${(c.tags && c.tags.length) ? `<div class="mt-3 pt-3 border-t border-slate-100">${c.tags.map(t => `<span class="tag-pill">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
           </div>
         `;
       }).join('')}
@@ -2539,6 +2730,18 @@ function clienteForm(c = {}) {
               ${['casa','gym_comercial','parque','aire_libre','mixto'].map(o => `<option value="${o}" ${c.lugar_entreno === o ? 'selected' : ''}>${o.replace('_',' ')}</option>`).join('')}
             </select>
           </div>
+          <div><label>Días de entreno / semana</label><input id="cl-dias-ent" type="number" min="0" max="7" placeholder="5" value="${c.dias_entreno_cantidad ?? ''}"></div>
+          <div class="col-span-2">
+            <label>Qué días entrena</label>
+            <div class="flex gap-1.5 flex-wrap" id="cl-dias-sem">
+              ${DIAS_SEMANA.map(d => `
+                <label class="day-chip">
+                  <input type="checkbox" value="${d}" class="hidden" ${(c.dias_entreno || []).includes(d) ? 'checked' : ''}>
+                  <span>${d}</span>
+                </label>`).join('')}
+            </div>
+            <p class="text-xs text-slate-500 mt-1">El seguimiento semanal compara los días entrenados contra esta meta.</p>
+          </div>
         </div>
       </div>
 
@@ -2546,11 +2749,15 @@ function clienteForm(c = {}) {
       <div>
         <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">5 · Meta nutricional</h4>
         <div class="grid grid-cols-2 gap-3">
-          <div class="col-span-2"><label>Objetivo calórico</label>
+          <div><label>Objetivo calórico</label>
             <select id="cl-objk">
               <option value="">—</option>
               ${OBJETIVOS_KCAL.map(o => `<option value="${o.key}" ${c.objetivo_calorico === o.key ? 'selected' : ''}>${o.label}</option>`).join('')}
             </select>
+          </div>
+          <div><label>Proteína (g/kg)</label>
+            <input id="cl-prote-gkg" type="number" step="0.1" min="1" max="3.5" value="${c.proteina_g_kg ?? 1.8}">
+            <p class="text-xs text-slate-500 mt-1">1.6-1.8 general · 2.0-2.4 cutting</p>
           </div>
           <div class="col-span-2 bg-slate-50 rounded-xl p-3">
             <div class="flex items-baseline justify-between mb-2">
@@ -2659,7 +2866,7 @@ window.editarCliente = async (id) => {
   window._editingClienteId = id;
   window._pendingEncuesta = c.nivel_actividad ? { nivel: c.nivel_actividad, pal: c.pal_factor || PAL_MAP[c.nivel_actividad], respuestas: c.nivel_actividad_encuesta } : null;
   window._pendingMeta = null;
-  openModal(modalShell(`Editar · ${c.nombre}`, clienteForm(c), `
+  openModal(modalShell(`Editar · ${escapeHtml(c.nombre)}`, clienteForm(c), `
     <button class="btn btn-danger mr-auto" onclick="eliminarCliente('${id}')">Eliminar</button>
     <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
     <button class="btn btn-primary" onclick="guardarCliente('${id}')">Guardar</button>
@@ -2678,6 +2885,8 @@ window.guardarCliente = async (id = null) => {
     objetivo: $('#cl-obj').value.trim() || null,
     meta_especifica: $('#cl-meta').value.trim() || null,
     lugar_entreno: $('#cl-lugar').value || null,
+    dias_entreno_cantidad: $('#cl-dias-ent').value ? Number($('#cl-dias-ent').value) : null,
+    dias_entreno: $$('#cl-dias-sem input:checked').map(i => i.value),
     fase_programa: $('#cl-fase').value || null,
     estatura_cm: $('#cl-alt').value ? Number($('#cl-alt').value) : null,
     restricciones_lesiones: $('#cl-rest').value.trim() || null,
@@ -2686,6 +2895,7 @@ window.guardarCliente = async (id = null) => {
     lesion_estado: $('#cl-lesion-est').value || null,
     antecedentes_deportivos: $('#cl-ant').value.trim() || null,
     objetivo_calorico: $('#cl-objk').value || null,
+    proteina_g_kg: $('#cl-prote-gkg').value ? Number($('#cl-prote-gkg').value) : null,
     ...(window._pendingEncuesta ? {
       nivel_actividad: window._pendingEncuesta.nivel,
       pal_factor: window._pendingEncuesta.pal,
@@ -2714,8 +2924,30 @@ window.guardarCliente = async (id = null) => {
 };
 
 // ===== Encuesta nivel de actividad =====
+// innerHTML no conserva lo tecleado en inputs (son propiedades, no atributos):
+// guardar/restaurar los valores aparte para no perder el formulario a medio llenar.
+function guardarValoresModalCliente() {
+  const vals = {};
+  $$('input, textarea, select', modalContent).forEach(el => {
+    if (el.id) vals[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+  });
+  window._modalClienteValores = vals;
+  window._modalClienteDias = $$('#cl-dias-sem input:checked').map(i => i.value);
+}
+function restaurarModalCliente() {
+  modalContent.innerHTML = window._modalClienteHTML || '';
+  const vals = window._modalClienteValores || {};
+  for (const [id, v] of Object.entries(vals)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = v; else el.value = v;
+  }
+  $$('#cl-dias-sem input').forEach(i => { i.checked = (window._modalClienteDias || []).includes(i.value); });
+}
+
 window.abrirEncuestaActividad = () => {
   const modalActual = modalContent.innerHTML;  // guardo estado del modal cliente
+  guardarValoresModalCliente();
   openModal(modalShell('Encuesta · nivel de actividad', `
     <div class="space-y-4 text-sm">
       ${ENCUESTA_ACTIVIDAD.map(q => `
@@ -2755,8 +2987,8 @@ window.calcularEncuesta = () => {
 };
 
 window.aplicarEncuesta = () => {
-  // Volver al modal del cliente con el nivel puesto
-  modalContent.innerHTML = window._modalClienteHTML || '';
+  // Volver al modal del cliente con el nivel puesto (y lo tecleado intacto)
+  restaurarModalCliente();
   if (window._pendingEncuesta) {
     const el = $('#cl-nivel');
     if (el) el.value = `${window._pendingEncuesta.nivel.replace('_',' ')} · PAL ${window._pendingEncuesta.pal}`;
@@ -2765,7 +2997,7 @@ window.aplicarEncuesta = () => {
 };
 
 window.cerrarEncuesta = () => {
-  modalContent.innerHTML = window._modalClienteHTML || '';
+  restaurarModalCliente();
 };
 
 // ===== Recalcular meta nutricional =====
@@ -2807,6 +3039,7 @@ window.recalcularMeta = async () => {
   const meta = calcMetaNutricional({
     peso, altura: estatura, edad, sexo, grasa_pct: grasa,
     pal: enc.pal, objetivo_pct: objData.pct,
+    proteina_g_kg: $('#cl-prote-gkg')?.value,
   });
   if (!meta) { toast('Datos insuficientes'); return; }
 
@@ -2829,9 +3062,15 @@ window.recalcularMeta = async () => {
 };
 
 window.eliminarCliente = async (id) => {
-  if (!confirm('¿Eliminar este cliente y todo su historial?')) return;
+  const c = await db.clientes.get(id);
+  if (!c) return;
+  // Confirmación fuerte: borra en cascada seguimientos, pagos, mediciones y pendientes
+  const resp = prompt(`⚠️ Esto elimina a "${c.nombre}" y TODO su historial (seguimientos, pagos, mediciones, pendientes). No se puede deshacer.\n\nEscribe el nombre del cliente para confirmar:`);
+  if (resp === null) return;
+  if (normalizeName(resp) !== normalizeName(c.nombre)) { toast('El nombre no coincide · no se eliminó'); return; }
   await db.clientes.remove(id);
   closeModal();
+  toast('Cliente eliminado');
   navigate('clientes');
 };
 
@@ -2845,8 +3084,8 @@ window.verCliente = async (id) => {
   ]);
   const edad = helpers.edadDe(c.fecha_nacimiento);
 
-  // Adherencia promedio: usar score_global si existe, fallback a promedioAdh viejo
-  const adhVals = segs.slice(0, 4).map(s => s.score_global ?? (helpers.promedioAdh(s) !== null ? helpers.promedioAdh(s) * 10 : null)).filter(v => v !== null);
+  // Adherencia promedio en escala 0-10: score_global (0-100) ÷ 10, fallback a promedioAdh
+  const adhVals = segs.slice(0, 4).map(s => s.score_global != null ? s.score_global / 10 : helpers.promedioAdh(s)).filter(v => v !== null);
   const promAdh = adhVals.length ? adhVals.reduce((a, b) => a + b, 0) / adhVals.length : null;
 
   // Streaks
@@ -2880,7 +3119,7 @@ window.verCliente = async (id) => {
     altura_cm: c.estatura_cm,
   })).filter(x => x);
 
-  openModal(modalShell(c.nombre, `
+  openModal(modalShell(escapeHtml(c.nombre), `
     <div class="space-y-4">
       <div class="flex gap-2 flex-wrap">
         <button class="btn btn-secondary btn-sm" onclick="editarCliente('${c.id}')">✎ Editar</button>
@@ -2907,28 +3146,29 @@ window.verCliente = async (id) => {
 
       <!-- 1. IDENTIDAD -->
       ${edad || c.ciudad || c.profesion ? `
-        <div class="bg-slate-50 rounded-xl p-3 text-sm space-y-1">
-          <div class="text-xs font-bold text-slate-500 uppercase mb-1">1 · Identidad</div>
+        <div class="sec sec-slate space-y-1">
+          <div class="sec-title">1 · 👤 Identidad</div>
           ${edad ? `<div><span class="text-slate-500">Edad:</span> <strong>${edad} años</strong> ${c.sexo ? `(${c.sexo})` : ''}</div>` : ''}
-          ${c.ciudad ? `<div><span class="text-slate-500">Ciudad:</span> <strong>${c.ciudad}</strong></div>` : ''}
-          ${c.profesion ? `<div><span class="text-slate-500">Profesión:</span> <strong>${c.profesion}</strong></div>` : ''}
+          ${c.ciudad ? `<div><span class="text-slate-500">Ciudad:</span> <strong>${escapeHtml(c.ciudad)}</strong></div>` : ''}
+          ${c.profesion ? `<div><span class="text-slate-500">Profesión:</span> <strong>${escapeHtml(c.profesion)}</strong></div>` : ''}
         </div>` : ''}
 
       <!-- 2. OBJETIVO Y FASE -->
       ${c.objetivo || c.meta_especifica || c.fase_programa ? `
-        <div class="bg-emerald-50 rounded-xl p-3 text-sm">
-          <div class="text-xs font-bold text-emerald-900 mb-1">2 · 🎯 Objetivo y fase</div>
-          ${c.objetivo ? `<div class="text-emerald-800">${escapeHtml(c.objetivo)}</div>` : ''}
-          ${c.meta_especifica ? `<div class="text-emerald-700 text-xs mt-1">${escapeHtml(c.meta_especifica)}</div>` : ''}
-          ${c.fase_programa ? `<div class="text-emerald-700 text-xs mt-1"><span class="text-emerald-600">Fase:</span> ${FASES_PROGRAMA.find(f => f.key === c.fase_programa)?.label || c.fase_programa}</div>` : ''}
+        <div class="sec sec-olive">
+          <div class="sec-title">2 · 🎯 Objetivo y fase</div>
+          ${c.objetivo ? `<div class="text-slate-800">${escapeHtml(c.objetivo)}</div>` : ''}
+          ${c.meta_especifica ? `<div class="text-slate-600 text-xs mt-1">${escapeHtml(c.meta_especifica)}</div>` : ''}
+          ${c.fase_programa ? `<div class="text-slate-600 text-xs mt-1"><span class="text-slate-500">Fase:</span> ${FASES_PROGRAMA.find(f => f.key === c.fase_programa)?.label || c.fase_programa}</div>` : ''}
         </div>` : ''}
 
       <!-- 3. COMPOSICIÓN CORPORAL -->
-      <div class="bg-white ring-1 ring-slate-200 rounded-xl p-4">
-        <div class="flex items-center justify-between mb-3">
-          <div class="text-xs font-bold text-slate-500 uppercase">3 · 🧬 Composición corporal</div>
-          <button class="text-xs text-emerald-600 font-semibold hover:underline" onclick="nuevaMedicion('${c.id}')">+ Nueva medición</button>
+      <div class="sec sec-blue">
+        <div class="flex items-center justify-between">
+          <div class="sec-title" style="margin-bottom:0">3 · 🧬 Composición corporal</div>
+          <button class="text-xs text-blue-700 font-semibold hover:underline" onclick="nuevaMedicion('${c.id}')">+ Nueva medición</button>
         </div>
+        <div class="mt-3">
         ${!comp ? `<p class="text-xs text-slate-500">Sin mediciones. ${c.estatura_cm ? '' : 'Falta estatura en el perfil. '}Registra la primera para ver estimaciones.</p>` : `
           <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
             <div><div class="text-xs text-slate-500">Peso</div><div class="font-bold text-lg text-slate-900">${comp.peso_kg} kg</div></div>
@@ -2951,20 +3191,22 @@ window.verCliente = async (id) => {
             </div>
           </details>
         `}
+        </div>
       </div>
 
-      <!-- 4. NIVEL DE ACTIVIDAD -->
-      ${c.nivel_actividad || c.lugar_entreno ? `
-        <div class="bg-slate-50 rounded-xl p-3 text-sm space-y-1">
-          <div class="text-xs font-bold text-slate-500 uppercase mb-1">4 · Nivel de actividad</div>
+      <!-- 4. NIVEL DE ACTIVIDAD Y ENTRENO -->
+      ${c.nivel_actividad || c.lugar_entreno || metaDiasEntreno(c) ? `
+        <div class="sec sec-teal space-y-1">
+          <div class="sec-title">4 · 🏃 Nivel de actividad y entreno</div>
           ${c.nivel_actividad ? `<div><span class="text-slate-500">Nivel:</span> <strong class="capitalize">${c.nivel_actividad.replace('_',' ')}</strong> · PAL ${c.pal_factor || '—'}</div>` : ''}
           ${c.lugar_entreno ? `<div><span class="text-slate-500">Lugar entreno:</span> <strong class="capitalize">${c.lugar_entreno.replace('_',' ')}</strong></div>` : ''}
+          ${metaDiasEntreno(c) ? `<div><span class="text-slate-500">Días de entreno:</span> <strong>${metaDiasEntreno(c)}/semana</strong>${(c.dias_entreno || []).length ? ` (${c.dias_entreno.join(' · ')})` : ''}</div>` : ''}
         </div>` : ''}
 
       <!-- 6. CONDICIONES MÉDICAS / LESIONES -->
       ${c.restricciones_lesiones || c.patologias || c.lesion_actual ? `
-        <div class="bg-red-50 rounded-xl p-3 text-sm">
-          <div class="text-xs font-bold text-red-800 mb-1">6 · ⚕️ Condiciones médicas / lesiones</div>
+        <div class="sec sec-red">
+          <div class="sec-title">6 · ⚕️ Condiciones médicas / lesiones</div>
           ${c.patologias ? `<div class="text-red-700 text-xs"><span class="font-semibold">Patologías:</span> ${escapeHtml(c.patologias)}</div>` : ''}
           ${c.restricciones_lesiones ? `<div class="text-red-700 text-xs mt-1"><span class="font-semibold">Restricciones:</span> ${escapeHtml(c.restricciones_lesiones)}</div>` : ''}
           ${c.lesion_actual ? `<div class="text-red-700 text-xs mt-1"><span class="font-semibold">Lesión actual:</span> ${escapeHtml(c.lesion_actual)}${c.lesion_estado ? ` (${c.lesion_estado.replace('_',' ')})` : ''}</div>` : ''}
@@ -2972,27 +3214,25 @@ window.verCliente = async (id) => {
 
       <!-- 7. ANTECEDENTES DEPORTIVOS -->
       ${c.antecedentes_deportivos ? `
-        <div class="text-sm">
-          <div class="text-xs font-bold text-slate-500 uppercase mb-1">7 · Antecedentes deportivos</div>
+        <div class="sec sec-slate">
+          <div class="sec-title">7 · 🏅 Antecedentes deportivos</div>
           <div class="text-slate-700">${escapeHtml(c.antecedentes_deportivos)}</div>
         </div>` : ''}
 
-      ${(c.tags && c.tags.length) ? `<div>${c.tags.map(t => `<span class="tag-pill">${t}</span>`).join('')}</div>` : ''}
+      ${(c.tags && c.tags.length) ? `<div>${c.tags.map(t => `<span class="tag-pill">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
 
-      ${(c.tags && c.tags.length) ? `<div>${c.tags.map(t => `<span class="tag-pill">${t}</span>`).join('')}</div>` : ''}
-
-      <div>
-        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">Pendientes (${pends.filter(p => p.estado === 'abierto').length} abiertos)</h4>
+      <div class="sec sec-violet">
+        <div class="sec-title">✅ Pendientes (${pends.filter(p => p.estado === 'abierto').length} abiertos)</div>
         ${pends.length === 0 ? '<p class="text-xs text-slate-500">Sin pendientes.</p>' : pends.slice(0, 6).map(p => `
           <div class="flex items-center gap-2 py-1 text-sm">
-            <input type="checkbox" ${p.estado === 'completado' ? 'checked' : ''} onchange="togglePendienteFicha('${p.id}', '${p.estado}', '${c.id}')">
+            <input type="checkbox" class="rounded" ${p.estado === 'completado' ? 'checked' : ''} onchange="togglePendienteFicha('${p.id}', '${p.estado}', '${c.id}')">
             <span class="${p.estado === 'completado' ? 'line-through text-slate-400' : ''}">${escapeHtml(p.descripcion)}</span>
             <span class="text-xs ${p.scope === 'general' ? 'text-emerald-600' : 'text-violet-600'} font-semibold">${p.scope === 'general' ? '📌' : '📅'}</span>
           </div>`).join('')}
       </div>
 
-      <div>
-        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">Últimas semanas (${segs.length})</h4>
+      <div class="sec sec-slate">
+        <div class="sec-title">🗓 Últimas semanas (${segs.length})</div>
         ${segs.length === 0 ? '<p class="text-xs text-slate-500">Sin registros.</p>' :
           segs.slice(0, 4).map(s => {
             const p = helpers.promedioAdh(s);
@@ -3019,8 +3259,8 @@ window.verCliente = async (id) => {
             <div class="h-2 bg-slate-100 rounded-full overflow-hidden"><div class="h-full rounded-full ${barColor}" style="width:${pct}%"></div></div>
           </div>`;
         };
-        return `<div class="bg-slate-50 rounded-xl p-4 text-sm space-y-2">
-          <div class="text-xs font-bold text-slate-500 uppercase mb-2">Alineación 4 semanas</div>
+        return `<div class="sec sec-emerald space-y-2">
+          <div class="sec-title">📊 Alineación 4 semanas</div>
           ${scoreBar('Entrenamiento', avgEnt, '#10b981')}
           ${scoreBar('Alimentación · metas', avgAlimM, '#3b82f6')}
           ${scoreBar('Alimentación · registro', avgAlimR, '#8b5cf6')}
@@ -3028,18 +3268,18 @@ window.verCliente = async (id) => {
       })()}
 
       ${c.meta_calorias ? `
-        <div class="bg-blue-50 rounded-xl p-3 text-sm">
-          <div class="text-xs font-bold text-blue-800 mb-1">🥗 Meta nutricional diaria</div>
+        <div class="sec sec-blue">
+          <div class="sec-title">5 · 🥗 Meta nutricional diaria</div>
           <div class="text-blue-900 font-semibold">${c.meta_calorias} kcal · ${c.meta_proteina_g}g prote · ${c.meta_grasas_g}g grasas · ${c.meta_carbos_g}g carbos</div>
           <div class="text-xs text-blue-700 mt-1">${c.meta_metodo || ''} · Nivel: ${c.nivel_actividad?.replace('_',' ') || '—'} · PAL ${c.pal_factor || '—'}</div>
           ${c.meta_argumento ? `<details class="mt-2"><summary class="text-xs text-blue-700 cursor-pointer">Ver argumento del cálculo</summary><pre class="text-xs text-slate-600 mt-1 whitespace-pre-wrap">${escapeHtml(c.meta_argumento)}</pre></details>` : ''}
           ${c.mealtracker_id ? `<button class="mt-2 text-xs text-blue-700 font-semibold hover:underline" onclick="abrirNutricionCliente('${c.id}')">📊 Ver dashboard de alimentación</button>` : ''}
         </div>` : ''}
 
-      <div>
+      <div class="sec sec-teal">
         <div class="flex items-baseline justify-between mb-2">
-          <h4 class="text-xs font-bold text-slate-500 uppercase">📏 Mediciones corporales (${meds.length})</h4>
-          <button class="text-xs text-emerald-600 font-semibold hover:underline" onclick="nuevaMedicion('${c.id}')">+ Agregar</button>
+          <div class="sec-title" style="margin-bottom:0">📏 Mediciones corporales (${meds.length})</div>
+          <button class="text-xs text-teal-700 font-semibold hover:underline" onclick="nuevaMedicion('${c.id}')">+ Agregar</button>
         </div>
         ${meds.length === 0 ? '<p class="text-xs text-slate-500">Sin mediciones registradas.</p>' : `
           ${pesos.length >= 2 ? `
@@ -3086,8 +3326,8 @@ window.verCliente = async (id) => {
           </tbody></table>`}
       </div>
 
-      <div>
-        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">Últimos pagos</h4>
+      <div class="sec sec-slate">
+        <div class="sec-title">💰 Últimos pagos</div>
         ${(pagos.data || []).length === 0 ? '<p class="text-xs text-slate-500">Sin pagos.</p>' :
           `<table><thead><tr><th>Mes</th><th>Estado</th><th>Monto</th><th>Fecha</th></tr></thead>
           <tbody>${pagos.data.slice(0, 6).map(p => `
@@ -3100,8 +3340,8 @@ window.verCliente = async (id) => {
       </div>
 
       ${c.notas ? `
-        <div class="bg-amber-50 rounded-xl p-4 text-sm">
-          <div class="text-xs font-bold text-amber-800 uppercase mb-2">9 · 📋 Entrevista inicial / notas</div>
+        <div class="sec sec-amber">
+          <div class="sec-title">9 · 📋 Entrevista inicial / notas</div>
           <details ${c.notas.length < 400 ? 'open' : ''}>
             <summary class="text-xs text-amber-700 cursor-pointer mb-2">${c.notas.length < 400 ? 'Ocultar' : 'Ver registro completo'} (${c.notas.length} caracteres)</summary>
             <div class="text-slate-700 whitespace-pre-line text-xs bg-white rounded-lg p-3 mt-2 max-h-96 overflow-y-auto">${escapeHtml(c.notas)}</div>
@@ -3216,18 +3456,22 @@ window.togglePendienteFicha = async (id, estado, clienteId) => {
 // =====================================================
 routes.negocio = async () => {
   view.innerHTML = '<div class="card">Cargando…</div>';
-  const [clientes, allSegs, pagosAnio] = await Promise.all([
+  const [clientes, allSegs, pagosAnio, pagadosHist] = await Promise.all([
     db.clientes.list(),
     db.seguimientos.listAll(),
     db.pagos.listAnio(_pagosYear),
+    // Todos los pagos históricos (todos los años) para LTV e ingreso por canal reales
+    sb.from('pagos').select('cliente_id, monto, moneda').eq('pagado', true).then(r => r.data || []),
   ]);
 
   const activos = clientes.filter(c => c.estado === 'activo');
   const finalizados = clientes.filter(c => c.estado === 'finalizado');
   const mesActual = fmt.mesActual();
   const mesAnt = (() => {
-    const d = new Date(); d.setMonth(d.getMonth() - 1);
-    return d.toISOString().slice(0, 7);
+    // setMonth(-1) sobre un día 31 se desborda al mismo mes; calcular desde el día 1
+    const [y, m] = mesActual.split('-').map(Number);
+    const d = new Date(y, m - 2, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   })();
 
   // Cobrado mes / mes anterior
@@ -3242,9 +3486,9 @@ routes.negocio = async () => {
   const retenidos = [...pagaronAnt].filter(id => pagaronAct.has(id)).length;
   const retencion = pagaronAnt.size > 0 ? Math.round((retenidos / pagaronAnt.size) * 100) : null;
 
-  // LTV (de finalizados): suma de pagos por cliente / cantidad
+  // LTV (de finalizados): suma HISTÓRICA de pagos por cliente (todos los años)
   const ltvPorCliente = {};
-  for (const p of pagosAnio.filter(p => p.pagado)) {
+  for (const p of pagadosHist) {
     ltvPorCliente[p.cliente_id] = (ltvPorCliente[p.cliente_id] || 0) + copConv(p.monto, p.moneda);
   }
   const ltvVals = finalizados.map(c => ltvPorCliente[c.id] || 0).filter(v => v > 0);
@@ -3330,7 +3574,7 @@ routes.negocio = async () => {
       <div class="card">
         <div class="text-xs font-semibold text-slate-500 uppercase mb-1">LTV promedio</div>
         <div class="text-2xl font-bold">${ltv === null ? '—' : fmt.moneyCop(ltv)}</div>
-        <div class="text-xs text-slate-500 mt-1">de ${ltvVals.length} finalizados</div>
+        <div class="text-xs text-slate-500 mt-1">histórico · ${ltvVals.length} finalizados</div>
       </div>
       <div class="card">
         <div class="text-xs font-semibold text-slate-500 uppercase mb-1">Renuevan en 7d</div>
@@ -3347,9 +3591,10 @@ routes.negocio = async () => {
         sems.push(fmt.semanaISO(d));
       }
       const labelsSem = sems.map(s => fmt.labelSemana(s));
-      const promPorSem = (campo) => sems.map(sem => {
+      // Score 0-100 por semana; fallback a adherencia subjetiva ×10 para registros viejos
+      const promPorSem = (scoreCampo, adhCampo) => sems.map(sem => {
         const regs = allSegs.filter(s => s.semana === sem);
-        const vals = regs.map(s => s[campo]).filter(v => v !== null && v !== undefined);
+        const vals = regs.map(s => s[scoreCampo] != null ? s[scoreCampo] : (s[adhCampo] != null ? s[adhCampo] * 10 : null)).filter(v => v !== null);
         return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
       });
       const pctCumplimiento = sems.map(sem => {
@@ -3359,16 +3604,16 @@ routes.negocio = async () => {
       return `
       <div class="card mb-6">
         <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
-          <h3 class="font-bold text-slate-900">Tendencia de adherencia · 8 semanas</h3>
+          <h3 class="font-bold text-slate-900">Tendencia de cumplimiento · 8 semanas (%)</h3>
           <div>
             ${legendDot('#10b981', 'Entreno')}
             ${legendDot('#3b82f6', 'Alimentación')}
           </div>
         </div>
         ${lineChart([
-          { label: 'Entreno', color: '#10b981', points: promPorSem('adherencia_entreno') },
-          { label: 'Alimentación', color: '#3b82f6', points: promPorSem('adherencia_alimentacion') },
-        ], labelsSem, { height: 200 })}
+          { label: 'Entreno', color: '#10b981', points: promPorSem('score_entreno', 'adherencia_entreno') },
+          { label: 'Alimentación', color: '#3b82f6', points: promPorSem('score_alim_metas', 'adherencia_alimentacion') },
+        ], labelsSem, { height: 200, yMax: 100 })}
       </div>
 
       <div class="card mb-6">
@@ -3385,7 +3630,7 @@ routes.negocio = async () => {
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <div class="card">
-        <h3 class="font-bold text-slate-900 mb-4">Conversión por canal</h3>
+        <h3 class="font-bold text-slate-900 mb-4">Conversión por canal <span class="text-xs font-normal text-slate-400">(ingreso histórico)</span></h3>
         ${canalesOrdenados.length === 0 ? '<p class="text-sm text-slate-500">Sin datos.</p>' :
           canalesOrdenados.map(([canal, info]) => {
             const pct = clientes.length > 0 ? Math.round((info.count / clientes.length) * 100) : 0;
@@ -3410,7 +3655,7 @@ routes.negocio = async () => {
           ${plateau.map(c => `
             <div class="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-xl cursor-pointer" onclick="verCliente('${c.id}')">
               ${helpers.avatar(c.nombre, 9)}
-              <div class="flex-1"><div class="font-medium text-sm">${c.nombre}</div></div>
+              <div class="flex-1"><div class="font-medium text-sm">${escapeHtml(c.nombre)}</div></div>
               <button class="btn btn-secondary btn-sm">Ver</button>
             </div>`).join('')}
         </div>
@@ -3424,7 +3669,7 @@ routes.negocio = async () => {
             <div class="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-xl">
               ${helpers.avatar(c.nombre, 9)}
               <div class="flex-1">
-                <div class="font-medium text-sm">${c.nombre}</div>
+                <div class="font-medium text-sm">${escapeHtml(c.nombre)}</div>
                 <div class="text-xs text-slate-500">Día ${c.dia_pago} · ${fmt.money(c.monto, c.moneda)}</div>
               </div>
             </div>`).join('')}
@@ -3464,18 +3709,24 @@ routes.ajustes = async () => {
 
     <div class="card max-w-xl mb-4">
       <h3 class="font-bold text-slate-900 mb-1">Conexión Mealtracker</h3>
-      ${window.MEALTRACKER_URL && window.MEALTRACKER_ANON_KEY ? `
-        <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-900 mb-3">
-          ✓ Credenciales configuradas en <code>config.js</code>. El CRM se conecta automáticamente al Mealtracker.
-        </div>
-        <p class="text-xs text-slate-500 mb-3">Los clientes se vinculan solos cuando el nombre coincide. Si algún nombre no coincide 100%, puedes vincularlos a mano:</p>
+      ${mtApiBase()
+        ? `<div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-900 mb-3">🔒 Conectado por la <strong>API segura de coach</strong>. Puedes activar RLS en el Supabase del Mealtracker (ver <code>docs/mealtracker_rls.sql</code>) para cerrar el acceso público.</div>`
+        : (window.MEALTRACKER_URL && window.MEALTRACKER_ANON_KEY
+          ? `<div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 mb-3">⚠️ Conectado en <strong>modo directo</strong> (anon key de <code>config.js</code>). Funciona, pero cualquiera con esa key pública puede leer los datos. Recomendado: llena los campos de abajo para pasar a la API segura.</div>`
+          : `<div class="bg-slate-50 rounded-xl p-3 text-xs text-slate-600 mb-3">Sin conexión configurada. Llena los campos de abajo (recomendado) o pon la anon key en <code>config.js</code>.</div>`)}
+
+      <div class="text-xs font-bold text-slate-600 uppercase mb-2">🔒 Conexión segura por API (recomendada)</div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label>URL de la app Mealtracker</label><input id="st-mt-url" autocomplete="off" placeholder="https://tu-mealtracker.vercel.app" value="${escapeHtml(_settings.mealtracker_app_url || '')}"></div>
+        <div><label>Contraseña del coach</label><input id="st-mt-pass" type="password" autocomplete="new-password" value="${escapeHtml(_settings.mealtracker_coach_password || '')}"></div>
+      </div>
+      <p class="text-xs text-slate-500 mt-2">Es la misma contraseña del dashboard de coach del Mealtracker (COACH_PASSWORD). Requiere que el dominio del CRM esté en <code>ALLOWED_ORIGINS</code> del proyecto mealtracker en Vercel.</p>
+
+      ${mtConfigured() ? `
+      <div class="mt-4 pt-4 border-t border-slate-100">
+        <p class="text-xs text-slate-500 mb-2">Los clientes se vinculan solos cuando el nombre coincide. Si algún nombre no coincide 100%, puedes vincularlos a mano:</p>
         <button class="btn btn-secondary" onclick="abrirSyncMealtracker()">🔗 Revisar / vincular manualmente</button>
-      ` : `
-        <p class="text-xs text-slate-500 mb-3">Para conectar el Mealtracker, edita el archivo <code>config.js</code> en tu repo de GitHub y pon ahí:</p>
-        <pre class="bg-slate-900 text-slate-100 rounded-xl p-3 text-xs overflow-x-auto"><code>window.MEALTRACKER_URL      = 'https://xxxxx.supabase.co';
-window.MEALTRACKER_ANON_KEY = 'eyJ...';</code></pre>
-        <p class="text-xs text-slate-500 mt-3">La anon key es pública y segura de subir a GitHub (Supabase la llama "public anon key"). Vercel redeploya solo al guardar el archivo.</p>
-      `}
+      </div>` : ''}
     </div>
 
     <div class="flex gap-2 max-w-xl">
@@ -3487,10 +3738,18 @@ window.MEALTRACKER_ANON_KEY = 'eyJ...';</code></pre>
 };
 
 window.guardarAjustes = async () => {
-  await db.settings.save({
+  const s = {
     usd_cop_rate: Number($('#st-rate').value) || 4000,
     nombre_coach: $('#st-nombre').value.trim() || 'Coach',
-  });
+  };
+  if ($('#st-mt-url')) {
+    s.mealtracker_app_url = $('#st-mt-url').value.trim() || null;
+    s.mealtracker_coach_password = $('#st-mt-pass').value || null;
+    // Forzar re-login y refrescar caches con las nuevas credenciales
+    localStorage.removeItem('mt_coach_token');
+    _mtUsersCache = null;
+  }
+  await db.settings.save(s);
   toast('Guardado');
   routes.ajustes();
 };
@@ -3553,7 +3812,7 @@ window.abrirSyncMealtracker = async () => {
         const yaOK = c.mealtracker_id && m.opciones.find(o => o.user_id === c.mealtracker_id);
         return `
           <div class="flex items-center gap-3 p-3 rounded-xl ${yaOK ? 'bg-emerald-50' : (s ? 'bg-white ring-1 ring-slate-200' : 'bg-amber-50')}">
-            <div class="w-40 shrink-0 font-semibold text-sm">${c.nombre}</div>
+            <div class="w-40 shrink-0 font-semibold text-sm">${escapeHtml(c.nombre)}</div>
             <div class="flex-1">
               <select id="sync-sel-${i}" class="text-xs" data-cliente-id="${c.id}">
                 <option value="">— sin vincular —</option>
@@ -3605,4 +3864,9 @@ if (!window.SUPABASE_URL || window.SUPABASE_URL.includes('TU-PROYECTO')) {
     </div>`;
 } else {
   checkSession();
+}
+
+// PWA: service worker para instalar en el celular y carga rápida / respaldo offline
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
 }

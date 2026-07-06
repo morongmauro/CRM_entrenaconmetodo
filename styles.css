@@ -1,4 +1,13 @@
+:root {
+  /* Colores de marca: se usan solo en acentos clave (botones, logo, foco) */
+  --brand-olive: #606c38;
+  --brand-olive-dark: #4a5429;
+  --brand-black: #0f172a;
+}
+
 body { font-family: 'Inter', system-ui, sans-serif; }
+
+.brand-badge { background: linear-gradient(135deg, #6b7a3f, #3d4522); }
 
 .glass { backdrop-filter: blur(8px); background-color: rgba(255,255,255,0.85); }
 .scrollbar-thin::-webkit-scrollbar { height: 6px; width: 6px; }
@@ -16,16 +25,16 @@ input, textarea, select {
 }
 input:focus, textarea:focus, select:focus {
   outline: none;
-  border-color: #10b981;
-  box-shadow: 0 0 0 3px rgba(16,185,129,0.15);
+  border-color: var(--brand-olive);
+  box-shadow: 0 0 0 3px rgba(96,108,56,0.15);
   background: white;
 }
 label { font-size: 0.72rem; font-weight: 600; color: #64748b; display: block; margin-bottom: 0.3rem; text-transform: uppercase; letter-spacing: 0.02em; }
 
 .btn { padding: 0.55rem 1.1rem; border-radius: 0.625rem; font-weight: 600; font-size: 0.875rem; cursor: pointer; transition: all 0.15s; border: none; display: inline-flex; align-items: center; gap: 0.4rem; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-primary { background-color: #10b981; color: white; box-shadow: 0 1px 3px rgba(16,185,129,0.3); }
-.btn-primary:hover { background-color: #059669; }
+.btn-primary { background-color: var(--brand-olive); color: white; box-shadow: 0 1px 3px rgba(96,108,56,0.35); }
+.btn-primary:hover { background-color: var(--brand-olive-dark); }
 .btn-secondary { background-color: #e2e8f0; color: #334155; }
 .btn-secondary:hover { background-color: #cbd5e1; }
 .btn-dark { background-color: #0f172a; color: white; }
@@ -87,3 +96,28 @@ tr:hover td { background-color: #f8fafc; }
 .kanban-col { min-width: 280px; max-width: 280px; }
 
 .tag-pill { display: inline-block; padding: 0.1rem 0.5rem; background: #f1f5f9; color: #475569; border-radius: 9999px; font-size: 0.7rem; font-weight: 500; margin-right: 0.25rem; margin-bottom: 0.2rem; }
+
+/* ===== Secciones de la ficha del cliente (bloques con tono para identificarlas rápido) ===== */
+.sec { border-radius: 0.9rem; padding: 0.9rem 1rem; border: 1px solid; border-left-width: 4px; font-size: 0.875rem; }
+.sec-title { font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.4rem; }
+.sec-slate   { background: #f8fafc; border-color: #e2e8f0; border-left-color: #94a3b8; } .sec-slate .sec-title   { color: #475569; }
+.sec-olive   { background: #f7f8f0; border-color: #e4e7d3; border-left-color: #606c38; } .sec-olive .sec-title   { color: #4a5429; }
+.sec-blue    { background: #eff6ff; border-color: #dbeafe; border-left-color: #3b82f6; } .sec-blue .sec-title    { color: #1d4ed8; }
+.sec-teal    { background: #f0fdfa; border-color: #ccfbf1; border-left-color: #14b8a6; } .sec-teal .sec-title    { color: #0f766e; }
+.sec-red     { background: #fef2f2; border-color: #fecaca; border-left-color: #ef4444; } .sec-red .sec-title     { color: #b91c1c; }
+.sec-amber   { background: #fffbeb; border-color: #fde68a; border-left-color: #f59e0b; } .sec-amber .sec-title   { color: #92400e; }
+.sec-violet  { background: #f5f3ff; border-color: #ddd6fe; border-left-color: #8b5cf6; } .sec-violet .sec-title  { color: #6d28d9; }
+.sec-emerald { background: #ecfdf5; border-color: #a7f3d0; border-left-color: #10b981; } .sec-emerald .sec-title { color: #065f46; }
+
+/* ===== Chips de días de la semana (L M X J V S D) ===== */
+.day-chip { display: inline-block; }
+.day-chip span {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.3rem; height: 2.3rem; border-radius: 0.6rem;
+  font-size: 0.75rem; font-weight: 700; background: white;
+  border: 1px solid #e2e8f0; color: #64748b; cursor: pointer;
+  transition: all 0.12s; user-select: none;
+}
+.day-chip span:hover { border-color: var(--brand-olive); }
+.day-chip span.plan { border-style: dashed; border-color: var(--brand-olive); color: var(--brand-olive); }
+.day-chip input:checked + span { background: var(--brand-olive); border-color: var(--brand-olive); border-style: solid; color: white; }
