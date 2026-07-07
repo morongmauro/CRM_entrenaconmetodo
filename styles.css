@@ -47,6 +47,7 @@ label.chk-item {
 label.chk-item input[type="checkbox"] { margin-top: 0.12rem; }
 label.chk-item .chk-text { flex: 1; min-width: 0; word-break: break-word; }
 label.chk-item.chk-done .chk-text { text-decoration: line-through; color: #94a3b8; font-weight: 400; }
+label.chk-item.chk-ink { color: #334155; } /* variante neutra (fuera de cajas ámbar) */
 .chk-count { font-size: 0.66rem; color: #94a3b8; padding-top: 0.15rem; }
 
 .btn { padding: 0.55rem 1.1rem; border-radius: 0.625rem; font-weight: 600; font-size: 0.875rem; cursor: pointer; transition: all 0.15s; border: none; display: inline-flex; align-items: center; gap: 0.4rem; }

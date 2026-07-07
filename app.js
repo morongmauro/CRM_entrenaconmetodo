@@ -710,6 +710,55 @@ window.togglePendEditPreview = (idx) => {
   renderPendEditPreview();
 };
 
+// ===== Pendientes del coach dentro del modal de la semana =====
+// Se guardan directo en la tabla "pendientes" (para='coach'), así salen
+// en el Panel de actividades y en Inicio sin pasos extra.
+window.renderPendCoachSeg = async () => {
+  const box = $('#sg-coach-list');
+  const cid = window._segCliente?.id;
+  if (!box || !cid) return;
+  const pends = (await db.pendientes.listCliente(cid)).filter(p => p.para === 'coach');
+  const abiertos = pends.filter(p => p.estado === 'abierto');
+  const hechos = pends.filter(p => p.estado === 'completado').slice(0, 3);
+  if (!abiertos.length && !hechos.length) {
+    box.innerHTML = '<p class="text-xs text-slate-500">Sin tareas tuyas para este cliente. Anota lo que identifiques en la revisión.</p>';
+    return;
+  }
+  box.innerHTML = [...abiertos, ...hechos].map(p => `
+    <label class="chk-item chk-ink ${p.estado === 'completado' ? 'chk-done' : ''}">
+      <input type="checkbox" class="rounded" ${p.estado === 'completado' ? 'checked' : ''} onchange="togglePendCoachSeg('${p.id}', '${p.estado}')">
+      <span class="chk-text">${escapeHtml(p.descripcion)}</span>
+      <button type="button" class="text-slate-400 hover:text-red-600 text-xs flex-shrink-0" title="Eliminar" onclick="event.preventDefault(); event.stopPropagation(); eliminarPendCoachSeg('${p.id}');">✕</button>
+    </label>`).join('');
+};
+window.agregarPendCoachSeg = async () => {
+  const inp = $('#sg-coach-nuevo');
+  const descripcion = (inp?.value || '').trim();
+  if (!descripcion) return;
+  const row = await db.pendientes.insert({
+    cliente_id: window._segCliente.id,
+    para: 'coach',
+    scope: 'semana',
+    seguimiento_id: window._segId || null,
+    descripcion,
+    prioridad: 'media',
+    estado: 'abierto',
+  });
+  if (!row) return;
+  inp.value = '';
+  toast('🧢 Tarea tuya guardada');
+  renderPendCoachSeg();
+};
+window.togglePendCoachSeg = async (id, estado) => {
+  await db.pendientes.toggle(id, estado);
+  renderPendCoachSeg();
+};
+window.eliminarPendCoachSeg = async (id) => {
+  if (!confirm('¿Eliminar esta tarea tuya?')) return;
+  await db.pendientes.remove(id);
+  renderPendCoachSeg();
+};
+
 window.toggleChecklistSemana = async (segId, idx) => {
   const s = await db.seguimientos.get(segId);
   const items = parseChecklist(s?.pendientes_semana);
@@ -1765,11 +1814,23 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
           <textarea id="sg-avances" rows="5" placeholder="Qué pasó esta semana…">${escapeHtml(s.avances || '')}</textarea>
         </div>
 
-        <div>
-          <label>Pendientes que le pediste esta semana</label>
-          <div id="sg-pend-check" class="hidden bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2"></div>
-          <textarea id="sg-pend" rows="3" placeholder="Uno por línea — se vuelven checklist en el timeline…" oninput="renderPendEditPreview()">${escapeHtml(s.pendientes_semana || '')}</textarea>
-          <p class="text-xs text-slate-500 mt-1">✅ Escribe un pendiente por línea: arriba se ven como checklist marcable (igual que en el timeline).</p>
+        <!-- PENDIENTES: DEL CLIENTE vs DEL COACH -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
+            <div class="text-xs font-bold text-amber-800 uppercase mb-2">👥 Pendientes del cliente (le pides)</div>
+            <div id="sg-pend-check" class="hidden bg-white rounded-lg px-3 py-2 mb-2 ring-1 ring-amber-200"></div>
+            <textarea id="sg-pend" rows="3" placeholder="Uno por línea — se vuelven checklist…" oninput="renderPendEditPreview()">${escapeHtml(s.pendientes_semana || '')}</textarea>
+            <p class="text-xs text-amber-700 mt-1">Se guardan con la semana y salen como checklist en el timeline y en Actividades.</p>
+          </div>
+          <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+            <div class="text-xs font-bold text-emerald-800 uppercase mb-2">🧢 Pendientes del coach (tuyos)</div>
+            <div id="sg-coach-list" class="space-y-1 mb-2"></div>
+            <div class="flex gap-2">
+              <input id="sg-coach-nuevo" placeholder="Ej: preparar rutina nueva…" onkeydown="if(event.key==='Enter'){event.preventDefault();agregarPendCoachSeg();}">
+              <button type="button" class="btn btn-secondary btn-sm flex-shrink-0" onclick="agregarPendCoachSeg()">+ Añadir</button>
+            </div>
+            <p class="text-xs text-emerald-700 mt-1">Se guardan al instante y aparecen en Actividades y en Inicio.</p>
+          </div>
         </div>
 
         <div>
@@ -1848,7 +1909,8 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
   openModal(html, { wide: true });
   window._segPrev = semanaPrev;
   window._segCliente = cliente;
-  setTimeout(() => { recalcScores(); recalcDiasEntreno(); renderPendEditPreview(); }, 0);
+  window._segId = s.id || null;
+  setTimeout(() => { recalcScores(); recalcDiasEntreno(); renderPendEditPreview(); renderPendCoachSeg(); }, 0);
 
   // Auto-resolver y jalar del Mealtracker si aún no hay data
   if (mtConfigured() && !s.kcal_promedio && !s.proteina_promedio_g) {
