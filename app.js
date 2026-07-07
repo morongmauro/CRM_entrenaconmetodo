@@ -92,6 +92,23 @@ async function getMealtrackerUserData(mealtrackerId) {
   return row.data || null;
 }
 
+// Cuando la lectura falla, prueba la conexión paso a paso y devuelve la causa
+// más probable, para no mostrar solo "no se pudo conectar".
+async function mtDiagnostico(mealtrackerId) {
+  if (mtApiBase()) {
+    const token = await mtApiToken(true);
+    if (!token) return 'No pude autenticarme con la app del Mealtracker (modo seguro). Revisa en Ajustes la URL de la app y la contraseña de coach, y que la app esté en línea.';
+    const res = await mtApiGet(`/api/coach-data?action=detail&user_id=${encodeURIComponent(mealtrackerId)}`);
+    if (!res) return 'Me autentiqué con la app del Mealtracker, pero la lectura falló (puede ser algo temporal de la app). Intenta de nuevo en unos minutos.';
+    return 'La app del Mealtracker respondió, pero este cliente no tiene datos allá. Revisa el vínculo en Ajustes → "Sincronizar clientes".';
+  }
+  const mt = mtClient();
+  if (!mt) return 'No hay conexión configurada: llena la URL y la anon key del Mealtracker en config.js o en Ajustes.';
+  const { error } = await mt.from('user_data').select('user_id').limit(1);
+  if (error) return `El Supabase del Mealtracker devolvió un error: "${error.message}". Si el proyecto está pausado (el plan gratis se pausa tras ~1 semana sin uso), reactívalo en supabase.com.`;
+  return 'Conecté al Supabase del Mealtracker pero no obtuve datos. Si activaste RLS en la tabla user_data, el modo directo ya no sirve: configura el modo seguro en Ajustes. Si no, revisa el vínculo del cliente en Ajustes → "Sincronizar clientes".';
+}
+
 // Convierte semana ISO (YYYY-Www) a rango [fecha_lunes, fecha_domingo]
 function semanaISOToRange(semanaISO) {
   const [y, w] = semanaISO.split('-W').map(Number);
@@ -2074,7 +2091,11 @@ window.jalarMealtracker = async (mealtrackerId, semana) => {
   if (info) { info.classList.remove('hidden'); info.textContent = '⏳ Consultando mealtracker…'; }
   const r = await getMealtrackerWeek(mealtrackerId, semana);
   if (!r) {
-    if (info) info.innerHTML = '<span class="text-red-600">✗ No se pudo conectar al mealtracker.</span>';
+    if (info) {
+      info.innerHTML = '<span class="text-red-600">✗ Sin conexión al Mealtracker, averiguando la causa…</span>';
+      const causa = await mtDiagnostico(mealtrackerId);
+      info.innerHTML = `<span class="text-red-600">✗ ${escapeHtml(causa)}</span>`;
+    }
     return;
   }
   if (r.dias === 0) {
