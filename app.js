@@ -673,13 +673,43 @@ function checklistHtml(texto, segId) {
   return `
     <div class="space-y-1" onclick="event.stopPropagation()">
       ${items.map((it, i) => `
-        <label class="flex items-start gap-2 text-xs cursor-pointer">
-          <input type="checkbox" class="mt-0.5 rounded" ${it.done ? 'checked' : ''} onchange="toggleChecklistSemana('${segId}', ${i})">
-          <span class="${it.done ? 'line-through text-slate-400' : 'text-amber-900'}">${escapeHtml(it.texto)}</span>
+        <label class="chk-item ${it.done ? 'chk-done' : ''}">
+          <input type="checkbox" class="rounded" ${it.done ? 'checked' : ''} onchange="toggleChecklistSemana('${segId}', ${i})">
+          <span class="chk-text">${escapeHtml(it.texto)}</span>
         </label>`).join('')}
-      ${items.length > 1 ? `<div class="text-[10px] text-slate-400 pt-0.5">${hechos}/${items.length} completados</div>` : ''}
+      ${items.length > 1 ? `<div class="chk-count">${hechos}/${items.length} completados</div>` : ''}
     </div>`;
 }
+// Checklist interactivo dentro del panel de edición de la semana:
+// refleja el textarea #sg-pend y al marcar/desmarcar actualiza el texto ([x] por línea).
+window.renderPendEditPreview = () => {
+  const box = $('#sg-pend-check');
+  const ta = $('#sg-pend');
+  if (!box || !ta) return;
+  const items = parseChecklist(ta.value);
+  if (!items.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  const hechos = items.filter(i => i.done).length;
+  box.classList.remove('hidden');
+  box.innerHTML = `
+    <div class="text-xs font-bold text-amber-800 mb-1">Le pediste:</div>
+    <div class="space-y-1">
+      ${items.map((it, i) => `
+        <label class="chk-item ${it.done ? 'chk-done' : ''}">
+          <input type="checkbox" class="rounded" ${it.done ? 'checked' : ''} onchange="togglePendEditPreview(${i})">
+          <span class="chk-text">${escapeHtml(it.texto)}</span>
+        </label>`).join('')}
+      ${items.length > 1 ? `<div class="chk-count">${hechos}/${items.length} completados</div>` : ''}
+    </div>`;
+};
+window.togglePendEditPreview = (idx) => {
+  const ta = $('#sg-pend');
+  const items = parseChecklist(ta?.value);
+  if (!items[idx]) return;
+  items[idx].done = !items[idx].done;
+  ta.value = serializeChecklist(items);
+  renderPendEditPreview();
+};
+
 window.toggleChecklistSemana = async (segId, idx) => {
   const s = await db.seguimientos.get(segId);
   const items = parseChecklist(s?.pendientes_semana);
@@ -1733,8 +1763,9 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
 
         <div>
           <label>Pendientes que le pediste esta semana</label>
-          <textarea id="sg-pend" rows="3" placeholder="Uno por línea — se vuelven checklist en el timeline…">${escapeHtml(s.pendientes_semana || '')}</textarea>
-          <p class="text-xs text-slate-500 mt-1">✅ Cada línea se muestra como checklist marcable en el timeline. El prefijo "[x]" indica completado.</p>
+          <div id="sg-pend-check" class="hidden bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2"></div>
+          <textarea id="sg-pend" rows="3" placeholder="Uno por línea — se vuelven checklist en el timeline…" oninput="renderPendEditPreview()">${escapeHtml(s.pendientes_semana || '')}</textarea>
+          <p class="text-xs text-slate-500 mt-1">✅ Escribe un pendiente por línea: arriba se ven como checklist marcable (igual que en el timeline).</p>
         </div>
 
         <div>
@@ -1813,7 +1844,7 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
   openModal(html, { wide: true });
   window._segPrev = semanaPrev;
   window._segCliente = cliente;
-  setTimeout(() => { recalcScores(); recalcDiasEntreno(); }, 0);
+  setTimeout(() => { recalcScores(); recalcDiasEntreno(); renderPendEditPreview(); }, 0);
 
   // Auto-resolver y jalar del Mealtracker si aún no hay data
   if (mtConfigured() && !s.kcal_promedio && !s.proteina_promedio_g) {
@@ -1887,6 +1918,7 @@ window.copiarSemanaAnterior = () => {
   if ($('#sg-fp')) $('#sg-fp').value = prev.fuerza_planeados ?? '';
   if ($('#sg-cp')) $('#sg-cp').value = prev.cardio_planeados ?? '';
   recalcScores();
+  renderPendEditPreview();
   toast('Copiado, ajusta ejecutados');
 };
 
@@ -2673,8 +2705,8 @@ function clienteForm(c = {}) {
   return `
     <div class="space-y-5">
       <!-- 1. IDENTIDAD -->
-      <div>
-        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">1 · Identidad</h4>
+      <div class="sec sec-slate">
+        <div class="sec-title">1 · 👤 Identidad</div>
         <div class="grid grid-cols-2 gap-3">
           <div class="col-span-2"><label>Nombre *</label><input id="cl-nombre" value="${escapeHtml(c.nombre || '')}" required></div>
           <div><label>Fecha de nacimiento</label><input id="cl-nac" type="date" value="${c.fecha_nacimiento || ''}"></div>
@@ -2690,8 +2722,8 @@ function clienteForm(c = {}) {
       </div>
 
       <!-- 2. OBJETIVO Y FASE -->
-      <div>
-        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">2 · Objetivo y fase</h4>
+      <div class="sec sec-olive">
+        <div class="sec-title">2 · 🎯 Objetivo y fase</div>
         <div class="grid grid-cols-2 gap-3">
           <div class="col-span-2"><label>Objetivo (resumen corto)</label><input id="cl-obj" placeholder="Ej: bajar 5 kg, ganar masa, hábitos…" value="${escapeHtml(c.objetivo || '')}"></div>
           <div class="col-span-2"><label>Meta específica</label><textarea id="cl-meta" rows="2">${escapeHtml(c.meta_especifica || '')}</textarea></div>
@@ -2705,8 +2737,8 @@ function clienteForm(c = {}) {
       </div>
 
       <!-- 3. COMPOSICIÓN CORPORAL -->
-      <div>
-        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">3 · Composición corporal</h4>
+      <div class="sec sec-blue">
+        <div class="sec-title">3 · 🧬 Composición corporal</div>
         <div class="grid grid-cols-2 gap-3">
           <div><label>Estatura (cm)</label><input id="cl-alt" type="number" min="120" max="230" value="${c.estatura_cm || ''}"></div>
         </div>
@@ -2714,8 +2746,8 @@ function clienteForm(c = {}) {
       </div>
 
       <!-- 4. NIVEL DE ACTIVIDAD -->
-      <div>
-        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">4 · Nivel de actividad</h4>
+      <div class="sec sec-teal">
+        <div class="sec-title">4 · 🏃 Nivel de actividad</div>
         <div class="grid grid-cols-2 gap-3">
           <div class="col-span-2">
             <label>Nivel de actividad</label>
@@ -2746,8 +2778,8 @@ function clienteForm(c = {}) {
       </div>
 
       <!-- 5. META NUTRICIONAL -->
-      <div>
-        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">5 · Meta nutricional</h4>
+      <div class="sec sec-emerald">
+        <div class="sec-title">5 · 🥗 Meta nutricional</div>
         <div class="grid grid-cols-2 gap-3">
           <div><label>Objetivo calórico</label>
             <select id="cl-objk">
@@ -2759,7 +2791,7 @@ function clienteForm(c = {}) {
             <input id="cl-prote-gkg" type="number" step="0.1" min="1" max="3.5" value="${c.proteina_g_kg ?? 1.8}">
             <p class="text-xs text-slate-500 mt-1">1.6-1.8 general · 2.0-2.4 cutting</p>
           </div>
-          <div class="col-span-2 bg-slate-50 rounded-xl p-3">
+          <div class="col-span-2 bg-white rounded-xl p-3 ring-1 ring-emerald-100">
             <div class="flex items-baseline justify-between mb-2">
               <div class="text-xs font-bold text-slate-600 uppercase">Meta nutricional diaria</div>
               <button type="button" class="btn btn-primary btn-sm" onclick="recalcularMeta()">🧮 Recalcular</button>
@@ -2776,8 +2808,8 @@ function clienteForm(c = {}) {
       </div>
 
       <!-- 6. CONDICIONES MÉDICAS / LESIONES -->
-      <div>
-        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">6 · Condiciones médicas / lesiones</h4>
+      <div class="sec sec-red">
+        <div class="sec-title">6 · ⚕️ Condiciones médicas / lesiones</div>
         <div class="grid grid-cols-2 gap-3">
           <div class="col-span-2"><label>Condiciones de salud / patologías</label><textarea id="cl-pat" rows="2" placeholder="Ej: prediabético, hipertensión, hipotiroidismo…">${escapeHtml(c.patologias || '')}</textarea></div>
           <div class="col-span-2"><label>Restricciones o lesiones (base)</label><textarea id="cl-rest" rows="2" placeholder="Ej: hernia lumbar L4-L5, rodilla derecha…">${escapeHtml(c.restricciones_lesiones || '')}</textarea></div>
@@ -2792,14 +2824,14 @@ function clienteForm(c = {}) {
       </div>
 
       <!-- 7. ANTECEDENTES DEPORTIVOS -->
-      <div>
-        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">7 · Antecedentes deportivos</h4>
+      <div class="sec sec-violet">
+        <div class="sec-title">7 · 🏅 Antecedentes deportivos</div>
         <textarea id="cl-ant" rows="2" placeholder="Deportes previos, nivel, años…">${escapeHtml(c.antecedentes_deportivos || '')}</textarea>
       </div>
 
       <!-- 8. COMERCIAL -->
-      <div>
-        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">8 · Comercial</h4>
+      <div class="sec sec-emerald">
+        <div class="sec-title">8 · 💰 Comercial</div>
         <div class="grid grid-cols-2 gap-3">
           <div><label>Monto mensual</label><input id="cl-monto" type="number" step="0.01" value="${c.monto || ''}"></div>
           <div><label>Moneda</label>
@@ -2833,8 +2865,8 @@ function clienteForm(c = {}) {
       </div>
 
       <!-- 9. ENTREVISTA INICIAL Y TAGS -->
-      <div>
-        <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">9 · Entrevista inicial y tags</h4>
+      <div class="sec sec-amber">
+        <div class="sec-title">9 · 📋 Entrevista inicial y tags</div>
         <div class="space-y-3">
           <div>
             <label>Entrevista inicial / notas (registro largo)</label>

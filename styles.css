@@ -23,6 +23,11 @@ input, textarea, select {
   color: #0f172a;
   font-family: inherit;
 }
+/* Los checkboxes/radios no deben heredar el ancho ni el padding de los inputs de texto */
+input[type="checkbox"], input[type="radio"] {
+  width: 1rem; height: 1rem; padding: 0; flex-shrink: 0;
+  accent-color: var(--brand-olive);
+}
 input:focus, textarea:focus, select:focus {
   outline: none;
   border-color: var(--brand-olive);
@@ -30,6 +35,19 @@ input:focus, textarea:focus, select:focus {
   background: white;
 }
 label { font-size: 0.72rem; font-weight: 600; color: #64748b; display: block; margin-bottom: 0.3rem; text-transform: uppercase; letter-spacing: 0.02em; }
+
+/* ===== Ítems de checklist (pendientes de la semana) =====
+   Resetea el estilo global de <label> (mayúsculas, margen) para que se vea como lista. */
+label.chk-item {
+  display: flex; align-items: flex-start; gap: 0.5rem;
+  font-size: 0.75rem; font-weight: 500; color: #78350f;
+  text-transform: none; letter-spacing: normal; margin-bottom: 0;
+  line-height: 1.4; cursor: pointer; text-align: left;
+}
+label.chk-item input[type="checkbox"] { margin-top: 0.12rem; }
+label.chk-item .chk-text { flex: 1; min-width: 0; word-break: break-word; }
+label.chk-item.chk-done .chk-text { text-decoration: line-through; color: #94a3b8; font-weight: 400; }
+.chk-count { font-size: 0.66rem; color: #94a3b8; padding-top: 0.15rem; }
 
 .btn { padding: 0.55rem 1.1rem; border-radius: 0.625rem; font-weight: 600; font-size: 0.875rem; cursor: pointer; transition: all 0.15s; border: none; display: inline-flex; align-items: center; gap: 0.4rem; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
