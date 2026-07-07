@@ -581,8 +581,8 @@ function borradorWhatsApp(cliente, seg, scores, pendientes, streaks) {
   // Streaks
   if (streaks?.fuerza >= 3) partes.push('', `🎉 ¡Llevas ${streaks.fuerza} semanas seguidas cumpliendo fuerza!`);
 
-  // Pendientes
-  const abiertos = (pendientes || []).filter(p => p.estado === 'abierto').slice(0, 3);
+  // Pendientes (solo los del cliente — las tareas del coach no van en su mensaje)
+  const abiertos = (pendientes || []).filter(p => p.estado === 'abierto' && p.para !== 'coach').slice(0, 3);
   if (abiertos.length) {
     partes.push('', 'Para esta semana:');
     abiertos.forEach(p => partes.push(`• ${p.descripcion}`));
@@ -718,7 +718,7 @@ window.toggleChecklistSemana = async (segId, idx) => {
   const { error } = await sb.from('seguimientos').update({ pendientes_semana: serializeChecklist(items) }).eq('id', segId);
   if (error) { toast(error.message); return; }
   toast(items[idx].done ? '✓ Completado' : 'Reabierto');
-  navigate('seguimiento');
+  rerenderView();
 };
 
 const PLANTILLAS = {
@@ -967,11 +967,15 @@ function copConv(monto, moneda) {
 // ROUTER
 // =====================================================
 const routes = {};
+let _currentView = 'dashboard';
 function navigate(name) {
+  _currentView = routes[name] ? name : 'dashboard';
   $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === name));
   (routes[name] || routes.dashboard)();
   window.scrollTo({ top: 0, behavior: 'instant' });
 }
+// Re-renderiza la vista actual sin saltar el scroll (para toggles de checkboxes)
+function rerenderView() { (routes[_currentView] || routes.dashboard)(); }
 $$('.nav-item').forEach(b => b.addEventListener('click', () => navigate(b.dataset.view)));
 
 // =====================================================
@@ -1170,7 +1174,7 @@ routes.dashboard = async () => {
                 <input type="checkbox" class="mt-1 rounded" onchange="togglePendienteDash('${p.id}', '${p.estado}')">
                 <div class="flex-1 min-w-0">
                   <div class="font-medium text-sm">${escapeHtml(p.descripcion)}</div>
-                  <div class="text-xs text-slate-500">${escapeHtml(p.clientes?.nombre || '')} · ${p.scope === 'semana' ? '<span class="text-violet-600 font-semibold">Semanal</span>' : '<span class="text-emerald-600 font-semibold">General</span>'} ${p.fecha_limite ? '· vence ' + fmt.fechaCorta(p.fecha_limite) : ''}</div>
+                  <div class="text-xs text-slate-500">${p.para === 'coach' ? '🧢 Tuyo' : escapeHtml(p.clientes?.nombre || '')} · ${p.scope === 'semana' ? '<span class="text-violet-600 font-semibold">Semanal</span>' : '<span class="text-emerald-600 font-semibold">General</span>'} ${p.fecha_limite ? '· vence ' + fmt.fechaCorta(p.fecha_limite) : ''}</div>
                 </div>
                 <span class="tag ${p.prioridad === 'alta' ? 'tag-red' : p.prioridad === 'baja' ? 'tag-gray' : 'tag-yellow'}">${p.prioridad}</span>
               </div>`).join('')}
@@ -1208,7 +1212,7 @@ window.abrirNuevoSeguimiento = async (clienteId) => {
 
 window.togglePendienteDash = async (id, estado) => {
   await db.pendientes.toggle(id, estado);
-  navigate('dashboard');
+  rerenderView();
 };
 
 // Genera y copia un recordatorio de pago amable para pegar en WhatsApp
@@ -1270,7 +1274,7 @@ window.confirmarPagoRapido = async (clienteId, mes) => {
   });
   closeModal();
   toast('Pago registrado');
-  navigate('dashboard');
+  rerenderView();
 };
 
 // =====================================================
@@ -1796,8 +1800,8 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
               <div class="flex items-start gap-2 text-xs">
                 <input type="checkbox" class="mt-0.5 rounded" onchange="togglePendienteCtx('${p.id}', '${p.estado}', '${clienteId}', '${semana}')">
                 <div class="flex-1">
-                  <div class="text-slate-700">${escapeHtml(p.descripcion)}</div>
-                  <div class="text-slate-400 text-xs">${p.scope === 'semana' ? '<span class="text-violet-600 font-semibold">Semanal</span>' : '<span class="text-emerald-600 font-semibold">General</span>'} ${p.fecha_limite ? '· vence ' + fmt.fechaCorta(p.fecha_limite) : ''}</div>
+                  <div class="text-slate-700">${p.para === 'coach' ? '🧢 ' : ''}${escapeHtml(p.descripcion)}</div>
+                  <div class="text-slate-400 text-xs">${p.para === 'coach' ? '<span class="font-semibold text-slate-600">Tarea tuya</span> · ' : ''}${p.scope === 'semana' ? '<span class="text-violet-600 font-semibold">Semanal</span>' : '<span class="text-emerald-600 font-semibold">General</span>'} ${p.fecha_limite ? '· vence ' + fmt.fechaCorta(p.fecha_limite) : ''}</div>
                 </div>
               </div>`).join('')}
           </div>
@@ -2504,58 +2508,230 @@ window.eliminarPago = async (id) => {
 };
 
 // =====================================================
-// VIEW: PENDIENTES
+// VIEW: ACTIVIDADES (agenda del coach + pendientes de clientes y del coach)
 // =====================================================
 routes.pendientes = async () => {
   view.innerHTML = '<div class="card">Cargando…</div>';
-  const lista = await db.pendientes.list();
+  const mes = fmt.mesActual();
+  const semana = fmt.semanaISO();
+  const hoy = fmt.hoy();
+  const [lista, clientes, pagosMes, segSemana, allSegs] = await Promise.all([
+    db.pendientes.list(),
+    db.clientes.list(),
+    db.pagos.listMes(mes),
+    db.seguimientos.listSemana(semana),
+    db.seguimientos.listAll(),
+  ]);
+  const activos = clientes.filter(c => c.estado === 'activo');
 
-  let f = lista;
-  if (_pendientesFilter === 'general') f = lista.filter(p => p.scope === 'general');
-  else if (_pendientesFilter === 'semana') f = lista.filter(p => p.scope === 'semana');
-  else if (_pendientesFilter === 'abiertos') f = lista.filter(p => p.estado === 'abierto');
-  else if (_pendientesFilter === 'completados') f = lista.filter(p => p.estado === 'completado');
+  const pendCoach = lista.filter(p => p.para === 'coach');
+  const pendClientes = lista.filter(p => p.para !== 'coach');
+
+  // ---------- 1. Qué atender primero (agenda) ----------
+  // nivel 0 = urgente (rojo) · 1 = pronto (ámbar) · 2 = normal
+  const agenda = [];
+  const diaHoy = new Date().getDate();
+
+  // Pagos vencidos (día de pago pasado + días de gracia, sin pago marcado)
+  activos.forEach(c => {
+    if (!c.dia_pago || c.dia_pago > diaHoy) return;
+    const p = pagosMes.find(pp => pp.cliente_id === c.id);
+    if (p && p.pagado) return;
+    if ((diaHoy - c.dia_pago) <= (c.dias_gracia || 0)) return;
+    agenda.push({
+      nivel: 0, icon: '💰',
+      texto: `Cobrar a ${c.nombre}`,
+      sub: `Venció el día ${c.dia_pago} · ${fmt.money(c.monto, c.moneda)}`,
+      acciones: `<button class="btn btn-ghost btn-sm" title="Copiar recordatorio WhatsApp" onclick="copiarRecordatorioPago('${c.id}')">💬</button>
+                 <button class="btn btn-dark btn-sm" onclick="marcarPagoRapido('${c.id}')">Pagado</button>`,
+    });
+  });
+
+  // Pendientes abiertos vencidos o de prioridad alta (tuyos o de clientes)
+  lista.filter(p => p.estado === 'abierto').forEach(p => {
+    const vencido = p.fecha_limite && p.fecha_limite < hoy;
+    if (!vencido && p.prioridad !== 'alta') return;
+    agenda.push({
+      nivel: vencido ? 0 : 1,
+      icon: p.para === 'coach' ? '🧢' : '👤',
+      texto: p.descripcion,
+      sub: `${p.para === 'coach' ? 'Tarea tuya' : (p.clientes?.nombre || 'Cliente')}${p.fecha_limite ? ` · ${vencido ? 'venció' : 'vence'} ${fmt.fechaCorta(p.fecha_limite)}` : ''} · prioridad ${p.prioridad}`,
+      check: `togglePendienteFromList('${p.id}', '${p.estado}')`,
+    });
+  });
+
+  // Pagos que vencen en los próximos 7 días
+  activos.forEach(c => {
+    if (!c.dia_pago) return;
+    const diff = c.dia_pago - diaHoy;
+    if (diff <= 0 || diff > 7) return;
+    const p = pagosMes.find(pp => pp.cliente_id === c.id);
+    if (p && p.pagado) return;
+    agenda.push({
+      nivel: 1, icon: '💵',
+      texto: `Cobro próximo: ${c.nombre}`,
+      sub: `En ${diff} día(s) · ${fmt.money(c.monto, c.moneda)}`,
+      acciones: `<button class="btn btn-dark btn-sm" onclick="marcarPagoRapido('${c.id}')">Pagado</button>`,
+    });
+  });
+
+  // Clientes en riesgo
+  const riesgoIds = new Set(clientes.filter(c => helpers.enRiesgo(c, allSegs)).map(c => c.id));
+  riesgoIds.forEach(id => {
+    const c = clientes.find(x => x.id === id);
+    agenda.push({
+      nivel: 1, icon: '⚠️',
+      texto: `Reactivar contacto con ${c.nombre}`,
+      sub: 'Cliente en riesgo',
+      acciones: `<button class="btn btn-secondary btn-sm" onclick="verCliente('${c.id}')">Abrir</button>`,
+    });
+  });
+
+  // Clientes sin seguimiento esta semana (los en riesgo ya salieron arriba)
+  const conSeg = new Set(segSemana.map(s => s.cliente_id));
+  activos.filter(c => !conSeg.has(c.id) && !riesgoIds.has(c.id)).forEach(c => {
+    const segCli = allSegs.filter(s => s.cliente_id === c.id).sort((a, b) => b.fecha.localeCompare(a.fecha));
+    const dias = segCli.length ? fmt.diasDesde(segCli[0].fecha) : null;
+    agenda.push({
+      nivel: (dias || 0) > 14 ? 1 : 2, icon: '📋',
+      texto: `Hacer seguimiento a ${c.nombre}`,
+      sub: dias !== null ? `Último hace ${dias} días` : 'Sin seguimientos previos',
+      acciones: `<button class="btn btn-primary btn-sm" onclick="abrirNuevoSeguimiento('${c.id}')">Registrar</button>`,
+    });
+  });
+
+  // Cumpleaños en los próximos 7 días
+  clientes.forEach(c => {
+    if (!c.fecha_nacimiento) return;
+    const d = helpers.diasHastaCumple(c.fecha_nacimiento);
+    if (d === null || d > 7) return;
+    agenda.push({ nivel: d === 0 ? 1 : 2, icon: '🎂', texto: `Cumpleaños de ${c.nombre}`, sub: d === 0 ? '¡Hoy!' : d === 1 ? 'Mañana' : `En ${d} días` });
+  });
+
+  agenda.sort((a, b) => a.nivel - b.nivel);
+  const nivelBg = ['bg-red-50', 'bg-amber-50', 'bg-white ring-1 ring-slate-100'];
+
+  // ---------- 2. Checklists semanales "Le pediste" (última semana con pendientes por cliente) ----------
+  const checklists = activos.map(c => {
+    const segs = allSegs.filter(s => s.cliente_id === c.id && s.pendientes_semana).sort((a, b) => b.semana.localeCompare(a.semana));
+    const s = segs[0];
+    if (!s) return null;
+    const items = parseChecklist(s.pendientes_semana);
+    if (!items.length) return null;
+    return { c, s, items, abiertos: items.filter(i => !i.done).length };
+  }).filter(Boolean).sort((a, b) => b.abiertos - a.abiertos);
+
+  // ---------- 3. Lista de pendientes de clientes (con filtro) ----------
+  let f = pendClientes;
+  if (_pendientesFilter === 'general') f = pendClientes.filter(p => p.scope === 'general');
+  else if (_pendientesFilter === 'semana') f = pendClientes.filter(p => p.scope === 'semana');
+  else if (_pendientesFilter === 'abiertos') f = pendClientes.filter(p => p.estado === 'abierto');
+  else if (_pendientesFilter === 'completados') f = pendClientes.filter(p => p.estado === 'completado');
+
+  const pendRow = (p, conAvatar = true) => `
+    <div class="flex items-center gap-3 py-2.5 px-2 hover:bg-slate-50 rounded-lg">
+      <input type="checkbox" ${p.estado === 'completado' ? 'checked' : ''} class="rounded" onchange="togglePendienteFromList('${p.id}', '${p.estado}')">
+      ${conAvatar ? helpers.avatar(p.clientes?.nombre || '?', 9) : ''}
+      <div class="flex-1 min-w-0">
+        <div class="font-medium text-sm ${p.estado === 'completado' ? 'line-through text-slate-400' : 'text-slate-900'}">${escapeHtml(p.descripcion)}</div>
+        <div class="text-xs text-slate-500 mt-0.5">
+          ${p.clientes?.nombre ? escapeHtml(p.clientes.nombre) + ' · ' : ''}${p.scope === 'semana' ? '<span class="text-violet-600 font-semibold">Semanal</span>' : '<span class="text-emerald-600 font-semibold">📌 General</span>'}
+          ${p.fecha_limite ? ' · vence ' + fmt.fechaCorta(p.fecha_limite) : ''}
+          ${p.estado === 'completado' && p.completado_en ? ' · ✓ ' + fmt.fechaCorta(p.completado_en) : ''}
+        </div>
+      </div>
+      <span class="tag ${p.prioridad === 'alta' ? 'tag-red' : p.prioridad === 'baja' ? 'tag-gray' : 'tag-yellow'}">${p.prioridad}</span>
+      ${p.scope === 'semana' && p.estado === 'abierto' ? `<button class="btn btn-ghost btn-sm" title="Hacer general" onclick="hacerGeneral('${p.id}')">📌</button>` : ''}
+      <button class="btn btn-ghost btn-sm" onclick="editarPendiente('${p.id}')">✎</button>
+      <button class="btn btn-ghost btn-sm" onclick="eliminarPendiente('${p.id}')">✕</button>
+    </div>`;
 
   view.innerHTML = `
     <div class="flex items-baseline justify-between flex-wrap gap-3 mb-5">
       <div>
-        <h2 class="text-2xl font-bold text-slate-900">Pendientes</h2>
-        <p class="text-sm text-slate-500">Tareas que les pediste a tus clientes</p>
+        <h2 class="text-2xl font-bold text-slate-900">Panel de actividades</h2>
+        <p class="text-sm text-slate-500">Qué atender primero, tus pendientes y los de tus clientes</p>
       </div>
       <button class="btn btn-primary" onclick="nuevoPendiente()">+ Nuevo pendiente</button>
     </div>
-    <div class="flex gap-2 overflow-x-auto pb-2 mb-4 scrollbar-thin">
-      <button class="chip ${_pendientesFilter === 'todos' ? 'active' : ''}" onclick="filtrarPend('todos')">Todos · ${lista.length}</button>
-      <button class="chip ${_pendientesFilter === 'abiertos' ? 'active' : ''}" onclick="filtrarPend('abiertos')">📌 Abiertos · ${lista.filter(p => p.estado === 'abierto').length}</button>
-      <button class="chip ${_pendientesFilter === 'general' ? 'active' : ''}" onclick="filtrarPend('general')">🌿 Generales · ${lista.filter(p => p.scope === 'general').length}</button>
-      <button class="chip ${_pendientesFilter === 'semana' ? 'active' : ''}" onclick="filtrarPend('semana')">📅 De la semana · ${lista.filter(p => p.scope === 'semana').length}</button>
-      <button class="chip ${_pendientesFilter === 'completados' ? 'active' : ''}" onclick="filtrarPend('completados')">✓ Completados · ${lista.filter(p => p.estado === 'completado').length}</button>
+
+    <!-- QUÉ ATENDER PRIMERO -->
+    <div class="card mb-6">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h3 class="font-bold text-slate-900 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-red-500"></span>🎯 Qué atender primero</h3>
+        <span class="tag ${agenda.some(a => a.nivel === 0) ? 'tag-red' : agenda.length ? 'tag-yellow' : 'tag-green'}">${agenda.length}</span>
+      </div>
+      ${agenda.length === 0
+        ? '<p class="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">✓ ¡Todo al día! No hay nada urgente por atender.</p>'
+        : `<div class="space-y-2">
+            ${agenda.slice(0, 12).map(a => `
+              <div class="flex items-center gap-3 p-3 rounded-xl ${nivelBg[a.nivel]}">
+                ${a.check ? `<input type="checkbox" class="rounded" onchange="${a.check}">` : `<span class="text-lg flex-shrink-0">${a.icon}</span>`}
+                <div class="flex-1 min-w-0">
+                  <div class="font-medium text-sm text-slate-900">${a.check ? a.icon + ' ' : ''}${escapeHtml(a.texto)}</div>
+                  <div class="text-xs text-slate-500">${escapeHtml(a.sub)}</div>
+                </div>
+                <div class="flex gap-1 flex-shrink-0">${a.acciones || ''}</div>
+              </div>`).join('')}
+            ${agenda.length > 12 ? `<p class="text-xs text-slate-500 text-center pt-1">+ ${agenda.length - 12} más</p>` : ''}
+          </div>`}
     </div>
 
-    <div class="card p-0">
-      ${f.length === 0 ? '<div class="text-sm text-slate-500 text-center py-8">No hay pendientes en este filtro.</div>' : `
-        <div class="divide-y divide-slate-100">
-          ${f.map(p => `
-            <div class="flex items-center gap-3 p-4 hover:bg-slate-50">
-              <input type="checkbox" ${p.estado === 'completado' ? 'checked' : ''} class="rounded" onchange="togglePendienteFromList('${p.id}', '${p.estado}')">
-              ${helpers.avatar(p.clientes?.nombre || '?', 9)}
-              <div class="flex-1 min-w-0">
-                <div class="font-medium text-sm ${p.estado === 'completado' ? 'line-through text-slate-400' : 'text-slate-900'}">${escapeHtml(p.descripcion)}</div>
-                <div class="text-xs text-slate-500 mt-0.5">
-                  ${escapeHtml(p.clientes?.nombre || '')} ·
-                  ${p.scope === 'semana' ? '<span class="text-violet-600 font-semibold">Semanal</span>' : '<span class="text-emerald-600 font-semibold">📌 General</span>'}
-                  ${p.fecha_limite ? ' · vence ' + fmt.fechaCorta(p.fecha_limite) : ''}
-                  ${p.estado === 'completado' && p.completado_en ? ' · ✓ ' + fmt.fechaCorta(p.completado_en) : ''}
-                </div>
-              </div>
-              <span class="tag ${p.prioridad === 'alta' ? 'tag-red' : p.prioridad === 'baja' ? 'tag-gray' : 'tag-yellow'}">${p.prioridad}</span>
-              ${p.scope === 'semana' && p.estado === 'abierto' ? `<button class="btn btn-ghost btn-sm" title="Hacer general" onclick="hacerGeneral('${p.id}')">📌</button>` : ''}
-              <button class="btn btn-ghost btn-sm" onclick="editarPendiente('${p.id}')">✎</button>
-              <button class="btn btn-ghost btn-sm" onclick="eliminarPendiente('${p.id}')">✕</button>
-            </div>
-          `).join('')}
+    <!-- PENDIENTES: CLIENTES vs COACH -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+      <div class="card">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h3 class="font-bold text-slate-900 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-violet-500"></span>👥 Pendientes de tus clientes</h3>
+          <span class="tag tag-violet">${pendClientes.filter(p => p.estado === 'abierto').length} abiertos</span>
         </div>
-      `}
+        <div class="flex gap-2 overflow-x-auto pb-2 mb-2 scrollbar-thin">
+          <button class="chip ${_pendientesFilter === 'todos' ? 'active' : ''}" onclick="filtrarPend('todos')">Todos · ${pendClientes.length}</button>
+          <button class="chip ${_pendientesFilter === 'abiertos' ? 'active' : ''}" onclick="filtrarPend('abiertos')">📌 Abiertos · ${pendClientes.filter(p => p.estado === 'abierto').length}</button>
+          <button class="chip ${_pendientesFilter === 'general' ? 'active' : ''}" onclick="filtrarPend('general')">🌿 Generales · ${pendClientes.filter(p => p.scope === 'general').length}</button>
+          <button class="chip ${_pendientesFilter === 'semana' ? 'active' : ''}" onclick="filtrarPend('semana')">📅 Semanales · ${pendClientes.filter(p => p.scope === 'semana').length}</button>
+          <button class="chip ${_pendientesFilter === 'completados' ? 'active' : ''}" onclick="filtrarPend('completados')">✓ Hechos · ${pendClientes.filter(p => p.estado === 'completado').length}</button>
+        </div>
+        ${f.length === 0
+          ? `<div class="text-sm text-slate-500 text-center py-6">No hay pendientes de clientes en este filtro.<br><span class="text-xs">Créalos con "+ Nuevo pendiente" o desde la ficha del cliente.</span></div>`
+          : `<div class="divide-y divide-slate-100">${f.map(p => pendRow(p)).join('')}</div>`}
+      </div>
+
+      <div class="card">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h3 class="font-bold text-slate-900 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-600"></span>🧢 Pendientes del coach (tuyos)</h3>
+          <button class="btn btn-secondary btn-sm" onclick="nuevoPendiente(null, 'coach')">+ Tarea mía</button>
+        </div>
+        ${pendCoach.length === 0
+          ? `<div class="text-sm text-slate-500 text-center py-6">Sin tareas tuyas.<br><span class="text-xs">Ej: "preparar rutina de Juan", "renovar plan de X", "publicar contenido"…</span></div>`
+          : `<div class="divide-y divide-slate-100">
+              ${pendCoach.filter(p => p.estado === 'abierto').map(p => pendRow(p, false)).join('')}
+              ${pendCoach.filter(p => p.estado === 'completado').map(p => pendRow(p, false)).join('')}
+            </div>`}
+      </div>
+    </div>
+
+    <!-- CHECKLISTS SEMANALES GLOBALES -->
+    <div class="card">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h3 class="font-bold text-slate-900 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-500"></span>✅ Lo que le pediste a cada cliente (checklist semanal)</h3>
+        <span class="tag tag-yellow">${checklists.reduce((s, ch) => s + ch.abiertos, 0)} sin completar</span>
+      </div>
+      ${checklists.length === 0
+        ? '<p class="text-sm text-slate-500 text-center py-6">Ningún cliente tiene checklist semanal. Se crean al escribir "Pendientes que le pediste" en el seguimiento de la semana.</p>'
+        : `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            ${checklists.map(({ c, s, items, abiertos }) => `
+              <div class="bg-amber-50 rounded-xl p-3 ${abiertos === 0 ? 'opacity-60' : ''}">
+                <div class="flex items-center gap-2 mb-2">
+                  ${helpers.avatar(c.nombre, 8)}
+                  <div class="flex-1 min-w-0">
+                    <div class="font-bold text-sm text-slate-900 truncate">${escapeHtml(c.nombre)}</div>
+                    <div class="text-xs text-slate-500">${fmt.labelSemana(s.semana)} · ${fmt.fechaCorta(s.fecha)}</div>
+                  </div>
+                  <button class="btn btn-ghost btn-sm" title="Abrir la semana" onclick="editarSeguimiento('${s.id}')">✎</button>
+                </div>
+                ${checklistHtml(s.pendientes_semana, s.id)}
+              </div>`).join('')}
+          </div>`}
     </div>
   `;
 };
@@ -2564,45 +2740,68 @@ window.filtrarPend = (f) => { _pendientesFilter = f; routes.pendientes(); };
 
 window.togglePendienteFromList = async (id, estado) => {
   await db.pendientes.toggle(id, estado);
-  navigate('pendientes');
+  rerenderView();
 };
 
 window.hacerGeneral = async (id) => {
   await db.pendientes.hacerGeneral(id);
   toast('Promovido a general');
-  navigate('pendientes');
+  rerenderView();
 };
 
-window.nuevoPendiente = async (clienteId = null) => {
+// Campos compartidos del formulario de pendiente (nuevo y editar)
+function pendienteFormHtml(p, opcionesClientes) {
+  const para = p.para || 'cliente';
+  return `
+    <div class="space-y-3">
+      <div class="grid grid-cols-2 gap-3">
+        <div><label>Para quién</label>
+          <select id="pn-para">
+            <option value="cliente" ${para === 'cliente' ? 'selected' : ''}>👥 Cliente (le pediste algo)</option>
+            <option value="coach" ${para === 'coach' ? 'selected' : ''}>🧢 Coach (tarea tuya)</option>
+          </select>
+        </div>
+        <div><label>Cliente</label>
+          <select id="pn-cliente"><option value="">— sin cliente —</option>${opcionesClientes}</select>
+          <p class="text-xs text-slate-500 mt-1">Opcional si es tarea tuya.</p>
+        </div>
+      </div>
+      <div><label>Descripción *</label><input id="pn-desc" placeholder="Qué hay que hacer…" value="${escapeHtml(p.descripcion || '')}"></div>
+      <div class="grid grid-cols-3 gap-3">
+        <div><label>Tipo</label><select id="pn-scope"><option value="general" ${(p.scope || 'general') === 'general' ? 'selected' : ''}>📌 General</option><option value="semana" ${p.scope === 'semana' ? 'selected' : ''}>📅 Semanal</option></select></div>
+        <div><label>Prioridad</label><select id="pn-prio">${['baja','media','alta'].map(o => `<option ${(p.prioridad || 'media') === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
+        <div><label>Vence</label><input id="pn-fecha" type="date" value="${p.fecha_limite || ''}"></div>
+      </div>
+    </div>`;
+}
+
+function leerPendienteForm() {
+  const para = $('#pn-para').value;
+  const cliente_id = $('#pn-cliente').value || null;
+  const descripcion = $('#pn-desc').value.trim();
+  if (!descripcion) { toast('Falta la descripción'); return null; }
+  if (para === 'cliente' && !cliente_id) { toast('Elige el cliente (o márcalo como tarea del coach)'); return null; }
+  return {
+    para, cliente_id, descripcion,
+    scope: $('#pn-scope').value,
+    prioridad: $('#pn-prio').value,
+    fecha_limite: $('#pn-fecha').value || null,
+  };
+}
+
+window.nuevoPendiente = async (clienteId = null, para = 'cliente') => {
   const clientes = await db.clientes.list();
   const opciones = clientes.map(c => `<option value="${c.id}" ${clienteId === c.id ? 'selected' : ''}>${escapeHtml(c.nombre)}</option>`).join('');
-  openModal(modalShell('Nuevo pendiente', `
-    <div class="space-y-3">
-      <div><label>Cliente *</label><select id="pn-cliente"><option value="">— elegir —</option>${opciones}</select></div>
-      <div><label>Descripción *</label><input id="pn-desc" placeholder="Qué le pediste"></div>
-      <div class="grid grid-cols-3 gap-3">
-        <div><label>Tipo</label><select id="pn-scope"><option value="general">📌 General</option><option value="semana">📅 Semanal</option></select></div>
-        <div><label>Prioridad</label><select id="pn-prio"><option value="baja">Baja</option><option value="media" selected>Media</option><option value="alta">Alta</option></select></div>
-        <div><label>Vence</label><input id="pn-fecha" type="date"></div>
-      </div>
-    </div>
-  `, `
+  openModal(modalShell('Nuevo pendiente', pendienteFormHtml({ para }, opciones), `
     <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
     <button class="btn btn-primary" onclick="guardarPendiente()">Guardar</button>
   `));
 };
 
 window.guardarPendiente = async () => {
-  const cliente_id = $('#pn-cliente').value;
-  const descripcion = $('#pn-desc').value.trim();
-  if (!cliente_id || !descripcion) { toast('Faltan datos'); return; }
-  await db.pendientes.insert({
-    cliente_id, descripcion,
-    scope: $('#pn-scope').value,
-    prioridad: $('#pn-prio').value,
-    fecha_limite: $('#pn-fecha').value || null,
-    estado: 'abierto',
-  });
+  const row = leerPendienteForm();
+  if (!row) return;
+  await db.pendientes.insert({ ...row, estado: 'abierto' });
   closeModal();
   toast('Guardado');
   navigate('pendientes');
@@ -2612,39 +2811,25 @@ window.editarPendiente = async (id) => {
   const { data: p } = await sb.from('pendientes').select('*').eq('id', id).single();
   const clientes = await db.clientes.list();
   const opciones = clientes.map(c => `<option value="${c.id}" ${p.cliente_id === c.id ? 'selected' : ''}>${escapeHtml(c.nombre)}</option>`).join('');
-  openModal(modalShell('Editar pendiente', `
-    <div class="space-y-3">
-      <div><label>Cliente *</label><select id="pn-cliente">${opciones}</select></div>
-      <div><label>Descripción *</label><input id="pn-desc" value="${escapeHtml(p.descripcion)}"></div>
-      <div class="grid grid-cols-3 gap-3">
-        <div><label>Tipo</label><select id="pn-scope"><option value="general" ${p.scope === 'general' ? 'selected' : ''}>📌 General</option><option value="semana" ${p.scope === 'semana' ? 'selected' : ''}>📅 Semanal</option></select></div>
-        <div><label>Prioridad</label><select id="pn-prio">${['baja','media','alta'].map(o => `<option ${p.prioridad === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
-        <div><label>Vence</label><input id="pn-fecha" type="date" value="${p.fecha_limite || ''}"></div>
-      </div>
-    </div>
-  `, `
+  openModal(modalShell('Editar pendiente', pendienteFormHtml(p, opciones), `
     <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
     <button class="btn btn-primary" onclick="actualizarPendiente('${id}')">Guardar</button>
   `));
 };
 
 window.actualizarPendiente = async (id) => {
-  await db.pendientes.update(id, {
-    cliente_id: $('#pn-cliente').value,
-    descripcion: $('#pn-desc').value.trim(),
-    scope: $('#pn-scope').value,
-    prioridad: $('#pn-prio').value,
-    fecha_limite: $('#pn-fecha').value || null,
-  });
+  const row = leerPendienteForm();
+  if (!row) return;
+  await db.pendientes.update(id, row);
   closeModal();
   toast('Actualizado');
-  navigate('pendientes');
+  rerenderView();
 };
 
 window.eliminarPendiente = async (id) => {
   if (!confirm('¿Eliminar?')) return;
   await db.pendientes.remove(id);
-  navigate('pendientes');
+  rerenderView();
 };
 
 // =====================================================
@@ -3258,7 +3443,7 @@ window.verCliente = async (id) => {
         ${pends.length === 0 ? '<p class="text-xs text-slate-500">Sin pendientes.</p>' : pends.slice(0, 6).map(p => `
           <div class="flex items-center gap-2 py-1 text-sm">
             <input type="checkbox" class="rounded" ${p.estado === 'completado' ? 'checked' : ''} onchange="togglePendienteFicha('${p.id}', '${p.estado}', '${c.id}')">
-            <span class="${p.estado === 'completado' ? 'line-through text-slate-400' : ''}">${escapeHtml(p.descripcion)}</span>
+            <span class="${p.estado === 'completado' ? 'line-through text-slate-400' : ''}">${p.para === 'coach' ? '🧢 ' : ''}${escapeHtml(p.descripcion)}</span>
             <span class="text-xs ${p.scope === 'general' ? 'text-emerald-600' : 'text-violet-600'} font-semibold">${p.scope === 'general' ? '📌' : '📅'}</span>
           </div>`).join('')}
       </div>

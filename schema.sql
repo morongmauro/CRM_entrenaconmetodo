@@ -93,7 +93,8 @@ create table if not exists seguimientos (
 create table if not exists pendientes (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users on delete cascade,
-  cliente_id uuid not null references clientes(id) on delete cascade,
+  cliente_id uuid references clientes(id) on delete cascade,  -- opcional si es tarea del coach
+  para text default 'cliente',        -- cliente | coach (de quién es la tarea)
   scope text default 'general',       -- semana | general
   seguimiento_id uuid references seguimientos(id) on delete set null,
   descripcion text not null,
@@ -138,3 +139,10 @@ create index if not exists idx_pagos_cliente     on pagos(cliente_id);
 create index if not exists idx_seg_user_semana   on seguimientos(user_id, semana);
 create index if not exists idx_seg_cliente       on seguimientos(cliente_id);
 create index if not exists idx_pend_user_estado  on pendientes(user_id, estado);
+
+-- ================================================================
+-- MIGRACIÓN · Si ya tenías la tabla "pendientes" creada, corre SOLO
+-- estas dos líneas en el SQL Editor (son seguras de repetir):
+-- ================================================================
+alter table pendientes add column if not exists para text default 'cliente';
+alter table pendientes alter column cliente_id drop not null;
