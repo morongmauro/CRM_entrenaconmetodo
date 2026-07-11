@@ -60,6 +60,67 @@ async function mtApiGet(path) {
   return r.json().catch(() => null);
 }
 
+async function mtApiPost(path, body) {
+  const cfg = mtApiBase();
+  if (!cfg) return null;
+  let token = await mtApiToken();
+  if (!token) return null;
+  const call = (t) => fetch(`${cfg.url}${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).catch(() => null);
+  let r = await call(token);
+  if (r && r.status === 401) {
+    token = await mtApiToken(true);
+    if (!token) return null;
+    r = await call(token);
+  }
+  if (!r || !r.ok) return null;
+  return r.json().catch(() => ({}));
+}
+
+// Escribe las metas (kcal/p/c/g) en el user_data del Mealtracker.
+// Devuelve { ok, causa }. Respeta el formato de claves que ya use el cliente
+// (nuevo: kcal/p/c/g · viejo: calories/protein/carbs/fat) y no toca nada más del blob.
+async function setMealtrackerGoals(mealtrackerId, metas) {
+  const aplicar = (goalsPrevias) => {
+    const goals = { ...(goalsPrevias || {}) };
+    const formatoViejo = goals.calories != null && goals.kcal == null;
+    if (formatoViejo) {
+      goals.calories = metas.kcal; goals.protein = metas.p; goals.carbs = metas.c; goals.fat = metas.g;
+    } else {
+      goals.kcal = metas.kcal; goals.p = metas.p; goals.c = metas.c; goals.g = metas.g;
+    }
+    return goals;
+  };
+
+  // Modo directo (anon key): leer el blob completo, cambiar solo goals, reescribir
+  const mt = mtClient();
+  if (mt) {
+    const { data: row, error } = await mt.from('user_data').select('data').eq('user_id', mealtrackerId).maybeSingle();
+    if (error) return { ok: false, causa: `El Supabase del Mealtracker devolvió un error al leer: "${error.message}".` };
+    if (!row) return { ok: false, causa: 'El cliente no existe en el Mealtracker. Revisa el vínculo en Ajustes → "Sincronizar clientes".' };
+    const blob = row.data || {};
+    blob.goals = aplicar(blob.goals);
+    const { error: e2 } = await mt.from('user_data')
+      .update({ data: blob, updated_at: new Date().toISOString() })
+      .eq('user_id', mealtrackerId);
+    if (e2) return { ok: false, causa: `No se pudo escribir en el Mealtracker: "${e2.message}". Si activaste RLS en user_data, el modo directo ya no permite escribir.` };
+    return { ok: true };
+  }
+
+  // Modo seguro (API de coach): requiere que la app Mealtracker exponga un
+  // endpoint de escritura de metas.
+  if (mtApiBase()) {
+    const res = await mtApiPost('/api/coach-data', { action: 'set_goals', user_id: mealtrackerId, goals: aplicar((await getMealtrackerUserData(mealtrackerId))?.goals) });
+    if (res) return { ok: true };
+    return { ok: false, causa: 'La API de coach del Mealtracker no aceptó el cambio de metas (es de solo lectura). Para enviar metas llena la URL y anon key del Mealtracker en config.js o Ajustes, o agrega el endpoint de escritura en la app Mealtracker.' };
+  }
+
+  return { ok: false, causa: 'No hay conexión configurada al Mealtracker (config.js o Ajustes).' };
+}
+
 // --- Modo directo (legado): lectura con anon key. Deja de funcionar si
 // activas RLS en el Mealtracker; migra al modo seguro en Ajustes. ---
 function mtClient() {
@@ -697,26 +758,27 @@ function checklistHtml(texto, segId) {
       ${items.length > 1 ? `<div class="chk-count">${hechos}/${items.length} completados</div>` : ''}
     </div>`;
 }
-// Checklist interactivo dentro del panel de edición de la semana:
-// refleja el textarea #sg-pend y al marcar/desmarcar actualiza el texto ([x] por línea).
+// Checklist editable dentro del panel de edición de la semana:
+// los bullets se editan directo (texto, check, eliminar) y el estado vive
+// en el textarea oculto #sg-pend ([x] por línea), que es lo que se guarda.
 window.renderPendEditPreview = () => {
   const box = $('#sg-pend-check');
   const ta = $('#sg-pend');
   if (!box || !ta) return;
   const items = parseChecklist(ta.value);
-  if (!items.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  if (!items.length) {
+    box.innerHTML = '<p class="text-xs text-amber-700/70">Nada pedido aún. Escribe abajo y dale "+ Añadir".</p>';
+    return;
+  }
   const hechos = items.filter(i => i.done).length;
-  box.classList.remove('hidden');
   box.innerHTML = `
-    <div class="text-xs font-bold text-amber-800 mb-1">Le pediste:</div>
-    <div class="space-y-1">
-      ${items.map((it, i) => `
-        <label class="chk-item ${it.done ? 'chk-done' : ''}">
-          <input type="checkbox" class="rounded" ${it.done ? 'checked' : ''} onchange="togglePendEditPreview(${i})">
-          <span class="chk-text">${escapeHtml(it.texto)}</span>
-        </label>`).join('')}
-      ${items.length > 1 ? `<div class="chk-count">${hechos}/${items.length} completados</div>` : ''}
-    </div>`;
+    ${items.map((it, i) => `
+      <div class="chk-row ${it.done ? 'chk-done' : ''}">
+        <input type="checkbox" class="rounded" ${it.done ? 'checked' : ''} onchange="togglePendEditPreview(${i})" title="Marcar como hecho">
+        <input class="chk-edit" value="${escapeHtml(it.texto)}" onchange="editarPendEditPreview(${i}, this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" title="Click para editar">
+        <button type="button" class="chk-del" title="Eliminar" onclick="eliminarPendEditPreview(${i})">✕</button>
+      </div>`).join('')}
+    ${items.length > 1 ? `<div class="chk-count">${hechos}/${items.length} completados</div>` : ''}`;
 };
 window.togglePendEditPreview = (idx) => {
   const ta = $('#sg-pend');
@@ -724,6 +786,36 @@ window.togglePendEditPreview = (idx) => {
   if (!items[idx]) return;
   items[idx].done = !items[idx].done;
   ta.value = serializeChecklist(items);
+  renderPendEditPreview();
+};
+window.editarPendEditPreview = (idx, valor) => {
+  const ta = $('#sg-pend');
+  const items = parseChecklist(ta?.value);
+  if (!items[idx]) return;
+  const texto = (valor || '').trim();
+  if (texto) items[idx].texto = texto;
+  else items.splice(idx, 1);   // texto vacío = eliminar el ítem
+  ta.value = serializeChecklist(items);
+  renderPendEditPreview();
+};
+window.eliminarPendEditPreview = (idx) => {
+  const ta = $('#sg-pend');
+  const items = parseChecklist(ta?.value);
+  if (!items[idx]) return;
+  items.splice(idx, 1);
+  ta.value = serializeChecklist(items);
+  renderPendEditPreview();
+};
+window.agregarPendClienteSeg = () => {
+  const inp = $('#sg-pend-nuevo');
+  const ta = $('#sg-pend');
+  const texto = (inp?.value || '').trim();
+  if (!texto || !ta) return;
+  const items = parseChecklist(ta.value);
+  items.push({ done: false, texto });
+  ta.value = serializeChecklist(items);
+  inp.value = '';
+  inp.focus();
   renderPendEditPreview();
 };
 
@@ -1835,8 +1927,12 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
             <div class="text-xs font-bold text-amber-800 uppercase mb-2">👥 Pendientes del cliente (le pides)</div>
-            <div id="sg-pend-check" class="hidden bg-white rounded-lg px-3 py-2 mb-2 ring-1 ring-amber-200"></div>
-            <textarea id="sg-pend" rows="3" placeholder="Uno por línea — se vuelven checklist…" oninput="renderPendEditPreview()">${escapeHtml(s.pendientes_semana || '')}</textarea>
+            <div id="sg-pend-check" class="space-y-1 mb-2"></div>
+            <div class="flex gap-2">
+              <input id="sg-pend-nuevo" placeholder="Ej: enviar video de sentadilla…" onkeydown="if(event.key==='Enter'){event.preventDefault();agregarPendClienteSeg();}">
+              <button type="button" class="btn btn-secondary btn-sm flex-shrink-0" onclick="agregarPendClienteSeg()">+ Añadir</button>
+            </div>
+            <textarea id="sg-pend" class="hidden">${escapeHtml(s.pendientes_semana || '')}</textarea>
             <p class="text-xs text-amber-700 mt-1">Se guardan con la semana y salen como checklist en el timeline y en Actividades.</p>
           </div>
           <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
@@ -2219,6 +2315,7 @@ window.abrirNutricionCliente = async (clienteId) => {
       <div class="bg-blue-50 rounded-xl p-3 text-sm">
         <div class="text-xs font-bold text-blue-800 mb-1">🥗 Meta nutricional configurada</div>
         <div class="text-blue-900 font-semibold">${c.meta_calorias} kcal · ${c.meta_proteina_g}g prote · ${c.meta_grasas_g}g grasas · ${c.meta_carbos_g}g carbos</div>
+        <button class="btn btn-primary btn-sm mt-2" onclick="enviarMetaMealtracker('${c.id}')" title="Cambia la meta en la app Mealtracker del cliente (pide confirmación)">🎯 Enviar meta al Mealtracker</button>
       </div>` : ''}
 
       ${goals && Object.keys(goals).length > 0 ? `
@@ -2228,6 +2325,56 @@ window.abrirNutricionCliente = async (clienteId) => {
       </div>` : ''}
     </div>
   `));
+};
+
+// ===== Enviar la meta nutricional del CRM al Mealtracker =====
+// Un solo botón + confirmación: muestra la meta actual de allá vs. la nueva
+// y solo escribe si el coach confirma. metaOverride permite mandar una meta
+// recién recalculada en el formulario (aún sin guardar en el CRM).
+window.enviarMetaMealtracker = async (clienteId, metaOverride = null) => {
+  const cliente = await db.clientes.get(clienteId);
+  if (!cliente) { toast('Cliente no encontrado'); return; }
+  const meta = metaOverride || {
+    kcal: cliente.meta_calorias,
+    p: cliente.meta_proteina_g,
+    c: cliente.meta_carbos_g,
+    g: cliente.meta_grasas_g,
+  };
+  if (!meta.kcal) { toast('Este cliente no tiene meta nutricional calculada. Calcúlala en su ficha (sección 5).'); return; }
+  if (!mtConfigured()) { toast('Sin conexión al Mealtracker (config.js o Ajustes)'); return; }
+
+  toast('⏳ Consultando Mealtracker…');
+  const mtId = cliente.mealtracker_id || await resolverMealtrackerId(cliente);
+  if (!mtId) { toast('⚠️ No encontré este cliente en el Mealtracker. Vincúlalo en Ajustes → "Sincronizar clientes".'); return; }
+
+  const dataActual = await getMealtrackerUserData(mtId);
+  const gPrev = dataActual?.goals || {};
+  const prevKcal = gPrev.kcal ?? gPrev.calories;
+  const prevTxt = prevKcal
+    ? `${prevKcal} kcal · ${gPrev.p ?? gPrev.protein ?? '—'}g prote · ${gPrev.c ?? gPrev.carbs ?? '—'}g carbos · ${gPrev.g ?? gPrev.fat ?? '—'}g grasas`
+    : 'sin meta definida';
+  const nuevaTxt = `${meta.kcal} kcal · ${meta.p ?? '—'}g prote · ${meta.c ?? '—'}g carbos · ${meta.g ?? '—'}g grasas`;
+
+  const okConfirm = confirm(
+    `🎯 Cambiar la meta en el Mealtracker de ${cliente.nombre}\n\n` +
+    `Meta actual allá: ${prevTxt}\n` +
+    `Meta nueva: ${nuevaTxt}\n\n` +
+    `El cliente la verá de inmediato en su app. ¿Confirmas el cambio?`
+  );
+  if (!okConfirm) return;
+
+  const r = await setMealtrackerGoals(mtId, meta);
+  if (r.ok) toast(`✓ Meta enviada al Mealtracker de ${cliente.nombre}`);
+  else toast(`✗ ${r.causa}`);
+};
+
+// Variante para el formulario de edición: usa la meta recién recalculada
+// (_pendingMeta) si existe, si no la guardada.
+window.enviarMetaMealtrackerForm = () => {
+  const id = window._editingClienteId;
+  if (!id) { toast('Guarda el cliente primero para poder enviar su meta'); return; }
+  const pm = window._pendingMeta;
+  enviarMetaMealtracker(id, pm ? { kcal: pm.meta_calorias, p: pm.meta_proteina_g, c: pm.meta_carbos_g, g: pm.meta_grasas_g } : null);
 };
 
 window.copiarMensajeWhatsApp = async (cliente_id) => {
@@ -2937,7 +3084,10 @@ routes.clientes = async () => {
         <h2 class="text-2xl font-bold text-slate-900">Clientes</h2>
         <p class="text-sm text-slate-500">${activos.length} activos · ${pausa.length} en pausa · ${fin.length} finalizados</p>
       </div>
-      <button class="btn btn-primary" onclick="nuevoCliente()">+ Nuevo cliente</button>
+      <div class="flex gap-2 flex-wrap">
+        <button class="btn btn-secondary" onclick="revisarEntrevistas()" title="Lee las entrevistas iniciales y propone llenar los campos vacíos de las fichas (con tu revisión antes de guardar)">🪄 Completar fichas desde entrevistas</button>
+        <button class="btn btn-primary" onclick="nuevoCliente()">+ Nuevo cliente</button>
+      </div>
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -2984,6 +3134,8 @@ function clienteForm(c = {}) {
               ${['M','F','otro'].map(o => `<option ${c.sexo === o ? 'selected' : ''}>${o}</option>`).join('')}
             </select>
           </div>
+          <div><label>Correo</label><input id="cl-email" type="email" placeholder="cliente@correo.com" value="${escapeHtml(c.email || '')}"></div>
+          <div><label>Teléfono / WhatsApp</label><input id="cl-tel" placeholder="+57 300 000 0000" value="${escapeHtml(c.telefono || '')}"></div>
           <div><label>Ciudad</label><input id="cl-ciudad" value="${escapeHtml(c.ciudad || '')}"></div>
           <div><label>Profesión</label><input id="cl-prof" value="${escapeHtml(c.profesion || '')}"></div>
         </div>
@@ -3060,9 +3212,12 @@ function clienteForm(c = {}) {
             <p class="text-xs text-slate-500 mt-1">1.6-1.8 general · 2.0-2.4 cutting</p>
           </div>
           <div class="col-span-2 bg-white rounded-xl p-3 ring-1 ring-emerald-100">
-            <div class="flex items-baseline justify-between mb-2">
+            <div class="flex items-baseline justify-between mb-2 flex-wrap gap-1">
               <div class="text-xs font-bold text-slate-600 uppercase">Meta nutricional diaria</div>
-              <button type="button" class="btn btn-primary btn-sm" onclick="recalcularMeta()">🧮 Recalcular</button>
+              <div class="flex gap-1.5">
+                <button type="button" class="btn btn-primary btn-sm" onclick="recalcularMeta()">🧮 Recalcular</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="enviarMetaMealtrackerForm()" title="Cambia la meta en la app Mealtracker del cliente (pide confirmación)">🎯 Enviar al Mealtracker</button>
+              </div>
             </div>
             <div id="meta-preview" class="text-sm">
               ${c.meta_calorias ? `
@@ -3137,9 +3292,13 @@ function clienteForm(c = {}) {
         <div class="sec-title">9 · 📋 Entrevista inicial y tags</div>
         <div class="space-y-3">
           <div>
-            <label>Entrevista inicial / notas (registro largo)</label>
+            <div class="flex items-baseline justify-between flex-wrap gap-1">
+              <label>Entrevista inicial / notas (registro largo)</label>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="extraerEntrevistaForm()" title="Lee la entrevista y llena los campos vacíos de la ficha (estatura, correo, fecha de nacimiento, sexo, condiciones médicas…)">🪄 Extraer datos de la entrevista</button>
+            </div>
             <textarea id="cl-notas" rows="8" placeholder="Descripción completa de la primera entrevista: hábitos, historia, contexto, expectativas, y cualquier nota permanente sobre el cliente…">${escapeHtml(c.notas || '')}</textarea>
             <p class="text-xs text-slate-500 mt-1">💡 Todo lo que captaste en la entrevista inicial + notas permanentes. Sirve como referencia del contexto del cliente.</p>
+            <div id="cl-extract-res" class="hidden bg-emerald-50 ring-1 ring-emerald-200 rounded-xl p-3 mt-2 text-xs text-emerald-900"></div>
           </div>
           <div>
             <label>Tags (separa con comas)</label>
@@ -3180,6 +3339,8 @@ window.guardarCliente = async (id = null) => {
     nombre: $('#cl-nombre').value.trim(),
     fecha_nacimiento: $('#cl-nac').value || null,
     sexo: $('#cl-sexo').value || null,
+    email: $('#cl-email').value.trim() || null,
+    telefono: $('#cl-tel').value.trim() || null,
     ciudad: $('#cl-ciudad').value.trim() || null,
     profesion: $('#cl-prof').value.trim() || null,
     objetivo: $('#cl-obj').value.trim() || null,
@@ -3214,12 +3375,273 @@ window.guardarCliente = async (id = null) => {
     notas: $('#cl-notas').value.trim() || null,
   };
   if (!row.nombre) { toast('Falta el nombre'); return; }
-  if (id) await db.clientes.update(id, row);
-  else await db.clientes.insert(row);
+  const r = await guardarClienteSeguro(id, row);
+  if (!r.ok) return;
   window._pendingEncuesta = null;
   window._pendingMeta = null;
   closeModal();
-  toast('Guardado');
+  toast(r.sinColumnas ? '⚠️ Guardado, pero sin correo/teléfono: corre la migración de schema.sql en Supabase' : 'Guardado');
+  navigate('clientes');
+};
+
+// Guarda un cliente tolerando que la BD aún no tenga las columnas nuevas
+// (email/telefono): si Supabase las rechaza, reintenta sin ellas y avisa.
+const COLS_NUEVAS_CLIENTE = ['email', 'telefono'];
+async function guardarClienteSeguro(id, row) {
+  const q = (r) => id ? sb.from('clientes').update(r).eq('id', id) : sb.from('clientes').insert(r);
+  let { error } = await q(row);
+  let sinColumnas = false;
+  if (error && COLS_NUEVAS_CLIENTE.some(col => (error.message || '').includes(`'${col}'`))) {
+    sinColumnas = true;
+    const r2 = { ...row };
+    COLS_NUEVAS_CLIENTE.forEach(col => delete r2[col]);
+    ({ error } = Object.keys(r2).length ? await q(r2) : { error: null });
+  }
+  if (error) { toast(error.message); return { ok: false, sinColumnas }; }
+  _clientesCache = null;
+  return { ok: true, sinColumnas };
+}
+
+// =====================================================
+// EXTRACCIÓN DE DATOS DESDE LA ENTREVISTA INICIAL
+// Lee el texto libre de la entrevista (campo notas) y propone valores SOLO
+// para campos de identidad/salud que estén vacíos. Nunca propone ni toca:
+// seguimientos semanales, días de calendario, ni datos comerciales.
+// =====================================================
+const MESES_ES = { enero: '01', febrero: '02', marzo: '03', abril: '04', mayo: '05', junio: '06', julio: '07', agosto: '08', septiembre: '09', setiembre: '09', octubre: '10', noviembre: '11', diciembre: '12' };
+const KW_PATOLOGIAS = ['hipotiroidismo', 'hipertiroidismo', 'hipertensión', 'hipertension', 'prediabetes', 'prediabético', 'prediabetico', 'diabetes', 'resistencia a la insulina', 'colesterol alto', 'colesterol elevado', 'triglicéridos', 'trigliceridos', 'hígado graso', 'higado graso', 'gastritis', 'colon irritable', 'asma', 'ansiedad', 'depresión', 'depresion', 'ovario poliquístico', 'ovario poliquistico', 'sop', 'apnea', 'migraña', 'migrana', 'anemia', 'artritis', 'artrosis', 'fibromialgia', 'tiroides'];
+const KW_LESIONES = ['hernia', 'lumbalgia', 'escoliosis', 'tendinitis', 'tendinopatía', 'tendinopatia', 'menisco', 'ligamento cruzado', 'manguito rotador', 'fascitis', 'condromalacia', 'esguince', 'fractura', 'luxación', 'luxacion', 'ciática', 'ciatica', 'pinzamiento', 'bursitis', 'túnel carpiano', 'tunel carpiano', 'dolor lumbar', 'dolor de rodilla', 'dolor de hombro', 'dolor de espalda', 'dolor de cadera', 'lesión', 'lesion'];
+
+function extraerDatosEntrevista(texto, c = {}) {
+  const props = [];   // { campo, label, valor, fuente }
+  if (!texto || !texto.trim()) return props;
+  const t = texto;
+  const tLow = t.toLowerCase();
+
+  const snippet = (idx, largo = 70) => {
+    if (idx == null) return '';
+    const ini = Math.max(0, idx - 20);
+    return (ini > 0 ? '…' : '') + t.slice(ini, idx + largo).replace(/\s+/g, ' ').trim() + (idx + largo < t.length ? '…' : '');
+  };
+  const add = (campo, label, valor, idx, nota = '') => {
+    if (valor == null || valor === '') return;
+    if (c[campo]) return;                                 // nunca pisar lo ya diligenciado
+    if (props.some(p => p.campo === campo)) return;       // primera coincidencia gana
+    props.push({ campo, label, valor: String(valor), fuente: snippet(idx), nota });
+  };
+
+  // --- Correo ---
+  const mEmail = t.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/);
+  if (mEmail) add('email', 'Correo', mEmail[0].toLowerCase(), mEmail.index);
+
+  // --- Teléfono: con etiqueta (tel/cel/whatsapp) o formato internacional +XX ---
+  let mTel = t.match(/(?:tel[eé]fono|tel|cel(?:ular)?|whatsapp|wpp|contacto)\s*[:.]?\s*(\+?[\d][\d\s().-]{7,18}\d)/i);
+  if (!mTel) {
+    const mIntl = t.match(/\+\d[\d\s().-]{8,17}\d/);
+    if (mIntl) mTel = { 1: mIntl[0], index: mIntl.index };
+  }
+  if (mTel) {
+    const digitos = (mTel[1] || '').replace(/[^\d+]/g, '');
+    if (digitos.replace('+', '').length >= 10) add('telefono', 'Teléfono', digitos, mTel.index);
+  }
+
+  // --- Estatura (a cm) ---
+  let mEst = tLow.match(/(?:estatura|altura|mide|mido)\D{0,12}(\d{3}|\d[.,]\d{1,2})\s*(m|mts|mt|metros|cm)?\b/);
+  if (!mEst) mEst = tLow.match(/\b(1[.,]\d{2})\s*(m|mts|mt|metros)\b/) || tLow.match(/\b(1[2-9]\d|2[0-2]\d)\s*(cm)\b/);
+  if (mEst) {
+    let est = Number(String(mEst[1]).replace(',', '.'));
+    if (est < 3) est = Math.round(est * 100);   // 1.70 m → 170 cm
+    if (est >= 120 && est <= 225) add('estatura_cm', 'Estatura (cm)', est, mEst.index);
+  }
+
+  // --- Fecha de nacimiento (dd/mm/aaaa, dd-mm-aaaa o "15 de marzo de 1990") ---
+  const aaaaOk = (y) => y >= 1940 && y <= 2012;   // año plausible de nacimiento
+  const norm2 = (n) => String(n).padStart(2, '0');
+  let fnac = null, idxNac = null;
+  let mNac = t.match(/(?:naci[oó]|nacimiento|f\.?\s*(?:de\s*)?nac\w*)\D{0,20}?(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/i);
+  if (mNac) {
+    let y = Number(mNac[3]); if (y < 100) y += y > 25 ? 1900 : 2000;
+    if (aaaaOk(y)) { fnac = `${y}-${norm2(mNac[2])}-${norm2(mNac[1])}`; idxNac = mNac.index; }
+  }
+  if (!fnac) {
+    mNac = t.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+    if (mNac && aaaaOk(Number(mNac[3])) && Number(mNac[2]) <= 12 && Number(mNac[1]) <= 31) {
+      fnac = `${mNac[3]}-${norm2(mNac[2])}-${norm2(mNac[1])}`; idxNac = mNac.index;
+    }
+  }
+  if (!fnac) {
+    mNac = tLow.match(/(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+(?:de\s+|del\s+)?(\d{4})/);
+    if (mNac && aaaaOk(Number(mNac[3]))) { fnac = `${mNac[3]}-${MESES_ES[mNac[2]]}-${norm2(mNac[1])}`; idxNac = mNac.index; }
+  }
+  if (fnac) add('fecha_nacimiento', 'Fecha de nacimiento', fnac, idxNac);
+  else {
+    // Solo edad → fecha aproximada (la edad alimenta el cálculo de la meta)
+    const mEdad = tLow.match(/(?:tiene|tengo|edad\s*[:=]?)\s*(\d{1,2})\s*años/) || tLow.match(/(?<!hace\s)(\b\d{1,2})\s*años\b/);
+    if (mEdad) {
+      const edad = Number(mEdad[1]);
+      if (edad >= 14 && edad <= 85 && !c.fecha_nacimiento) {
+        const y = new Date().getFullYear() - edad;
+        add('fecha_nacimiento', 'Fecha de nacimiento', `${y}-01-01`, mEdad.index, `aproximada: solo dice "${edad} años"`);
+      }
+    }
+  }
+
+  // --- Sexo ---
+  let mSexo = tLow.match(/sexo\s*[:=]?\s*(m\b|f\b|masculino|femenino|hombre|mujer)/);
+  if (!mSexo) mSexo = tLow.match(/\b(masculino|femenino|hombre|mujer|varón|varon)\b/);
+  if (mSexo) {
+    const v = mSexo[1] || mSexo[0];
+    const sexo = /^(f|femenin|mujer)/.test(v) ? 'F' : 'M';
+    add('sexo', 'Sexo', sexo, mSexo.index);
+  }
+
+  // --- Ciudad ---
+  const mCiudad = t.match(/(?:ciudad|vive en|vivo en|reside en|radicad[oa] en|ubicad[oa] en|desde)\s*[:=]?\s*([A-ZÁÉÍÓÚÑ][a-záéíóúñü]+(?:\s+(?:de|del|la|las|los)?\s*[A-ZÁÉÍÓÚÑ][a-záéíóúñü]+)?)/);
+  if (mCiudad) add('ciudad', 'Ciudad', mCiudad[1].trim(), mCiudad.index);
+
+  // --- Profesión ---
+  let mProf = t.match(/(?:profesi[oó]n|ocupaci[oó]n)\s*[:=]?\s*([^\n,.;]{3,40})/i);
+  if (!mProf) mProf = t.match(/trabaja\s+(?:como|de)\s+([^\n,.;]{3,40})/i);
+  if (mProf) add('profesion', 'Profesión', mProf[1].trim(), mProf.index);
+
+  // --- Condiciones médicas / patologías ---
+  let mPat = t.match(/(?:condici[oó]n(?:es)?\s+m[eé]dica(?:s)?|patolog[ií]a(?:s)?|diagn[oó]stico|enfermedad(?:es)?)\s*[:=]\s*([^\n]{3,150})/i);
+  if (mPat) add('patologias', 'Condiciones médicas', mPat[1].trim(), mPat.index);
+  else {
+    const encontradas = [];
+    let primerIdx = null;
+    for (const kw of KW_PATOLOGIAS) {
+      const idx = tLow.indexOf(kw);
+      if (idx === -1) continue;
+      if (/\b(sin|no tiene|no presenta|niega|descarta)\b[^.\n]{0,30}$/.test(tLow.slice(Math.max(0, idx - 40), idx))) continue;  // "sin diabetes"
+      if (!encontradas.some(e => kw.includes(e) || e.includes(kw))) encontradas.push(kw);
+      if (primerIdx === null) primerIdx = idx;
+    }
+    if (encontradas.length) add('patologias', 'Condiciones médicas', encontradas.join(', '), primerIdx);
+  }
+
+  // --- Restricciones / lesiones ---
+  let mLes = t.match(/(?:lesi[oó]n(?:es)?|restricci[oó]n(?:es)?)\s*[:=]\s*([^\n]{3,150})/i);
+  if (mLes) add('restricciones_lesiones', 'Restricciones / lesiones', mLes[1].trim(), mLes.index);
+  else {
+    const frases = [];
+    let primerIdx = null;
+    const oraciones = t.split(/(?<=[.;\n])/);
+    for (const kw of KW_LESIONES) {
+      const idx = tLow.indexOf(kw);
+      if (idx === -1) continue;
+      if (/\b(sin|no tiene|no presenta|niega|ninguna)\b[^.\n]{0,30}$/.test(tLow.slice(Math.max(0, idx - 40), idx))) continue;
+      const oracion = oraciones.find(o => o.toLowerCase().includes(kw));
+      const frase = (oracion || kw).replace(/\s+/g, ' ').trim().replace(/[.;\s]+$/, '');
+      if (frase && !frases.some(f => f.includes(frase) || frase.includes(f))) frases.push(frase.length > 90 ? kw : frase);
+      if (primerIdx === null) primerIdx = idx;
+      if (frases.join('; ').length > 200) break;
+    }
+    if (frases.length) add('restricciones_lesiones', 'Restricciones / lesiones', frases.join('; '), primerIdx);
+  }
+
+  // --- Antecedentes deportivos ---
+  let mAnt = t.match(/antecedentes\s+deportivos?\s*[:=]?\s*([^\n]{3,150})/i);
+  if (!mAnt) mAnt = t.match(/(?:practic(?:ó|aba|a)|jug(?:ó|aba)|entren(?:ó|aba)|compet[ií]a)\s+([^\n,.;]{3,80})/i);
+  if (mAnt) add('antecedentes_deportivos', 'Antecedentes deportivos', mAnt[1].trim(), mAnt.index);
+
+  return props;
+}
+
+// --- Botón del formulario: llena los campos vacíos con lo extraído ---
+const CAMPO_A_INPUT = {
+  email: 'cl-email', telefono: 'cl-tel', fecha_nacimiento: 'cl-nac', sexo: 'cl-sexo',
+  ciudad: 'cl-ciudad', profesion: 'cl-prof', estatura_cm: 'cl-alt',
+  patologias: 'cl-pat', restricciones_lesiones: 'cl-rest', antecedentes_deportivos: 'cl-ant',
+};
+window.extraerEntrevistaForm = () => {
+  const texto = $('#cl-notas')?.value || '';
+  if (!texto.trim()) { toast('La entrevista está vacía: pega primero el texto en el recuadro'); return; }
+  // "Vacío" se evalúa contra lo que hay AHORA en el formulario
+  const actual = {};
+  for (const [campo, inputId] of Object.entries(CAMPO_A_INPUT)) actual[campo] = $(`#${inputId}`)?.value?.trim() || '';
+  const props = extraerDatosEntrevista(texto, actual);
+  const res = $('#cl-extract-res');
+  if (!props.length) {
+    if (res) { res.classList.remove('hidden'); res.innerHTML = 'No encontré datos nuevos que falten en la ficha. Los campos ya llenos no se tocan.'; }
+    return;
+  }
+  for (const p of props) {
+    const el = $(`#${CAMPO_A_INPUT[p.campo]}`);
+    if (el) el.value = p.valor;
+  }
+  if (res) {
+    res.classList.remove('hidden');
+    res.innerHTML = `
+      <div class="font-bold mb-1">🪄 Llené ${props.length} campo(s) desde la entrevista:</div>
+      ${props.map(p => `<div>✓ <strong>${p.label}:</strong> ${escapeHtml(p.valor)}${p.nota ? ` <span class="text-amber-700">(${escapeHtml(p.nota)})</span>` : ''}</div>`).join('')}
+      <div class="text-emerald-700 mt-1">Revisa y corrige lo que haga falta. Nada se guarda hasta que des "Guardar".</div>`;
+  }
+  toast(`🪄 ${props.length} campo(s) diligenciados · revisa antes de guardar`);
+};
+
+// --- Revisión masiva: extrae de las entrevistas de TODOS los clientes ---
+window.revisarEntrevistas = async () => {
+  const clientes = await db.clientes.refresh();
+  const packs = clientes
+    .filter(c => c.notas && c.notas.trim())
+    .map(c => ({ clienteId: c.id, nombre: c.nombre, props: extraerDatosEntrevista(c.notas, c) }))
+    .filter(p => p.props.length);
+  if (!packs.length) { toast('Nada por diligenciar: no encontré en las entrevistas datos que falten en las fichas'); return; }
+  window._entrevistaProps = packs;
+  const total = packs.reduce((a, p) => a + p.props.length, 0);
+  openModal(modalShell('🪄 Completar fichas desde entrevistas', `
+    <div class="text-sm text-slate-600 mb-3">Encontré <strong>${total} dato(s)</strong> en las entrevistas de <strong>${packs.length} cliente(s)</strong> que faltan en sus fichas. Solo se llenan campos vacíos: no se tocan seguimientos, calendario de entreno ni datos comerciales. Desmarca lo que no quieras y edita el valor si hace falta.</div>
+    <div class="space-y-4 max-h-[55vh] overflow-y-auto pr-1">
+      ${packs.map((pk, ci) => `
+        <div class="bg-slate-50 rounded-xl p-3">
+          <div class="font-bold text-slate-800 text-sm mb-2">${escapeHtml(pk.nombre)}</div>
+          <div class="space-y-2">
+            ${pk.props.map((p, pi) => `
+              <div class="bg-white rounded-lg p-2 ring-1 ring-slate-200">
+                <div class="flex items-center gap-2">
+                  <input type="checkbox" id="ext-${ci}-${pi}" class="rounded" checked>
+                  <label for="ext-${ci}-${pi}" class="!mb-0 !text-xs whitespace-nowrap">${p.label}</label>
+                  <input id="extv-${ci}-${pi}" class="!py-1 !text-xs flex-1" value="${escapeHtml(p.valor)}">
+                </div>
+                ${p.nota ? `<div class="text-xs text-amber-700 mt-1 ml-6">⚠️ ${escapeHtml(p.nota)}</div>` : ''}
+                ${p.fuente ? `<div class="text-xs text-slate-400 mt-1 ml-6">«${escapeHtml(p.fuente)}»</div>` : ''}
+              </div>`).join('')}
+          </div>
+        </div>`).join('')}
+    </div>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-primary" onclick="aplicarEntrevistas()">Aplicar seleccionados</button>
+  `), { wide: true });
+};
+
+window.aplicarEntrevistas = async () => {
+  const packs = window._entrevistaProps || [];
+  const updates = [];
+  packs.forEach((pk, ci) => {
+    const row = {};
+    pk.props.forEach((p, pi) => {
+      if (!$(`#ext-${ci}-${pi}`)?.checked) return;
+      let val = ($(`#extv-${ci}-${pi}`)?.value || '').trim();
+      if (!val) return;
+      if (p.campo === 'estatura_cm') { const n = Number(val); if (!n) return; val = n; }
+      row[p.campo] = val;
+    });
+    if (Object.keys(row).length) updates.push({ id: pk.clienteId, nombre: pk.nombre, row });
+  });
+  if (!updates.length) { toast('No hay datos seleccionados'); return; }
+  const totalCampos = updates.reduce((a, u) => a + Object.keys(u.row).length, 0);
+  if (!confirm(`Vas a diligenciar ${totalCampos} dato(s) en ${updates.length} cliente(s).\nSolo se llenan campos vacíos de la ficha.\n\n¿Confirmas?`)) return;
+  let ok = 0, sinCols = false;
+  for (const u of updates) {
+    const r = await guardarClienteSeguro(u.id, u.row);
+    if (r.ok) ok++;
+    if (r.sinColumnas) sinCols = true;
+  }
+  window._entrevistaProps = null;
+  closeModal();
+  toast(`✓ ${ok}/${updates.length} fichas actualizadas${sinCols ? ' · correo/teléfono requieren la migración de schema.sql' : ''}`);
   navigate('clientes');
 };
 
@@ -3445,10 +3867,12 @@ window.verCliente = async (id) => {
       </div>
 
       <!-- 1. IDENTIDAD -->
-      ${edad || c.ciudad || c.profesion ? `
+      ${edad || c.ciudad || c.profesion || c.email || c.telefono ? `
         <div class="sec sec-slate space-y-1">
           <div class="sec-title">1 · 👤 Identidad</div>
           ${edad ? `<div><span class="text-slate-500">Edad:</span> <strong>${edad} años</strong> ${c.sexo ? `(${c.sexo})` : ''}</div>` : ''}
+          ${c.email ? `<div><span class="text-slate-500">Correo:</span> <strong>${escapeHtml(c.email)}</strong></div>` : ''}
+          ${c.telefono ? `<div><span class="text-slate-500">Teléfono:</span> <strong>${escapeHtml(c.telefono)}</strong></div>` : ''}
           ${c.ciudad ? `<div><span class="text-slate-500">Ciudad:</span> <strong>${escapeHtml(c.ciudad)}</strong></div>` : ''}
           ${c.profesion ? `<div><span class="text-slate-500">Profesión:</span> <strong>${escapeHtml(c.profesion)}</strong></div>` : ''}
         </div>` : ''}
@@ -3573,7 +3997,10 @@ window.verCliente = async (id) => {
           <div class="text-blue-900 font-semibold">${c.meta_calorias} kcal · ${c.meta_proteina_g}g prote · ${c.meta_grasas_g}g grasas · ${c.meta_carbos_g}g carbos</div>
           <div class="text-xs text-blue-700 mt-1">${c.meta_metodo || ''} · Nivel: ${c.nivel_actividad?.replace('_',' ') || '—'} · PAL ${c.pal_factor || '—'}</div>
           ${c.meta_argumento ? `<details class="mt-2"><summary class="text-xs text-blue-700 cursor-pointer">Ver argumento del cálculo</summary><pre class="text-xs text-slate-600 mt-1 whitespace-pre-wrap">${escapeHtml(c.meta_argumento)}</pre></details>` : ''}
-          ${c.mealtracker_id ? `<button class="mt-2 text-xs text-blue-700 font-semibold hover:underline" onclick="abrirNutricionCliente('${c.id}')">📊 Ver dashboard de alimentación</button>` : ''}
+          <div class="flex gap-2 flex-wrap mt-2">
+            ${mtConfigured() ? `<button class="btn btn-primary btn-sm" onclick="enviarMetaMealtracker('${c.id}')" title="Cambia la meta en la app Mealtracker del cliente (pide confirmación)">🎯 Enviar meta al Mealtracker</button>` : ''}
+            ${c.mealtracker_id ? `<button class="text-xs text-blue-700 font-semibold hover:underline" onclick="abrirNutricionCliente('${c.id}')">📊 Ver dashboard de alimentación</button>` : ''}
+          </div>
         </div>` : ''}
 
       <div class="sec sec-teal">

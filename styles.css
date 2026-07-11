@@ -50,6 +50,27 @@ label.chk-item.chk-done .chk-text { text-decoration: line-through; color: #94a3b
 label.chk-item.chk-ink { color: #334155; } /* variante neutra (fuera de cajas ámbar) */
 .chk-count { font-size: 0.66rem; color: #94a3b8; padding-top: 0.15rem; }
 
+/* Fila editable de checklist: mismo look que chk-item pero el texto es un input */
+.chk-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-size: 0.75rem; font-weight: 500; color: #78350f;
+}
+.chk-row input[type="checkbox"] { flex-shrink: 0; }
+.chk-row .chk-edit {
+  flex: 1; min-width: 0;
+  border: 1px solid transparent; background: transparent;
+  padding: 0.15rem 0.35rem; border-radius: 0.4rem;
+  font-size: 0.75rem; font-weight: 500; color: inherit;
+}
+.chk-row .chk-edit:hover { border-color: #fcd34d; background: #fffbeb; }
+.chk-row .chk-edit:focus { border-color: var(--brand-olive); background: white; box-shadow: 0 0 0 2px rgba(96,108,56,0.12); }
+.chk-row.chk-done .chk-edit { text-decoration: line-through; color: #94a3b8; font-weight: 400; }
+.chk-row .chk-del {
+  flex-shrink: 0; background: none; border: none; cursor: pointer;
+  color: #cbd5e1; font-size: 0.75rem; padding: 0.1rem 0.25rem; border-radius: 0.3rem;
+}
+.chk-row .chk-del:hover { color: #dc2626; background: #fee2e2; }
+
 .btn { padding: 0.55rem 1.1rem; border-radius: 0.625rem; font-weight: 600; font-size: 0.875rem; cursor: pointer; transition: all 0.15s; border: none; display: inline-flex; align-items: center; gap: 0.4rem; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-primary { background-color: var(--brand-olive); color: white; box-shadow: 0 1px 3px rgba(96,108,56,0.35); }
