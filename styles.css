@@ -162,6 +162,37 @@ tr:hover td { background-color: #f8fafc; }
 .day-chip span.plan { border-style: dashed; border-color: var(--brand-olive); color: var(--brand-olive); }
 .day-chip input:checked + span { background: var(--brand-olive); border-color: var(--brand-olive); border-style: solid; color: white; }
 
+/* ===== Seguimiento rediseñado: contexto (franja) + pilares de registro ===== */
+.seg-section-title {
+  font-size: 0.7rem; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.04em; color: #475569; margin-bottom: 0.6rem;
+}
+/* Franja de contexto: columnas que se leen de izquierda a derecha */
+.ctx-strip {
+  display: grid; grid-template-columns: repeat(5, minmax(180px, 1fr));
+  gap: 0.6rem; overflow-x: auto; padding-bottom: 0.35rem;
+}
+@media (max-width: 900px) { .ctx-strip { grid-auto-flow: column; grid-template-columns: none; grid-auto-columns: 78%; } }
+.ctx-col {
+  background: white; border: 1px solid #e2e8f0; border-radius: 0.75rem;
+  padding: 0.7rem 0.8rem; min-width: 0;
+}
+.ctx-col-title {
+  font-size: 0.68rem; font-weight: 800; color: #334155;
+  margin-bottom: 0.45rem; text-transform: none; letter-spacing: normal;
+}
+/* Pilares de registro: 3 en fila, se apilan en pantallas angostas */
+.seg-pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; align-items: start; }
+@media (max-width: 860px) { .seg-pillars { grid-template-columns: 1fr; } }
+.seg-pillar {
+  border-radius: 0.9rem; padding: 1rem; border: 1px solid;
+  display: flex; flex-direction: column; gap: 0.7rem;
+}
+.seg-pillar-title { font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; }
+.seg-pillar-ent  { background: #ecfdf5; border-color: #a7f3d0; } .seg-pillar-ent  .seg-pillar-title { color: #065f46; }
+.seg-pillar-alim { background: #eff6ff; border-color: #bfdbfe; } .seg-pillar-alim .seg-pillar-title { color: #1e40af; }
+.seg-pillar-gen  { background: #f8fafc; border-color: #e2e8f0; } .seg-pillar-gen  .seg-pillar-title { color: #334155; }
+
 /* ===== Navegador de semana en el modal de seguimiento ===== */
 .seg-wk-nav {
   padding: 0.12rem 0.5rem; border-radius: 0.4rem; border: none;

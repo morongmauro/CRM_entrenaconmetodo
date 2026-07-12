@@ -153,6 +153,46 @@ async function getMealtrackerUserData(mealtrackerId) {
   return row.data || null;
 }
 
+// Junta TODAS las cuentas del Mealtracker que tengan el MISMO nombre que el
+// cliente (duplicados que se crean cuando entra desde otro dispositivo/sesión)
+// y fusiona su history/historyDetail — exactamente como lo hace el
+// CoachDashboard del Mealtracker. Sin esto, el CRM leía una sola cuenta y
+// contaba de menos los días registrados.
+let _mtMergedCache = { key: null, at: 0, data: null };
+async function getMealtrackerDataMerged(cliente) {
+  if (!cliente || !mtConfigured()) return null;
+  // Cache corto por cliente: la vista de nutrición pide varias semanas seguidas
+  const ck = `${cliente.id || ''}|${normalizeName(cliente.nombre)}`;
+  if (_mtMergedCache.key === ck && (Date.now() - _mtMergedCache.at) < 30000) return _mtMergedCache.data;
+  const users = await listarClientesMealtracker();
+  const target = normalizeName(cliente.nombre);
+  // ids del mismo nombre, más reciente primero (para que "gane" el más nuevo por fecha)
+  let ids = users
+    .filter(u => normalizeName(u.name) === target)
+    .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
+    .map(u => u.user_id);
+  if (cliente.mealtracker_id && !ids.includes(cliente.mealtracker_id)) ids.unshift(cliente.mealtracker_id);
+  if (!ids.length && cliente.mealtracker_id) ids = [cliente.mealtracker_id];
+  if (!ids.length) return null;
+
+  const datas = (await Promise.all(ids.map(id => getMealtrackerUserData(id)))).filter(Boolean);
+  if (!datas.length) return null;
+
+  const history = {}, historyDetail = {};
+  let goals = null, today = null, today_totals = null, today_water = 0;
+  for (const d of datas) {                     // datas ya viene en orden de más reciente primero
+    for (const [date, tot] of Object.entries(d.history || {})) if (!history[date]) history[date] = tot;
+    for (const [date, ent] of Object.entries(d.historyDetail || {})) if (!historyDetail[date]) historyDetail[date] = ent;
+    if (!goals && d.goals && Object.keys(d.goals).length) goals = d.goals;
+    if (d.today && d.today_totals && Number(d.today_totals.kcal) > 0 && (!today || d.today > today)) {
+      today = d.today; today_totals = d.today_totals; today_water = d.today_water || 0;
+    }
+  }
+  const merged = { history, historyDetail, goals: goals || (datas[0].goals || {}), today, today_totals, today_water, _cuentas: datas.length };
+  _mtMergedCache = { key: ck, at: Date.now(), data: merged };
+  return merged;
+}
+
 // Cuando la lectura falla, prueba la conexión paso a paso y devuelve la causa
 // más probable, para no mostrar solo "no se pudo conectar".
 async function mtDiagnostico(mealtrackerId) {
@@ -185,11 +225,15 @@ function semanaISOToRange(semanaISO) {
   return [start.toISOString().slice(0, 10), end.toISOString().slice(0, 10)];
 }
 
-// Trae el resumen de una semana desde el mealtracker externo
-async function getMealtrackerWeek(mealtrackerId, semanaISO) {
-  const d = await getMealtrackerUserData(mealtrackerId);
+// Trae el resumen de una semana del cliente (fusionando sus cuentas duplicadas)
+async function getMealtrackerWeek(cliente, semanaISO) {
+  const d = await getMealtrackerDataMerged(cliente);
   if (!d) return null;
+  return resumenSemanaDeData(d, semanaISO);
+}
 
+// Cuenta los días de una semana a partir de un blob de datos ya fusionado.
+function resumenSemanaDeData(d, semanaISO) {
   const goals = d.goals || {};
   const history = d.history || {};
   const [ini, fin] = semanaISOToRange(semanaISO);
@@ -1869,6 +1913,76 @@ function renderSegBoard(clientes, allSegs) {
 }
 
 // =====================================================
+// Franja de CONTEXTO del seguimiento: la "película 360" del cliente que se
+// lee de izquierda a derecha. 5 bloques auto-generados a partir de la data.
+// =====================================================
+function ctxSeguimientoHTML(cliente, past, pendsCliente) {
+  const recientes = past.slice(0, 4);
+  const proms = recientes.map(helpers.promedioAdh).filter(v => v !== null);
+  const promAdh = proms.length ? proms.reduce((a, b) => a + b, 0) / proms.length : null;
+  let tend = '→', tcol = '#94a3b8';
+  if (past.length >= 2) {
+    const a = helpers.promedioAdh(past[0]), b = helpers.promedioAdh(past[1]);
+    if (a !== null && b !== null) { if (a > b + 0.3) { tend = '↗'; tcol = '#059669'; } else if (a < b - 0.3) { tend = '↘'; tcol = '#dc2626'; } }
+  }
+  const ult = past[0];
+  const animos = { excelente: '🤩', bien: '😊', neutro: '😐', bajo: '😕', 'muy bajo': '😔' };
+  const fase = (FASES_PROGRAMA.find(f => f.key === cliente.fase_programa)?.label) || '';
+  const linea = (t) => `<div class="text-xs text-slate-600 mb-1">${t}</div>`;
+  const col = (titulo, color, inner) => `<div class="ctx-col" style="border-top:3px solid ${color}"><div class="ctx-col-title">${titulo}</div>${inner || linea('<span class="text-slate-400">—</span>')}</div>`;
+
+  // 1. Panorama
+  const panorama = [
+    cliente.objetivo ? linea(`🎯 <strong>${escapeHtml(cliente.objetivo)}</strong>`) : '',
+    fase ? linea(`Fase: ${fase}`) : '',
+    linea(`${past.length} semana(s) registradas`),
+    promAdh !== null ? linea(`Adherencia 4 sem: <strong style="color:${promAdh >= 7.5 ? '#059669' : promAdh >= 5 ? '#d97706' : '#dc2626'}">${promAdh.toFixed(1)}/10</strong> <span style="color:${tcol};font-weight:700">${tend}</span>`) : linea('Sin adherencia previa'),
+    ult && ult.estado_animo ? linea(`Ánimo última: ${animos[ult.estado_animo] || ''} ${ult.estado_animo}`) : '',
+  ].join('');
+
+  // 2. Entrenamiento
+  const filaEnt = (s2) => {
+    const f = s2.fuerza_planeados ? `${s2.fuerza_ejecutados ?? 0}/${s2.fuerza_planeados}` : '—';
+    const comp = s2.cardio_ejecutados ? ` +${s2.cardio_ejecutados}d compl.` : '';
+    return `<div class="text-xs text-slate-600">${fmt.labelSemana(s2.semana)}: fuerza <strong>${f}</strong>${comp}${s2.score_entreno != null ? ` · <span style="color:#10b981;font-weight:700">${Math.round(s2.score_entreno)}%</span>` : ''}</div>`;
+  };
+  const streakF = calcStreakDim(past, s2 => s2.fuerza_planeados > 0 && (s2.fuerza_ejecutados / s2.fuerza_planeados) >= 0.75);
+  const entreno = (recientes.length ? recientes.slice(0, 3).map(filaEnt).join('') : linea('Sin registros de entreno'))
+    + (streakF > 1 ? `<div class="text-xs mt-1" style="color:#059669;font-weight:600">🔥 ${streakF} sem cumpliendo fuerza</div>` : '')
+    + (metaDiasEntreno(cliente) ? `<div class="text-xs text-slate-400 mt-1">Meta: ${metaDiasEntreno(cliente)} días/sem</div>` : '');
+
+  // 3. Alimentación
+  const filaAlim = (s2) => `<div class="text-xs text-slate-600">${fmt.labelSemana(s2.semana)}: ${s2.kcal_promedio ?? '—'} kcal · ${s2.proteina_promedio_g ?? '—'}g P · ${s2.dias_registro_alim ?? 0}/7 reg</div>`;
+  const alim = (recientes.length ? recientes.slice(0, 3).map(filaAlim).join('') : linea('Sin registros de alimentación'))
+    + (cliente.meta_calorias ? `<div class="text-xs text-slate-400 mt-1">Meta: ${cliente.meta_calorias} kcal · ${cliente.meta_proteina_g}g P</div>` : `<div class="text-xs text-amber-600 mt-1">Sin meta definida</div>`);
+
+  // 4. Salud y lesiones
+  const salud = [
+    cliente.lesion_actual ? `<div class="text-xs text-red-700 mb-1">🩹 <strong>Lesión:</strong> ${escapeHtml(cliente.lesion_actual)}${cliente.lesion_estado ? ` (${cliente.lesion_estado.replace('_', ' ')})` : ''}</div>` : '',
+    cliente.restricciones_lesiones ? `<div class="text-xs text-red-700 mb-1"><strong>Restric.:</strong> ${escapeHtml(cliente.restricciones_lesiones)}</div>` : '',
+    cliente.patologias ? `<div class="text-xs text-red-700 mb-1"><strong>Patologías:</strong> ${escapeHtml(cliente.patologias)}</div>` : '',
+    cliente.suplementos ? `<div class="text-xs text-slate-600 mb-1">💊 ${escapeHtml(cliente.suplementos)}</div>` : '',
+  ].filter(Boolean).join('') || linea('Sin alertas de salud ✓');
+
+  // 5. Pendientes y foco
+  const abiertos = pendsCliente.filter(p => p.estado === 'abierto');
+  const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+  const cands = [
+    ['Entrenamiento', avg(recientes.map(s2 => s2.score_entreno).filter(v => v != null))],
+    ['Alim · metas', avg(recientes.map(s2 => s2.score_alim_metas).filter(v => v != null))],
+    ['Registro comidas', avg(recientes.map(s2 => s2.score_alim_registro).filter(v => v != null))],
+  ].filter(c => c[1] != null).sort((a, b) => a[1] - b[1]);
+  const foco = cands.length && cands[0][1] < 75 ? `<div class="text-xs mt-1" style="color:#d97706;font-weight:600">👉 Reforzar: ${cands[0][0]} (${Math.round(cands[0][1])}%)</div>` : '';
+  const pend = (abiertos.length ? abiertos.slice(0, 6).map(p => `<div class="text-xs text-slate-600">${p.para === 'coach' ? '🧢' : '👥'} ${escapeHtml(p.descripcion)}</div>`).join('') : linea('Sin pendientes abiertos ✓')) + foco;
+
+  return col('📌 Panorama', '#0ea5e9', panorama)
+    + col('🏋️ Entrenamiento', '#10b981', entreno)
+    + col('🥗 Alimentación', '#3b82f6', alim)
+    + col('⚕️ Salud y lesiones', '#ef4444', salud)
+    + col('✅ Pendientes y foco', '#8b5cf6', pend);
+}
+
+// =====================================================
 // MODAL: SEGUIMIENTO con panel contexto
 // =====================================================
 async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
@@ -1885,12 +1999,21 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
     if (existing) s = existing;
   }
 
-  const resumen = generarResumen(cliente, segsCliente.filter(x => x.id !== s.id), pendsCliente);
-  const abiertos = pendsCliente.filter(p => p.estado === 'abierto');
-
   // Rango lunes-domingo de la semana + si es la semana en curso (no dejar ir al futuro)
   const [wkIni, wkFin] = semanaISOToRange(semana);
   const esSemanaActual = semana >= fmt.semanaISO();
+
+  // Serie para la gráfica de tendencia de cumplimiento (últimas 8 semanas, cronológico)
+  const chartSegs = segsCliente.slice().sort((a, b) => a.semana.localeCompare(b.semana)).slice(-8);
+  const chartLabels = chartSegs.map(x => fmt.labelSemana(x.semana));
+  const chartSerie = (key, color, label) => ({ label, color, points: chartSegs.map(x => x[key] != null ? x[key] : null) });
+  const tendenciaChart = chartSegs.length >= 2
+    ? lineChart([
+        chartSerie('score_entreno', '#10b981', 'Entreno'),
+        chartSerie('score_alim_metas', '#3b82f6', 'Alim · metas'),
+        chartSerie('score_alim_registro', '#8b5cf6', 'Alim · registro'),
+      ], chartLabels, { yMin: 0, yMax: 100, height: 150 })
+    : '<p class="text-xs text-slate-400 text-center py-4">Necesitas 2+ semanas registradas para ver la tendencia.</p>';
 
   const html = `
     <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-10">
@@ -1909,19 +2032,34 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
       <button class="btn btn-ghost" onclick="closeModal()">✕</button>
     </div>
 
-    <div class="grid grid-cols-12 flex-1 overflow-hidden">
+    <div class="p-5 space-y-5">
 
-      <!-- FORM -->
-      <div class="col-span-12 lg:col-span-7 p-6 overflow-y-auto space-y-4">
-        <!-- ENTRENO: solo números contra la meta (sin calendario) -->
-        <div class="bg-slate-50 rounded-xl p-4 space-y-3">
-          <div class="flex items-baseline justify-between flex-wrap gap-2">
-            <div class="text-xs font-bold text-slate-600 uppercase">🏋️ Entrenamiento</div>
+      <!-- CONTEXTO · la película 360, se lee de izquierda a derecha -->
+      <div>
+        <div class="seg-section-title">📖 Contexto · la película del cliente <span style="text-transform:none;letter-spacing:normal;font-weight:400;color:#94a3b8">(lee de izquierda a derecha)</span></div>
+        <div class="ctx-strip">${ctxSeguimientoHTML(cliente, segsCliente.filter(x => x.id !== s.id), pendsCliente)}</div>
+      </div>
+
+      <!-- TENDENCIA de cumplimiento -->
+      <div>
+        <div class="seg-section-title flex items-center justify-between">
+          <span>📈 Tendencia de cumplimiento</span>
+          <span class="flex" style="text-transform:none;letter-spacing:normal">${legendDot('#10b981', 'Entreno')}${legendDot('#3b82f6', 'Alim · metas')}${legendDot('#8b5cf6', 'Alim · registro')}</span>
+        </div>
+        <div class="bg-slate-50 rounded-xl p-3">${tendenciaChart}</div>
+      </div>
+
+      <!-- REGISTRO · 3 pilares -->
+      <div>
+        <div class="seg-section-title">✍️ Registro de la semana</div>
+        <div class="seg-pillars">
+
+          <!-- PILAR ENTRENAMIENTO -->
+          <div class="seg-pillar seg-pillar-ent">
+            <div class="seg-pillar-title">🏋️ Entrenamiento</div>
             <div class="text-xs text-slate-500">${metaDiasEntreno(cliente)
               ? `Meta fuerza: <strong>${metaDiasEntreno(cliente)} días</strong>/sem${(cliente.dias_entreno || []).length ? ` (${cliente.dias_entreno.join(' · ')})` : ''}`
-              : 'Sin meta de fuerza · defínela en la ficha del cliente'}</div>
-          </div>
-          <div class="grid grid-cols-2 gap-3">
+              : 'Sin meta de fuerza · defínela en la ficha'}</div>
             <div>
               <label class="text-xs">Fuerza — meta vs hechas</label>
               <div class="flex items-center gap-2">
@@ -1932,27 +2070,39 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
               </div>
             </div>
             <div>
-              <label class="text-xs">Complementaria — días que hizo algo (0-7)</label>
+              <label class="text-xs">Complementaria — días (0-7)${cliente.actividades_complementarias ? ` · <span style="text-transform:none;font-weight:400" class="text-slate-400">${escapeHtml(cliente.actividades_complementarias)}</span>` : ''}</label>
               <div class="flex items-center gap-2">
                 <input id="sg-ce" type="number" min="0" max="7" class="w-16" value="${s.cardio_ejecutados ?? ''}" placeholder="0" onchange="recalcScores()">
                 <span id="sg-c-pct" class="text-sm font-bold text-violet-600"></span>
-                ${cliente.actividades_complementarias ? `<span class="ml-auto text-xs text-slate-400 truncate" title="${escapeHtml(cliente.actividades_complementarias)}">${escapeHtml(cliente.actividades_complementarias)}</span>` : ''}
               </div>
+              <p class="text-xs text-slate-400 mt-1">Suma +2 pts/día al score, máx +10.</p>
+            </div>
+            ${cliente.lesion_actual ? `
+            <div class="bg-white rounded-lg p-2 ring-1 ring-red-200">
+              <div class="text-xs font-bold text-red-800 mb-1">🩹 Lesión: ${escapeHtml(cliente.lesion_actual)}</div>
+              <div class="grid grid-cols-2 gap-2">
+                <select id="sg-lesion-est" class="text-xs"><option value="">Estado…</option>${['mejor','igual','peor','resuelta'].map(o => `<option value="${o}" ${s.lesion_estado_semana === o ? 'selected' : ''}>${o}</option>`).join('')}</select>
+                <input id="sg-lesion-txt" class="text-xs" value="${escapeHtml(s.lesion_actualizacion || '')}" placeholder="Evolución…">
+              </div>
+            </div>` : ''}
+            <div class="bg-white rounded-lg p-2 ring-1 ring-slate-200">
+              <div class="text-xs font-semibold text-slate-600 mb-1">🧬 Composición (opcional)</div>
+              <div class="grid grid-cols-3 gap-2">
+                <input id="sg-peso" type="number" step="0.1" placeholder="Peso" oninput="recalcCompSeg()">
+                <input id="sg-grasa" type="number" step="0.1" placeholder="%Grasa" oninput="recalcCompSeg()">
+                <input id="sg-cin" type="number" step="0.1" placeholder="Cintura">
+              </div>
+              <div id="sg-comp-preview" class="hidden text-xs mt-2"><div id="sg-comp-body"></div></div>
             </div>
           </div>
-          <p class="text-xs text-slate-400">La complementaria (correr, tenis, natación…) no es meta: suma +2 pts por día al score de entreno, máximo +10. Premia sin inflar.</p>
-        </div>
 
-        <!-- ALIMENTACIÓN -->
-        <div class="bg-slate-50 rounded-xl p-4 space-y-3">
-          <div class="flex items-baseline justify-between flex-wrap gap-2">
-            <div class="text-xs font-bold text-slate-600 uppercase">🥗 Alimentación</div>
-            <div class="flex items-center gap-2">
-              ${mtConfigured() ? `<button type="button" class="btn btn-secondary btn-sm" onclick="jalarMealtrackerAuto('${cliente.id}', '${semana}')">🔄 ${cliente.mealtracker_id ? 'Actualizar' : 'Buscar'} Mealtracker</button>` : ''}
-              ${cliente.meta_calorias ? `<div class="text-xs text-slate-500">Meta: ${cliente.meta_calorias} kcal · ${cliente.meta_proteina_g}g prote</div>` : '<div class="text-xs text-amber-600">Sin meta definida</div>'}
+          <!-- PILAR ALIMENTACIÓN -->
+          <div class="seg-pillar seg-pillar-alim">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <div class="seg-pillar-title">🥗 Alimentación</div>
+              ${mtConfigured() ? `<button type="button" class="btn btn-secondary btn-sm" onclick="jalarMealtrackerAuto('${cliente.id}', '${semana}')">🔄 ${cliente.mealtracker_id ? 'Actualizar' : 'Buscar'} MT</button>` : ''}
             </div>
-          </div>
-          <div class="grid grid-cols-3 gap-3">
+            <div class="text-xs ${cliente.meta_calorias ? 'text-slate-500' : 'text-amber-600'}">${cliente.meta_calorias ? `Meta: ${cliente.meta_calorias} kcal · ${cliente.meta_proteina_g}g prote` : 'Sin meta definida'}</div>
             <div>
               <label class="text-xs">kcal promedio</label>
               <input id="sg-kcal" type="number" min="0" value="${s.kcal_promedio ?? ''}" placeholder="${cliente.meta_calorias || '—'}" onchange="recalcScores()">
@@ -1962,157 +2112,64 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
               <input id="sg-prote" type="number" min="0" value="${s.proteina_promedio_g ?? ''}" placeholder="${cliente.meta_proteina_g || '—'}" onchange="recalcScores()">
             </div>
             <div>
-              <label class="text-xs">Días registro (0-7)</label>
+              <label class="text-xs">Días con registro (0-7)</label>
               <input id="sg-dr" type="number" min="0" max="7" value="${s.dias_registro_alim ?? ''}" placeholder="0" onchange="recalcScores()">
             </div>
+            <div id="sg-mt-info" class="text-xs text-slate-500 hidden"></div>
           </div>
-          <div id="sg-mt-info" class="text-xs text-slate-500 hidden"></div>
-        </div>
 
-        <!-- SCORES VIVOS -->
-        <div id="sg-scores" class="grid grid-cols-4 gap-2"></div>
-
-        <!-- COMPOSICIÓN CORPORAL (opcional en seguimiento semanal) -->
-        <div class="bg-slate-50 rounded-xl p-4 space-y-3">
-          <div class="flex items-baseline justify-between flex-wrap gap-2">
-            <div class="text-xs font-bold text-slate-600 uppercase">🧬 Composición corporal (opcional)</div>
-            <div class="text-xs text-slate-500">Si mediste esta semana, guarda aquí. Se crea una medición automáticamente.</div>
-          </div>
-          <div class="grid grid-cols-3 gap-3">
+          <!-- PILAR GENERAL -->
+          <div class="seg-pillar seg-pillar-gen">
+            <div class="seg-pillar-title">📋 General</div>
             <div>
-              <label class="text-xs">Peso (kg)</label>
-              <input id="sg-peso" type="number" step="0.1" placeholder="78.5" oninput="recalcCompSeg()">
+              <label class="text-xs">Ánimo de la semana</label>
+              <select id="sg-animo"><option value="">—</option>${['excelente','bien','neutro','bajo','muy bajo'].map(o => `<option value="${o}" ${s.estado_animo === o ? 'selected' : ''}>${o}</option>`).join('')}</select>
             </div>
             <div>
-              <label class="text-xs">% Grasa</label>
-              <input id="sg-grasa" type="number" step="0.1" placeholder="18.5" oninput="recalcCompSeg()">
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-xs mb-0">Avances</label>
+                <div class="flex gap-1">
+                  ${semanaPrev ? '<button type="button" class="btn btn-sm" style="background:#e2e8f0;color:#334155;padding:.15rem .5rem" onclick="copiarSemanaAnterior()" title="Copiar de la semana pasada">↻</button>' : ''}
+                  <button type="button" class="btn btn-sm" style="background:#d1fae5;color:#065f46;padding:.15rem .5rem" onclick="aplicarPlantilla('alta')" title="Plantilla adherencia alta">A</button>
+                  <button type="button" class="btn btn-sm" style="background:#fef3c7;color:#92400e;padding:.15rem .5rem" onclick="aplicarPlantilla('media')" title="Plantilla media">M</button>
+                  <button type="button" class="btn btn-sm" style="background:#fee2e2;color:#991b1b;padding:.15rem .5rem" onclick="aplicarPlantilla('baja')" title="Plantilla baja">B</button>
+                </div>
+              </div>
+              <textarea id="sg-avances" rows="4" placeholder="Qué pasó esta semana…">${escapeHtml(s.avances || '')}</textarea>
+            </div>
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-2">
+              <div class="text-xs font-bold text-amber-800 mb-1">👥 Le pides al cliente</div>
+              <div id="sg-pend-check" class="space-y-1 mb-1"></div>
+              <div class="flex gap-1">
+                <input id="sg-pend-nuevo" class="text-xs" placeholder="Ej: enviar video…" onkeydown="if(event.key==='Enter'){event.preventDefault();agregarPendClienteSeg();}">
+                <button type="button" class="btn btn-secondary btn-sm flex-shrink-0" onclick="agregarPendClienteSeg()">+</button>
+              </div>
+              <textarea id="sg-pend" class="hidden">${escapeHtml(s.pendientes_semana || '')}</textarea>
+            </div>
+            <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-2">
+              <div class="text-xs font-bold text-emerald-800 mb-1">🧢 Tus tareas (coach)</div>
+              <div id="sg-coach-list" class="space-y-1 mb-1"></div>
+              <div class="flex gap-1">
+                <input id="sg-coach-nuevo" class="text-xs" placeholder="Ej: preparar rutina…" onkeydown="if(event.key==='Enter'){event.preventDefault();agregarPendCoachSeg();}">
+                <button type="button" class="btn btn-secondary btn-sm flex-shrink-0" onclick="agregarPendCoachSeg()">+</button>
+              </div>
             </div>
             <div>
-              <label class="text-xs">Cintura (cm)</label>
-              <input id="sg-cin" type="number" step="0.1" placeholder="—">
+              <label class="text-xs">Notas</label>
+              <textarea id="sg-notas" rows="2" placeholder="Otras observaciones…">${escapeHtml(s.notas || '')}</textarea>
             </div>
-          </div>
-          <div id="sg-comp-preview" class="hidden text-xs bg-white rounded-lg p-2 ring-1 ring-slate-200">
-            <div class="font-semibold text-slate-700 mb-1">Estimaciones al vuelo:</div>
-            <div id="sg-comp-body"></div>
-          </div>
-        </div>
-
-        <!-- LESIÓN -->
-        ${cliente.lesion_actual ? `
-        <div class="bg-red-50 rounded-xl p-4 space-y-2">
-          <div class="text-xs font-bold text-red-800 uppercase">⚕️ Lesión: ${escapeHtml(cliente.lesion_actual)}</div>
-          <div class="grid grid-cols-3 gap-3">
             <div>
-              <label class="text-xs">Estado esta semana</label>
-              <select id="sg-lesion-est">
-                <option value="">—</option>
-                ${['mejor','igual','peor','resuelta'].map(o => `<option value="${o}" ${s.lesion_estado_semana === o ? 'selected' : ''}>${o}</option>`).join('')}
-              </select>
-            </div>
-            <div class="col-span-2">
-              <label class="text-xs">Actualización</label>
-              <input id="sg-lesion-txt" value="${escapeHtml(s.lesion_actualizacion || '')}" placeholder="Cómo va la evolución…">
+              <label class="text-xs">Fecha del registro</label>
+              <input id="sg-fecha" type="date" value="${s.fecha || fmt.hoy()}">
             </div>
           </div>
-        </div>` : ''}
-
-        <div>
-          <div class="flex items-center justify-between mb-2">
-            <label class="mb-0">Avances de la semana</label>
-            <div class="flex gap-1">
-              ${semanaPrev ? '<button type="button" class="btn btn-secondary btn-sm" onclick="copiarSemanaAnterior()" title="Copiar de la semana pasada">↻ Copiar S anterior</button>' : ''}
-              <button type="button" class="btn btn-sm" style="background:#d1fae5;color:#065f46" onclick="aplicarPlantilla('alta')">Alta</button>
-              <button type="button" class="btn btn-sm" style="background:#fef3c7;color:#92400e" onclick="aplicarPlantilla('media')">Media</button>
-              <button type="button" class="btn btn-sm" style="background:#fee2e2;color:#991b1b" onclick="aplicarPlantilla('baja')">Baja</button>
-            </div>
-          </div>
-          <textarea id="sg-avances" rows="5" placeholder="Qué pasó esta semana…">${escapeHtml(s.avances || '')}</textarea>
-        </div>
-
-        <!-- PENDIENTES: DEL CLIENTE vs DEL COACH -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
-            <div class="text-xs font-bold text-amber-800 uppercase mb-2">👥 Pendientes del cliente (le pides)</div>
-            <div id="sg-pend-check" class="space-y-1 mb-2"></div>
-            <div class="flex gap-2">
-              <input id="sg-pend-nuevo" placeholder="Ej: enviar video de sentadilla…" onkeydown="if(event.key==='Enter'){event.preventDefault();agregarPendClienteSeg();}">
-              <button type="button" class="btn btn-secondary btn-sm flex-shrink-0" onclick="agregarPendClienteSeg()">+ Añadir</button>
-            </div>
-            <textarea id="sg-pend" class="hidden">${escapeHtml(s.pendientes_semana || '')}</textarea>
-            <p class="text-xs text-amber-700 mt-1">Se guardan con la semana y salen como checklist en el timeline y en Actividades.</p>
-          </div>
-          <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-            <div class="text-xs font-bold text-emerald-800 uppercase mb-2">🧢 Pendientes del coach (tuyos)</div>
-            <div id="sg-coach-list" class="space-y-1 mb-2"></div>
-            <div class="flex gap-2">
-              <input id="sg-coach-nuevo" placeholder="Ej: preparar rutina nueva…" onkeydown="if(event.key==='Enter'){event.preventDefault();agregarPendCoachSeg();}">
-              <button type="button" class="btn btn-secondary btn-sm flex-shrink-0" onclick="agregarPendCoachSeg()">+ Añadir</button>
-            </div>
-            <p class="text-xs text-emerald-700 mt-1">Se guardan al instante y aparecen en Actividades y en Inicio.</p>
-          </div>
-        </div>
-
-        <div>
-          <label>Fecha del registro</label>
-          <input id="sg-fecha" type="date" value="${s.fecha || fmt.hoy()}">
-        </div>
-
-        <div>
-          <label>Notas</label>
-          <textarea id="sg-notas" rows="2" placeholder="Otras observaciones…">${escapeHtml(s.notas || '')}</textarea>
         </div>
       </div>
 
-      <!-- CONTEXTO -->
-      <div class="col-span-12 lg:col-span-5 bg-slate-50 p-6 overflow-y-auto border-l border-slate-200">
-        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Contexto · qué hablarle</h4>
-
-        <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-4">
-          <div class="text-xs font-bold text-emerald-900 mb-1">📌 Para tener en cuenta</div>
-          <p class="text-xs text-emerald-800">${resumen}</p>
-        </div>
-
-        ${abiertos.length > 0 ? `
-        <div class="bg-white rounded-xl p-3 mb-3 ring-1 ring-slate-100">
-          <div class="text-xs font-bold text-slate-700 mb-2">Pendientes abiertos (${abiertos.length})</div>
-          <div class="space-y-1.5">
-            ${abiertos.map(p => `
-              <div class="flex items-start gap-2 text-xs">
-                <input type="checkbox" class="mt-0.5 rounded" onchange="togglePendienteCtx('${p.id}', '${p.estado}', '${clienteId}', '${semana}')">
-                <div class="flex-1">
-                  <div class="text-slate-700">${p.para === 'coach' ? '🧢 ' : ''}${escapeHtml(p.descripcion)}</div>
-                  <div class="text-slate-400 text-xs">${p.para === 'coach' ? '<span class="font-semibold text-slate-600">Tarea tuya</span> · ' : ''}${p.scope === 'semana' ? '<span class="text-violet-600 font-semibold">Semanal</span>' : '<span class="text-emerald-600 font-semibold">General</span>'} ${p.fecha_limite ? '· vence ' + fmt.fechaCorta(p.fecha_limite) : ''}</div>
-                </div>
-              </div>`).join('')}
-          </div>
-        </div>` : '<div class="bg-white rounded-xl p-3 mb-3 ring-1 ring-slate-100 text-xs text-slate-500">Sin pendientes abiertos.</div>'}
-
-        ${cliente.restricciones_lesiones || cliente.patologias ? `
-        <div class="bg-red-50 rounded-xl p-3 mb-3 ring-1 ring-red-200">
-          <div class="text-xs font-bold text-red-800 mb-1">⚕️ Cuidado físico</div>
-          ${cliente.restricciones_lesiones ? `<div class="text-xs text-red-700">Lesiones: ${escapeHtml(cliente.restricciones_lesiones)}</div>` : ''}
-          ${cliente.patologias ? `<div class="text-xs text-red-700">Patologías: ${escapeHtml(cliente.patologias)}</div>` : ''}
-        </div>` : ''}
-
-        <div class="text-xs font-bold text-slate-700 mb-2">Últimas semanas</div>
-        <div class="space-y-2">
-          ${segsCliente.filter(x => x.id !== s.id).slice(0, 3).map(s2 => {
-            const prom = helpers.promedioAdh(s2);
-            const ring = prom === null ? '' : prom >= 7.5 ? 'ring-good' : prom >= 5 ? 'ring-mid' : 'ring-bad';
-            return `
-              <div class="bg-white rounded-xl p-3 ring-1 ring-slate-100 ${ring}">
-                <div class="flex justify-between mb-1">
-                  <span class="text-xs font-bold text-slate-700">${fmt.labelSemana(s2.semana)} · ${fmt.fechaCorta(s2.fecha)}</span>
-                  ${prom !== null ? `<span class="text-xs font-bold ${prom >= 7.5 ? 'text-emerald-600' : prom >= 5 ? 'text-amber-600' : 'text-red-600'}">${prom.toFixed(1)}/10</span>` : ''}
-                </div>
-                ${s2.avances ? `<p class="text-xs text-slate-600 line-clamp-3">${escapeHtml(s2.avances)}</p>` : ''}
-                ${s2.pendientes_semana ? `<div class="text-xs text-red-700 mt-1 line-clamp-2 whitespace-pre-line">${escapeHtml(checklistTextoPlano(s2.pendientes_semana))}</div>` : ''}
-              </div>
-            `;
-          }).join('')}
-          ${segsCliente.filter(x => x.id !== s.id).length === 0 ? '<div class="text-xs text-slate-500">Sin semanas previas.</div>' : ''}
-        </div>
+      <!-- SCORES vivos -->
+      <div>
+        <div class="seg-section-title">📊 Scores de la semana</div>
+        <div id="sg-scores" class="grid grid-cols-2 md:grid-cols-4 gap-2"></div>
       </div>
     </div>
 
@@ -2140,7 +2197,7 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
         // Actualizar el objeto cliente en memoria por si volvemos a abrir
         cliente.mealtracker_id = mtId;
         window._segCliente = cliente;
-        window.jalarMealtracker(mtId, semana);
+        window.jalarMealtracker(cliente, semana);
       }
     }, 200);
   }
@@ -2226,6 +2283,7 @@ window.guardarSeguimiento = async (cliente_id, semana, id) => {
     score_global: scores.score_global,
     avances: $('#sg-avances').value || null,
     pendientes_semana: $('#sg-pend').value || null,
+    estado_animo: $('#sg-animo')?.value || null,
     notas: $('#sg-notas').value || null,
     lesion_estado_semana: $('#sg-lesion-est')?.value || null,
     lesion_actualizacion: $('#sg-lesion-txt')?.value || null,
@@ -2270,17 +2328,49 @@ window.jalarMealtrackerAuto = async (clienteId, semana) => {
     return;
   }
   if (window._segCliente) window._segCliente.mealtracker_id = mtId;
-  await window.jalarMealtracker(mtId, semana);
+  await window.jalarMealtracker(window._segCliente || cliente, semana);
 };
 
-window.jalarMealtracker = async (mealtrackerId, semana) => {
+// Tarjeta visual del resumen semanal del Mealtracker: días registrados,
+// kcal y proteína promedio vs meta, con barras y color por adherencia.
+function mtInfoCard(r, cliente) {
+  const g = r.goals || {};
+  const metaK = cliente?.meta_calorias || Number(g.kcal ?? g.calories) || null;
+  const metaP = cliente?.meta_proteina_g || Number(g.p ?? g.protein) || null;
+  const regPct = Math.round((r.dias / 7) * 100);
+  const regColor = r.dias >= 6 ? '#10b981' : r.dias >= 4 ? '#f59e0b' : '#ef4444';
+  const kcalPct = metaK ? Math.max(0, Math.round(100 - Math.abs((r.kcal_avg - metaK) / metaK * 100))) : null;
+  const protePct = metaP ? Math.min(100, Math.round((r.prote_avg / metaP) * 100)) : null;
+  const cK = kcalPct == null ? '#94a3b8' : kcalPct >= 85 ? '#10b981' : kcalPct >= 65 ? '#f59e0b' : '#ef4444';
+  const cP = protePct == null ? '#94a3b8' : protePct >= 90 ? '#10b981' : protePct >= 70 ? '#f59e0b' : '#ef4444';
+  const bar = (label, valTxt, pct, color) => `
+    <div>
+      <div class="flex justify-between text-xs mb-0.5"><span class="text-slate-500">${label}</span><span class="font-bold" style="color:${color}">${valTxt}</span></div>
+      <div class="h-1.5 bg-slate-200 rounded-full overflow-hidden"><div class="h-full rounded-full" style="width:${pct == null ? 0 : pct}%;background:${color}"></div></div>
+    </div>`;
+  return `
+    <div class="bg-white rounded-lg p-2.5 ring-1 ring-slate-200 space-y-2 mt-1">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold text-slate-700">📊 Mealtracker · ${r.dias}/7 días</span>
+        <span class="text-xs" style="color:${regColor};font-weight:700">${regPct}% registro</span>
+      </div>
+      <div class="h-1.5 bg-slate-200 rounded-full overflow-hidden"><div class="h-full rounded-full" style="width:${regPct}%;background:${regColor}"></div></div>
+      ${bar('kcal promedio', `${r.kcal_avg}${metaK ? ` / ${metaK}` : ''}`, kcalPct, cK)}
+      ${bar('Proteína promedio', `${r.prote_avg}g${metaP ? ` / ${metaP}g` : ''}`, protePct, cP)}
+      ${(r.carbos_avg != null || r.grasas_avg != null) ? `<div class="text-xs text-slate-400">Carbos ${r.carbos_avg ?? '—'}g · Grasas ${r.grasas_avg ?? '—'}g promedio</div>` : ''}
+      <div class="text-xs text-slate-400">${r.rango[0].slice(5)} → ${r.rango[1].slice(5)} · valores aplicados a los campos de arriba</div>
+    </div>`;
+}
+
+// Recibe el CLIENTE (no un id): fusiona sus cuentas duplicadas del Mealtracker.
+window.jalarMealtracker = async (cliente, semana) => {
   const info = $('#sg-mt-info');
   if (info) { info.classList.remove('hidden'); info.textContent = '⏳ Consultando mealtracker…'; }
-  const r = await getMealtrackerWeek(mealtrackerId, semana);
+  const r = await getMealtrackerWeek(cliente, semana);
   if (!r) {
     if (info) {
       info.innerHTML = '<span class="text-red-600">✗ Sin conexión al Mealtracker, averiguando la causa…</span>';
-      const causa = await mtDiagnostico(mealtrackerId);
+      const causa = await mtDiagnostico(cliente?.mealtracker_id);
       info.innerHTML = `<span class="text-red-600">✗ ${escapeHtml(causa)}</span>`;
     }
     return;
@@ -2293,7 +2383,7 @@ window.jalarMealtracker = async (mealtrackerId, semana) => {
   $('#sg-prote').value = r.prote_avg;
   $('#sg-dr').value = r.dias;
   recalcScores();
-  if (info) info.innerHTML = `✓ <strong>${r.dias} días</strong> registrados · promedio <strong>${r.kcal_avg} kcal</strong> · <strong>${r.prote_avg}g</strong> proteína · rango ${r.rango[0]} → ${r.rango[1]}`;
+  if (info) info.innerHTML = mtInfoCard(r, cliente);
 };
 
 window.abrirNutricionCliente = async (clienteId) => {
@@ -2302,7 +2392,7 @@ window.abrirNutricionCliente = async (clienteId) => {
   const mtId = c.mealtracker_id || await resolverMealtrackerId(c);
   if (!mtId) { toast('Sin conexión a Mealtracker'); return; }
 
-  const d = await getMealtrackerUserData(mtId);
+  const d = await getMealtrackerDataMerged(c);   // fusiona cuentas duplicadas
   if (!d) { toast('Sin datos en Mealtracker'); return; }
 
   const goals = d.goals || {};
@@ -2313,7 +2403,7 @@ window.abrirNutricionCliente = async (clienteId) => {
   for (let i = 0; i < 4; i++) {
     const ref = new Date(hoy); ref.setDate(hoy.getDate() - i * 7);
     const sem = fmt.semanaISO(ref);
-    const r = await getMealtrackerWeek(mtId, sem);
+    const r = await getMealtrackerWeek(c, sem);
     if (r) ultimas4Sem.push({ semana: sem, ...r });
   }
 
