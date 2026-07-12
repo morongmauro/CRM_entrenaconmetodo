@@ -450,6 +450,14 @@ const OBJETIVOS_KCAL = [
   { key: 'superavit_30', label: 'Superávit +30% (agresivo)', pct: 0.30 },
 ];
 
+// Objetivos del cliente: chips multi-selección. Se guardan como texto plano
+// ("Recomposición, Fuerza, …") para no cambiar la columna ni los reportes.
+const OBJETIVOS_TAGS = [
+  ['⚖️', 'Recomposición'], ['🤸', 'Movilidad'], ['🏋️', 'Fuerza'], ['🤾', 'Calistenia'],
+  ['❤️', 'Salud'], ['🌱', 'Longevidad'], ['🔥', 'Bajar grasa'], ['💪', 'Ganar masa'],
+  ['📈', 'Resistencia'], ['🧠', 'Hábitos'],
+];
+
 const FASES_PROGRAMA = [
   { key: 'preparacion',    label: '🟢 Preparación / onboarding' },
   { key: 'bloque_fuerza',  label: '🏋️ Bloque de fuerza' },
@@ -590,11 +598,16 @@ function calcComposicionCorporal({ peso, grasa_pct, edad, sexo, altura_cm }) {
 function calcScores(s, cliente) {
   const pctSafe = (num, den) => den > 0 ? Math.min(100, (num / den) * 100) : null;
 
-  // Entreno
+  // Entreno: el score base es la fuerza (estructurada, con meta). La actividad
+  // complementaria (correr, tenis, fútbol…) es variada y sin meta fija: suma un
+  // bono de +2 pts por día hecho (máx +10, tope 100). Premia sin inflar y no
+  // puede hundir una semana de fuerza cumplida. cardio_ejecutados = días 0-7.
   const scoreFuerza = pctSafe(s.fuerza_ejecutados, s.fuerza_planeados);
-  const scoreCardio = pctSafe(s.cardio_ejecutados, s.cardio_planeados);
-  const entrenos = [scoreFuerza, scoreCardio].filter(v => v !== null);
-  const score_entreno = entrenos.length ? entrenos.reduce((a, b) => a + b, 0) / entrenos.length : null;
+  const diasComp = Math.max(0, Math.min(7, Number(s.cardio_ejecutados) || 0));
+  const bonoComp = Math.min(10, diasComp * 2);
+  let score_entreno = null;
+  if (scoreFuerza !== null) score_entreno = Math.min(100, scoreFuerza + bonoComp);
+  else if (s.cardio_planeados) score_entreno = pctSafe(s.cardio_ejecutados, s.cardio_planeados); // semanas viejas sin dato de fuerza
 
   // Alimentación metas
   let score_alim_metas = null;
@@ -987,6 +1000,7 @@ async function checkSession() {
     loginScreen.classList.add('hidden');
     appScreen.classList.remove('hidden');
     navigate('dashboard');
+    sincronizarAccesoApps();   // mantiene al día la lista de acceso de las apps (no bloquea)
   } else {
     appScreen.classList.add('hidden');
     loginScreen.classList.remove('hidden');
@@ -1438,6 +1452,62 @@ window.confirmarPagoRapido = async (clienteId, mes) => {
 // =====================================================
 // VIEW: SEGUIMIENTO
 // =====================================================
+// ===== Tandas de seguimiento =====
+// Reparte los clientes ACTIVOS en tandas por día, en orden alfabético (el
+// mismo orden de Trainerize), para no revisar a todos de una: 2 tandas
+// (Lun · Jue) con pocos activos, 3 (Lun · Mié · Vie) con más de 8.
+const TANDA_DIAS = { 2: [['Lunes', 1], ['Jueves', 4]], 3: [['Lunes', 1], ['Miércoles', 3], ['Viernes', 5]] };
+window.setSegTandas = (v) => { localStorage.setItem('seg_tandas', v); routes.seguimiento(); };
+
+function renderTandasBanner(clientes, allSegs) {
+  const activos = clientes.filter(c => c.estado === 'activo')
+    .slice().sort((a, b) => normalizeName(a.nombre).localeCompare(normalizeName(b.nombre)));
+  if (!activos.length) return '';
+  const cfg = localStorage.getItem('seg_tandas') || 'auto';
+  const nAuto = activos.length > 8 ? 3 : 2;
+  const n = cfg === 'auto' ? nAuto : Number(cfg);
+  const semanaAct = fmt.semanaISO();
+  const hechosSemana = new Set(allSegs.filter(s => s.semana === semanaAct).map(s => s.cliente_id));
+  const porTanda = Math.ceil(activos.length / n);
+  const hoyDow = new Date().getDay();
+  const grupos = TANDA_DIAS[n].map(([label, dow], i) => ({ label, dow, lista: activos.slice(i * porTanda, (i + 1) * porTanda) }));
+  const totalHechos = activos.filter(c => hechosSemana.has(c.id)).length;
+  return `
+    <div class="card mb-4">
+      <div class="flex items-baseline justify-between flex-wrap gap-2 mb-3">
+        <div class="text-xs font-bold text-slate-600 uppercase">📋 Tandas de la semana · orden alfabético (igual que Trainerize) · ${totalHechos}/${activos.length} hechos</div>
+        <select class="!w-auto !py-1 text-xs" onchange="setSegTandas(this.value)" title="En cuántos días repartes los seguimientos">
+          <option value="auto" ${cfg === 'auto' ? 'selected' : ''}>Auto (${nAuto} tandas)</option>
+          <option value="2" ${cfg === '2' ? 'selected' : ''}>2 tandas · Lun y Jue</option>
+          <option value="3" ${cfg === '3' ? 'selected' : ''}>3 tandas · Lun, Mié y Vie</option>
+        </select>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-${n} gap-3">
+        ${grupos.map(g => {
+          const hechos = g.lista.filter(c => hechosSemana.has(c.id)).length;
+          const esHoy = g.dow === hoyDow;
+          const completa = g.lista.length > 0 && hechos === g.lista.length;
+          return `
+          <div class="rounded-xl p-3 ${esHoy ? 'bg-emerald-50 ring-2 ring-emerald-300' : 'bg-slate-50 ring-1 ring-slate-200'}">
+            <div class="flex justify-between items-baseline mb-2">
+              <span class="text-xs font-bold ${esHoy ? 'text-emerald-800' : 'text-slate-600'}">${g.label}${esHoy ? ' · HOY 👈' : ''}</span>
+              <span class="text-xs font-bold ${completa ? 'text-emerald-600' : 'text-slate-400'}">${hechos}/${g.lista.length}${completa ? ' 🎉' : ''}</span>
+            </div>
+            <div class="space-y-1">
+              ${g.lista.map(c => {
+                const done = hechosSemana.has(c.id);
+                return `
+                <button class="w-full text-left text-xs px-2 py-1.5 rounded-lg flex items-center gap-2 ${done ? 'text-slate-400 bg-white/60' : 'bg-white hover:bg-emerald-100 text-slate-700 font-medium'}" onclick="abrirNuevoSeguimiento('${c.id}')" title="${done ? 'Semana ya registrada · click para revisar o editar' : 'Registrar la semana de ' + escapeHtml(c.nombre)}">
+                  <span>${done ? '✅' : '○'}</span><span class="truncate">${escapeHtml(c.nombre)}</span>
+                </button>`;
+              }).join('')}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
 routes.seguimiento = async () => {
   view.innerHTML = '<div class="card">Cargando…</div>';
   const [clientes, allSegs] = await Promise.all([db.clientes.list(), db.seguimientos.listAll()]);
@@ -1463,6 +1533,7 @@ routes.seguimiento = async () => {
         <button class="btn btn-primary" onclick="abrirNuevoSeguimiento(_selectedClienteId)">+ Nueva semana</button>
       </div>
     </div>
+    ${renderTandasBanner(clientes, allSegs)}
     <div id="seg-content"></div>
   `;
 
@@ -1793,47 +1864,34 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
 
       <!-- FORM -->
       <div class="col-span-12 lg:col-span-7 p-6 overflow-y-auto space-y-4">
-        <!-- DÍAS ENTRENADOS -->
+        <!-- ENTRENO: solo números contra la meta (sin calendario) -->
         <div class="bg-slate-50 rounded-xl p-4 space-y-3">
           <div class="flex items-baseline justify-between flex-wrap gap-2">
-            <div class="text-xs font-bold text-slate-600 uppercase">📆 Días entrenados esta semana</div>
+            <div class="text-xs font-bold text-slate-600 uppercase">🏋️ Entrenamiento</div>
             <div class="text-xs text-slate-500">${metaDiasEntreno(cliente)
-              ? `Meta: <strong>${metaDiasEntreno(cliente)} días</strong>${(cliente.dias_entreno || []).length ? ` (${cliente.dias_entreno.join(' · ')})` : ''}`
-              : 'Sin meta configurada · defínela en la ficha del cliente'}</div>
+              ? `Meta fuerza: <strong>${metaDiasEntreno(cliente)} días</strong>/sem${(cliente.dias_entreno || []).length ? ` (${cliente.dias_entreno.join(' · ')})` : ''}`
+              : 'Sin meta de fuerza · defínela en la ficha del cliente'}</div>
           </div>
-          <div class="flex gap-1.5 flex-wrap" id="sg-dias-sem">
-            ${DIAS_SEMANA.map(d => `
-              <label class="day-chip">
-                <input type="checkbox" value="${d}" class="hidden" ${(s.dias_entrenados || []).includes(d) ? 'checked' : ''} onchange="recalcDiasEntreno()">
-                <span class="${(cliente.dias_entreno || []).includes(d) ? 'plan' : ''}" title="${(cliente.dias_entreno || []).includes(d) ? 'Día planificado' : ''}">${d}</span>
-              </label>`).join('')}
-          </div>
-          <div id="sg-dias-res" class="text-xs"></div>
-        </div>
-
-        <!-- ENTRENO -->
-        <div class="bg-slate-50 rounded-xl p-4 space-y-3">
-          <div class="text-xs font-bold text-slate-600 uppercase">🏋️ Entrenamiento</div>
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="text-xs">Fuerza — planeadas vs ejecutadas</label>
+              <label class="text-xs">Fuerza — meta vs hechas</label>
               <div class="flex items-center gap-2">
-                <input id="sg-fp" type="number" min="0" class="w-16" value="${s.fuerza_planeados ?? ''}" placeholder="3" onchange="recalcScores()">
+                <input id="sg-fp" type="number" min="0" class="w-16" value="${s.fuerza_planeados ?? metaDiasEntreno(cliente) ?? ''}" placeholder="3" onchange="recalcScores()">
                 <span class="text-slate-400">→</span>
                 <input id="sg-fe" type="number" min="0" class="w-16" value="${s.fuerza_ejecutados ?? ''}" placeholder="0" onchange="recalcScores()">
                 <span id="sg-f-pct" class="ml-auto text-sm font-bold text-emerald-600"></span>
               </div>
             </div>
             <div>
-              <label class="text-xs">Cardio/deporte — planeadas vs ejecutadas</label>
+              <label class="text-xs">Complementaria — días que hizo algo (0-7)</label>
               <div class="flex items-center gap-2">
-                <input id="sg-cp" type="number" min="0" class="w-16" value="${s.cardio_planeados ?? ''}" placeholder="2" onchange="recalcScores()">
-                <span class="text-slate-400">→</span>
-                <input id="sg-ce" type="number" min="0" class="w-16" value="${s.cardio_ejecutados ?? ''}" placeholder="0" onchange="recalcScores()">
-                <span id="sg-c-pct" class="ml-auto text-sm font-bold text-emerald-600"></span>
+                <input id="sg-ce" type="number" min="0" max="7" class="w-16" value="${s.cardio_ejecutados ?? ''}" placeholder="0" onchange="recalcScores()">
+                <span id="sg-c-pct" class="text-sm font-bold text-violet-600"></span>
+                ${cliente.actividades_complementarias ? `<span class="ml-auto text-xs text-slate-400 truncate" title="${escapeHtml(cliente.actividades_complementarias)}">${escapeHtml(cliente.actividades_complementarias)}</span>` : ''}
               </div>
             </div>
           </div>
+          <p class="text-xs text-slate-400">La complementaria (correr, tenis, natación…) no es meta: suma +2 pts por día al score de entreno, máximo +10. Premia sin inflar.</p>
         </div>
 
         <!-- ALIMENTACIÓN -->
@@ -2023,7 +2081,7 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
   window._segPrev = semanaPrev;
   window._segCliente = cliente;
   window._segId = s.id || null;
-  setTimeout(() => { recalcScores(); recalcDiasEntreno(); renderPendEditPreview(); renderPendCoachSeg(); }, 0);
+  setTimeout(() => { recalcScores(); renderPendEditPreview(); renderPendCoachSeg(); }, 0);
 
   // Auto-resolver y jalar del Mealtracker si aún no hay data
   if (mtConfigured() && !s.kcal_promedio && !s.proteina_promedio_g) {
@@ -2054,11 +2112,11 @@ window.recalcScores = () => {
   const el = $('#sg-scores');
   if (!el) return;
 
-  // % individuales
+  // % de fuerza y bono de complementaria en vivo
   const fPct = seg.fuerza_planeados ? Math.min(100, Math.round((seg.fuerza_ejecutados / seg.fuerza_planeados) * 100)) : null;
-  const cPct = seg.cardio_planeados ? Math.min(100, Math.round((seg.cardio_ejecutados / seg.cardio_planeados) * 100)) : null;
+  const bono = Math.min(10, Math.max(0, Math.min(7, seg.cardio_ejecutados || 0)) * 2);
   const fLabel = $('#sg-f-pct'); if (fLabel) fLabel.textContent = fPct !== null ? `${fPct}%` : '';
-  const cLabel = $('#sg-c-pct'); if (cLabel) cLabel.textContent = cPct !== null ? `${cPct}%` : '';
+  const cLabel = $('#sg-c-pct'); if (cLabel) cLabel.textContent = bono ? `+${bono} pts` : '';
 
   const card = (titulo, valor, color) => `
     <div class="rounded-xl p-3 text-center" style="background:${color}15;border:1px solid ${color}40">
@@ -2071,21 +2129,6 @@ window.recalcScores = () => {
     ${card('Alim · registro', scores.score_alim_registro, '#8b5cf6')}
     ${card('Global', scores.score_global, '#0f172a')}
   `;
-};
-
-// Compara los días marcados contra la meta configurada en la ficha del cliente
-window.recalcDiasEntreno = () => {
-  const cont = $('#sg-dias-res');
-  if (!cont) return;
-  const marcados = $$('#sg-dias-sem input:checked').length;
-  const meta = metaDiasEntreno(window._segCliente);
-  if (!meta) {
-    cont.innerHTML = marcados ? `<span class="text-slate-500">${marcados} día(s) entrenado(s)</span>` : '';
-    return;
-  }
-  const pct = Math.min(100, Math.round((marcados / meta) * 100));
-  const color = pct >= 90 ? 'text-emerald-600' : pct >= 60 ? 'text-amber-600' : 'text-red-600';
-  cont.innerHTML = `<span class="font-bold ${color}">${marcados}/${meta} días · ${pct}% de cumplimiento</span>${marcados > meta ? ' <span class="text-slate-400">(superó la meta 💪)</span>' : ''}`;
 };
 
 window.copiarSemanaAnterior = () => {
@@ -2120,15 +2163,14 @@ window.guardarSeguimiento = async (cliente_id, semana, id) => {
     dias_registro_alim: $('#sg-dr')?.value ? Number($('#sg-dr').value) : null,
   };
   const scores = calcScores(seg, window._segCliente);
-  const diasEntrenados = $$('#sg-dias-sem input:checked').map(i => i.value);
-  const metaDias = metaDiasEntreno(window._segCliente);
   const row = {
     cliente_id, semana,
     fecha: $('#sg-fecha').value || fmt.hoy(),
     ...seg,
-    dias_entrenados: diasEntrenados,
-    dias_planeados: metaDias,
-    dias_asistidos: (metaDias != null || diasEntrenados.length) ? diasEntrenados.length : null,
+    // Ya no hay calendario en el seguimiento: los días asistidos son las
+    // sesiones de fuerza hechas contra la meta (el % del timeline sigue vivo).
+    dias_planeados: seg.fuerza_planeados,
+    dias_asistidos: seg.fuerza_planeados != null ? (seg.fuerza_ejecutados ?? 0) : null,
     score_entreno: scores.score_entreno,
     score_alim_metas: scores.score_alim_metas,
     score_alim_registro: scores.score_alim_registro,
@@ -3120,6 +3162,10 @@ routes.clientes = async () => {
 };
 
 function clienteForm(c = {}) {
+  // Objetivo guardado como texto → qué chips van marcados y qué queda como "otro"
+  const objPartes = (c.objetivo || '').split(/[,;·|]/).map(s => s.trim()).filter(Boolean);
+  const objSel = objPartes.map(normalizeName);
+  const objOtros = objPartes.filter(p => !OBJETIVOS_TAGS.some(([, t]) => normalizeName(t) === normalizeName(p))).join(', ');
   return `
     <div class="space-y-5">
       <!-- 1. IDENTIDAD -->
@@ -3145,8 +3191,22 @@ function clienteForm(c = {}) {
       <div class="sec sec-olive">
         <div class="sec-title">2 · 🎯 Objetivo y fase</div>
         <div class="grid grid-cols-2 gap-3">
-          <div class="col-span-2"><label>Objetivo (resumen corto)</label><input id="cl-obj" placeholder="Ej: bajar 5 kg, ganar masa, hábitos…" value="${escapeHtml(c.objetivo || '')}"></div>
-          <div class="col-span-2"><label>Meta específica</label><textarea id="cl-meta" rows="2">${escapeHtml(c.meta_especifica || '')}</textarea></div>
+          <div class="col-span-2">
+            <label>Objetivos (marca los que apliquen)</label>
+            <div class="flex gap-1.5 flex-wrap" id="cl-obj-tags">
+              ${OBJETIVOS_TAGS.map(([emoji, t]) => `
+                <label class="obj-chip">
+                  <input type="checkbox" value="${t}" class="hidden" ${objSel.includes(normalizeName(t)) ? 'checked' : ''}>
+                  <span>${emoji} ${t}</span>
+                </label>`).join('')}
+            </div>
+            <input id="cl-obj-otro" class="mt-2" placeholder="Otro objetivo (opcional, texto libre)…" value="${escapeHtml(objOtros)}">
+          </div>
+          <div class="col-span-2">
+            <label>Meta específica</label>
+            <textarea id="cl-meta" rows="2" placeholder="Se llena sola con 🧮 Recalcular (sección 5). Puedes editarla a mano.">${escapeHtml(c.meta_especifica || '')}</textarea>
+            <p class="text-xs text-slate-500 mt-1">🧮 Al recalcular la meta nutricional diaria, este campo se actualiza solo (y sigue siendo editable).</p>
+          </div>
           <div class="col-span-2"><label>Fase del programa</label>
             <select id="cl-fase">
               <option value="">—</option>
@@ -3182,9 +3242,9 @@ function clienteForm(c = {}) {
               ${['casa','gym_comercial','parque','aire_libre','mixto'].map(o => `<option value="${o}" ${c.lugar_entreno === o ? 'selected' : ''}>${o.replace('_',' ')}</option>`).join('')}
             </select>
           </div>
-          <div><label>Días de entreno / semana</label><input id="cl-dias-ent" type="number" min="0" max="7" placeholder="5" value="${c.dias_entreno_cantidad ?? ''}"></div>
+          <div><label>Días de fuerza / semana</label><input id="cl-dias-ent" type="number" min="0" max="7" placeholder="5" value="${c.dias_entreno_cantidad ?? ''}"></div>
           <div class="col-span-2">
-            <label>Qué días entrena</label>
+            <label>Qué días hace fuerza</label>
             <div class="flex gap-1.5 flex-wrap" id="cl-dias-sem">
               ${DIAS_SEMANA.map(d => `
                 <label class="day-chip">
@@ -3192,7 +3252,11 @@ function clienteForm(c = {}) {
                   <span>${d}</span>
                 </label>`).join('')}
             </div>
-            <p class="text-xs text-slate-500 mt-1">El seguimiento semanal compara los días entrenados contra esta meta.</p>
+            <p class="text-xs text-slate-500 mt-1">La fuerza es estructurada: va con días fijos. El seguimiento semanal compara contra esta meta.</p>
+          </div>
+          <div class="col-span-2"><label>Actividades complementarias (variadas, sin meta fija)</label>
+            <input id="cl-acts-comp" placeholder="Ej: correr, tenis, natación, fútbol…" value="${escapeHtml(c.actividades_complementarias || '')}">
+            <p class="text-xs text-slate-500 mt-1">No llevan calendario ni meta: cada día que las haga suma puntos al score de entreno (máx +10). Son un complemento, no un compromiso.</p>
           </div>
         </div>
       </div>
@@ -3235,6 +3299,7 @@ function clienteForm(c = {}) {
         <div class="sec-title">6 · ⚕️ Condiciones médicas / lesiones</div>
         <div class="grid grid-cols-2 gap-3">
           <div class="col-span-2"><label>Condiciones de salud / patologías</label><textarea id="cl-pat" rows="2" placeholder="Ej: prediabético, hipertensión, hipotiroidismo…">${escapeHtml(c.patologias || '')}</textarea></div>
+          <div class="col-span-2"><label>💊 Suplementos que toma</label><textarea id="cl-sup" rows="2" placeholder="Ej: creatina 5g/día, proteína whey, omega 3, vitamina D… (vacío = no toma)">${escapeHtml(c.suplementos || '')}</textarea></div>
           <div class="col-span-2"><label>Restricciones o lesiones (base)</label><textarea id="cl-rest" rows="2" placeholder="Ej: hernia lumbar L4-L5, rodilla derecha…">${escapeHtml(c.restricciones_lesiones || '')}</textarea></div>
           <div class="col-span-2"><label>Lesión actual (activa hoy)</label><input id="cl-lesion" placeholder="Ej: tendinitis hombro derecho" value="${escapeHtml(c.lesion_actual || '')}"></div>
           <div><label>Estado de la lesión</label>
@@ -3343,7 +3408,7 @@ window.guardarCliente = async (id = null) => {
     telefono: $('#cl-tel').value.trim() || null,
     ciudad: $('#cl-ciudad').value.trim() || null,
     profesion: $('#cl-prof').value.trim() || null,
-    objetivo: $('#cl-obj').value.trim() || null,
+    objetivo: [...$$('#cl-obj-tags input:checked').map(i => i.value), $('#cl-obj-otro').value.trim()].filter(Boolean).join(', ') || null,
     meta_especifica: $('#cl-meta').value.trim() || null,
     lugar_entreno: $('#cl-lugar').value || null,
     dias_entreno_cantidad: $('#cl-dias-ent').value ? Number($('#cl-dias-ent').value) : null,
@@ -3352,6 +3417,8 @@ window.guardarCliente = async (id = null) => {
     estatura_cm: $('#cl-alt').value ? Number($('#cl-alt').value) : null,
     restricciones_lesiones: $('#cl-rest').value.trim() || null,
     patologias: $('#cl-pat').value.trim() || null,
+    suplementos: $('#cl-sup').value.trim() || null,
+    actividades_complementarias: $('#cl-acts-comp').value.trim() || null,
     lesion_actual: $('#cl-lesion').value.trim() || null,
     lesion_estado: $('#cl-lesion-est').value || null,
     antecedentes_deportivos: $('#cl-ant').value.trim() || null,
@@ -3380,13 +3447,14 @@ window.guardarCliente = async (id = null) => {
   window._pendingEncuesta = null;
   window._pendingMeta = null;
   closeModal();
-  toast(r.sinColumnas ? '⚠️ Guardado, pero sin correo/teléfono: corre la migración de schema.sql en Supabase' : 'Guardado');
+  toast(r.sinColumnas ? '⚠️ Guardado, pero sin los campos nuevos: corre la migración de schema.sql en Supabase' : 'Guardado');
+  await sincronizarAccesoApps();   // activo/pausa/finalizado se refleja YA en las apps
   navigate('clientes');
 };
 
 // Guarda un cliente tolerando que la BD aún no tenga las columnas nuevas
 // (email/telefono): si Supabase las rechaza, reintenta sin ellas y avisa.
-const COLS_NUEVAS_CLIENTE = ['email', 'telefono'];
+const COLS_NUEVAS_CLIENTE = ['email', 'telefono', 'suplementos', 'actividades_complementarias'];
 async function guardarClienteSeguro(id, row) {
   const q = (r) => id ? sb.from('clientes').update(r).eq('id', id) : sb.from('clientes').insert(r);
   let { error } = await q(row);
@@ -3403,6 +3471,47 @@ async function guardarClienteSeguro(id, row) {
 }
 
 // =====================================================
+// ACCESO DE CLIENTES A LAS APPS (Mealtracker · Centro de recursos)
+// El CRM es la fuente de verdad: cada vez que se crea, edita, pausa o
+// elimina un cliente, reconstruye la tabla acceso_apps con SOLO los
+// clientes activos. Las apps externas leen esa tabla (solo lectura con
+// la anon key) en vez de tener nombres quemados en el código.
+// Requiere la tabla acceso_apps (ver migración en schema.sql).
+// =====================================================
+let _accesoAppsAviso = false;
+async function sincronizarAccesoApps() {
+  try {
+    const clientes = await db.clientes.refresh();
+    const activos = clientes.filter(c => c.estado === 'activo');
+    // dedupe por nombre normalizado (la tabla tiene unique por eso)
+    const vistos = new Set();
+    const rows = [];
+    for (const c of activos) {
+      const n = normalizeName(c.nombre);
+      if (!n || vistos.has(n)) continue;
+      vistos.add(n);
+      rows.push({ nombre: c.nombre, nombre_normalizado: n, estado: 'activo', actualizado_en: new Date().toISOString() });
+    }
+    // rebuild completo: simple y a prueba de renombres, pausas y eliminaciones
+    const { error: eDel } = await sb.from('acceso_apps').delete().gte('actualizado_en', '1970-01-01');
+    if (eDel) throw eDel;
+    if (rows.length) {
+      const { error: eIns } = await sb.from('acceso_apps').insert(rows);
+      if (eIns) throw eIns;
+    }
+    return true;
+  } catch (e) {
+    if (!_accesoAppsAviso) {
+      _accesoAppsAviso = true;
+      toast('⚠️ No pude actualizar la lista de acceso de las apps. ¿Corriste la migración acceso_apps de schema.sql en Supabase?');
+    }
+    console.warn('sincronizarAccesoApps:', e?.message || e);
+    return false;
+  }
+}
+window.sincronizarAccesoApps = sincronizarAccesoApps;
+
+// =====================================================
 // EXTRACCIÓN DE DATOS DESDE LA ENTREVISTA INICIAL
 // Lee el texto libre de la entrevista (campo notas) y propone valores SOLO
 // para campos de identidad/salud que estén vacíos. Nunca propone ni toca:
@@ -3411,6 +3520,7 @@ async function guardarClienteSeguro(id, row) {
 const MESES_ES = { enero: '01', febrero: '02', marzo: '03', abril: '04', mayo: '05', junio: '06', julio: '07', agosto: '08', septiembre: '09', setiembre: '09', octubre: '10', noviembre: '11', diciembre: '12' };
 const KW_PATOLOGIAS = ['hipotiroidismo', 'hipertiroidismo', 'hipertensión', 'hipertension', 'prediabetes', 'prediabético', 'prediabetico', 'diabetes', 'resistencia a la insulina', 'colesterol alto', 'colesterol elevado', 'triglicéridos', 'trigliceridos', 'hígado graso', 'higado graso', 'gastritis', 'colon irritable', 'asma', 'ansiedad', 'depresión', 'depresion', 'ovario poliquístico', 'ovario poliquistico', 'sop', 'apnea', 'migraña', 'migrana', 'anemia', 'artritis', 'artrosis', 'fibromialgia', 'tiroides'];
 const KW_LESIONES = ['hernia', 'lumbalgia', 'escoliosis', 'tendinitis', 'tendinopatía', 'tendinopatia', 'menisco', 'ligamento cruzado', 'manguito rotador', 'fascitis', 'condromalacia', 'esguince', 'fractura', 'luxación', 'luxacion', 'ciática', 'ciatica', 'pinzamiento', 'bursitis', 'túnel carpiano', 'tunel carpiano', 'dolor lumbar', 'dolor de rodilla', 'dolor de hombro', 'dolor de espalda', 'dolor de cadera', 'lesión', 'lesion'];
+const KW_SUPLEMENTOS = ['creatina', 'whey', 'proteína en polvo', 'proteina en polvo', 'omega 3', 'omega-3', 'magnesio', 'vitamina d', 'vitamina c', 'multivitamínico', 'multivitaminico', 'colágeno', 'colageno', 'melatonina', 'zinc', 'pre-entreno', 'preentreno', 'bcaa', 'glutamina', 'ashwagandha', 'cafeína en cápsulas'];
 
 function extraerDatosEntrevista(texto, c = {}) {
   const props = [];   // { campo, label, valor, fuente }
@@ -3545,6 +3655,23 @@ function extraerDatosEntrevista(texto, c = {}) {
   if (!mAnt) mAnt = t.match(/(?:practic(?:ó|aba|a)|jug(?:ó|aba)|entren(?:ó|aba)|compet[ií]a)\s+([^\n,.;]{3,80})/i);
   if (mAnt) add('antecedentes_deportivos', 'Antecedentes deportivos', mAnt[1].trim(), mAnt.index);
 
+  // --- Suplementos ---
+  let mSup = t.match(/suplement(?:os|ación|acion)?\s*[:=]\s*([^\n]{3,150})/i);
+  if (!mSup) mSup = t.match(/(?<!no\s)(?<!no)toma\s+(?:suplementos?\s*[:=]?\s*)?((?:[^\n,.;]*\b(?:creatina|whey|omega|magnesio|vitamina|colágeno|colageno|melatonina)\b)[^\n.;]{0,80})/i);
+  if (mSup) add('suplementos', 'Suplementos', mSup[1].trim(), mSup.index);
+  else {
+    const sups = [];
+    let primerIdxSup = null;
+    for (const kw of KW_SUPLEMENTOS) {
+      const idx = tLow.indexOf(kw);
+      if (idx === -1) continue;
+      if (/\b(sin|no toma|no usa|no consume)\b[^.\n]{0,30}$/.test(tLow.slice(Math.max(0, idx - 40), idx))) continue;
+      if (!sups.some(e => kw.includes(e) || e.includes(kw))) sups.push(kw);
+      if (primerIdxSup === null) primerIdxSup = idx;
+    }
+    if (sups.length) add('suplementos', 'Suplementos', sups.join(', '), primerIdxSup);
+  }
+
   return props;
 }
 
@@ -3553,6 +3680,7 @@ const CAMPO_A_INPUT = {
   email: 'cl-email', telefono: 'cl-tel', fecha_nacimiento: 'cl-nac', sexo: 'cl-sexo',
   ciudad: 'cl-ciudad', profesion: 'cl-prof', estatura_cm: 'cl-alt',
   patologias: 'cl-pat', restricciones_lesiones: 'cl-rest', antecedentes_deportivos: 'cl-ant',
+  suplementos: 'cl-sup', actividades_complementarias: 'cl-acts-comp',
 };
 window.extraerEntrevistaForm = () => {
   const texto = $('#cl-notas')?.value || '';
@@ -3655,6 +3783,7 @@ function guardarValoresModalCliente() {
   });
   window._modalClienteValores = vals;
   window._modalClienteDias = $$('#cl-dias-sem input:checked').map(i => i.value);
+  window._modalClienteObj = $$('#cl-obj-tags input:checked').map(i => i.value);
 }
 function restaurarModalCliente() {
   modalContent.innerHTML = window._modalClienteHTML || '';
@@ -3665,6 +3794,7 @@ function restaurarModalCliente() {
     if (el.type === 'checkbox') el.checked = v; else el.value = v;
   }
   $$('#cl-dias-sem input').forEach(i => { i.checked = (window._modalClienteDias || []).includes(i.value); });
+  $$('#cl-obj-tags input').forEach(i => { i.checked = (window._modalClienteObj || []).includes(i.value); });
 }
 
 window.abrirEncuestaActividad = () => {
@@ -3775,6 +3905,18 @@ window.recalcularMeta = async () => {
     meta_calculada_en: new Date().toISOString(),
   };
 
+  // Meta específica (sección 2): se toma del cálculo, editable a mano después.
+  // Si el coach escribió algo propio (no empieza con "#### kcal"), se conserva y
+  // la línea calculada se agrega al final.
+  const cm = $('#cl-meta');
+  if (cm) {
+    const pct = (kcalMacro) => Math.round((kcalMacro / meta.kcal) * 100);
+    const linea = `${meta.kcal} kcal: ${meta.proteina}P / ${meta.carbos}C / ${meta.grasas}G (${pct(meta.proteina * 4)}% / ${pct(meta.carbos * 4)}% / ${pct(meta.grasas * 9)}%)`;
+    const actual = cm.value.trim();
+    if (!actual || /^\d{3,4}\s*\.?\s*kcal/i.test(actual)) cm.value = linea;
+    else cm.value = actual.split('\n').filter(l => !/^\d{3,4}\s*\.?\s*kcal/i.test(l.trim())).join('\n').trim() + '\n' + linea;
+  }
+
   $('#meta-preview').innerHTML = `
     <div class="font-bold text-emerald-700 text-base">${meta.kcal} kcal · ${meta.proteina}g prote · ${meta.grasas}g grasas · ${meta.carbos}g carbos</div>
     <div class="text-xs text-slate-500 mt-1">${meta.metodo} · calculada ahora</div>
@@ -3793,6 +3935,7 @@ window.eliminarCliente = async (id) => {
   await db.clientes.remove(id);
   closeModal();
   toast('Cliente eliminado');
+  await sincronizarAccesoApps();
   navigate('clientes');
 };
 
@@ -3924,16 +4067,18 @@ window.verCliente = async (id) => {
           <div class="sec-title">4 · 🏃 Nivel de actividad y entreno</div>
           ${c.nivel_actividad ? `<div><span class="text-slate-500">Nivel:</span> <strong class="capitalize">${c.nivel_actividad.replace('_',' ')}</strong> · PAL ${c.pal_factor || '—'}</div>` : ''}
           ${c.lugar_entreno ? `<div><span class="text-slate-500">Lugar entreno:</span> <strong class="capitalize">${c.lugar_entreno.replace('_',' ')}</strong></div>` : ''}
-          ${metaDiasEntreno(c) ? `<div><span class="text-slate-500">Días de entreno:</span> <strong>${metaDiasEntreno(c)}/semana</strong>${(c.dias_entreno || []).length ? ` (${c.dias_entreno.join(' · ')})` : ''}</div>` : ''}
+          ${metaDiasEntreno(c) ? `<div><span class="text-slate-500">Fuerza:</span> <strong>${metaDiasEntreno(c)} días/semana</strong>${(c.dias_entreno || []).length ? ` (${c.dias_entreno.join(' · ')})` : ''}</div>` : ''}
+          ${c.actividades_complementarias ? `<div><span class="text-slate-500">Complementarias:</span> <strong>${escapeHtml(c.actividades_complementarias)}</strong> <span class="text-xs text-slate-400">(suman bonus al score, sin meta fija)</span></div>` : ''}
         </div>` : ''}
 
       <!-- 6. CONDICIONES MÉDICAS / LESIONES -->
-      ${c.restricciones_lesiones || c.patologias || c.lesion_actual ? `
+      ${c.restricciones_lesiones || c.patologias || c.lesion_actual || c.suplementos ? `
         <div class="sec sec-red">
           <div class="sec-title">6 · ⚕️ Condiciones médicas / lesiones</div>
           ${c.patologias ? `<div class="text-red-700 text-xs"><span class="font-semibold">Patologías:</span> ${escapeHtml(c.patologias)}</div>` : ''}
           ${c.restricciones_lesiones ? `<div class="text-red-700 text-xs mt-1"><span class="font-semibold">Restricciones:</span> ${escapeHtml(c.restricciones_lesiones)}</div>` : ''}
           ${c.lesion_actual ? `<div class="text-red-700 text-xs mt-1"><span class="font-semibold">Lesión actual:</span> ${escapeHtml(c.lesion_actual)}${c.lesion_estado ? ` (${c.lesion_estado.replace('_',' ')})` : ''}</div>` : ''}
+          ${c.suplementos ? `<div class="text-slate-700 text-xs mt-1"><span class="font-semibold">💊 Suplementos:</span> ${escapeHtml(c.suplementos)}</div>` : '<div class="text-slate-400 text-xs mt-1">💊 Sin suplementos registrados</div>'}
         </div>` : ''}
 
       <!-- 7. ANTECEDENTES DEPORTIVOS -->

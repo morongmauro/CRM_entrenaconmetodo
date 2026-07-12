@@ -161,3 +161,16 @@ tr:hover td { background-color: #f8fafc; }
 .day-chip span:hover { border-color: var(--brand-olive); }
 .day-chip span.plan { border-style: dashed; border-color: var(--brand-olive); color: var(--brand-olive); }
 .day-chip input:checked + span { background: var(--brand-olive); border-color: var(--brand-olive); border-style: solid; color: white; }
+
+/* ===== Chips de objetivos del cliente (multi-selección) ===== */
+.obj-chip { display: inline-block; }
+.obj-chip span {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  padding: 0.32rem 0.8rem; border-radius: 999px;
+  font-size: 0.75rem; font-weight: 600; background: white;
+  border: 1px solid #e2e8f0; color: #64748b; cursor: pointer;
+  transition: all 0.12s; user-select: none; white-space: nowrap;
+  text-transform: none; letter-spacing: normal;
+}
+.obj-chip span:hover { border-color: var(--brand-olive); color: var(--brand-olive); }
+.obj-chip input:checked + span { background: var(--brand-olive); border-color: var(--brand-olive); color: white; }
