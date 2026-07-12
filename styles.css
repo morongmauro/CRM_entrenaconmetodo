@@ -162,6 +162,16 @@ tr:hover td { background-color: #f8fafc; }
 .day-chip span.plan { border-style: dashed; border-color: var(--brand-olive); color: var(--brand-olive); }
 .day-chip input:checked + span { background: var(--brand-olive); border-color: var(--brand-olive); border-style: solid; color: white; }
 
+/* ===== Navegador de semana en el modal de seguimiento ===== */
+.seg-wk-nav {
+  padding: 0.12rem 0.5rem; border-radius: 0.4rem; border: none;
+  background: #e2e8f0; color: #334155; font-size: 0.72rem; font-weight: 700;
+  cursor: pointer; transition: background 0.12s; line-height: 1.2;
+}
+.seg-wk-nav:hover { background: #cbd5e1; }
+.seg-wk-nav-off { opacity: 0.35; cursor: not-allowed; }
+.seg-wk-nav-off:hover { background: #e2e8f0; }
+
 /* ===== Chips de objetivos del cliente (multi-selección) ===== */
 .obj-chip { display: inline-block; }
 .obj-chip span {

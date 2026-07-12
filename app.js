@@ -347,6 +347,12 @@ const fmt = {
     d.setDate(d.getDate() - 7);
     return fmt.semanaISO(d);
   },
+  semanaNext: (s) => {
+    const [ini] = semanaISOToRange(s);
+    const d = new Date(ini + 'T00:00:00');
+    d.setDate(d.getDate() + 7);
+    return fmt.semanaISO(d);
+  },
   labelSemana: (s) => {
     const [y, w] = s.split('-W').map(Number);
     return `S${w} '${String(y).slice(2)}`;
@@ -881,6 +887,12 @@ window.eliminarPendCoachSeg = async (id) => {
   renderPendCoachSeg();
 };
 
+// Marca/desmarca una tarea del coach directo desde el timeline del seguimiento
+window.togglePendienteTimeline = async (id, estado) => {
+  await db.pendientes.toggle(id, estado);
+  rerenderView();
+};
+
 window.toggleChecklistSemana = async (segId, idx) => {
   const s = await db.seguimientos.get(segId);
   const items = parseChecklist(s?.pendientes_semana);
@@ -1381,6 +1393,18 @@ window.abrirNuevoSeguimiento = async (clienteId) => {
   await abrirModalSeguimiento(clienteId, fmt.semanaISO());
 };
 
+// Cambia la semana del modal de seguimiento sin cerrarlo. Si esa semana ya
+// tiene registro, lo abre para editar; si no, abre una vacía. Avisa si hay
+// datos sin guardar en la semana actual.
+window.cambiarSemanaSeg = (clienteId, semanaActual, delta) => {
+  const nueva = delta < 0 ? fmt.semanaPrev(semanaActual) : fmt.semanaNext(semanaActual);
+  if (delta > 0 && nueva > fmt.semanaISO()) { toast('No puedes registrar una semana futura'); return; }
+  const hayDatos = ['#sg-fe', '#sg-ce', '#sg-kcal', '#sg-prote', '#sg-avances', '#sg-notas', '#sg-pend']
+    .some(sel => ($(sel)?.value || '').trim());
+  if (hayDatos && !confirm('¿Cambiar de semana? Se perderá lo que no hayas guardado en esta.')) return;
+  abrirModalSeguimiento(clienteId, nueva);
+};
+
 window.togglePendienteDash = async (id, estado) => {
   await db.pendientes.toggle(id, estado);
   rerenderView();
@@ -1542,10 +1566,22 @@ routes.seguimiento = async () => {
 
 window.switchSegView = (which) => { _segView = which; routes.seguimiento(); };
 
-function renderSegFocus(clientes, allSegs, ultPorCliente) {
+async function renderSegFocus(clientes, allSegs, ultPorCliente) {
   const cliente = clientes.find(c => c.id === _selectedClienteId);
   const segs = allSegs.filter(s => s.cliente_id === _selectedClienteId).sort((a, b) => b.semana.localeCompare(a.semana));
   const ordenados = clientes.slice().sort(sortByEstado);
+
+  // Pendientes del coach (para='coach') agrupados por la semana a la que
+  // pertenecen, para mostrarlos en cada tarjeta del timeline junto a los
+  // del cliente.
+  const coachPorSeg = {};
+  if (cliente) {
+    const pendsCoach = (await db.pendientes.listCliente(_selectedClienteId)).filter(p => p.para === 'coach');
+    for (const p of pendsCoach) {
+      if (!p.seguimiento_id) continue;
+      (coachPorSeg[p.seguimiento_id] ||= []).push(p);
+    }
+  }
 
   const sidebar = `
     <aside class="col-span-12 lg:col-span-4 card h-fit">
@@ -1592,7 +1628,7 @@ function renderSegFocus(clientes, allSegs, ultPorCliente) {
 
         <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider px-1 pt-2">Timeline · ${segs.length} semana(s)</h4>
         <div class="space-y-3">
-          ${segs.length === 0 ? '<div class="card text-sm text-slate-500 text-center py-8">Sin registros aún. <button class="text-emerald-600 font-semibold" onclick="abrirNuevoSeguimiento(\''+cliente.id+'\')">+ Crear el primero</button></div>' : segs.map(s => seguimientoCard(s)).join('')}
+          ${segs.length === 0 ? '<div class="card text-sm text-slate-500 text-center py-8">Sin registros aún. <button class="text-emerald-600 font-semibold" onclick="abrirNuevoSeguimiento(\''+cliente.id+'\')">+ Crear el primero</button></div>' : segs.map(s => seguimientoCard(s, coachPorSeg[s.id] || [])).join('')}
         </div>
       </div>
     </div>
@@ -1747,7 +1783,7 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
   `;
 }
 
-function seguimientoCard(s) {
+function seguimientoCard(s, coachPends = []) {
   const prom = helpers.promedioAdh(s);
   const ring = prom === null ? '' : prom >= 7.5 ? 'ring-good' : prom >= 5 ? 'ring-mid' : 'ring-bad';
   const animos = { excelente: '🤩', bien: '😊', neutro: '😐', bajo: '😕', 'muy bajo': '😔' };
@@ -1763,7 +1799,12 @@ function seguimientoCard(s) {
             ${pctAsis !== null ? `<span class="tag ${pctAsis >= 90 ? 'tag-green' : pctAsis >= 60 ? 'tag-yellow' : 'tag-red'}">📆 ${s.dias_asistidos}/${s.dias_planeados} días · ${pctAsis}%</span>` : ''}
           </div>
           ${s.avances ? `<p class="text-sm text-slate-700 mb-2 whitespace-pre-line">${escapeHtml(s.avances)}</p>` : '<p class="text-sm text-slate-400 italic">Sin avances escritos</p>'}
-          ${s.pendientes_semana ? `<div class="bg-amber-50 rounded-lg px-3 py-2 mt-2"><div class="text-xs font-bold text-amber-800 mb-1">Le pediste:</div>${checklistHtml(s.pendientes_semana, s.id)}</div>` : ''}
+          ${s.pendientes_semana ? `<div class="bg-amber-50 rounded-lg px-3 py-2 mt-2"><div class="text-xs font-bold text-amber-800 mb-1">👥 Le pediste al cliente:</div>${checklistHtml(s.pendientes_semana, s.id)}</div>` : ''}
+          ${coachPends.length ? `<div class="bg-emerald-50 rounded-lg px-3 py-2 mt-2"><div class="text-xs font-bold text-emerald-800 mb-1">🧢 Tus tareas (coach):</div><div class="space-y-1" onclick="event.stopPropagation()">${coachPends.map(p => `
+            <label class="chk-item chk-ink ${p.estado === 'completado' ? 'chk-done' : ''}">
+              <input type="checkbox" class="rounded" ${p.estado === 'completado' ? 'checked' : ''} onchange="togglePendienteTimeline('${p.id}', '${p.estado}')">
+              <span class="chk-text">${escapeHtml(p.descripcion)}</span>
+            </label>`).join('')}${coachPends.length > 1 ? `<div class="chk-count">${coachPends.filter(p => p.estado === 'completado').length}/${coachPends.length} completados</div>` : ''}</div></div>` : ''}
           ${s.notas ? `<p class="text-xs text-slate-500 mt-2 whitespace-pre-line">📝 ${escapeHtml(s.notas)}</p>` : ''}
         </div>
         <div class="flex flex-col items-end gap-1 flex-shrink-0">
@@ -1847,13 +1888,22 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
   const resumen = generarResumen(cliente, segsCliente.filter(x => x.id !== s.id), pendsCliente);
   const abiertos = pendsCliente.filter(p => p.estado === 'abierto');
 
+  // Rango lunes-domingo de la semana + si es la semana en curso (no dejar ir al futuro)
+  const [wkIni, wkFin] = semanaISOToRange(semana);
+  const esSemanaActual = semana >= fmt.semanaISO();
+
   const html = `
     <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-10">
       <div class="flex items-center gap-3">
         ${helpers.avatar(cliente.nombre, 10)}
         <div>
           <h3 class="font-bold text-slate-900">${s.id ? 'Editar' : 'Nueva'} semana · ${escapeHtml(cliente.nombre)}</h3>
-          <p class="text-xs text-slate-500">${fmt.labelSemana(semana)} · ${fmt.fecha(s.fecha || fmt.hoy())}</p>
+          <div class="flex items-center gap-1.5 mt-1">
+            <button type="button" class="seg-wk-nav" title="Semana anterior" onclick="cambiarSemanaSeg('${clienteId}','${semana}',-1)">◀</button>
+            <span class="text-xs font-semibold text-slate-600">${fmt.labelSemana(semana)} · ${fmt.fechaCorta(wkIni)}–${fmt.fechaCorta(wkFin)}</span>
+            <button type="button" class="seg-wk-nav ${esSemanaActual ? 'seg-wk-nav-off' : ''}" title="${esSemanaActual ? 'No puedes registrar una semana futura' : 'Semana siguiente'}" ${esSemanaActual ? 'disabled' : ''} onclick="cambiarSemanaSeg('${clienteId}','${semana}',1)">▶</button>
+            ${s.id ? '<span class="text-xs text-emerald-600 font-semibold ml-1">✎ ya registrada</span>' : ''}
+          </div>
         </div>
       </div>
       <button class="btn btn-ghost" onclick="closeModal()">✕</button>
