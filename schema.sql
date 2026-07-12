@@ -156,30 +156,6 @@ alter table clientes add column if not exists email text;
 alter table clientes add column if not exists telefono text;
 alter table clientes add column if not exists suplementos text;
 alter table clientes add column if not exists actividades_complementarias text;
-
--- ================================================================
--- MIGRACIÓN · ACCESO DE CLIENTES A LAS APPS
--- El CRM reconstruye esta tabla cada vez que creas/editas/pausas/
--- eliminas un cliente: contiene SOLO los clientes ACTIVOS.
--- El Mealtracker y el Centro de Recursos la leen con la anon key del
--- CRM (solo lectura pública) en vez de tener nombres quemados en el
--- código. Pausar un cliente lo saca de la lista al instante.
--- ================================================================
-create table if not exists acceso_apps (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null default auth.uid() references auth.users on delete cascade,
-  nombre text not null,
-  nombre_normalizado text not null,   -- minúsculas, sin tildes ni espacios dobles
-  estado text not null default 'activo',
-  actualizado_en timestamptz default now(),
-  unique (user_id, nombre_normalizado)
-);
-alter table acceso_apps enable row level security;
--- el coach (autenticado) escribe solo lo suyo:
-drop policy if exists "own acceso_apps" on acceso_apps;
-create policy "own acceso_apps" on acceso_apps
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
--- cualquier app con la anon key puede LEER la lista (solo lectura):
-drop policy if exists "public read acceso_apps" on acceso_apps;
-create policy "public read acceso_apps" on acceso_apps
-  for select using (true);
+-- Nota: el acceso de clientes al Mealtracker / Centro de Recursos lo
+-- resuelve el Mealtracker (api/authorize.js) leyendo la tabla clientes
+-- directo con la service_role key. No requiere tabla extra en el CRM.

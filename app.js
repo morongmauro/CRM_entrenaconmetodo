@@ -1000,7 +1000,6 @@ async function checkSession() {
     loginScreen.classList.add('hidden');
     appScreen.classList.remove('hidden');
     navigate('dashboard');
-    sincronizarAccesoApps();   // mantiene al día la lista de acceso de las apps (no bloquea)
   } else {
     appScreen.classList.add('hidden');
     loginScreen.classList.remove('hidden');
@@ -3448,7 +3447,6 @@ window.guardarCliente = async (id = null) => {
   window._pendingMeta = null;
   closeModal();
   toast(r.sinColumnas ? '⚠️ Guardado, pero sin los campos nuevos: corre la migración de schema.sql en Supabase' : 'Guardado');
-  await sincronizarAccesoApps();   // activo/pausa/finalizado se refleja YA en las apps
   navigate('clientes');
 };
 
@@ -3469,47 +3467,6 @@ async function guardarClienteSeguro(id, row) {
   _clientesCache = null;
   return { ok: true, sinColumnas };
 }
-
-// =====================================================
-// ACCESO DE CLIENTES A LAS APPS (Mealtracker · Centro de recursos)
-// El CRM es la fuente de verdad: cada vez que se crea, edita, pausa o
-// elimina un cliente, reconstruye la tabla acceso_apps con SOLO los
-// clientes activos. Las apps externas leen esa tabla (solo lectura con
-// la anon key) en vez de tener nombres quemados en el código.
-// Requiere la tabla acceso_apps (ver migración en schema.sql).
-// =====================================================
-let _accesoAppsAviso = false;
-async function sincronizarAccesoApps() {
-  try {
-    const clientes = await db.clientes.refresh();
-    const activos = clientes.filter(c => c.estado === 'activo');
-    // dedupe por nombre normalizado (la tabla tiene unique por eso)
-    const vistos = new Set();
-    const rows = [];
-    for (const c of activos) {
-      const n = normalizeName(c.nombre);
-      if (!n || vistos.has(n)) continue;
-      vistos.add(n);
-      rows.push({ nombre: c.nombre, nombre_normalizado: n, estado: 'activo', actualizado_en: new Date().toISOString() });
-    }
-    // rebuild completo: simple y a prueba de renombres, pausas y eliminaciones
-    const { error: eDel } = await sb.from('acceso_apps').delete().gte('actualizado_en', '1970-01-01');
-    if (eDel) throw eDel;
-    if (rows.length) {
-      const { error: eIns } = await sb.from('acceso_apps').insert(rows);
-      if (eIns) throw eIns;
-    }
-    return true;
-  } catch (e) {
-    if (!_accesoAppsAviso) {
-      _accesoAppsAviso = true;
-      toast('⚠️ No pude actualizar la lista de acceso de las apps. ¿Corriste la migración acceso_apps de schema.sql en Supabase?');
-    }
-    console.warn('sincronizarAccesoApps:', e?.message || e);
-    return false;
-  }
-}
-window.sincronizarAccesoApps = sincronizarAccesoApps;
 
 // =====================================================
 // EXTRACCIÓN DE DATOS DESDE LA ENTREVISTA INICIAL
@@ -3935,7 +3892,6 @@ window.eliminarCliente = async (id) => {
   await db.clientes.remove(id);
   closeModal();
   toast('Cliente eliminado');
-  await sincronizarAccesoApps();
   navigate('clientes');
 };
 
