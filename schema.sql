@@ -156,6 +156,10 @@ alter table clientes add column if not exists email text;
 alter table clientes add column if not exists telefono text;
 alter table clientes add column if not exists suplementos text;
 alter table clientes add column if not exists actividades_complementarias text;
+
+-- Calculadora de meta nutricional: % de las kcal destinado a grasas
+-- (configurable por cliente; AMDR 20-35%, default 25). Segura de repetir:
+alter table clientes add column if not exists grasa_pct_kcal numeric;
 -- Nota: el acceso de clientes al Mealtracker / Centro de Recursos lo
 -- resuelve el Mealtracker (api/authorize.js) leyendo la tabla clientes
 -- directo con la service_role key. No requiere tabla extra en el CRM.

@@ -80,22 +80,61 @@ async function mtApiPost(path, body) {
   return r.json().catch(() => ({}));
 }
 
+async function mtApiPatch(path, body) {
+  const cfg = mtApiBase();
+  if (!cfg) return null;
+  let token = await mtApiToken();
+  if (!token) return null;
+  const call = (t) => fetch(`${cfg.url}${path}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).catch(() => null);
+  let r = await call(token);
+  if (r && r.status === 401) {
+    token = await mtApiToken(true);
+    if (!token) return null;
+    r = await call(token);
+  }
+  if (!r || !r.ok) return null;
+  return r.json().catch(() => ({}));
+}
+
 // Escribe las metas (kcal/p/c/g) en el user_data del Mealtracker.
-// Devuelve { ok, causa }. Respeta el formato de claves que ya use el cliente
-// (nuevo: kcal/p/c/g · viejo: calories/protein/carbs/fat) y no toca nada más del blob.
+// Devuelve { ok, causa }.
+//
+// IMPORTANTE: siempre se sella goals_updated = { at, by: 'coach' }. Ese sello
+// es el que hace que (1) la app del cliente detecte el cambio y muestre el
+// ANUNCIO en su chat ("tu coach actualizó tu meta…"), y (2) el próximo push
+// del cliente NO pise la meta nueva con la vieja (anti-pisado de /api/sync).
 async function setMealtrackerGoals(mealtrackerId, metas) {
   const aplicar = (goalsPrevias) => {
     const goals = { ...(goalsPrevias || {}) };
     const formatoViejo = goals.calories != null && goals.kcal == null;
+    // Siempre escribimos las claves nuevas (kcal/p/c/g): el ANUNCIO en la app
+    // del cliente las lee. Si el blob traía el formato viejo, actualizamos
+    // también esas claves para no dejar datos contradictorios.
+    goals.kcal = metas.kcal; goals.p = metas.p; goals.c = metas.c; goals.g = metas.g;
     if (formatoViejo) {
       goals.calories = metas.kcal; goals.protein = metas.p; goals.carbs = metas.c; goals.fat = metas.g;
-    } else {
-      goals.kcal = metas.kcal; goals.p = metas.p; goals.c = metas.c; goals.g = metas.g;
     }
     return goals;
   };
 
-  // Modo directo (anon key): leer el blob completo, cambiar solo goals, reescribir
+  // Modo seguro (API de coach) — PRIMERA opción: el endpoint PATCH
+  // action=goals del Mealtracker escribe la meta Y sella goals_updated en el
+  // servidor, con lo que el anuncio al cliente sale solo.
+  if (mtApiBase()) {
+    const res = await mtApiPatch(
+      `/api/coach-data?action=goals&user_id=${encodeURIComponent(mealtrackerId)}`,
+      { kcal: Number(metas.kcal), p: Number(metas.p), c: Number(metas.c), g: Number(metas.g) }
+    );
+    if (res && res.ok) return { ok: true };
+    // Si falla (URL/contraseña mal, red), probamos el modo directo abajo.
+  }
+
+  // Modo directo (anon key): leer el blob completo, cambiar solo goals +
+  // goals_updated, reescribir.
   const mt = mtClient();
   if (mt) {
     const { data: row, error } = await mt.from('user_data').select('data').eq('user_id', mealtrackerId).maybeSingle();
@@ -103,19 +142,12 @@ async function setMealtrackerGoals(mealtrackerId, metas) {
     if (!row) return { ok: false, causa: 'El cliente no existe en el Mealtracker. Revisa el vínculo en Ajustes → "Sincronizar clientes".' };
     const blob = row.data || {};
     blob.goals = aplicar(blob.goals);
+    blob.goals_updated = { at: new Date().toISOString(), by: 'coach' };
     const { error: e2 } = await mt.from('user_data')
       .update({ data: blob, updated_at: new Date().toISOString() })
       .eq('user_id', mealtrackerId);
-    if (e2) return { ok: false, causa: `No se pudo escribir en el Mealtracker: "${e2.message}". Si activaste RLS en user_data, el modo directo ya no permite escribir.` };
+    if (e2) return { ok: false, causa: `No se pudo escribir en el Mealtracker: "${e2.message}". Si activaste RLS en user_data, configura la URL y contraseña de coach en Ajustes (modo seguro).` };
     return { ok: true };
-  }
-
-  // Modo seguro (API de coach): requiere que la app Mealtracker exponga un
-  // endpoint de escritura de metas.
-  if (mtApiBase()) {
-    const res = await mtApiPost('/api/coach-data', { action: 'set_goals', user_id: mealtrackerId, goals: aplicar((await getMealtrackerUserData(mealtrackerId))?.goals) });
-    if (res) return { ok: true };
-    return { ok: false, causa: 'La API de coach del Mealtracker no aceptó el cambio de metas (es de solo lectura). Para enviar metas llena la URL y anon key del Mealtracker en config.js o Ajustes, o agrega el endpoint de escritura en la app Mealtracker.' };
   }
 
   return { ok: false, causa: 'No hay conexión configurada al Mealtracker (config.js o Ajustes).' };
@@ -556,9 +588,23 @@ function nivelDesdeEncuesta(respuestas) {
 }
 
 // ===== Cálculo de meta nutricional =====
-function calcMetaNutricional({ peso, altura, edad, sexo, grasa_pct, pal, objetivo_pct, proteina_g_kg }) {
+// Métodos y respaldo científico (ver también GUIA_MACROS para los rangos):
+//  · BMR con %grasa conocido → Katch-McArdle (usa masa magra; el gasto basal
+//    lo determina el tejido metabólicamente activo, no el peso total).
+//  · BMR sin %grasa → Mifflin-St Jeor (1990), la ecuación con mejor precisión
+//    poblacional según la revisión sistemática de la ADA (Frankenfield 2005).
+//  · TDEE = BMR × PAL (factores de actividad FAO/OMS 1985 / Black 1996).
+//  · Ajuste calórico como % del TDEE (déficit/superávit gradual).
+//  · Proteína en g/kg (así la dosifica la evidencia: ISSN 2017, Morton 2018,
+//    Helms 2014) — NUNCA como % de las kcal, porque la necesidad de proteína
+//    depende de la masa corporal, no de cuánta energía se coma.
+//  · Grasa como % de las kcal (configurable; AMDR 20-35%, IOM 2005), con piso
+//    de 0.5 g/kg para no comprometer función hormonal (Helms 2014).
+//  · Carbohidrato = el resto de las kcal (combustible flexible del entreno).
+function calcMetaNutricional({ peso, altura, edad, sexo, grasa_pct, pal, objetivo_pct, proteina_g_kg, grasa_pct_kcal }) {
   const w = Number(peso), h = Number(altura), a = Number(edad), g = grasa_pct != null && grasa_pct !== '' ? Number(grasa_pct) : null;
   const gkg = Number(proteina_g_kg) || 1.8;
+  const fatPct = Math.min(45, Math.max(10, Number(grasa_pct_kcal) || 25));
   if (!w || !h || !a || !sexo || !pal || objetivo_pct == null) return null;
 
   let bmr, metodo, formula;
@@ -577,20 +623,108 @@ function calcMetaNutricional({ peso, altura, edad, sexo, grasa_pct, pal, objetiv
   const tdee = bmr * pal;
   const kcal = Math.round(tdee * (1 + objetivo_pct));
   const proteina = Math.round(w * gkg);
-  const grasas = Math.round(kcal * 0.25 / 9);
-  const carbos = Math.round((kcal - proteina * 4 - grasas * 9) / 4);
+  const grasas = Math.round(kcal * fatPct / 100 / 9);
+  const carbos = Math.round(Math.max(0, kcal - proteina * 4 - grasas * 9) / 4);
+
+  // Derivados para mostrar las tres lecturas de cada macro (g · % kcal · g/kg)
+  const pct = (kcalMacro) => Math.round((kcalMacro / kcal) * 100);
+  const porKg = (gr) => +(gr / w).toFixed(1);
+  const detalle = {
+    proteina: { g: proteina, pct: pct(proteina * 4), gkg: porKg(proteina) },
+    carbos:   { g: carbos,   pct: pct(carbos * 4),   gkg: porKg(carbos) },
+    grasas:   { g: grasas,   pct: pct(grasas * 9),   gkg: porKg(grasas) },
+  };
+
+  // Ritmo esperado de cambio de peso (≈7700 kcal por kg de tejido adiposo)
+  const cambioSemanalKg = +(((kcal - tdee) * 7) / 7700).toFixed(2);
+
+  // Avisos de seguridad — el cálculo sale igual, pero el coach los ve.
+  const avisos = [];
+  if (detalle.grasas.gkg < 0.5) avisos.push(`Grasa en ${detalle.grasas.gkg} g/kg — por debajo de 0.5 g/kg puede afectar la función hormonal (Helms 2014). Sube el % de grasa o las kcal.`);
+  if (kcal < bmr) avisos.push(`La meta (${kcal} kcal) queda por debajo del BMR (${Math.round(bmr)} kcal). Déficit muy agresivo: úsalo solo por periodos cortos y con supervisión.`);
+  if (detalle.carbos.gkg < 2 && objetivo_pct < 0) avisos.push(`Carbohidrato en ${detalle.carbos.gkg} g/kg — con entreno frecuente puede costar rendimiento (referencia mínima ~3 g/kg, Burke 2011).`);
+  if (kcal - proteina * 4 - grasas * 9 < 0) avisos.push('Proteína + grasa ya superan las kcal de la meta: el carbo quedó en 0. Baja proteína g/kg o % de grasa.');
 
   const signo = objetivo_pct >= 0 ? '+' : '';
-  const argumento = `Método: ${metodo}
+  const argumento = `Método: ${metodo}${metodo === 'Katch-McArdle' ? ' (usa masa magra; %grasa conocido)' : ' (mayor precisión poblacional; Frankenfield 2005)'}
 ${formula}
-TDEE = BMR × PAL(${pal}) = ${tdee.toFixed(0)} kcal
+TDEE = BMR × PAL(${pal}) = ${tdee.toFixed(0)} kcal  [factores FAO/OMS]
 Meta = TDEE × (1 ${signo}${(objetivo_pct * 100).toFixed(0)}%) = ${kcal} kcal
-Proteína: ${w} kg × ${gkg} g/kg = ${proteina} g
-Grasas: 25% de kcal = ${grasas} g
-Carbos: resto = ${carbos} g`;
+Ritmo esperado: ${cambioSemanalKg > 0 ? '+' : ''}${cambioSemanalKg} kg/semana aprox.
+Proteína: ${w} kg × ${gkg} g/kg = ${proteina} g (${detalle.proteina.pct}% kcal)  [ISSN 2017 · Morton 2018]
+Grasas: ${fatPct}% de kcal = ${grasas} g (${detalle.grasas.gkg} g/kg)  [AMDR 20-35%, piso 0.5 g/kg]
+Carbos: resto = ${carbos} g (${detalle.carbos.pct}% kcal · ${detalle.carbos.gkg} g/kg)${avisos.length ? '\n⚠️ ' + avisos.join('\n⚠️ ') : ''}`;
 
-  return { kcal, proteina, grasas, carbos, metodo, argumento, bmr: Math.round(bmr), tdee: Math.round(tdee) };
+  return { kcal, proteina, grasas, carbos, metodo, argumento, bmr: Math.round(bmr), tdee: Math.round(tdee), detalle, cambioSemanalKg, avisos, grasa_pct_kcal: fatPct };
 }
+
+// Guía de rangos por objetivo — respaldo para configurar proteína y grasa.
+// Proteína: ISSN position stand (Jäger 2017) 1.4-2.0 g/kg general; Morton et
+// al. 2018 (meta-análisis, Br J Sports Med) ~1.6-2.2 g/kg para hipertrofia;
+// Helms et al. 2014 (revisión, IJSNEM) 2.3-3.1 g/kg de masa MAGRA en déficit
+// (≈2.0-2.7 g/kg de peso total con %grasa moderado) — más proteína protege
+// el músculo cuando faltan calorías. Grasa: AMDR 20-35% (IOM 2005), piso 0.5
+// g/kg (Helms 2014). Carbo: Burke et al. 2011 (J Sports Sci) 3-5 g/kg entreno
+// moderado, 5-7 g/kg volumen alto.
+// Bases científicas del cálculo — SIEMPRE visibles en la sección 5 de la
+// ficha: nombre del método + explicación en cristiano + la fórmula al lado,
+// para que el coach las tenga a la vista y se las vaya aprendiendo.
+const FORMULAS_META = [
+  ['Mifflin-St Jeor (1990)',
+   'Estima las kcal que el cuerpo quema en reposo total (BMR) con peso, estatura, edad y sexo. Es la ecuación más precisa a nivel poblacional (revisión ADA, Frankenfield 2005). Se usa cuando NO conocemos el %grasa.',
+   'BMR = 10×peso + 6.25×estatura − 5×edad (+5 H · −161 M)'],
+  ['Katch-McArdle',
+   'Estima el BMR desde la masa magra: el músculo y los órganos son lo que gasta energía, la grasa casi nada. Más preciso — se usa automáticamente cuando SÍ tenemos el %grasa del cliente.',
+   'BMR = 370 + 21.6 × masa magra · magra = peso × (1 − %grasa/100)'],
+  ['Factor de actividad PAL (FAO/OMS)',
+   'Convierte el gasto en reposo en el gasto REAL del día (TDEE) multiplicando por cuánto se mueve la persona en total: trabajo, pasos, entreno, deporte.',
+   'TDEE = BMR × PAL (1.2 sedentario → 1.9 muy activo)'],
+  ['Objetivo como % del TDEE + regla de Wishnofsky (1958)',
+   'El déficit/superávit se aplica como porcentaje del gasto (gradual y proporcional al tamaño de la persona). Como ~7700 kcal acumuladas ≈ 1 kg de grasa, de ahí sale el ritmo esperado en kg/semana.',
+   'Meta = TDEE × (1 ± %) · kg/sem ≈ (Meta − TDEE) × 7 ÷ 7700'],
+  ['Proteína en g/kg (ISSN 2017 · Morton 2018 · Helms 2014)',
+   'La necesidad de proteína depende de la MASA CORPORAL, no de cuántas calorías se coman — por eso se dosifica en gramos por kg de peso, nunca como %. En déficit se sube (2.0-2.7 g/kg) para proteger el músculo.',
+   'Proteína (g) = peso × g/kg elegido'],
+  ['Grasa en % de las kcal (AMDR, IOM 2005)',
+   'La grasa sí se asigna como fracción de la energía total: el rango aceptable es 20-35% de las kcal, con un PISO de 0.5 g/kg para no comprometer la función hormonal (Helms 2014).',
+   'Grasas (g) = Meta × % ÷ 9'],
+  ['Carbohidrato = el resto (Burke 2011)',
+   'Es el combustible flexible del entreno: recibe todas las kcal que quedan tras cubrir proteína y grasa. Referencia de suficiencia: 3-5 g/kg entreno moderado, 5-7 g/kg volumen alto.',
+   'Carbos (g) = (Meta − prote×4 − grasas×9) ÷ 4'],
+];
+
+// Referencias bibliográficas completas del cálculo y la distribución.
+const BIBLIOGRAFIA_META = [
+  'Mifflin MD, St Jeor ST, et al. (1990). "A new predictive equation for resting energy expenditure in healthy individuals". Am J Clin Nutr 51(2):241-247.',
+  'Frankenfield D, Roth-Yousey L, Compher C (2005). "Comparison of predictive equations for resting metabolic rate…" (Mifflin-St Jeor, la más precisa). J Am Diet Assoc 105(5):775-789.',
+  'McArdle WD, Katch FI, Katch VL. "Exercise Physiology" — fórmula Katch-McArdle sobre masa magra (deriva de Cunningham 1980, Am J Clin Nutr 33:2372-2374).',
+  'FAO/OMS/UNU (2001). "Human Energy Requirements" — factores de actividad PAL.',
+  'Jäger R, et al. (2017). "ISSN Position Stand: protein and exercise". J Int Soc Sports Nutr 14:20 → proteína 1.4-2.0 g/kg base.',
+  'Morton RW, et al. (2018). Meta-análisis proteína e hipertrofia. Br J Sports Med 52(6):376-384 → techo de beneficio ≈1.6-2.2 g/kg.',
+  'Helms ER, Aragon AA, Fitschen PJ (2014). "Evidence-based recommendations for natural bodybuilding contest preparation". J Int Soc Sports Nutr 11:20 → proteína alta en déficit (2.3-3.1 g/kg magra) y grasa mínima 0.5 g/kg.',
+  'Institute of Medicine (2005). "Dietary Reference Intakes" → AMDR de grasa: 20-35% de las kcal.',
+  'Burke LM, Hawley JA, Wong SH, Jeukendrup AE (2011). "Carbohydrates for training and competition". J Sports Sci 29(sup1):S17-S27 → carbo 3-5 g/kg moderado · 5-7 g/kg volumen alto.',
+  'Wishnofsky M (1958). "Caloric equivalents of gained or lost weight". Am J Clin Nutr 6(5):542-546 → ≈7700 kcal por kg.',
+];
+
+const GUIA_MACROS = {
+  proteina: [
+    ['Pérdida de grasa (déficit)', '2.0 – 2.7 g/kg', 'Preserva masa magra en déficit (Helms 2014)'],
+    ['Recomposición', '1.8 – 2.2 g/kg', 'Rango alto del meta-análisis Morton 2018'],
+    ['Ganancia muscular (superávit)', '1.6 – 2.2 g/kg', 'Techo de beneficio ≈1.6-2.2 (Morton 2018)'],
+    ['Mantenimiento / salud general', '1.4 – 1.8 g/kg', 'Piso para entrenados (ISSN 2017)'],
+  ],
+  grasa: [
+    ['Estándar', '25 – 30% kcal', 'Punto medio del AMDR; saciedad y adherencia'],
+    ['Más carbo para entrenar', '20 – 25% kcal', 'Libera kcal para carbohidrato en volumen alto'],
+    ['Preferencia alta en grasa', '30 – 35% kcal', 'Válido si el carbo no cae bajo ~3 g/kg'],
+    ['Piso absoluto', '≥ 0.5 g/kg', 'Función hormonal (Helms 2014)'],
+  ],
+  carbo: [
+    ['Entreno moderado (3-4 d/sem)', '3 – 5 g/kg', 'Burke 2011'],
+    ['Volumen alto (5+ d/sem)', '5 – 7 g/kg', 'Burke 2011'],
+  ],
+};
 
 // ===== Composición corporal =====
 // Estimaciones basadas en fórmulas científicamente respaldadas.
@@ -1031,7 +1165,9 @@ function openModal(html, opts = {}) {
   modal.classList.remove('hidden');
 }
 function closeModal() { modal.classList.add('hidden'); modalContent.innerHTML = ''; }
-modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+// OJO: NO se cierra al hacer clic fuera del cuadro. Un clic accidental en el
+// fondo botaba el formulario a medio llenar (seguimiento, ficha del cliente…)
+// y se perdía todo lo escrito. Salir es SIEMPRE explícito: Cancelar o la X.
 window.closeModal = closeModal;
 
 function modalShell(title, body, footer = '') {
@@ -1817,9 +1953,8 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
         <div class="text-sm font-semibold text-blue-900">${c.meta_calorias} kcal · ${c.meta_proteina_g}g prote · ${c.meta_grasas_g}g grasas · ${c.meta_carbos_g}g carbos</div>
       </div>` : ''}
 
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-5 border-t border-slate-100">
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-5 pt-5 border-t border-slate-100">
         <div><div class="text-xs text-slate-500 mb-1">Estado</div><div class="font-bold">${c.estado === 'activo' ? '<span class="text-emerald-600">● Activo</span>' : c.estado === 'pausa' ? '<span class="text-orange-600">● Pausa</span>' : '<span class="text-slate-500">● Finalizado</span>'}</div></div>
-        <div><div class="text-xs text-slate-500 mb-1">Fase</div><div class="font-bold">${c.fase_programa ? (FASES_PROGRAMA.find(f => f.key === c.fase_programa)?.label || c.fase_programa) : '—'}</div></div>
         <div><div class="text-xs text-slate-500 mb-1">Lugar entreno</div><div class="font-bold capitalize">${c.lugar_entreno ? c.lugar_entreno.replace('_',' ') : '—'}</div></div>
         <div><div class="text-xs text-slate-500 mb-1">Ficha</div><button class="text-emerald-600 font-semibold text-sm hover:underline" onclick="verCliente('${c.id}')">Abrir perfil</button></div>
       </div>
@@ -2540,12 +2675,12 @@ window.enviarMetaMealtracker = async (clienteId, metaOverride = null) => {
     `🎯 Cambiar la meta en el Mealtracker de ${cliente.nombre}\n\n` +
     `Meta actual allá: ${prevTxt}\n` +
     `Meta nueva: ${nuevaTxt}\n\n` +
-    `El cliente la verá de inmediato en su app. ¿Confirmas el cambio?`
+    `El cliente recibirá un ANUNCIO en el chat de su app avisando la meta nueva. ¿Confirmas el cambio?`
   );
   if (!okConfirm) return;
 
   const r = await setMealtrackerGoals(mtId, meta);
-  if (r.ok) toast(`✓ Meta enviada al Mealtracker de ${cliente.nombre}`);
+  if (r.ok) toast(`✓ Meta cargada al Mealtracker de ${cliente.nombre} · le llegará el anuncio en su app`);
   else toast(`✗ ${r.causa}`);
 };
 
@@ -3322,7 +3457,6 @@ function clienteForm(c = {}) {
           <div><label>Correo</label><input id="cl-email" type="email" placeholder="cliente@correo.com" value="${escapeHtml(c.email || '')}"></div>
           <div><label>Teléfono / WhatsApp</label><input id="cl-tel" placeholder="+57 300 000 0000" value="${escapeHtml(c.telefono || '')}"></div>
           <div><label>Ciudad</label><input id="cl-ciudad" value="${escapeHtml(c.ciudad || '')}"></div>
-          <div><label>Profesión</label><input id="cl-prof" value="${escapeHtml(c.profesion || '')}"></div>
         </div>
       </div>
 
@@ -3346,12 +3480,6 @@ function clienteForm(c = {}) {
             <textarea id="cl-meta" rows="2" placeholder="Se llena sola con 🧮 Recalcular (sección 5). Puedes editarla a mano.">${escapeHtml(c.meta_especifica || '')}</textarea>
             <p class="text-xs text-slate-500 mt-1">🧮 Al recalcular la meta nutricional diaria, este campo se actualiza solo (y sigue siendo editable).</p>
           </div>
-          <div class="col-span-2"><label>Fase del programa</label>
-            <select id="cl-fase">
-              <option value="">—</option>
-              ${FASES_PROGRAMA.map(f => `<option value="${f.key}" ${c.fase_programa === f.key ? 'selected' : ''}>${f.label}</option>`).join('')}
-            </select>
-          </div>
         </div>
       </div>
 
@@ -3369,11 +3497,15 @@ function clienteForm(c = {}) {
         <div class="sec-title">4 · 🏃 Nivel de actividad</div>
         <div class="grid grid-cols-2 gap-3">
           <div class="col-span-2">
-            <label>Nivel de actividad</label>
+            <label>Nivel de actividad (factor PAL)</label>
             <div class="flex items-center gap-2">
-              <input id="cl-nivel" readonly value="${c.nivel_actividad ? c.nivel_actividad.replace('_',' ') + ' · PAL ' + (c.pal_factor || PAL_MAP[c.nivel_actividad] || '') : ''}" placeholder="—" class="!bg-white">
-              <button type="button" class="btn btn-secondary btn-sm whitespace-nowrap" onclick="abrirEncuestaActividad()">Encuesta</button>
+              <select id="cl-nivel-sel" class="flex-1">
+                <option value="">—</option>
+                ${Object.entries(PAL_MAP).map(([k, v]) => `<option value="${k}" ${c.nivel_actividad === k ? 'selected' : ''}>${k.replace('_', ' ')} · PAL ${v}</option>`).join('')}
+              </select>
+              <button type="button" class="btn btn-secondary btn-sm whitespace-nowrap" onclick="abrirEncuestaActividad()" title="5 preguntas rápidas que estiman el nivel por ti">📋 Estimarlo con encuesta</button>
             </div>
+            <p class="text-xs text-slate-500 mt-1">Elígelo directo si ya lo conoces, o usa la encuesta (fuerza, cardio, trabajo, pasos, deporte) para estimarlo. Factores PAL de FAO/OMS: 1.2 sedentario → 1.9 muy activo.</p>
           </div>
           <div class="col-span-2"><label>Lugar de entreno</label>
             <select id="cl-lugar">
@@ -3410,9 +3542,46 @@ function clienteForm(c = {}) {
               ${OBJETIVOS_KCAL.map(o => `<option value="${o.key}" ${c.objetivo_calorico === o.key ? 'selected' : ''}>${o.label}</option>`).join('')}
             </select>
           </div>
-          <div><label>Proteína (g/kg)</label>
+          <div><label>Proteína (g/kg de peso)</label>
             <input id="cl-prote-gkg" type="number" step="0.1" min="1" max="3.5" value="${c.proteina_g_kg ?? 1.8}">
-            <p class="text-xs text-slate-500 mt-1">1.6-1.8 general · 2.0-2.4 cutting</p>
+            <p class="text-xs text-slate-500 mt-1">Déficit 2.0-2.7 · recomp 1.8-2.2 · superávit 1.6-2.2</p>
+          </div>
+          <div><label>Grasas (% de las kcal)</label>
+            <input id="cl-grasa-pct" type="number" step="1" min="15" max="40" value="${c.grasa_pct_kcal ?? 25}">
+            <p class="text-xs text-slate-500 mt-1">AMDR 20-35% · típico 25% · piso 0.5 g/kg</p>
+          </div>
+          <div class="flex items-end pb-1">
+            <p class="text-xs text-slate-500">El carbohidrato no se configura: es el <strong>resto</strong> de las kcal tras proteína y grasa (es el combustible flexible del entreno).</p>
+          </div>
+          <details class="col-span-2 bg-emerald-50/60 rounded-xl px-3 py-2 ring-1 ring-emerald-100">
+            <summary class="text-xs font-bold text-emerald-800 cursor-pointer">📚 Guía de rangos por objetivo (respaldo científico)</summary>
+            <div class="mt-2 space-y-3 text-xs">
+              ${[['Proteína (g por kg de peso corporal)', GUIA_MACROS.proteina], ['Grasa (% de las kcal)', GUIA_MACROS.grasa], ['Carbohidrato (referencia, no se configura)', GUIA_MACROS.carbo]].map(([titulo, filas]) => `
+                <div>
+                  <div class="font-bold text-slate-700 mb-1">${titulo}</div>
+                  <table class="w-full">
+                    ${filas.map(([caso, rango, nota]) => `<tr class="border-b border-emerald-100/70"><td class="py-1 pr-2 text-slate-600">${caso}</td><td class="py-1 pr-2 font-semibold text-emerald-800 whitespace-nowrap">${rango}</td><td class="py-1 text-slate-500">${nota}</td></tr>`).join('')}
+                  </table>
+                </div>`).join('')}
+              <p class="text-slate-500">La proteína se dosifica por kg (depende de la masa corporal); la grasa por % de kcal (depende de la energía total); el cliente siempre la ve en gramos. Referencias completas en el recuadro "Bases científicas" de abajo.</p>
+            </div>
+          </details>
+          <div class="col-span-2 bg-white rounded-xl px-3 py-2.5 ring-1 ring-emerald-100">
+            <div class="text-xs font-bold text-emerald-800 mb-2">🔬 Bases científicas del cálculo — siempre a la vista</div>
+            <div class="space-y-2">
+              ${FORMULAS_META.map(([nombre, explicacion, formula]) => `
+                <div class="text-xs border-b border-emerald-50 pb-2">
+                  <div class="font-bold text-slate-700">${nombre}</div>
+                  <div class="text-slate-600 mt-0.5">${explicacion}</div>
+                  <div class="font-mono text-[11px] text-emerald-700 mt-0.5 bg-emerald-50/70 rounded px-1.5 py-0.5 inline-block">${formula}</div>
+                </div>`).join('')}
+            </div>
+            <details class="mt-2">
+              <summary class="text-xs text-emerald-700 cursor-pointer font-semibold">📖 Referencias bibliográficas completas (${BIBLIOGRAFIA_META.length})</summary>
+              <ol class="mt-1.5 space-y-1 list-decimal list-inside">
+                ${BIBLIOGRAFIA_META.map(ref => `<li class="text-[11px] text-slate-500">${ref}</li>`).join('')}
+              </ol>
+            </details>
           </div>
           <div class="col-span-2 bg-white rounded-xl p-3 ring-1 ring-emerald-100">
             <div class="flex items-baseline justify-between mb-2 flex-wrap gap-1">
@@ -3546,13 +3715,11 @@ window.guardarCliente = async (id = null) => {
     email: $('#cl-email').value.trim() || null,
     telefono: $('#cl-tel').value.trim() || null,
     ciudad: $('#cl-ciudad').value.trim() || null,
-    profesion: $('#cl-prof').value.trim() || null,
     objetivo: [...$$('#cl-obj-tags input:checked').map(i => i.value), $('#cl-obj-otro').value.trim()].filter(Boolean).join(', ') || null,
     meta_especifica: $('#cl-meta').value.trim() || null,
     lugar_entreno: $('#cl-lugar').value || null,
     dias_entreno_cantidad: $('#cl-dias-ent').value ? Number($('#cl-dias-ent').value) : null,
     dias_entreno: $$('#cl-dias-sem input:checked').map(i => i.value),
-    fase_programa: $('#cl-fase').value || null,
     estatura_cm: $('#cl-alt').value ? Number($('#cl-alt').value) : null,
     restricciones_lesiones: $('#cl-rest').value.trim() || null,
     patologias: $('#cl-pat').value.trim() || null,
@@ -3563,10 +3730,15 @@ window.guardarCliente = async (id = null) => {
     antecedentes_deportivos: $('#cl-ant').value.trim() || null,
     objetivo_calorico: $('#cl-objk').value || null,
     proteina_g_kg: $('#cl-prote-gkg').value ? Number($('#cl-prote-gkg').value) : null,
-    ...(window._pendingEncuesta ? {
-      nivel_actividad: window._pendingEncuesta.nivel,
-      pal_factor: window._pendingEncuesta.pal,
-      nivel_actividad_encuesta: window._pendingEncuesta.respuestas,
+    grasa_pct_kcal: $('#cl-grasa-pct')?.value ? Number($('#cl-grasa-pct').value) : null,
+    // Nivel de actividad: manda lo elegido en el select (manual o puesto por
+    // la encuesta). Las respuestas de la encuesta solo se guardan si el nivel
+    // seleccionado sigue siendo el que la encuesta arrojó.
+    ...(($('#cl-nivel-sel')?.value) ? {
+      nivel_actividad: $('#cl-nivel-sel').value,
+      pal_factor: PAL_MAP[$('#cl-nivel-sel').value] || null,
+      ...(window._pendingEncuesta && window._pendingEncuesta.nivel === $('#cl-nivel-sel').value
+        ? { nivel_actividad_encuesta: window._pendingEncuesta.respuestas } : {}),
     } : {}),
     ...(window._pendingMeta || {}),
     monto: Number($('#cl-monto').value) || 0,
@@ -3592,7 +3764,7 @@ window.guardarCliente = async (id = null) => {
 
 // Guarda un cliente tolerando que la BD aún no tenga las columnas nuevas
 // (email/telefono): si Supabase las rechaza, reintenta sin ellas y avisa.
-const COLS_NUEVAS_CLIENTE = ['email', 'telefono', 'suplementos', 'actividades_complementarias'];
+const COLS_NUEVAS_CLIENTE = ['email', 'telefono', 'suplementos', 'actividades_complementarias', 'grasa_pct_kcal'];
 async function guardarClienteSeguro(id, row) {
   const q = (r) => id ? sb.from('clientes').update(r).eq('id', id) : sb.from('clientes').insert(r);
   let { error } = await q(row);
@@ -3707,9 +3879,6 @@ function extraerDatosEntrevista(texto, c = {}) {
   if (mCiudad) add('ciudad', 'Ciudad', mCiudad[1].trim(), mCiudad.index);
 
   // --- Profesión ---
-  let mProf = t.match(/(?:profesi[oó]n|ocupaci[oó]n)\s*[:=]?\s*([^\n,.;]{3,40})/i);
-  if (!mProf) mProf = t.match(/trabaja\s+(?:como|de)\s+([^\n,.;]{3,40})/i);
-  if (mProf) add('profesion', 'Profesión', mProf[1].trim(), mProf.index);
 
   // --- Condiciones médicas / patologías ---
   let mPat = t.match(/(?:condici[oó]n(?:es)?\s+m[eé]dica(?:s)?|patolog[ií]a(?:s)?|diagn[oó]stico|enfermedad(?:es)?)\s*[:=]\s*([^\n]{3,150})/i);
@@ -3775,7 +3944,7 @@ function extraerDatosEntrevista(texto, c = {}) {
 // --- Botón del formulario: llena los campos vacíos con lo extraído ---
 const CAMPO_A_INPUT = {
   email: 'cl-email', telefono: 'cl-tel', fecha_nacimiento: 'cl-nac', sexo: 'cl-sexo',
-  ciudad: 'cl-ciudad', profesion: 'cl-prof', estatura_cm: 'cl-alt',
+  ciudad: 'cl-ciudad', estatura_cm: 'cl-alt',
   patologias: 'cl-pat', restricciones_lesiones: 'cl-rest', antecedentes_deportivos: 'cl-ant',
   suplementos: 'cl-sup', actividades_complementarias: 'cl-acts-comp',
 };
@@ -3939,8 +4108,8 @@ window.aplicarEncuesta = () => {
   // Volver al modal del cliente con el nivel puesto (y lo tecleado intacto)
   restaurarModalCliente();
   if (window._pendingEncuesta) {
-    const el = $('#cl-nivel');
-    if (el) el.value = `${window._pendingEncuesta.nivel.replace('_',' ')} · PAL ${window._pendingEncuesta.pal}`;
+    const el = $('#cl-nivel-sel');
+    if (el) el.value = window._pendingEncuesta.nivel;
   }
   toast('Nivel de actividad aplicado');
 };
@@ -3956,16 +4125,17 @@ window.recalcularMeta = async () => {
   const sexo = $('#cl-sexo').value;
   const fnac = $('#cl-nac').value;
   const objetivoK = $('#cl-objk').value;
-  const enc = window._pendingEncuesta;
+  const nivel = $('#cl-nivel-sel')?.value;
 
   if (!estatura) { toast('Falta estatura'); return; }
   if (!sexo) { toast('Falta sexo'); return; }
   if (!fnac) { toast('Falta fecha de nacimiento'); return; }
   if (!objetivoK) { toast('Falta objetivo calórico'); return; }
-  if (!enc) { toast('Falta hacer la encuesta de nivel de actividad'); return; }
+  if (!nivel) { toast('Falta el nivel de actividad (elígelo o estímalo con la encuesta)'); return; }
 
   const edad = helpers.edadDe(fnac);
   const objData = OBJETIVOS_KCAL.find(o => o.key === objetivoK);
+  const pal = PAL_MAP[nivel];
 
   // Peso: última medición corporal del cliente, o pregunta
   let peso = null, grasa = null;
@@ -3981,14 +4151,15 @@ window.recalcularMeta = async () => {
     peso = Number(p);
   }
   if (!grasa) {
-    const g = prompt('¿% de grasa corporal? (opcional, deja vacío si no lo sabes)', '');
+    const g = prompt('¿% de grasa corporal? (opcional, deja vacío si no lo sabes — con él uso Katch-McArdle, más preciso)', '');
     if (g) grasa = Number(g);
   }
 
   const meta = calcMetaNutricional({
     peso, altura: estatura, edad, sexo, grasa_pct: grasa,
-    pal: enc.pal, objetivo_pct: objData.pct,
+    pal, objetivo_pct: objData.pct,
     proteina_g_kg: $('#cl-prote-gkg')?.value,
+    grasa_pct_kcal: $('#cl-grasa-pct')?.value,
   });
   if (!meta) { toast('Datos insuficientes'); return; }
 
@@ -4007,18 +4178,31 @@ window.recalcularMeta = async () => {
   // la línea calculada se agrega al final.
   const cm = $('#cl-meta');
   if (cm) {
-    const pct = (kcalMacro) => Math.round((kcalMacro / meta.kcal) * 100);
-    const linea = `${meta.kcal} kcal: ${meta.proteina}P / ${meta.carbos}C / ${meta.grasas}G (${pct(meta.proteina * 4)}% / ${pct(meta.carbos * 4)}% / ${pct(meta.grasas * 9)}%)`;
+    const linea = `${meta.kcal} kcal: ${meta.proteina}P / ${meta.carbos}C / ${meta.grasas}G (${meta.detalle.proteina.pct}% / ${meta.detalle.carbos.pct}% / ${meta.detalle.grasas.pct}%)`;
     const actual = cm.value.trim();
     if (!actual || /^\d{3,4}\s*\.?\s*kcal/i.test(actual)) cm.value = linea;
     else cm.value = actual.split('\n').filter(l => !/^\d{3,4}\s*\.?\s*kcal/i.test(l.trim())).join('\n').trim() + '\n' + linea;
   }
 
+  const filaMacro = (nombre, d, color) => `
+    <tr class="border-b border-slate-100">
+      <td class="py-1 pr-2 font-semibold" style="color:${color}">${nombre}</td>
+      <td class="py-1 pr-2 font-bold text-right">${d.g} g</td>
+      <td class="py-1 pr-2 text-right text-slate-500">${d.pct}% kcal</td>
+      <td class="py-1 text-right text-slate-500">${d.gkg} g/kg</td>
+    </tr>`;
   $('#meta-preview').innerHTML = `
-    <div class="font-bold text-emerald-700 text-base">${meta.kcal} kcal · ${meta.proteina}g prote · ${meta.grasas}g grasas · ${meta.carbos}g carbos</div>
-    <div class="text-xs text-slate-500 mt-1">${meta.metodo} · calculada ahora</div>
-    <details class="mt-2" open><summary class="text-xs text-emerald-700 cursor-pointer">Ver argumento del cálculo</summary><pre class="text-xs text-slate-600 mt-1 whitespace-pre-wrap">${escapeHtml(meta.argumento)}</pre></details>
-    <p class="text-xs text-amber-700 mt-2">⚠️ Aún no guardada. Click en "Guardar" abajo para persistir.</p>
+    <div class="font-bold text-emerald-700 text-base">${meta.kcal} kcal / día</div>
+    <div class="text-xs text-slate-500 mb-2">BMR ${meta.bmr} · TDEE ${meta.tdee} (${meta.metodo}) · ritmo esperado ${meta.cambioSemanalKg > 0 ? '+' : ''}${meta.cambioSemanalKg} kg/semana</div>
+    <table class="w-full text-sm mb-1">
+      <tr class="text-[10px] uppercase text-slate-400"><td></td><td class="text-right pr-2">Cliente ve</td><td class="text-right pr-2">% kcal</td><td class="text-right">g/kg</td></tr>
+      ${filaMacro('Proteína', meta.detalle.proteina, '#2563eb')}
+      ${filaMacro('Carbos', meta.detalle.carbos, '#d97706')}
+      ${filaMacro('Grasas', meta.detalle.grasas, '#dc2626')}
+    </table>
+    ${meta.avisos.map(a => `<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-2 py-1 mt-1">⚠️ ${escapeHtml(a)}</div>`).join('')}
+    <details class="mt-2"><summary class="text-xs text-emerald-700 cursor-pointer">Ver argumento del cálculo (métodos y fuentes)</summary><pre class="text-xs text-slate-600 mt-1 whitespace-pre-wrap">${escapeHtml(meta.argumento)}</pre></details>
+    <p class="text-xs text-amber-700 mt-2">⚠️ Aún no guardada. Click en "Guardar" abajo para persistir, y luego "🎯 Enviar al Mealtracker" si quieres cargarla al cliente.</p>
   `;
 };
 
