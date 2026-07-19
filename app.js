@@ -1381,20 +1381,26 @@ routes.dashboard = async () => {
     return s + copConv(monto, moneda);
   }, 0);
 
-  // Vencidos: cliente activo cuyo día_pago ya pasó este mes y no tiene pago marcado
+  // Vencidos: cliente activo cuyo día_pago YA PASÓ este mes (desde el día
+  // siguiente — el mismo día aún no cuenta) y no tiene pago marcado. Esta
+  // lista además respeta los días de gracia: es la bandeja de "ya toca
+  // cobrarle", no el estado visual (la tabla de Pagos muestra el vencido
+  // desde el día siguiente, sin gracia).
   const diaHoy = new Date().getDate();
   const vencidos = activos.filter(c => {
-    if (!c.dia_pago || c.dia_pago > diaHoy) return false;
+    if (!c.dia_pago || c.dia_pago >= diaHoy) return false;
     const p = pagosMes.find(pp => pp.cliente_id === c.id);
     return !p || !p.pagado;
-  }).map(c => ({ ...c, dias_vencido: Math.max(0, diaHoy - c.dia_pago) }))
+  }).map(c => ({ ...c, dias_vencido: diaHoy - c.dia_pago }))
     .filter(c => c.dias_vencido > (c.dias_gracia || 0));
 
-  // Próximos 7 días
+  // Próximos 7 días (incluye el que vence HOY)
   const proximos = activos.filter(c => {
     if (!c.dia_pago) return false;
+    const p = pagosMes.find(pp => pp.cliente_id === c.id);
+    if (p && p.pagado) return false;
     const diff = c.dia_pago - diaHoy;
-    return diff > 0 && diff <= 7;
+    return diff >= 0 && diff <= 7;
   }).map(c => ({ ...c, dias_falta: c.dia_pago - diaHoy }));
 
   // Clientes en riesgo
@@ -1466,7 +1472,7 @@ routes.dashboard = async () => {
       ${vencidos.length > 0 ? `
         <div class="card">
           <div class="flex items-center justify-between mb-3">
-            <h3 class="font-bold text-slate-900 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-red-500"></span>Pagos vencidos</h3>
+            <h3 class="font-bold text-slate-900 flex items-center gap-2" title="Clientes cuyo día de pago ya pasó (contando sus días de gracia) sin pago registrado"><span class="w-2 h-2 rounded-full bg-red-500"></span>Pagos vencidos <span class="text-xs font-normal text-slate-400">(pasada su gracia)</span></h3>
             <span class="tag tag-red">${vencidos.length}</span>
           </div>
           <div class="space-y-2">
@@ -1498,7 +1504,7 @@ routes.dashboard = async () => {
                   ${helpers.avatar(c.nombre, 9)}
                   <div class="min-w-0">
                     <div class="font-medium text-sm truncate">${escapeHtml(c.nombre)}</div>
-                    <div class="text-xs text-amber-700">En ${c.dias_falta} día(s) · ${fmt.money(c.monto, c.moneda)}</div>
+                    <div class="text-xs text-amber-700">${c.dias_falta === 0 ? '⏰ Vence HOY' : `En ${c.dias_falta} día(s)`} · ${fmt.money(c.monto, c.moneda)}</div>
                   </div>
                 </div>
                 <button class="btn btn-dark btn-sm" onclick="marcarPagoRapido('${c.id}')">Marcar</button>
@@ -2857,14 +2863,15 @@ function sortByEstado(a, b) {
 
 function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActualNum) {
   const activos = clientes.filter(c => c.estado !== 'finalizado').sort(sortByEstado);
+  const diaHoy = new Date().getDate();
   $('#pagos-content').innerHTML = `
     <div class="card overflow-hidden p-0">
       <div class="flex items-center justify-between px-5 py-3 border-b border-slate-100 flex-wrap gap-2">
         <h3 class="font-semibold text-slate-900">Tabla anual · ${_pagosYear}</h3>
         <div class="flex gap-2 text-xs">
           <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-100"></span><span class="text-slate-500">Pagado</span></span>
-          <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-100"></span><span class="text-slate-500">Pendiente</span></span>
-          <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-red-100"></span><span class="text-slate-500">Vencido</span></span>
+          <span class="flex items-center gap-1.5" title="Aún no llega su día de pago (o es hoy)"><span class="w-3 h-3 rounded bg-amber-100"></span><span class="text-slate-500">Pendiente (no llega su día)</span></span>
+          <span class="flex items-center gap-1.5" title="Pasó su día de pago sin registrar el pago (desde el día siguiente), o es un mes anterior sin pago"><span class="w-3 h-3 rounded bg-red-100"></span><span class="text-slate-500">Vencido (pasó su día)</span></span>
         </div>
       </div>
       <div class="overflow-x-auto scrollbar-thin">
@@ -2893,7 +2900,15 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
                     val = fmtVal(p.monto);
                     totalFila += copConv(p.monto, p.moneda);
                   } else if (p && Number(p.monto) > 0) {
-                    cls = monthNum < mesActualNum ? 'pay-overdue' : 'pay-pending';
+                    // Vencido = mes anterior sin pago, O mes en curso cuyo día
+                    // de pago YA pasó (desde el día siguiente; el mismo día
+                    // aún cuenta como pendiente). Antes el mes en curso nunca
+                    // se marcaba vencido aunque la fecha hubiera pasado —
+                    // misma convención que las cards y que el recordatorio
+                    // que le llega al cliente en su Mealtracker.
+                    const vencido = monthNum < mesActualNum ||
+                      (monthNum === mesActualNum && c.dia_pago && diaHoy > c.dia_pago);
+                    cls = vencido ? 'pay-overdue' : 'pay-pending';
                     val = fmtVal(p.monto);
                     // Solo sumar pendientes al total anual si el cliente está activo
                     if (c.estado === 'activo') totalFila += copConv(p.monto, p.moneda);
@@ -2901,7 +2916,8 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
                     cls = 'pay-overdue';
                     val = '—';
                   } else if (monthNum === mesActualNum) {
-                    cls = 'pay-pending';
+                    // Sin registro de pago este mes: misma regla de vencimiento
+                    cls = (c.dia_pago && diaHoy > c.dia_pago) ? 'pay-overdue' : 'pay-pending';
                     val = Number(c.monto) > 0 ? fmtVal(c.monto) : '—';
                   } else {
                     cls = 'pay-future';
@@ -2932,6 +2948,7 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
       </div>
       <div class="px-5 py-3 bg-slate-50 border-t border-slate-100 text-xs text-slate-500">
         Click en cualquier celda para registrar o editar el pago. Conversión USD→COP a tasa ${_settings.usd_cop_rate.toLocaleString('es-CO')}.
+        Convención: una celda del mes en curso pasa de <strong>Pendiente</strong> a <strong>Vencido</strong> al día siguiente del día de pago del cliente — el mismo día en que le empieza a salir el recordatorio en su Mealtracker.
       </div>
     </div>
   `;
@@ -3078,9 +3095,10 @@ routes.pendientes = async () => {
   const agenda = [];
   const diaHoy = new Date().getDate();
 
-  // Pagos vencidos (día de pago pasado + días de gracia, sin pago marcado)
+  // Pagos vencidos (día de pago pasado + días de gracia, sin pago marcado).
+  // Misma convención de todo el CRM: vencido desde el día SIGUIENTE al de pago.
   activos.forEach(c => {
-    if (!c.dia_pago || c.dia_pago > diaHoy) return;
+    if (!c.dia_pago || c.dia_pago >= diaHoy) return;
     const p = pagosMes.find(pp => pp.cliente_id === c.id);
     if (p && p.pagado) return;
     if ((diaHoy - c.dia_pago) <= (c.dias_gracia || 0)) return;
