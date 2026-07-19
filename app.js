@@ -1375,6 +1375,7 @@ routes.dashboard = async () => {
   const porCobrar = activos.reduce((s, c) => {
     const p = pagosMes.find(pp => pp.cliente_id === c.id);
     if (p && p.pagado) return s;
+    if (p && Number(p.monto) === 0) return s; // monto 0 = mes sin cobro (premio, cortesía)
     // Si hay un pago pendiente registrado, usar su monto; si no, el de la ficha
     const monto = p && Number(p.monto) > 0 ? p.monto : c.monto;
     const moneda = (p && p.moneda) || c.moneda;
@@ -1390,7 +1391,8 @@ routes.dashboard = async () => {
   const vencidos = activos.filter(c => {
     if (!c.dia_pago || c.dia_pago >= diaHoy) return false;
     const p = pagosMes.find(pp => pp.cliente_id === c.id);
-    return !p || !p.pagado;
+    if (p && (p.pagado || Number(p.monto) === 0)) return false; // pagado o mes sin cobro
+    return true;
   }).map(c => ({ ...c, dias_vencido: diaHoy - c.dia_pago }))
     .filter(c => c.dias_vencido > (c.dias_gracia || 0));
 
@@ -1398,7 +1400,7 @@ routes.dashboard = async () => {
   const proximos = activos.filter(c => {
     if (!c.dia_pago) return false;
     const p = pagosMes.find(pp => pp.cliente_id === c.id);
-    if (p && p.pagado) return false;
+    if (p && (p.pagado || Number(p.monto) === 0)) return false; // pagado o mes sin cobro
     const diff = c.dia_pago - diaHoy;
     return diff >= 0 && diff <= 7;
   }).map(c => ({ ...c, dias_falta: c.dia_pago - diaHoy }));
@@ -2774,7 +2776,8 @@ routes.pagos = async () => {
   const cobradoMes = pagos.filter(p => p.mes === mesActual && p.pagado).reduce((s, p) => s + copConv(p.monto, p.moneda), 0);
   const porCobrarMes = clientes.filter(c => c.estado === 'activo').filter(c => {
     const p = map[c.id]?.[mesActual];
-    return !p || !p.pagado;
+    if (p && (p.pagado || Number(p.monto) === 0)) return false; // pagado o mes sin cobro
+    return true;
   }).reduce((s, c) => s + copConv(c.monto, c.moneda), 0);
 
   view.innerHTML = `
@@ -2894,11 +2897,24 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
                   const monthNum = i + 1;
                   const monedaCel = (p && p.moneda) || c.moneda || 'COP';
                   const fmtVal = (n) => monedaCel === 'USD' ? `$${Number(n).toFixed(0)}` : Number(n).toLocaleString('es-CO');
-                  let cls, val;
+                  let cls, val, titleExtra = '';
                   if (p && p.pagado) {
                     cls = 'pay-paid';
                     val = fmtVal(p.monto);
                     totalFila += copConv(p.monto, p.moneda);
+                  } else if (c.estado === 'pausa') {
+                    // Cliente en pausa: rayita neutra salvo que el mes esté
+                    // pagado (arriba). Nada de amarillos/rojos que ensucien.
+                    cls = 'pay-future';
+                    val = '—';
+                    titleExtra = ' · en pausa, sin cobro';
+                  } else if (p && Number(p.monto) === 0) {
+                    // Monto 0 manual = mes sin cobro (premio del reto,
+                    // cortesía…): neutro, no cuenta por cobrar, y al cliente
+                    // no le sale el recordatorio en su Mealtracker.
+                    cls = 'pay-future';
+                    val = '0';
+                    titleExtra = ' · mes sin cobro (monto 0)';
                   } else if (p && Number(p.monto) > 0) {
                     // Vencido = mes anterior sin pago, O mes en curso cuyo día
                     // de pago YA pasó (desde el día siguiente; el mismo día
@@ -2923,7 +2939,7 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
                     cls = 'pay-future';
                     val = '—';
                   }
-                  return `<td class="pay-cell ${cls}" onclick="abrirPago('${c.id}', '${m}')" title="${fmt.mesEsLargo(m)}">${val}</td>`;
+                  return `<td class="pay-cell ${cls}" onclick="abrirPago('${c.id}', '${m}')" title="${fmt.mesEsLargo(m)}${titleExtra}">${val}</td>`;
                 }).join('');
                 return `
                   <tr>
@@ -2968,6 +2984,9 @@ function renderPagosCards(clientes, map, mesActual) {
     if (p && p.pagado) {
       cls = 'pay-paid'; banner = 'bg-emerald-50'; labelClass = 'text-emerald-700';
       label = '✓ Pagado'; estado = 'paid';
+    } else if (p && Number(p.monto) === 0) {
+      banner = 'bg-slate-50'; labelClass = 'text-slate-500';
+      label = '🎁 Mes sin cobro'; estado = 'free';
     } else if (c.dia_pago && c.dia_pago < diaHoy) {
       banner = 'bg-red-50'; labelClass = 'text-red-700';
       label = `Vencido hace ${diaHoy - c.dia_pago} días`; estado = 'overdue';
@@ -2982,7 +3001,7 @@ function renderPagosCards(clientes, map, mesActual) {
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       ${cards.map(({ c, p, banner, labelClass, label, estado }) => `
         <div class="card card-hover overflow-hidden p-0">
-          <div class="h-1.5 ${estado === 'paid' ? 'bg-emerald-500' : estado === 'overdue' ? 'bg-red-500' : 'bg-amber-500'}"></div>
+          <div class="h-1.5 ${estado === 'paid' ? 'bg-emerald-500' : estado === 'overdue' ? 'bg-red-500' : estado === 'free' ? 'bg-slate-300' : 'bg-amber-500'}"></div>
           <div class="p-5">
             <div class="flex items-center gap-3 mb-4">
               ${helpers.avatar(c.nombre, 12).replace('rounded-full','rounded-2xl')}
@@ -2996,7 +3015,7 @@ function renderPagosCards(clientes, map, mesActual) {
               <div class="text-2xl font-bold text-slate-900">${fmt.money(p?.monto || c.monto, c.moneda)}</div>
               ${p && p.fecha_pago ? `<div class="text-xs text-slate-500 mt-1">${fmt.fecha(p.fecha_pago)}${p.metodo ? ' · ' + p.metodo : ''}</div>` : ''}
             </div>
-            ${estado === 'paid'
+            ${(estado === 'paid' || estado === 'free')
               ? `<button class="btn btn-secondary w-full" onclick="abrirPago('${c.id}', '${mesActual}')">Ver / editar</button>`
               : `<div class="flex gap-2">
                   <button class="btn btn-dark flex-1" onclick="abrirPago('${c.id}', '${mesActual}')">Marcar pagado</button>
@@ -3038,7 +3057,7 @@ window.abrirPago = async (cliente_id, mes) => {
         <div><label>Fecha del pago</label><input id="pg-fecha" type="date" value="${p?.fecha_pago || fmt.hoy()}"></div>
         <div><label>Método</label><input id="pg-metodo" placeholder="Transferencia, Nequi…" value="${escapeHtml(p?.metodo || cliente.metodo_pago_preferido || '')}"></div>
       </div>
-      <p class="text-xs text-slate-500">Si guardas sin marcar pagado, queda como pendiente del mes (amarillo).</p>
+      <p class="text-xs text-slate-500">Si guardas sin marcar pagado, queda como pendiente del mes (amarillo) y pasa a vencido al día siguiente de su día de pago. <strong>Monto 0 = mes sin cobro</strong> (🎁 premio del reto, cortesía, pausa): no suma por cobrar, no vence, y al cliente NO le sale el recordatorio en su Mealtracker.</p>
       <div><label>Nota</label><input id="pg-nota" value="${escapeHtml(p?.nota || '')}"></div>
     </div>
   `, `
@@ -3100,7 +3119,7 @@ routes.pendientes = async () => {
   activos.forEach(c => {
     if (!c.dia_pago || c.dia_pago >= diaHoy) return;
     const p = pagosMes.find(pp => pp.cliente_id === c.id);
-    if (p && p.pagado) return;
+    if (p && (p.pagado || Number(p.monto) === 0)) return; // pagado o mes sin cobro
     if ((diaHoy - c.dia_pago) <= (c.dias_gracia || 0)) return;
     agenda.push({
       nivel: 0, icon: '💰',
@@ -3465,9 +3484,9 @@ function clienteForm(c = {}) {
         <div class="sec-title">1 · 👤 Identidad</div>
         <div class="grid grid-cols-2 gap-3">
           <div class="col-span-2"><label>Nombre *</label><input id="cl-nombre" value="${escapeHtml(c.nombre || '')}" required></div>
-          <div><label>Fecha de nacimiento</label><input id="cl-nac" type="date" value="${c.fecha_nacimiento || ''}"></div>
+          <div><label>Fecha de nacimiento</label><input id="cl-nac" type="date" value="${c.fecha_nacimiento || ''}" onchange="actualizarCalcVivo()"></div>
           <div><label>Sexo</label>
-            <select id="cl-sexo">
+            <select id="cl-sexo" onchange="actualizarCalcVivo()">
               <option value="">—</option>
               ${['M','F','otro'].map(o => `<option ${c.sexo === o ? 'selected' : ''}>${o}</option>`).join('')}
             </select>
@@ -3505,7 +3524,7 @@ function clienteForm(c = {}) {
       <div class="sec sec-blue">
         <div class="sec-title">3 · 🧬 Composición corporal</div>
         <div class="grid grid-cols-2 gap-3">
-          <div><label>Estatura (cm)</label><input id="cl-alt" type="number" min="120" max="230" value="${c.estatura_cm || ''}"></div>
+          <div><label>Estatura (cm)</label><input id="cl-alt" type="number" min="120" max="230" value="${c.estatura_cm || ''}" oninput="actualizarCalcVivo()"></div>
         </div>
         <p class="text-xs text-slate-500 mt-2">📏 Las mediciones (peso, %grasa) se registran desde el perfil del cliente o desde el seguimiento semanal. Las demás variables (masa muscular, agua corporal, masa ósea) se estiman automáticamente.</p>
       </div>
@@ -3517,7 +3536,7 @@ function clienteForm(c = {}) {
           <div class="col-span-2">
             <label>Nivel de actividad (factor PAL)</label>
             <div class="flex items-center gap-2">
-              <select id="cl-nivel-sel" class="flex-1">
+              <select id="cl-nivel-sel" class="flex-1" onchange="actualizarCalcVivo()">
                 <option value="">—</option>
                 ${Object.entries(PAL_MAP).map(([k, v]) => `<option value="${k}" ${c.nivel_actividad === k ? 'selected' : ''}>${k.replace('_', ' ')} · PAL ${v}</option>`).join('')}
               </select>
@@ -3554,23 +3573,33 @@ function clienteForm(c = {}) {
       <div class="sec sec-emerald">
         <div class="sec-title">5 · 🥗 Meta nutricional</div>
         <div class="grid grid-cols-2 gap-3">
+          <div><label>Peso actual (kg)</label>
+            <input id="cl-peso-calc" type="number" step="0.1" min="30" max="250" oninput="actualizarCalcVivo()">
+            <p class="text-xs text-slate-500 mt-1">Se precarga de la última medición; edítalo si cambió</p>
+          </div>
+          <div><label>% grasa corporal (opcional)</label>
+            <input id="cl-grasa-corp-calc" type="number" step="0.1" min="3" max="60" oninput="actualizarCalcVivo()">
+            <p class="text-xs text-slate-500 mt-1">Con él uso Katch-McArdle (más preciso); sin él, Mifflin-St Jeor</p>
+          </div>
           <div><label>Objetivo calórico</label>
-            <select id="cl-objk">
+            <select id="cl-objk" onchange="actualizarCalcVivo()">
               <option value="">—</option>
               ${OBJETIVOS_KCAL.map(o => `<option value="${o.key}" ${c.objetivo_calorico === o.key ? 'selected' : ''}>${o.label}</option>`).join('')}
             </select>
+            <p class="text-xs text-slate-500 mt-1">Elígelo VIENDO el TDEE del panel de abajo — cada % se aplica sobre ese gasto</p>
           </div>
           <div><label>Proteína (g/kg de peso)</label>
-            <input id="cl-prote-gkg" type="number" step="0.1" min="1" max="3.5" value="${c.proteina_g_kg ?? 1.8}">
+            <input id="cl-prote-gkg" type="number" step="0.1" min="1" max="3.5" value="${c.proteina_g_kg ?? 1.8}" oninput="actualizarCalcVivo()">
             <p class="text-xs text-slate-500 mt-1">Déficit 2.0-2.7 · recomp 1.8-2.2 · superávit 1.6-2.2</p>
           </div>
           <div><label>Grasas (% de las kcal)</label>
-            <input id="cl-grasa-pct" type="number" step="1" min="15" max="40" value="${c.grasa_pct_kcal ?? 25}">
+            <input id="cl-grasa-pct" type="number" step="1" min="15" max="40" value="${c.grasa_pct_kcal ?? 25}" oninput="actualizarCalcVivo()">
             <p class="text-xs text-slate-500 mt-1">AMDR 20-35% · típico 25% · piso 0.5 g/kg</p>
           </div>
           <div class="flex items-end pb-1">
             <p class="text-xs text-slate-500">El carbohidrato no se configura: es el <strong>resto</strong> de las kcal tras proteína y grasa (es el combustible flexible del entreno).</p>
           </div>
+          <div id="calc-live" class="col-span-2 bg-white rounded-xl p-3 ring-1 ring-emerald-200"></div>
           <details class="col-span-2 bg-emerald-50/60 rounded-xl px-3 py-2 ring-1 ring-emerald-100">
             <summary class="text-xs font-bold text-emerald-800 cursor-pointer">📚 Guía de rangos por objetivo (respaldo científico)</summary>
             <div class="mt-2 space-y-3 text-xs">
@@ -3605,7 +3634,7 @@ function clienteForm(c = {}) {
             <div class="flex items-baseline justify-between mb-2 flex-wrap gap-1">
               <div class="text-xs font-bold text-slate-600 uppercase">Meta nutricional diaria</div>
               <div class="flex gap-1.5">
-                <button type="button" class="btn btn-primary btn-sm" onclick="recalcularMeta()">🧮 Recalcular</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="recalcularMeta()" title="Toma lo que muestra el panel en vivo y lo deja listo para Guardar">📌 Fijar esta meta</button>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="enviarMetaMealtrackerForm()" title="Cambia la meta en la app Mealtracker del cliente (pide confirmación)">🎯 Enviar al Mealtracker</button>
               </div>
             </div>
@@ -3614,7 +3643,7 @@ function clienteForm(c = {}) {
                 <div class="font-bold text-emerald-700 text-base">${c.meta_calorias} kcal · ${c.meta_proteina_g}g prote · ${c.meta_grasas_g}g grasas · ${c.meta_carbos_g}g carbos</div>
                 <div class="text-xs text-slate-500 mt-1">${c.meta_metodo || ''} · Recalculada ${c.meta_calculada_en ? new Date(c.meta_calculada_en).toLocaleDateString('es-CO') : ''}</div>
                 ${c.meta_argumento ? `<details class="mt-2"><summary class="text-xs text-emerald-700 cursor-pointer">Ver argumento del cálculo</summary><pre class="text-xs text-slate-600 mt-1 whitespace-pre-wrap">${escapeHtml(c.meta_argumento)}</pre></details>` : ''}
-              ` : '<div class="text-xs text-slate-500">Sin meta calculada. Llena estatura, sexo, edad, nivel actividad y objetivo calórico, luego click en "Recalcular".</div>'}
+              ` : '<div class="text-xs text-slate-500">Sin meta fijada. Ajusta las perillas viendo el panel en vivo de arriba y dale "📌 Fijar esta meta".</div>'}
             </div>
           </div>
         </div>
@@ -3709,6 +3738,7 @@ window.nuevoCliente = () => {
     <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
     <button class="btn btn-primary" onclick="guardarCliente()">Guardar</button>
   `), { wide: true });
+  actualizarCalcVivo();
 };
 
 window.editarCliente = async (id) => {
@@ -3721,6 +3751,20 @@ window.editarCliente = async (id) => {
     <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
     <button class="btn btn-primary" onclick="guardarCliente('${id}')">Guardar</button>
   `), { wide: true });
+  actualizarCalcVivo();
+  // Precargar peso y %grasa desde la última medición (editables): así el
+  // panel en vivo arranca con datos reales sin escribir nada.
+  try {
+    const meds = await db.mediciones.listCliente(id);
+    const ult = meds[meds.length - 1];
+    if (ult) {
+      const pe = $('#cl-peso-calc');
+      if (pe && !pe.value && ult.peso) pe.value = ult.peso;
+      const gr = $('#cl-grasa-corp-calc');
+      if (gr && !gr.value && ult.grasa_pct) gr.value = ult.grasa_pct;
+    }
+  } catch (e) { /* sin mediciones: el coach escribe el peso a mano */ }
+  actualizarCalcVivo();
 };
 
 window.guardarCliente = async (id = null) => {
@@ -4129,55 +4173,124 @@ window.aplicarEncuesta = () => {
     const el = $('#cl-nivel-sel');
     if (el) el.value = window._pendingEncuesta.nivel;
   }
+  actualizarCalcVivo();
   toast('Nivel de actividad aplicado');
 };
 
 window.cerrarEncuesta = () => {
   restaurarModalCliente();
+  actualizarCalcVivo();
 };
 
-// ===== Recalcular meta nutricional =====
-window.recalcularMeta = async () => {
-  // Datos que vienen del form actual (aún no guardado)
-  const estatura = Number($('#cl-alt').value);
-  const sexo = $('#cl-sexo').value;
-  const fnac = $('#cl-nac').value;
-  const objetivoK = $('#cl-objk').value;
+// ===== Calculadora de meta EN VIVO =====
+// Lee del formulario todo lo que alimenta el cálculo. El peso y el %grasa
+// viven en campos visibles de la sección 5 (precargados de la última
+// medición): el coach ve y controla TODAS las variables, nada de prompts.
+function leerInputsCalc() {
+  const peso = Number($('#cl-peso-calc')?.value);
+  const estatura = Number($('#cl-alt')?.value);
+  const fnac = $('#cl-nac')?.value;
+  const sexo = $('#cl-sexo')?.value;
   const nivel = $('#cl-nivel-sel')?.value;
+  const grasaRaw = $('#cl-grasa-corp-calc')?.value;
+  const faltan = [];
+  if (!peso) faltan.push('peso');
+  if (!estatura) faltan.push('estatura (sección 3)');
+  if (!fnac) faltan.push('fecha de nacimiento (sección 1)');
+  if (!sexo) faltan.push('sexo (sección 1)');
+  if (!nivel) faltan.push('nivel de actividad (sección 4)');
+  return {
+    faltan, peso, estatura, sexo,
+    edad: fnac ? helpers.edadDe(fnac) : null,
+    grasa: grasaRaw ? Number(grasaRaw) : null,
+    pal: nivel ? PAL_MAP[nivel] : null,
+    objetivoK: $('#cl-objk')?.value || '',
+    gkg: $('#cl-prote-gkg')?.value,
+    fatPct: $('#cl-grasa-pct')?.value,
+  };
+}
 
-  if (!estatura) { toast('Falta estatura'); return; }
-  if (!sexo) { toast('Falta sexo'); return; }
-  if (!fnac) { toast('Falta fecha de nacimiento'); return; }
-  if (!objetivoK) { toast('Falta objetivo calórico'); return; }
-  if (!nivel) { toast('Falta el nivel de actividad (elígelo o estímalo con la encuesta)'); return; }
-
-  const edad = helpers.edadDe(fnac);
-  const objData = OBJETIVOS_KCAL.find(o => o.key === objetivoK);
-  const pal = PAL_MAP[nivel];
-
-  // Peso: última medición corporal del cliente, o pregunta
-  let peso = null, grasa = null;
-  const clienteId = window._editingClienteId;
-  if (clienteId) {
-    const meds = await db.mediciones.listCliente(clienteId);
-    const ult = meds[meds.length - 1];
-    if (ult) { peso = ult.peso; grasa = ult.grasa_pct; }
+// Panel 360 en tiempo real: BMR y TDEE apenas hay datos (ANTES de elegir el
+// % de objetivo, para elegirlo con criterio), y al mover cualquier perilla
+// (objetivo, g/kg de proteína, % de grasa, peso…) se ve al instante cómo
+// queda la meta, cómo se reparte (barra + tabla g · % · g/kg), el ritmo
+// esperado en kg/semana y los avisos de seguridad. Nada se guarda hasta
+// "Fijar esta meta" + Guardar.
+window.actualizarCalcVivo = () => {
+  const el = $('#calc-live');
+  if (!el) return;
+  const i = leerInputsCalc();
+  if (i.faltan.length) {
+    el.innerHTML = `<div class="text-xs text-slate-500">🧮 <strong>Cálculo en vivo:</strong> faltan datos → <strong class="text-amber-700">${i.faltan.join(' · ')}</strong>. Al completarlos verás aquí BMR, TDEE y la meta al instante.</div>`;
+    return;
   }
-  if (!peso) {
-    const p = prompt('¿Peso actual en kg? (aún no tienes medición registrada)');
-    if (!p) return;
-    peso = Number(p);
-  }
-  if (!grasa) {
-    const g = prompt('¿% de grasa corporal? (opcional, deja vacío si no lo sabes — con él uso Katch-McArdle, más preciso)', '');
-    if (g) grasa = Number(g);
+  const base = calcMetaNutricional({
+    peso: i.peso, altura: i.estatura, edad: i.edad, sexo: i.sexo, grasa_pct: i.grasa,
+    pal: i.pal, objetivo_pct: 0, proteina_g_kg: i.gkg, grasa_pct_kcal: i.fatPct,
+  });
+  if (!base) { el.innerHTML = '<div class="text-xs text-slate-500">Datos insuficientes.</div>'; return; }
+
+  // El gasto SIEMPRE visible: es la referencia para elegir el % con criterio
+  const gastoHtml = `
+    <div class="flex items-baseline gap-3 flex-wrap">
+      <span class="text-xs font-bold text-slate-600 uppercase">🧮 En vivo</span>
+      <span class="text-sm"><span class="text-slate-500">BMR</span> <strong>${base.bmr}</strong></span>
+      <span class="text-sm"><span class="text-slate-500">TDEE (mantenimiento)</span> <strong class="text-emerald-700">${base.tdee} kcal</strong></span>
+      <span class="text-xs text-slate-400">${base.metodo} · PAL ${i.pal}</span>
+    </div>`;
+
+  const objData = OBJETIVOS_KCAL.find(o => o.key === i.objetivoK);
+  if (!objData) {
+    el.innerHTML = gastoHtml + `<div class="text-xs text-slate-500 mt-2">Ese TDEE es tu referencia: elige ahora el <strong>objetivo calórico</strong> arriba y verás aquí la meta resultante, el reparto de macros y el ritmo esperado.</div>`;
+    return;
   }
 
   const meta = calcMetaNutricional({
-    peso, altura: estatura, edad, sexo, grasa_pct: grasa,
-    pal, objetivo_pct: objData.pct,
-    proteina_g_kg: $('#cl-prote-gkg')?.value,
-    grasa_pct_kcal: $('#cl-grasa-pct')?.value,
+    peso: i.peso, altura: i.estatura, edad: i.edad, sexo: i.sexo, grasa_pct: i.grasa,
+    pal: i.pal, objetivo_pct: objData.pct, proteina_g_kg: i.gkg, grasa_pct_kcal: i.fatPct,
+  });
+  const d = meta.detalle;
+  const barSeg = (pct, color) => `<div style="width:${pct}%; background:${color};" class="h-full"></div>`;
+  const fila = (nombre, dd, color) => `
+    <tr class="border-b border-slate-100">
+      <td class="py-0.5 pr-2 font-semibold" style="color:${color}">${nombre}</td>
+      <td class="py-0.5 pr-2 font-bold text-right">${dd.g} g</td>
+      <td class="py-0.5 pr-2 text-right text-slate-500">${dd.pct}%</td>
+      <td class="py-0.5 text-right text-slate-500">${dd.gkg} g/kg</td>
+    </tr>`;
+  el.innerHTML = `
+    ${gastoHtml}
+    <div class="mt-2 flex items-baseline gap-3 flex-wrap">
+      <span class="text-lg font-bold text-emerald-700">Meta: ${meta.kcal} kcal</span>
+      <span class="text-xs text-slate-500">= TDEE ${objData.pct >= 0 ? '+' : ''}${Math.round(objData.pct * 100)}% (${meta.kcal - meta.tdee >= 0 ? '+' : ''}${meta.kcal - meta.tdee} kcal/día)</span>
+      <span class="text-xs font-semibold ${meta.cambioSemanalKg <= 0 ? 'text-blue-700' : 'text-orange-700'}">ritmo ≈ ${meta.cambioSemanalKg > 0 ? '+' : ''}${meta.cambioSemanalKg} kg/semana</span>
+    </div>
+    <div class="flex h-2.5 rounded-full overflow-hidden mt-2 mb-1" title="Reparto de las kcal: proteína / carbos / grasas">
+      ${barSeg(d.proteina.pct, '#2563eb')}${barSeg(d.carbos.pct, '#d97706')}${barSeg(d.grasas.pct, '#dc2626')}
+    </div>
+    <table class="w-full text-sm">
+      <tr class="text-[10px] uppercase text-slate-400"><td></td><td class="text-right pr-2">Cliente ve</td><td class="text-right pr-2">% kcal</td><td class="text-right">g/kg</td></tr>
+      ${fila('Proteína', d.proteina, '#2563eb')}
+      ${fila('Carbos', d.carbos, '#d97706')}
+      ${fila('Grasas', d.grasas, '#dc2626')}
+    </table>
+    ${meta.avisos.map(a => `<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-2 py-1 mt-1">⚠️ ${escapeHtml(a)}</div>`).join('')}
+    <div class="text-[11px] text-slate-400 mt-2">Juega con objetivo, proteína y grasa viendo cómo cambia todo. Cuando te convenza: "📌 Fijar esta meta" y luego Guardar.</div>
+  `;
+};
+
+// ===== Fijar la meta calculada (la deja lista para Guardar) =====
+window.recalcularMeta = async () => {
+  const i = leerInputsCalc();
+  if (i.faltan.length) { toast(`Faltan datos: ${i.faltan.join(', ')}`); return; }
+  if (!i.objetivoK) { toast('Falta el objetivo calórico (elígelo viendo el TDEE del panel en vivo)'); return; }
+  const objData = OBJETIVOS_KCAL.find(o => o.key === i.objetivoK);
+
+  const meta = calcMetaNutricional({
+    peso: i.peso, altura: i.estatura, edad: i.edad, sexo: i.sexo, grasa_pct: i.grasa,
+    pal: i.pal, objetivo_pct: objData.pct,
+    proteina_g_kg: i.gkg,
+    grasa_pct_kcal: i.fatPct,
   });
   if (!meta) { toast('Datos insuficientes'); return; }
 
