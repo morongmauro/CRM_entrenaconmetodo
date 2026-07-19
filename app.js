@@ -707,6 +707,30 @@ const BIBLIOGRAFIA_META = [
   'Wishnofsky M (1958). "Caloric equivalents of gained or lost weight". Am J Clin Nutr 6(5):542-546 → ≈7700 kcal por kg.',
 ];
 
+// Rangos de % de grasa corporal (norma ISSA, tabla 7.1). Coinciden casi
+// exactamente con los de ACE (la referencia más citada): ACE solo difiere en
+// la grasa esencial de hombres (2-5% ACE vs 4-6% ISSA) y llama "obesidad" al
+// rango alto. ACSM y Gallagher et al. 2000 (Am J Clin Nutr 72:694-701) dan
+// rangos saludables AJUSTADOS POR EDAD: después de los 40 el rango sano se
+// corre unos puntos hacia arriba — tenerlo en cuenta al interpretar.
+const RANGOS_GRASA_HEADERS = ['', 'Esencial', 'Atlético', 'Fit', 'Promedio', 'Alto'];
+const RANGOS_GRASA = [
+  ['Hombres', '4-6%', '7-10%', '11-16%', '17-25%', '≥26%'],
+  ['Mujeres', '10-12%', '13-20%', '21-24%', '25-31%', '≥32%'],
+];
+function tablaGrasaHtml() {
+  return `
+    <div class="text-[11px] font-bold text-slate-600 mb-1">📊 % de grasa corporal — rangos de referencia (ISSA/ACE)</div>
+    <table class="w-full text-[11px]">
+      <tr>${RANGOS_GRASA_HEADERS.map((h, i) => `<th class="text-${i === 0 ? 'left' : 'center'} py-0.5 px-1 ${i === 0 ? '' : 'text-slate-500 font-semibold uppercase text-[9px] tracking-wide'}">${h}</th>`).join('')}</tr>
+      ${RANGOS_GRASA.map(fila => `
+        <tr class="border-t border-slate-100">
+          ${fila.map((celda, i) => `<td class="py-1 px-1 ${i === 0 ? 'font-semibold text-slate-700' : 'text-center num'} ${i === 4 ? 'bg-emerald-50/60' : ''} ${i === 5 ? 'text-red-600' : ''}">${celda}</td>`).join('')}
+        </tr>`).join('')}
+    </table>
+    <div class="text-[10px] text-slate-400 mt-1">ISSA · coincide con ACE (esencial hombres: 2-5% según ACE) · en 40+ años el rango sano sube unos puntos (Gallagher 2000, ACSM)</div>`;
+}
+
 const GUIA_MACROS = {
   proteina: [
     ['Pérdida de grasa (déficit)', '2.0 – 2.7 g/kg', 'Preserva masa magra en déficit (Helms 2014)'],
@@ -2236,6 +2260,7 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
                 <input id="sg-cin" type="number" step="0.1" placeholder="Cintura">
               </div>
               <div id="sg-comp-preview" class="hidden text-xs mt-2"><div id="sg-comp-body"></div></div>
+              <div class="mt-2 pt-2 border-t border-slate-100">${tablaGrasaHtml()}</div>
             </div>
           </div>
 
@@ -2688,8 +2713,21 @@ window.enviarMetaMealtracker = async (clienteId, metaOverride = null) => {
   if (!okConfirm) return;
 
   const r = await setMealtrackerGoals(mtId, meta);
-  if (r.ok) toast(`✓ Meta cargada al Mealtracker de ${cliente.nombre} · le llegará el anuncio en su app`);
-  else toast(`✗ ${r.causa}`);
+  if (r.ok) {
+    // Registrar QUÉ se envió y cuándo: queda en la ficha (columna
+    // meta_enviada_mt) y visible en la sección 5, para saber siempre cuál
+    // fue la última meta que el cliente efectivamente recibió en su app.
+    const registro = { kcal: meta.kcal, p: meta.p, c: meta.c, g: meta.g, at: new Date().toISOString() };
+    const { error: eReg } = await sb.from('clientes').update({ meta_enviada_mt: registro }).eq('id', clienteId);
+    // Si la columna aún no existe (falta migración), el envío igual fue OK.
+    const info = $('#mt-enviada-info');
+    if (info && !eReg) {
+      info.classList.remove('text-slate-400');
+      info.classList.add('text-violet-700');
+      info.innerHTML = `📤 Último envío al Mealtracker: <strong>${registro.kcal} kcal</strong> · P${registro.p} C${registro.c} G${registro.g} · ahora mismo`;
+    }
+    toast(`✓ Enviado al Mealtracker de ${cliente.nombre}: ${meta.kcal} kcal · P${meta.p} C${meta.c} G${meta.g} — le llegará el anuncio en su app${eReg ? ' (corre la migración de schema.sql para que quede registrado en la ficha)' : ''}`, 5000);
+  } else toast(`✗ ${r.causa}`);
 };
 
 // Variante para el formulario de edición: usa la meta recién recalculada
@@ -3581,6 +3619,10 @@ function clienteForm(c = {}) {
             <input id="cl-grasa-corp-calc" type="number" step="0.1" min="3" max="60" oninput="actualizarCalcVivo()">
             <p class="text-xs text-slate-500 mt-1">Con él uso Katch-McArdle (más preciso); sin él, Mifflin-St Jeor</p>
           </div>
+          <div id="calc-ultima-med" class="col-span-2 text-xs text-slate-500"></div>
+          <div class="col-span-2 bg-white rounded-xl px-3 py-2 ring-1 ring-slate-100">
+            ${tablaGrasaHtml()}
+          </div>
           <div><label>Objetivo calórico</label>
             <select id="cl-objk" onchange="actualizarCalcVivo()">
               <option value="">—</option>
@@ -3644,6 +3686,11 @@ function clienteForm(c = {}) {
                 <div class="text-xs text-slate-500 mt-1">${c.meta_metodo || ''} · Recalculada ${c.meta_calculada_en ? new Date(c.meta_calculada_en).toLocaleDateString('es-CO') : ''}</div>
                 ${c.meta_argumento ? `<details class="mt-2"><summary class="text-xs text-emerald-700 cursor-pointer">Ver argumento del cálculo</summary><pre class="text-xs text-slate-600 mt-1 whitespace-pre-wrap">${escapeHtml(c.meta_argumento)}</pre></details>` : ''}
               ` : '<div class="text-xs text-slate-500">Sin meta fijada. Ajusta las perillas viendo el panel en vivo de arriba y dale "📌 Fijar esta meta".</div>'}
+            </div>
+            <div id="mt-enviada-info" class="text-xs mt-2 pt-2 border-t border-emerald-50 ${c.meta_enviada_mt?.kcal ? 'text-violet-700' : 'text-slate-400'}">
+              ${c.meta_enviada_mt?.kcal
+                ? `📤 Último envío al Mealtracker: <strong>${c.meta_enviada_mt.kcal} kcal</strong> · P${c.meta_enviada_mt.p} C${c.meta_enviada_mt.c} G${c.meta_enviada_mt.g} · ${c.meta_enviada_mt.at ? new Date(c.meta_enviada_mt.at).toLocaleString('es-CO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}`
+                : '📤 Aún no has enviado ninguna meta al Mealtracker de este cliente.'}
             </div>
           </div>
         </div>
@@ -3751,6 +3798,12 @@ window.editarCliente = async (id) => {
     <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
     <button class="btn btn-primary" onclick="guardarCliente('${id}')">Guardar</button>
   `), { wide: true });
+  // Meta guardada actual: referencia para comparar "lo que había" vs. "lo
+  // nuevo que voy ajustando" (el panel en vivo muestra el delta contra esta).
+  window._metaGuardada = c.meta_calorias ? {
+    kcal: c.meta_calorias, p: c.meta_proteina_g, ca: c.meta_carbos_g, g: c.meta_grasas_g,
+    en: c.meta_calculada_en,
+  } : null;
   actualizarCalcVivo();
   // Precargar peso y %grasa desde la última medición (editables): así el
   // panel en vivo arranca con datos reales sin escribir nada.
@@ -3762,6 +3815,14 @@ window.editarCliente = async (id) => {
       if (pe && !pe.value && ult.peso) pe.value = ult.peso;
       const gr = $('#cl-grasa-corp-calc');
       if (gr && !gr.value && ult.grasa_pct) gr.value = ult.grasa_pct;
+      const info = $('#calc-ultima-med');
+      if (info) {
+        const partes = [];
+        if (ult.peso) partes.push(`<strong>${ult.peso} kg</strong>`);
+        if (ult.grasa_pct) partes.push(`<strong>${ult.grasa_pct}%</strong> grasa`);
+        if (ult.cintura) partes.push(`${ult.cintura} cm cintura`);
+        info.innerHTML = `📏 Última medición registrada: ${partes.join(' · ')}${ult.fecha ? ` · ${fmt.fechaCorta(ult.fecha)}` : ''} — los campos de arriba arrancan con estos valores.`;
+      }
     }
   } catch (e) { /* sin mediciones: el coach escribe el peso a mano */ }
   actualizarCalcVivo();
@@ -4264,6 +4325,7 @@ window.actualizarCalcVivo = () => {
       <span class="text-lg font-bold text-emerald-700">Meta: ${meta.kcal} kcal</span>
       <span class="text-xs text-slate-500">= TDEE ${objData.pct >= 0 ? '+' : ''}${Math.round(objData.pct * 100)}% (${meta.kcal - meta.tdee >= 0 ? '+' : ''}${meta.kcal - meta.tdee} kcal/día)</span>
       <span class="text-xs font-semibold ${meta.cambioSemanalKg <= 0 ? 'text-blue-700' : 'text-orange-700'}">ritmo ≈ ${meta.cambioSemanalKg > 0 ? '+' : ''}${meta.cambioSemanalKg} kg/semana</span>
+      ${window._metaGuardada?.kcal ? `<span class="text-xs text-violet-700 bg-violet-50 rounded px-1.5 py-0.5">vs guardada (${window._metaGuardada.kcal} kcal): ${meta.kcal - window._metaGuardada.kcal >= 0 ? '+' : ''}${meta.kcal - window._metaGuardada.kcal} kcal</span>` : ''}
     </div>
     <div class="flex h-2.5 rounded-full overflow-hidden mt-2 mb-1" title="Reparto de las kcal: proteína / carbos / grasas">
       ${barSeg(d.proteina.pct, '#2563eb')}${barSeg(d.carbos.pct, '#d97706')}${barSeg(d.grasas.pct, '#dc2626')}
@@ -4323,6 +4385,11 @@ window.recalcularMeta = async () => {
       <td class="py-1 text-right text-slate-500">${d.gkg} g/kg</td>
     </tr>`;
   $('#meta-preview').innerHTML = `
+    ${window._metaGuardada?.kcal ? `
+      <div class="text-xs text-slate-500 bg-slate-50 rounded-lg px-2 py-1 mb-2">
+        📋 Anterior (guardada${window._metaGuardada.en ? ` ${new Date(window._metaGuardada.en).toLocaleDateString('es-CO')}` : ''}): ${window._metaGuardada.kcal} kcal · P${window._metaGuardada.p} C${window._metaGuardada.ca} G${window._metaGuardada.g}
+        <span class="text-violet-700 font-semibold">→ Nueva: ${meta.kcal} kcal (${meta.kcal - window._metaGuardada.kcal >= 0 ? '+' : ''}${meta.kcal - window._metaGuardada.kcal})</span>
+      </div>` : ''}
     <div class="font-bold text-emerald-700 text-base">${meta.kcal} kcal / día</div>
     <div class="text-xs text-slate-500 mb-2">BMR ${meta.bmr} · TDEE ${meta.tdee} (${meta.metodo}) · ritmo esperado ${meta.cambioSemanalKg > 0 ? '+' : ''}${meta.cambioSemanalKg} kg/semana</div>
     <table class="w-full text-sm mb-1">
@@ -4552,6 +4619,7 @@ window.verCliente = async (id) => {
           <div class="sec-title">5 · 🥗 Meta nutricional diaria</div>
           <div class="text-blue-900 font-semibold">${c.meta_calorias} kcal · ${c.meta_proteina_g}g prote · ${c.meta_grasas_g}g grasas · ${c.meta_carbos_g}g carbos</div>
           <div class="text-xs text-blue-700 mt-1">${c.meta_metodo || ''} · Nivel: ${c.nivel_actividad?.replace('_',' ') || '—'} · PAL ${c.pal_factor || '—'}</div>
+          ${c.meta_enviada_mt?.kcal ? `<div class="text-xs text-violet-700 mt-1">📤 Último envío al Mealtracker: <strong>${c.meta_enviada_mt.kcal} kcal</strong> · P${c.meta_enviada_mt.p} C${c.meta_enviada_mt.c} G${c.meta_enviada_mt.g} · ${c.meta_enviada_mt.at ? new Date(c.meta_enviada_mt.at).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }) : ''}</div>` : ''}
           ${c.meta_argumento ? `<details class="mt-2"><summary class="text-xs text-blue-700 cursor-pointer">Ver argumento del cálculo</summary><pre class="text-xs text-slate-600 mt-1 whitespace-pre-wrap">${escapeHtml(c.meta_argumento)}</pre></details>` : ''}
           <div class="flex gap-2 flex-wrap mt-2">
             ${mtConfigured() ? `<button class="btn btn-primary btn-sm" onclick="enviarMetaMealtracker('${c.id}')" title="Cambia la meta en la app Mealtracker del cliente (pide confirmación)">🎯 Enviar meta al Mealtracker</button>` : ''}
