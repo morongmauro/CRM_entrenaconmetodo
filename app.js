@@ -655,7 +655,16 @@ Proteína: ${w} kg × ${gkg} g/kg = ${proteina} g (${detalle.proteina.pct}% kcal
 Grasas: ${fatPct}% de kcal = ${grasas} g (${detalle.grasas.gkg} g/kg)  [AMDR 20-35%, piso 0.5 g/kg]
 Carbos: resto = ${carbos} g (${detalle.carbos.pct}% kcal · ${detalle.carbos.gkg} g/kg)${avisos.length ? '\n⚠️ ' + avisos.join('\n⚠️ ') : ''}`;
 
-  return { kcal, proteina, grasas, carbos, metodo, argumento, bmr: Math.round(bmr), tdee: Math.round(tdee), detalle, cambioSemanalKg, avisos, grasa_pct_kcal: fatPct };
+  // Versión REDONDEADA de cara al cliente: kcal al múltiplo de 50 más
+  // cercano, macros al múltiplo de 5 g. Una meta "bonita" (1650 / P145) es
+  // más fácil de recordar y seguir que 1625 / P146; el descuadre de ±20-30
+  // kcal contra la suma exacta es ruido frente a la imprecisión del registro
+  // diario de comida. El valor exacto se conserva como referencia del coach.
+  const r50 = (n) => Math.round(n / 50) * 50;
+  const r5 = (n) => Math.round(n / 5) * 5;
+  const redondeo = { kcal: r50(kcal), proteina: r5(proteina), carbos: r5(carbos), grasas: r5(grasas) };
+
+  return { kcal, proteina, grasas, carbos, redondeo, metodo, argumento: argumento + `\nRedondeo para el cliente: ${redondeo.kcal} kcal · P${redondeo.proteina} / C${redondeo.carbos} / G${redondeo.grasas} (exacto: ${kcal} · P${proteina}/C${carbos}/G${grasas})`, bmr: Math.round(bmr), tdee: Math.round(tdee), detalle, cambioSemanalKg, avisos, grasa_pct_kcal: fatPct };
 }
 
 // Guía de rangos por objetivo — respaldo para configurar proteína y grasa.
@@ -4311,31 +4320,35 @@ window.actualizarCalcVivo = () => {
     pal: i.pal, objetivo_pct: objData.pct, proteina_g_kg: i.gkg, grasa_pct_kcal: i.fatPct,
   });
   const d = meta.detalle;
+  const rd = meta.redondeo;
   const barSeg = (pct, color) => `<div style="width:${pct}%; background:${color};" class="h-full"></div>`;
-  const fila = (nombre, dd, color) => `
+  const fila = (nombre, dd, redond, color) => `
     <tr class="border-b border-slate-100">
       <td class="py-0.5 pr-2 font-semibold" style="color:${color}">${nombre}</td>
-      <td class="py-0.5 pr-2 font-bold text-right">${dd.g} g</td>
+      <td class="py-0.5 pr-2 text-right text-slate-400">${dd.g} g</td>
+      <td class="py-0.5 pr-2 font-bold text-right">${redond} g</td>
       <td class="py-0.5 pr-2 text-right text-slate-500">${dd.pct}%</td>
       <td class="py-0.5 text-right text-slate-500">${dd.gkg} g/kg</td>
     </tr>`;
   el.innerHTML = `
     ${gastoHtml}
     <div class="mt-2 flex items-baseline gap-3 flex-wrap">
-      <span class="text-lg font-bold text-emerald-700">Meta: ${meta.kcal} kcal</span>
+      <span class="text-lg font-bold text-emerald-700">Meta: ${rd.kcal} kcal</span>
+      <span class="text-xs text-slate-400">(exacta: ${meta.kcal})</span>
       <span class="text-xs text-slate-500">= TDEE ${objData.pct >= 0 ? '+' : ''}${Math.round(objData.pct * 100)}% (${meta.kcal - meta.tdee >= 0 ? '+' : ''}${meta.kcal - meta.tdee} kcal/día)</span>
       <span class="text-xs font-semibold ${meta.cambioSemanalKg <= 0 ? 'text-blue-700' : 'text-orange-700'}">ritmo ≈ ${meta.cambioSemanalKg > 0 ? '+' : ''}${meta.cambioSemanalKg} kg/semana</span>
-      ${window._metaGuardada?.kcal ? `<span class="text-xs text-violet-700 bg-violet-50 rounded px-1.5 py-0.5">vs guardada (${window._metaGuardada.kcal} kcal): ${meta.kcal - window._metaGuardada.kcal >= 0 ? '+' : ''}${meta.kcal - window._metaGuardada.kcal} kcal</span>` : ''}
+      ${window._metaGuardada?.kcal ? `<span class="text-xs text-violet-700 bg-violet-50 rounded px-1.5 py-0.5">vs guardada (${window._metaGuardada.kcal} kcal): ${rd.kcal - window._metaGuardada.kcal >= 0 ? '+' : ''}${rd.kcal - window._metaGuardada.kcal} kcal</span>` : ''}
     </div>
     <div class="flex h-2.5 rounded-full overflow-hidden mt-2 mb-1" title="Reparto de las kcal: proteína / carbos / grasas">
       ${barSeg(d.proteina.pct, '#2563eb')}${barSeg(d.carbos.pct, '#d97706')}${barSeg(d.grasas.pct, '#dc2626')}
     </div>
     <table class="w-full text-sm">
-      <tr class="text-[10px] uppercase text-slate-400"><td></td><td class="text-right pr-2">Cliente ve</td><td class="text-right pr-2">% kcal</td><td class="text-right">g/kg</td></tr>
-      ${fila('Proteína', d.proteina, '#2563eb')}
-      ${fila('Carbos', d.carbos, '#d97706')}
-      ${fila('Grasas', d.grasas, '#dc2626')}
+      <tr class="text-[10px] uppercase text-slate-400"><td></td><td class="text-right pr-2">Exacto</td><td class="text-right pr-2">Cliente ve</td><td class="text-right pr-2">% kcal</td><td class="text-right">g/kg</td></tr>
+      ${fila('Proteína', d.proteina, rd.proteina, '#2563eb')}
+      ${fila('Carbos', d.carbos, rd.carbos, '#d97706')}
+      ${fila('Grasas', d.grasas, rd.grasas, '#dc2626')}
     </table>
+    <div class="text-[10px] text-slate-400 mt-0.5">"Cliente ve" = redondeado (kcal a 50 · macros a 5 g): es lo que se fija y se envía. El descuadre de ±20-30 kcal vs la suma exacta es normal y menor que el error del registro diario.</div>
     ${meta.avisos.map(a => `<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-2 py-1 mt-1">⚠️ ${escapeHtml(a)}</div>`).join('')}
     <div class="text-[11px] text-slate-400 mt-2">Juega con objetivo, proteína y grasa viendo cómo cambia todo. Cuando te convenza: "📌 Fijar esta meta" y luego Guardar.</div>
   `;
@@ -4356,11 +4369,13 @@ window.recalcularMeta = async () => {
   });
   if (!meta) { toast('Datos insuficientes'); return; }
 
+  // Se fija la versión REDONDEADA (kcal a 50, macros a 5 g): es la que ve el
+  // cliente y la que viaja al Mealtracker. La exacta queda en el argumento.
   window._pendingMeta = {
-    meta_calorias: meta.kcal,
-    meta_proteina_g: meta.proteina,
-    meta_grasas_g: meta.grasas,
-    meta_carbos_g: meta.carbos,
+    meta_calorias: meta.redondeo.kcal,
+    meta_proteina_g: meta.redondeo.proteina,
+    meta_grasas_g: meta.redondeo.grasas,
+    meta_carbos_g: meta.redondeo.carbos,
     meta_metodo: meta.metodo,
     meta_argumento: meta.argumento,
     meta_calculada_en: new Date().toISOString(),
@@ -4371,16 +4386,17 @@ window.recalcularMeta = async () => {
   // la línea calculada se agrega al final.
   const cm = $('#cl-meta');
   if (cm) {
-    const linea = `${meta.kcal} kcal: ${meta.proteina}P / ${meta.carbos}C / ${meta.grasas}G (${meta.detalle.proteina.pct}% / ${meta.detalle.carbos.pct}% / ${meta.detalle.grasas.pct}%)`;
+    const linea = `${meta.redondeo.kcal} kcal: ${meta.redondeo.proteina}P / ${meta.redondeo.carbos}C / ${meta.redondeo.grasas}G (${meta.detalle.proteina.pct}% / ${meta.detalle.carbos.pct}% / ${meta.detalle.grasas.pct}%)`;
     const actual = cm.value.trim();
     if (!actual || /^\d{3,4}\s*\.?\s*kcal/i.test(actual)) cm.value = linea;
     else cm.value = actual.split('\n').filter(l => !/^\d{3,4}\s*\.?\s*kcal/i.test(l.trim())).join('\n').trim() + '\n' + linea;
   }
 
-  const filaMacro = (nombre, d, color) => `
+  const filaMacro = (nombre, d, redond, color) => `
     <tr class="border-b border-slate-100">
       <td class="py-1 pr-2 font-semibold" style="color:${color}">${nombre}</td>
-      <td class="py-1 pr-2 font-bold text-right">${d.g} g</td>
+      <td class="py-1 pr-2 text-right text-slate-400">${d.g} g</td>
+      <td class="py-1 pr-2 font-bold text-right">${redond} g</td>
       <td class="py-1 pr-2 text-right text-slate-500">${d.pct}% kcal</td>
       <td class="py-1 text-right text-slate-500">${d.gkg} g/kg</td>
     </tr>`;
@@ -4388,15 +4404,15 @@ window.recalcularMeta = async () => {
     ${window._metaGuardada?.kcal ? `
       <div class="text-xs text-slate-500 bg-slate-50 rounded-lg px-2 py-1 mb-2">
         📋 Anterior (guardada${window._metaGuardada.en ? ` ${new Date(window._metaGuardada.en).toLocaleDateString('es-CO')}` : ''}): ${window._metaGuardada.kcal} kcal · P${window._metaGuardada.p} C${window._metaGuardada.ca} G${window._metaGuardada.g}
-        <span class="text-violet-700 font-semibold">→ Nueva: ${meta.kcal} kcal (${meta.kcal - window._metaGuardada.kcal >= 0 ? '+' : ''}${meta.kcal - window._metaGuardada.kcal})</span>
+        <span class="text-violet-700 font-semibold">→ Nueva: ${meta.redondeo.kcal} kcal (${meta.redondeo.kcal - window._metaGuardada.kcal >= 0 ? '+' : ''}${meta.redondeo.kcal - window._metaGuardada.kcal})</span>
       </div>` : ''}
-    <div class="font-bold text-emerald-700 text-base">${meta.kcal} kcal / día</div>
+    <div class="font-bold text-emerald-700 text-base">${meta.redondeo.kcal} kcal / día <span class="text-xs font-normal text-slate-400">(exacta: ${meta.kcal})</span></div>
     <div class="text-xs text-slate-500 mb-2">BMR ${meta.bmr} · TDEE ${meta.tdee} (${meta.metodo}) · ritmo esperado ${meta.cambioSemanalKg > 0 ? '+' : ''}${meta.cambioSemanalKg} kg/semana</div>
     <table class="w-full text-sm mb-1">
-      <tr class="text-[10px] uppercase text-slate-400"><td></td><td class="text-right pr-2">Cliente ve</td><td class="text-right pr-2">% kcal</td><td class="text-right">g/kg</td></tr>
-      ${filaMacro('Proteína', meta.detalle.proteina, '#2563eb')}
-      ${filaMacro('Carbos', meta.detalle.carbos, '#d97706')}
-      ${filaMacro('Grasas', meta.detalle.grasas, '#dc2626')}
+      <tr class="text-[10px] uppercase text-slate-400"><td></td><td class="text-right pr-2">Exacto</td><td class="text-right pr-2">Cliente ve</td><td class="text-right pr-2">% kcal</td><td class="text-right">g/kg</td></tr>
+      ${filaMacro('Proteína', meta.detalle.proteina, meta.redondeo.proteina, '#2563eb')}
+      ${filaMacro('Carbos', meta.detalle.carbos, meta.redondeo.carbos, '#d97706')}
+      ${filaMacro('Grasas', meta.detalle.grasas, meta.redondeo.grasas, '#dc2626')}
     </table>
     ${meta.avisos.map(a => `<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-2 py-1 mt-1">⚠️ ${escapeHtml(a)}</div>`).join('')}
     <details class="mt-2"><summary class="text-xs text-emerald-700 cursor-pointer">Ver argumento del cálculo (métodos y fuentes)</summary><pre class="text-xs text-slate-600 mt-1 whitespace-pre-wrap">${escapeHtml(meta.argumento)}</pre></details>
@@ -4632,6 +4648,14 @@ window.verCliente = async (id) => {
           <div class="sec-title" style="margin-bottom:0">📏 Mediciones corporales (${meds.length})</div>
           <button class="text-xs text-teal-700 font-semibold hover:underline" onclick="nuevaMedicion('${c.id}')">+ Agregar</button>
         </div>
+        ${ultMed ? `
+          <div class="bg-teal-50 ring-1 ring-teal-100 rounded-xl px-3 py-2 mb-2 text-sm text-teal-900">
+            <strong>Último registro vigente:</strong>
+            ${ultMed.peso ? ` <strong>${ultMed.peso} kg</strong>` : ''}
+            ${ultMed.grasa_pct ? ` · ${ultMed.grasa_pct}% grasa` : ''}
+            ${ultMed.cintura ? ` · ${ultMed.cintura} cm cintura` : ''}
+            ${ultMed.fecha ? ` <span class="text-teal-700/70 text-xs">(${fmt.fechaCorta(ultMed.fecha)})</span>` : ''}
+          </div>` : ''}
         ${meds.length === 0 ? '<p class="text-xs text-slate-500">Sin mediciones registradas.</p>' : `
           ${pesos.length >= 2 ? `
             <div class="bg-slate-50 rounded-xl p-3 mb-2">
