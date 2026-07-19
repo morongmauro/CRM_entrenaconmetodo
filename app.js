@@ -3674,7 +3674,14 @@ function clienteForm(c = {}) {
                     ${filas.map(([caso, rango, nota]) => `<tr class="border-b border-emerald-100/70"><td class="py-1 pr-2 text-slate-600">${caso}</td><td class="py-1 pr-2 font-semibold text-emerald-800 whitespace-nowrap">${rango}</td><td class="py-1 text-slate-500">${nota}</td></tr>`).join('')}
                   </table>
                 </div>`).join('')}
-              <p class="text-slate-500">La proteína se dosifica por kg (depende de la masa corporal); la grasa por % de kcal (depende de la energía total); el cliente siempre la ve en gramos. Referencias completas en el recuadro "Bases científicas" de abajo.</p>
+              <div class="font-bold text-slate-700 mt-2 mb-1">🎚️ ¿Cómo elegir DENTRO del rango? (no siempre el tope)</div>
+              <div class="space-y-1 text-slate-600">
+                <p><strong>Proteína en déficit:</strong> parte de 2.0-2.2 g/kg y súbela hacia 2.4-2.7 solo si el cliente es MAGRO (más riesgo de perder músculo), el déficit es agresivo (-20% o más), tiene mucha hambre (la proteína sacia) o es 40+. Bájala a 1.8-2.0 si su %grasa es ALTO (H >25% · M >32%): en sobrepeso, dosificar 2.7 sobre el peso total sobredosifica — la necesidad la marca la masa magra, no la grasa.</p>
+                <p><strong>Grasa:</strong> 20-25% cuando entrena mucho volumen (libera kcal para carbo) o prefiere platos voluminosos; 28-35% si la comida baja en grasa no lo sacia, por preferencia cultural o señales hormonales. Nunca bajo 0.5 g/kg.</p>
+                <p><strong>Carbo (se valida, no se elige):</strong> mira su g/kg en el panel en vivo contra su entreno — 3-5 g/kg moderado, 5-7 g/kg volumen alto. Si queda corto para lo que entrena: baja el % de grasa, modera la proteína o suaviza el déficit.</p>
+                <p class="text-slate-500">Regla general: el rango existe para ajustarse al CLIENTE (composición, hambre, adherencia, volumen de entreno) — no para usar siempre el máximo.</p>
+              </div>
+              <p class="text-slate-500 mt-2">La proteína se dosifica por kg (depende de la masa corporal); la grasa por % de kcal (depende de la energía total); el cliente siempre la ve en gramos. Referencias completas en el recuadro "Bases científicas" de abajo.</p>
             </div>
           </details>
           <div class="col-span-2 bg-white rounded-xl px-3 py-2.5 ring-1 ring-emerald-100">
@@ -5265,3 +5272,36 @@ if (!window.SUPABASE_URL || window.SUPABASE_URL.includes('TU-PROYECTO')) {
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
+
+// ── Auto-actualización del CRM ──────────────────────────────────────────
+// El CRM es una SPA que el coach deja abierta días: sin esto, subir un
+// app.js nuevo NO se reflejaba hasta un refresh manual, y daba la impresión
+// de que el cambio "no quedó". Compara la firma (ETag/Last-Modified) de
+// /app.js contra el servidor al volver a la pestaña y cada 5 minutos, y si
+// cambió recarga — pero NUNCA con un modal abierto (no bota un formulario a
+// medio llenar; espera al siguiente momento seguro).
+(() => {
+  let firma = null;
+  let recargado = false;
+  const leerFirma = async () => {
+    try {
+      const r = await fetch('/app.js', { method: 'HEAD', cache: 'no-store' });
+      if (!r.ok) return null;
+      return r.headers.get('etag') || r.headers.get('last-modified') || null;
+    } catch (e) { return null; }
+  };
+  leerFirma().then(f => { firma = f; });
+  const chequear = async () => {
+    if (recargado || !firma) return;
+    if (modal && !modal.classList.contains('hidden')) return; // formulario abierto: no molestar
+    const f = await leerFirma();
+    if (f && f !== firma) {
+      recargado = true;
+      location.reload();
+    }
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') chequear();
+  });
+  setInterval(chequear, 5 * 60 * 1000);
+})();
