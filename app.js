@@ -655,16 +655,29 @@ Proteína: ${w} kg × ${gkg} g/kg = ${proteina} g (${detalle.proteina.pct}% kcal
 Grasas: ${fatPct}% de kcal = ${grasas} g (${detalle.grasas.gkg} g/kg)  [AMDR 20-35%, piso 0.5 g/kg]
 Carbos: resto = ${carbos} g (${detalle.carbos.pct}% kcal · ${detalle.carbos.gkg} g/kg)${avisos.length ? '\n⚠️ ' + avisos.join('\n⚠️ ') : ''}`;
 
-  // Versión REDONDEADA de cara al cliente: kcal al múltiplo de 50 más
-  // cercano, macros al múltiplo de 5 g. Una meta "bonita" (1650 / P145) es
-  // más fácil de recordar y seguir que 1625 / P146; el descuadre de ±20-30
-  // kcal contra la suma exacta es ruido frente a la imprecisión del registro
-  // diario de comida. El valor exacto se conserva como referencia del coach.
-  const r50 = (n) => Math.round(n / 50) * 50;
-  const r5 = (n) => Math.round(n / 5) * 5;
-  const redondeo = { kcal: r50(kcal), proteina: r5(proteina), carbos: r5(carbos), grasas: r5(grasas) };
+  // Versión REDONDEADA de cara al cliente — redondeo DIRECCIONAL, no al más
+  // cercano. La precisión de 1625/P146 es falsa (Katch-McArdle ±10%, el
+  // etiquetado permite 20% de desvío, y el registro del cliente suma otro
+  // 10-20%), y además fomenta rigidez. Reglas:
+  //  · kcal a múltiplos de 50: en DÉFICIT hacia ABAJO (el registro promedio
+  //    subreporta — redondear abajo deja colchón), en SUPERÁVIT hacia ARRIBA
+  //    (el riesgo ahí es quedarse corto), en mantenimiento al más cercano.
+  //  · proteína a múltiplos de 5, SIEMPRE hacia ARRIBA (pasarse no cuesta,
+  //    quedarse corto sí).
+  //  · grasas a múltiplos de 5 hacia ABAJO (libera carbo para el entreno),
+  //    sin romper el piso de 0.5 g/kg.
+  //  · carbos: el RESTO de las kcal redondeadas — el set del cliente queda
+  //    internamente consistente (suma ≈ kcal redondeadas).
+  const floor50 = (n) => Math.floor(n / 50) * 50;
+  const ceil50 = (n) => Math.ceil(n / 50) * 50;
+  const kcalRed = objetivo_pct < 0 ? floor50(kcal) : objetivo_pct > 0 ? ceil50(kcal) : Math.round(kcal / 50) * 50;
+  const proteRed = Math.ceil(proteina / 5) * 5;
+  let grasaRed = Math.floor(grasas / 5) * 5;
+  if (grasas / w >= 0.5 && grasaRed / w < 0.5) grasaRed = Math.ceil(grasas / 5) * 5; // el redondeo no rompe el piso
+  const carbosRed = Math.max(0, Math.round(((kcalRed - proteRed * 4 - grasaRed * 9) / 4) / 5) * 5);
+  const redondeo = { kcal: kcalRed, proteina: proteRed, carbos: carbosRed, grasas: grasaRed };
 
-  return { kcal, proteina, grasas, carbos, redondeo, metodo, argumento: argumento + `\nRedondeo para el cliente: ${redondeo.kcal} kcal · P${redondeo.proteina} / C${redondeo.carbos} / G${redondeo.grasas} (exacto: ${kcal} · P${proteina}/C${carbos}/G${grasas})`, bmr: Math.round(bmr), tdee: Math.round(tdee), detalle, cambioSemanalKg, avisos, grasa_pct_kcal: fatPct };
+  return { kcal, proteina, grasas, carbos, redondeo, metodo, argumento: argumento + `\nRedondeo para el cliente (direccional): ${redondeo.kcal} kcal · P${redondeo.proteina} / C${redondeo.carbos} / G${redondeo.grasas} — kcal ${objetivo_pct < 0 ? 'hacia abajo (colchón anti-subreporte en déficit)' : objetivo_pct > 0 ? 'hacia arriba (no quedarse corto en superávit)' : 'al más cercano'}, proteína hacia arriba, grasa hacia abajo, carbo = resto. (Exacto: ${kcal} · P${proteina}/C${carbos}/G${grasas})`, bmr: Math.round(bmr), tdee: Math.round(tdee), detalle, cambioSemanalKg, avisos, grasa_pct_kcal: fatPct };
 }
 
 // Guía de rangos por objetivo — respaldo para configurar proteína y grasa.
@@ -3815,7 +3828,10 @@ window.editarCliente = async (id) => {
   } : null;
   actualizarCalcVivo();
   // Precargar peso y %grasa desde la última medición (editables): así el
-  // panel en vivo arranca con datos reales sin escribir nada.
+  // panel en vivo arranca con datos reales sin escribir nada. El recuadro
+  // #calc-ultima-med SIEMPRE dice algo: la última medición si existe, o un
+  // aviso claro de que no hay — antes quedaba vacío y parecía que faltaba.
+  const info = $('#calc-ultima-med');
   try {
     const meds = await db.mediciones.listCliente(id);
     const ult = meds[meds.length - 1];
@@ -3824,7 +3840,6 @@ window.editarCliente = async (id) => {
       if (pe && !pe.value && ult.peso) pe.value = ult.peso;
       const gr = $('#cl-grasa-corp-calc');
       if (gr && !gr.value && ult.grasa_pct) gr.value = ult.grasa_pct;
-      const info = $('#calc-ultima-med');
       if (info) {
         const partes = [];
         if (ult.peso) partes.push(`<strong>${ult.peso} kg</strong>`);
@@ -3832,8 +3847,12 @@ window.editarCliente = async (id) => {
         if (ult.cintura) partes.push(`${ult.cintura} cm cintura`);
         info.innerHTML = `📏 Última medición registrada: ${partes.join(' · ')}${ult.fecha ? ` · ${fmt.fechaCorta(ult.fecha)}` : ''} — los campos de arriba arrancan con estos valores.`;
       }
+    } else if (info) {
+      info.innerHTML = `📏 <span class="text-amber-700">Este cliente aún no tiene mediciones registradas</span> — escribe peso y %grasa a mano (se usan solo para el cálculo; la medición formal se registra desde el seguimiento semanal o el perfil).`;
     }
-  } catch (e) { /* sin mediciones: el coach escribe el peso a mano */ }
+  } catch (e) {
+    if (info) info.innerHTML = '📏 No pude leer las mediciones ahora; escribe peso y %grasa a mano.';
+  }
   actualizarCalcVivo();
 };
 
@@ -4348,7 +4367,8 @@ window.actualizarCalcVivo = () => {
       ${fila('Carbos', d.carbos, rd.carbos, '#d97706')}
       ${fila('Grasas', d.grasas, rd.grasas, '#dc2626')}
     </table>
-    <div class="text-[10px] text-slate-400 mt-0.5">"Cliente ve" = redondeado (kcal a 50 · macros a 5 g): es lo que se fija y se envía. El descuadre de ±20-30 kcal vs la suma exacta es normal y menor que el error del registro diario.</div>
+    <div class="text-[10px] text-slate-400 mt-0.5">"Cliente ve" = redondeo direccional (kcal a 50: ↓ en déficit / ↑ en superávit · proteína a 5 ↑ · grasa a 5 ↓ · carbo = resto): es lo que se fija y se envía. La precisión decimal es falsa: fórmula ±10%, etiquetado ±20%, registro ±10-20%.</div>
+    <div class="text-[11px] text-emerald-800 bg-emerald-50/70 rounded-lg px-2 py-1 mt-1">💬 Para comunicárselo como rango (más honesto y mejor adherencia): <strong>${rd.kcal - 50}–${rd.kcal + 50} kcal · mínimo ${rd.proteina} g de proteína</strong> · carbos ~${rd.carbos} g · grasas ~${rd.grasas} g</div>
     ${meta.avisos.map(a => `<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-2 py-1 mt-1">⚠️ ${escapeHtml(a)}</div>`).join('')}
     <div class="text-[11px] text-slate-400 mt-2">Juega con objetivo, proteína y grasa viendo cómo cambia todo. Cuando te convenza: "📌 Fijar esta meta" y luego Guardar.</div>
   `;
