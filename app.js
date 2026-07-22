@@ -298,6 +298,107 @@ function resumenSemanaDeData(d, semanaISO) {
   };
 }
 
+// Meta del mealtracker VIGENTE en una semana dada (usa goals_history si el
+// cliente lo tiene — trazabilidad: la semana vieja se compara con SU meta).
+function goalsDeSemanaMT(d, semanaISO) {
+  const [, fin] = semanaISOToRange(semanaISO);
+  const hist = Array.isArray(d.goals_history) ? d.goals_history : null;
+  if (!hist || !hist.length) return d.goals || {};
+  let g = null;
+  for (const h of hist) { if (h.since <= fin) g = h; else break; }
+  return g || hist[0] || d.goals || {};
+}
+
+// ─── Quick view: adherencia últimas 3 semanas (Seguimiento y ficha) ──────
+// Entreno desde los seguimientos del CRM; alimentación EN VIVO desde el
+// mealtracker. Async: el contenedor arranca en "Cargando…" y se llena solo.
+async function quickAdherencia3Sem(c, contId, segsPre) {
+  const el = document.getElementById(contId);
+  if (!el) return;
+  try {
+    const s0 = fmt.semanaISO();
+    const s1 = fmt.semanaPrev(s0);
+    const s2 = fmt.semanaPrev(s1);
+    const semanas = [s2, s1, s0];
+    const [segs, mtData] = await Promise.all([
+      segsPre ? Promise.resolve(segsPre) : db.seguimientos.listCliente(c.id),
+      getMealtrackerDataMerged(c).catch(() => null),
+    ]);
+    const bySem = new Map((segs || []).map(s => [s.semana, s]));
+    const pctColor = (p) => p == null ? 'text-slate-400' : p >= 85 ? 'text-emerald-600' : p >= 60 ? 'text-amber-600' : 'text-red-500';
+    const cols = semanas.map((sem, i) => {
+      const tag = i === 2 ? 'En curso' : i === 1 ? 'Pasada' : 'Hace 2';
+      const sg = bySem.get(sem);
+      const entPct = sg && sg.dias_planeados ? Math.round(((sg.dias_asistidos || 0) / sg.dias_planeados) * 100) : null;
+      const ent = sg && sg.dias_planeados ? `${sg.dias_asistidos ?? 0}/${sg.dias_planeados}` : '—';
+      let ali = '—', aliPct = null;
+      if (mtData) {
+        const r = resumenSemanaDeData(mtData, sem);
+        ali = `${r.dias}/7`;
+        const g = goalsDeSemanaMT(mtData, sem);
+        if (r.kcal_avg != null && g && g.kcal) aliPct = Math.round((r.kcal_avg / g.kcal) * 100);
+      }
+      return `<div class="flex-1 min-w-[120px] bg-white rounded-xl border border-slate-200 p-2.5 text-center">
+        <div class="text-[10px] uppercase tracking-wide text-slate-400 font-bold">${tag} · ${fmt.labelSemana(sem)}</div>
+        <div class="mt-1.5 text-[11px] text-slate-500">🏋️ <span class="font-bold ${pctColor(entPct)}">${ent}</span>${entPct != null ? ` <span class="${pctColor(entPct)}">(${entPct}%)</span>` : ''}</div>
+        <div class="mt-1 text-[11px] text-slate-500">🍽 <span class="font-bold text-slate-700">${ali}</span>${aliPct != null ? ` · <span class="${pctColor(aliPct)}">${aliPct}% kcal</span>` : ''}</div>
+      </div>`;
+    });
+    el.innerHTML = `<div class="flex gap-2 flex-wrap">${cols.join('')}</div>
+      <div class="text-[10px] text-slate-400 mt-1.5">🏋️ entrenos asistidos/planeados (seguimiento) · 🍽 días con registro/7 y % kcal vs la meta de ESA semana (mealtracker, en vivo)</div>`;
+  } catch (e) {
+    el.innerHTML = '<div class="text-xs text-slate-400">No se pudo cargar la adherencia rápida</div>';
+  }
+}
+
+// ─── Vinculación MANUAL cliente CRM ↔ cuenta Mealtracker ────────────────
+// Para cuando el nombre no matchea solo (el cliente escribió "Juan M." en
+// la app). Lista todas las cuentas ordenadas por parecido; un clic guarda
+// el vínculo en clientes.mealtracker_id y los envíos de meta salen directo.
+window.vincularMealtrackerMenu = async (clienteId) => {
+  const c = await db.clientes.get(clienteId);
+  if (!c) return;
+  toast('⏳ Buscando cuentas en el Mealtracker…');
+  const users = await listarClientesMealtracker(true);
+  if (!users.length) { toast('No pude listar las cuentas del Mealtracker (revisa la conexión en Ajustes)'); return; }
+  const conScore = users.map(u => ({ ...u, score: similitudNombre(c.nombre, u.name) }))
+    .sort((a, b) => b.score - a.score);
+  openModal(modalShell(`Vincular a ${escapeHtml(c.nombre)}`, `
+    <div class="space-y-2">
+      <p class="text-xs text-slate-500">Elige la cuenta del Mealtracker que corresponde a este cliente (así escribió su nombre en la app). El vínculo queda guardado y no se vuelve a preguntar.</p>
+      <div class="max-h-96 overflow-y-auto space-y-1">
+        ${conScore.map(u => `
+          <button class="w-full flex items-center justify-between text-left px-3 py-2 rounded-lg border ${u.score >= 85 ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-white'} hover:bg-slate-50"
+            onclick="confirmarVinculoMealtracker('${c.id}', '${u.user_id}')">
+            <span class="text-sm">${escapeHtml(u.name || '(sin nombre)')}</span>
+            <span class="text-[10px] text-slate-400">${u.score}% parecido${u.updated_at ? ' · activo ' + fmt.fechaCorta(String(u.updated_at).slice(0, 10)) : ''}</span>
+          </button>`).join('')}
+      </div>
+    </div>
+  `));
+};
+window.confirmarVinculoMealtracker = async (clienteId, mtId) => {
+  const { error } = await sb.from('clientes').update({ mealtracker_id: mtId }).eq('id', clienteId);
+  if (error) { toast('✗ ' + error.message); return; }
+  _clientesCache = null;
+  closeModal();
+  toast('✓ Vinculado. Ya puedes enviarle la meta nutricional y ver su adherencia.');
+};
+
+// Campo de texto largo colapsable (patrón <details> de las notas): muestra
+// las primeras líneas y el resto al clic — no se come la visual de la ficha.
+function campoColapsable(label, valor, cls = 'text-slate-700', extra = '') {
+  if (!valor) return '';
+  const v = escapeHtml(valor);
+  if (valor.length <= 140) {
+    return `<div class="${cls} text-xs mt-1"><span class="font-semibold">${label}:</span> ${v}${extra}</div>`;
+  }
+  return `<details class="${cls} text-xs mt-1">
+    <summary class="cursor-pointer"><span class="font-semibold">${label}:</span> ${escapeHtml(valor.slice(0, 140))}… <span class="text-blue-600 font-semibold">ver todo</span></summary>
+    <div class="whitespace-pre-line bg-white rounded-lg p-2 mt-1 max-h-72 overflow-y-auto">${v}${extra}</div>
+  </details>`;
+}
+
 // Lista todos los clientes del mealtracker (con cache de 60s)
 async function listarClientesMealtracker(force = false) {
   if (!mtConfigured()) return [];
@@ -359,6 +460,12 @@ function similitudNombre(a, b) {
   const ta = new Set(na.split(' ')), tb = new Set(nb.split(' '));
   const inter = [...ta].filter(x => tb.has(x)).length;
   const union = new Set([...ta, ...tb]).size;
+  // SUBCONJUNTO = misma persona: en la app el cliente casi nunca escribe su
+  // nombre completo ("Juan Mariño" vs "Juan Sebastián Mariño" del CRM daba
+  // 67% y el envío de metas fallaba con "no sincronizado"). Con 2+ palabras
+  // en común y un nombre contenido en el otro, se considera match (90).
+  const minLen = Math.min(ta.size, tb.size);
+  if (inter >= 2 && inter === minLen) return 90;
   return Math.round((inter / union) * 100);
 }
 
@@ -550,41 +657,74 @@ const FASES_PROGRAMA = [
   { key: 'deload',         label: '😴 Deload / descarga' },
 ];
 
+// Encuesta de actividad — modelo ADITIVO CONTINUO en vez de puntos
+// abstractos: cada respuesta guarda su efecto real sobre el PAL (o los días,
+// en el caso del cardio) y el PAL final es la SUMA sobre la base sedentaria
+// (1.2). Más preciso que los 5 cajones fijos: dos personas "moderadas" ya no
+// reciben el mismo 1.55 si una camina 12.000 pasos y la otra 5.000.
+//  · Pasos diarios = NEAT, el gran diferenciador del gasto (hasta +0.20).
+//  · El TIPO de cardio pesa distinto: caminata suave < cardio moderado <
+//    deporte < cardio intenso (efecto POR DÍA de práctica).
+//  · Se eliminó "¿deportes recreativos los fines de semana?" — redundaba
+//    con los días/semana de cardio o deporte.
 const ENCUESTA_ACTIVIDAD = [
-  {
-    key: 'q_fuerza',
-    label: '¿Cuántos días a la semana entrena fuerza?',
-    opts: [ ['0', 0], ['1-2', 1], ['3-4', 2], ['5 o más', 3] ],
-  },
-  {
-    key: 'q_cardio',
-    label: '¿Cuántos días a la semana hace cardio o deporte?',
-    opts: [ ['0', 0], ['1-2', 1], ['3-5', 2], ['6 o más', 3] ],
-  },
   {
     key: 'q_trabajo',
     label: '¿Cómo es su trabajo?',
-    opts: [ ['Oficina/sedentario', 0], ['Mixto', 2], ['Físico', 4] ],
+    opts: [ ['Oficina/sedentario', 0], ['Mixto / de pie', 0.07], ['Físico', 0.15] ],
   },
   {
     key: 'q_pasos',
-    label: '¿Cuántos pasos diarios estima?',
-    opts: [ ['<5.000', 0], ['5.000-8.000', 1], ['8.000-12.000', 3], ['>12.000', 4] ],
+    label: '¿Cuántos pasos diarios promedia? (ideal: que mire el conteo de su teléfono o reloj)',
+    opts: [ ['<5.000', 0], ['5.000-7.500', 0.05], ['7.500-10.000', 0.10], ['10.000-12.500', 0.15], ['>12.500', 0.20] ],
   },
   {
-    key: 'q_deportes',
-    label: '¿Practica deportes recreativos los fines de semana?',
-    opts: [ ['No', 0], ['A veces', 1], ['Siempre', 2] ],
+    key: 'q_fuerza',
+    label: '¿Cuántos días a la semana entrena fuerza?',
+    opts: [ ['0', 0], ['1-2', 0.03], ['3-4', 0.07], ['5 o más', 0.11] ],
+  },
+  {
+    key: 'q_cardio_dias',
+    label: '¿Cuántos días a la semana hace cardio o deporte (aparte de la fuerza)?',
+    opts: [ ['0', 0], ['1-2', 1.5], ['3-5', 4], ['6 o más', 6] ],
+  },
+  {
+    key: 'q_cardio_tipo',
+    label: '¿De qué tipo, principalmente?',
+    opts: [
+      ['Caminatas suaves', 0.015],
+      ['Cardio moderado (trote, bici, natación, clases)', 0.03],
+      ['Deporte (fútbol, tenis, básquet…)', 0.035],
+      ['Cardio intenso / HIIT', 0.045],
+    ],
   },
 ];
 
 function nivelDesdeEncuesta(respuestas) {
-  const total = Object.values(respuestas || {}).reduce((a, b) => a + Number(b || 0), 0);
-  if (total <= 3) return { nivel: 'sedentario', pal: 1.2, total };
-  if (total <= 6) return { nivel: 'ligero', pal: 1.375, total };
-  if (total <= 9) return { nivel: 'moderado', pal: 1.55, total };
-  if (total <= 12) return { nivel: 'activo', pal: 1.725, total };
-  return { nivel: 'muy_activo', pal: 1.9, total };
+  const r = respuestas || {};
+  // Compatibilidad: encuestas guardadas con el formato viejo (puntos
+  // enteros, claves q_cardio/q_deportes) se evalúan con la escala vieja.
+  if (r.q_deportes != null || r.q_cardio != null) {
+    const total = Object.values(r).reduce((a, b) => a + Number(b || 0), 0);
+    if (total <= 3) return { nivel: 'sedentario', pal: 1.2, total };
+    if (total <= 6) return { nivel: 'ligero', pal: 1.375, total };
+    if (total <= 9) return { nivel: 'moderado', pal: 1.55, total };
+    if (total <= 12) return { nivel: 'activo', pal: 1.725, total };
+    return { nivel: 'muy_activo', pal: 1.9, total };
+  }
+
+  // La suma aditiva es SOLO el clasificador: ubica a la persona en el nivel
+  // correcto con más señal (pasos + tipo de cardio). El PAL asignado es
+  // SIEMPRE el factor canónico de la bibliografía (FAO/OMS vía PAL_MAP) —
+  // nada de decimales inventados fuera de la evidencia. Cortes = punto
+  // medio entre factores canónicos (se asigna el nivel más cercano).
+  const num = (k) => Number(r[k] || 0);
+  const cardio = +(num('q_cardio_dias') * (num('q_cardio_tipo') || 0.03)).toFixed(3);
+  const score = Math.round((1.2 + num('q_trabajo') + num('q_pasos') + num('q_fuerza') + cardio) * 100) / 100;
+  const nivel = score < 1.29 ? 'sedentario' : score < 1.46 ? 'ligero' : score < 1.64 ? 'moderado' : score < 1.81 ? 'activo' : 'muy_activo';
+  const pal = PAL_MAP[nivel];
+  const desglose = `clasificador: 1.2 + trabajo ${num('q_trabajo')} + pasos ${num('q_pasos')} + fuerza ${num('q_fuerza')} + cardio ${cardio} = ${score} → nivel ${nivel.replace('_', ' ')} → PAL ${pal} (FAO/OMS)`;
+  return { nivel, pal, total: score, desglose };
 }
 
 // ===== Cálculo de meta nutricional =====
@@ -1904,6 +2044,9 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
   const edad = helpers.edadDe(c.fecha_nacimiento);
   const semanas = segs.length;
   const inicio = c.fecha_inicio ? fmt.fecha(c.fecha_inicio) : '—';
+  // Quick view de 3 semanas: el placeholder va en el template y se llena
+  // async apenas el HTML esté en el DOM (mismo tick + timeout).
+  setTimeout(() => quickAdherencia3Sem(c, 'quick3-seg', segs), 60);
 
   // Últimas 8 semanas (más antiguas a la izquierda) · scores 0-100
   // Fallback: si la semana no tiene score calculado, usar la adherencia subjetiva ×10
@@ -1991,6 +2134,11 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
           { label: 'Global', color: '#0f172a', points: ptsGlob },
         ], labels, { height: 170, yMax: 100 })}
       </div>` : ''}
+
+      <div class="mt-4 pt-4 border-t border-slate-100">
+        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Adherencia rápida · últimas 3 semanas</h4>
+        <div id="quick3-seg"><div class="text-xs text-slate-400">Cargando…</div></div>
+      </div>
 
       <div class="mt-4 pt-4 border-t border-slate-100">
         <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Alineación 4 semanas</h4>
@@ -2716,7 +2864,13 @@ window.enviarMetaMealtracker = async (clienteId, metaOverride = null) => {
 
   toast('⏳ Consultando Mealtracker…');
   const mtId = cliente.mealtracker_id || await resolverMealtrackerId(cliente);
-  if (!mtId) { toast('⚠️ No encontré este cliente en el Mealtracker. Vincúlalo en Ajustes → "Sincronizar clientes".'); return; }
+  if (!mtId) {
+    // Sin match automático: en vez de un callejón sin salida, se abre el
+    // selector de vinculación manual con las cuentas ordenadas por parecido.
+    toast('⚠️ No lo encontré por nombre — elige su cuenta para vincularlo.');
+    vincularMealtrackerMenu(clienteId);
+    return;
+  }
 
   const dataActual = await getMealtrackerUserData(mtId);
   const gPrev = dataActual?.goals || {};
@@ -3894,6 +4048,7 @@ window.guardarCliente = async (id = null) => {
     // seleccionado sigue siendo el que la encuesta arrojó.
     ...(($('#cl-nivel-sel')?.value) ? {
       nivel_actividad: $('#cl-nivel-sel').value,
+      // Siempre el PAL canónico del nivel (FAO/OMS)
       pal_factor: PAL_MAP[$('#cl-nivel-sel').value] || null,
       ...(window._pendingEncuesta && window._pendingEncuesta.nivel === $('#cl-nivel-sel').value
         ? { nivel_actividad_encuesta: window._pendingEncuesta.respuestas } : {}),
@@ -4258,7 +4413,7 @@ window.calcularEncuesta = () => {
   window._pendingEncuesta = { nivel: r.nivel, pal: r.pal, respuestas };
   const el = $('#enc-result');
   el.classList.remove('hidden');
-  el.innerHTML = `<strong>Resultado:</strong> nivel <strong>${r.nivel.replace('_',' ')}</strong> · PAL <strong>${r.pal}</strong> · puntaje ${r.total}. Click "Aplicar" para guardarlo en la ficha.`;
+  el.innerHTML = `<strong>Resultado:</strong> nivel <strong>${r.nivel.replace('_',' ')}</strong> · PAL <strong>${r.pal}</strong>${r.desglose ? `<br><span class="text-[11px] text-emerald-700">${r.desglose}</span>` : ` · puntaje ${r.total}`}. Click "Aplicar" para guardarlo en la ficha.`;
   el.insertAdjacentHTML('afterend', `<div class="flex justify-end mt-3"><button class="btn btn-primary" onclick="aplicarEncuesta()">Aplicar</button></div>`);
 };
 
@@ -4299,6 +4454,8 @@ function leerInputsCalc() {
     faltan, peso, estatura, sexo,
     edad: fnac ? helpers.edadDe(fnac) : null,
     grasa: grasaRaw ? Number(grasaRaw) : null,
+    // PAL: siempre el factor canónico de la bibliografía para el nivel
+    // (la encuesta refinada solo mejora la CLASIFICACIÓN del nivel).
     pal: nivel ? PAL_MAP[nivel] : null,
     objetivoK: $('#cl-objk')?.value || '',
     gkg: $('#cl-prote-gkg')?.value,
@@ -4505,6 +4662,8 @@ window.verCliente = async (id) => {
     altura_cm: c.estatura_cm,
   })).filter(x => x);
 
+  // El quick view se llena async cuando el modal ya está en el DOM
+  setTimeout(() => quickAdherencia3Sem(c, 'quick3-modal', segs), 60);
   openModal(modalShell(escapeHtml(c.nombre), `
     <div class="space-y-4">
       <div class="flex gap-2 flex-wrap">
@@ -4528,6 +4687,12 @@ window.verCliente = async (id) => {
         <div><span class="text-slate-500 text-xs">Adherencia 4 sem:</span><br><strong class="${promAdh === null ? '' : promAdh >= 7.5 ? 'text-emerald-600' : promAdh >= 5 ? 'text-amber-600' : 'text-red-600'}">${promAdh === null ? '—' : promAdh.toFixed(1) + '/10'}</strong></div>
         <div><span class="text-slate-500 text-xs">Inició:</span><br><strong>${c.fecha_inicio ? fmt.fecha(c.fecha_inicio) : '—'}</strong></div>
         <div><span class="text-slate-500 text-xs">Canal:</span><br><strong class="capitalize">${c.canal_adquisicion || '—'}</strong></div>
+      </div>
+
+      <!-- Adherencia rápida · últimas 3 semanas (entreno + alimentación) -->
+      <div class="sec sec-slate">
+        <div class="sec-title">⚡ Adherencia rápida · últimas 3 semanas</div>
+        <div id="quick3-modal"><div class="text-xs text-slate-400">Cargando…</div></div>
       </div>
 
       <!-- 1. IDENTIDAD -->
@@ -4596,17 +4761,17 @@ window.verCliente = async (id) => {
       ${c.restricciones_lesiones || c.patologias || c.lesion_actual || c.suplementos ? `
         <div class="sec sec-red">
           <div class="sec-title">6 · ⚕️ Condiciones médicas / lesiones</div>
-          ${c.patologias ? `<div class="text-red-700 text-xs"><span class="font-semibold">Patologías:</span> ${escapeHtml(c.patologias)}</div>` : ''}
-          ${c.restricciones_lesiones ? `<div class="text-red-700 text-xs mt-1"><span class="font-semibold">Restricciones:</span> ${escapeHtml(c.restricciones_lesiones)}</div>` : ''}
-          ${c.lesion_actual ? `<div class="text-red-700 text-xs mt-1"><span class="font-semibold">Lesión actual:</span> ${escapeHtml(c.lesion_actual)}${c.lesion_estado ? ` (${c.lesion_estado.replace('_',' ')})` : ''}</div>` : ''}
-          ${c.suplementos ? `<div class="text-slate-700 text-xs mt-1"><span class="font-semibold">💊 Suplementos:</span> ${escapeHtml(c.suplementos)}</div>` : '<div class="text-slate-400 text-xs mt-1">💊 Sin suplementos registrados</div>'}
+          ${campoColapsable('Patologías', c.patologias, 'text-red-700')}
+          ${campoColapsable('Restricciones', c.restricciones_lesiones, 'text-red-700')}
+          ${campoColapsable('Lesión actual', c.lesion_actual, 'text-red-700', c.lesion_estado ? ` (${c.lesion_estado.replace('_', ' ')})` : '')}
+          ${c.suplementos ? campoColapsable('💊 Suplementos', c.suplementos, 'text-slate-700') : '<div class="text-slate-400 text-xs mt-1">💊 Sin suplementos registrados</div>'}
         </div>` : ''}
 
       <!-- 7. ANTECEDENTES DEPORTIVOS -->
       ${c.antecedentes_deportivos ? `
         <div class="sec sec-slate">
           <div class="sec-title">7 · 🏅 Antecedentes deportivos</div>
-          <div class="text-slate-700">${escapeHtml(c.antecedentes_deportivos)}</div>
+          ${campoColapsable('Historial', c.antecedentes_deportivos)}
         </div>` : ''}
 
       ${(c.tags && c.tags.length) ? `<div>${c.tags.map(t => `<span class="tag-pill">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
