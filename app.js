@@ -385,6 +385,22 @@ window.confirmarVinculoMealtracker = async (clienteId, mtId) => {
   toast('✓ Vinculado. Ya puedes enviarle la meta nutricional y ver su adherencia.');
 };
 
+// ─── Push manual al teléfono del cliente ────────────────────────────────
+// El coach escribe el mensaje y llega como notificación push al instante
+// (a todos los dispositivos donde el cliente activó los recordatorios).
+window.enviarPushManual = async (clienteId) => {
+  const c = await db.clientes.get(clienteId);
+  if (!c) return;
+  if (!mtApiBase()) { toast('El push manual necesita el modo seguro del Mealtracker (Ajustes: URL de la app + contraseña de coach).'); return; }
+  const msg = prompt(`📲 Mensaje push para ${c.nombre}\n\n(Llega a su teléfono como notificación, con "Tu coach" de título)`);
+  if (!msg || !msg.trim()) return;
+  toast('⏳ Enviando…');
+  const mtId = c.mealtracker_id || await resolverMealtrackerId(c);
+  const res = await mtApiPost('/api/push-send', { user_id: mtId || undefined, name: c.nombre, body: msg.trim() });
+  if (res && res.ok) toast(`✓ Push enviado a ${c.nombre} (${res.sent} dispositivo${res.sent === 1 ? '' : 's'})`);
+  else toast(`✗ ${res?.causa || 'No se pudo enviar (revisa la conexión al Mealtracker)'}`, 6000);
+};
+
 // Campo de texto largo colapsable (patrón <details> de las notas): muestra
 // las primeras líneas y el resto al clic — no se come la visual de la ficha.
 function campoColapsable(label, valor, cls = 'text-slate-700', extra = '') {
@@ -4671,6 +4687,7 @@ window.verCliente = async (id) => {
         <button class="btn btn-secondary btn-sm" onclick="abrirNuevoSeguimiento('${c.id}')">+ Nueva semana</button>
         <button class="btn btn-secondary btn-sm" onclick="nuevoPendiente('${c.id}')">+ Pendiente</button>
         <button class="btn btn-secondary btn-sm" onclick="nuevaMedicion('${c.id}')">+ Medición corporal</button>
+        <button class="btn btn-secondary btn-sm" onclick="enviarPushManual('${c.id}')">📲 Push al teléfono</button>
       </div>
 
       ${streakF > 1 || streakC > 1 || streakGlobal > 1 ? `
