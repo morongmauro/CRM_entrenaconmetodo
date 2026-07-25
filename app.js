@@ -556,6 +556,20 @@ const fmt = {
     const [y, w] = s.split('-W').map(Number);
     return `S${w} '${String(y).slice(2)}`;
   },
+  // Rango lunes-domingo de una semana ISO, compacto pero claro:
+  //   misma mes  → "1–7 sep"
+  //   cruza mes  → "29 sep – 5 oct"
+  rangoSemana: (s) => {
+    if (!s || !String(s).includes('-W')) return '';
+    const [ini, fin] = semanaISOToRange(s);
+    const di = new Date(ini + 'T00:00:00');
+    const df = new Date(fin + 'T00:00:00');
+    const mes = (d) => d.toLocaleDateString('es-CO', { month: 'short' }).replace('.', '');
+    const mi = mes(di), mf = mes(df);
+    return mi === mf
+      ? `${di.getDate()}–${df.getDate()} ${mf}`
+      : `${di.getDate()} ${mi} – ${df.getDate()} ${mf}`;
+  },
   diasDesde: (s) => {
     if (!s) return null;
     const a = new Date(s + (String(s).length === 10 ? 'T00:00:00' : ''));
@@ -1551,12 +1565,15 @@ routes.dashboard = async () => {
   const hoy = fmt.hoy();
   const mes = fmt.mesActual();
   const semana = fmt.semanaISO();
+  // El seguimiento se hace sobre la semana vencida (la que acaba de cerrar),
+  // no la semana en curso: la bandeja rastrea a quién le falta ESA semana.
+  const semanaSeg = fmt.semanaPrev(semana);
   const en7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
 
   const [clientes, pagosMes, segSemana, pendAbiertos, allSegs] = await Promise.all([
     db.clientes.list(),
     db.pagos.listMes(mes),
-    db.seguimientos.listSemana(semana),
+    db.seguimientos.listSemana(semanaSeg),
     db.pendientes.listAbiertos(),
     db.seguimientos.listAll(),
   ]);
@@ -1652,11 +1669,11 @@ routes.dashboard = async () => {
     <!-- Bandeja semanal -->
     <div class="card mb-6">
       <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <h3 class="font-bold text-slate-900 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>Bandeja de la semana</h3>
+        <h3 class="font-bold text-slate-900 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>Bandeja de la semana <span class="text-xs font-normal text-slate-400">· semana vencida ${fmt.rangoSemana(semanaSeg)}</span></h3>
         <div class="text-xs text-slate-500"><strong class="text-slate-900">${activos.length - faltaSeguimiento.length}</strong> hechos · <strong class="text-amber-600">${faltaSeguimiento.length}</strong> faltan</div>
       </div>
       ${faltaSeguimiento.length === 0
-        ? '<p class="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">✓ ¡Todo al día! No queda nadie sin seguimiento esta semana.</p>'
+        ? '<p class="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">✓ ¡Todo al día! No queda nadie sin seguimiento de la semana vencida.</p>'
         : `<div class="space-y-2">${faltaSeguimiento.slice(0, 8).map(c => `
             <div class="flex items-center gap-3 p-3 hover:bg-slate-50 rounded-xl cursor-pointer" onclick="abrirNuevoSeguimiento('${c.id}')">
               ${helpers.avatar(c.nombre, 10)}
@@ -1780,7 +1797,10 @@ routes.dashboard = async () => {
 };
 
 window.abrirNuevoSeguimiento = async (clienteId) => {
-  await abrirModalSeguimiento(clienteId, fmt.semanaISO());
+  // El seguimiento se hace sobre la semana YA vencida (la que acaba de cerrar),
+  // no la semana en curso: así se garantiza que el cliente terminó sus entrenos
+  // (algunos entrenan el fin de semana). Siempre se puede navegar con ◀ ▶.
+  await abrirModalSeguimiento(clienteId, fmt.semanaPrev(fmt.semanaISO()));
 };
 
 // Cambia la semana del modal de seguimiento sin cerrarlo. Si esa semana ya
@@ -1865,62 +1885,6 @@ window.confirmarPagoRapido = async (clienteId, mes) => {
 // =====================================================
 // VIEW: SEGUIMIENTO
 // =====================================================
-// ===== Tandas de seguimiento =====
-// Reparte los clientes ACTIVOS en tandas por día, en orden alfabético (el
-// mismo orden de Trainerize), para no revisar a todos de una: 2 tandas
-// (Lun · Jue) con pocos activos, 3 (Lun · Mié · Vie) con más de 8.
-const TANDA_DIAS = { 2: [['Lunes', 1], ['Jueves', 4]], 3: [['Lunes', 1], ['Miércoles', 3], ['Viernes', 5]] };
-window.setSegTandas = (v) => { localStorage.setItem('seg_tandas', v); routes.seguimiento(); };
-
-function renderTandasBanner(clientes, allSegs) {
-  const activos = clientes.filter(c => c.estado === 'activo')
-    .slice().sort((a, b) => normalizeName(a.nombre).localeCompare(normalizeName(b.nombre)));
-  if (!activos.length) return '';
-  const cfg = localStorage.getItem('seg_tandas') || 'auto';
-  const nAuto = activos.length > 8 ? 3 : 2;
-  const n = cfg === 'auto' ? nAuto : Number(cfg);
-  const semanaAct = fmt.semanaISO();
-  const hechosSemana = new Set(allSegs.filter(s => s.semana === semanaAct).map(s => s.cliente_id));
-  const porTanda = Math.ceil(activos.length / n);
-  const hoyDow = new Date().getDay();
-  const grupos = TANDA_DIAS[n].map(([label, dow], i) => ({ label, dow, lista: activos.slice(i * porTanda, (i + 1) * porTanda) }));
-  const totalHechos = activos.filter(c => hechosSemana.has(c.id)).length;
-  return `
-    <div class="card mb-4">
-      <div class="flex items-baseline justify-between flex-wrap gap-2 mb-3">
-        <div class="text-xs font-bold text-slate-600 uppercase">📋 Tandas de la semana · orden alfabético (igual que Trainerize) · ${totalHechos}/${activos.length} hechos</div>
-        <select class="!w-auto !py-1 text-xs" onchange="setSegTandas(this.value)" title="En cuántos días repartes los seguimientos">
-          <option value="auto" ${cfg === 'auto' ? 'selected' : ''}>Auto (${nAuto} tandas)</option>
-          <option value="2" ${cfg === '2' ? 'selected' : ''}>2 tandas · Lun y Jue</option>
-          <option value="3" ${cfg === '3' ? 'selected' : ''}>3 tandas · Lun, Mié y Vie</option>
-        </select>
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-${n} gap-3">
-        ${grupos.map(g => {
-          const hechos = g.lista.filter(c => hechosSemana.has(c.id)).length;
-          const esHoy = g.dow === hoyDow;
-          const completa = g.lista.length > 0 && hechos === g.lista.length;
-          return `
-          <div class="rounded-xl p-3 ${esHoy ? 'bg-emerald-50 ring-2 ring-emerald-300' : 'bg-slate-50 ring-1 ring-slate-200'}">
-            <div class="flex justify-between items-baseline mb-2">
-              <span class="text-xs font-bold ${esHoy ? 'text-emerald-800' : 'text-slate-600'}">${g.label}${esHoy ? ' · HOY 👈' : ''}</span>
-              <span class="text-xs font-bold ${completa ? 'text-emerald-600' : 'text-slate-400'}">${hechos}/${g.lista.length}${completa ? ' 🎉' : ''}</span>
-            </div>
-            <div class="space-y-1">
-              ${g.lista.map(c => {
-                const done = hechosSemana.has(c.id);
-                return `
-                <button class="w-full text-left text-xs px-2 py-1.5 rounded-lg flex items-center gap-2 ${done ? 'text-slate-400 bg-white/60' : 'bg-white hover:bg-emerald-100 text-slate-700 font-medium'}" onclick="abrirNuevoSeguimiento('${c.id}')" title="${done ? 'Semana ya registrada · click para revisar o editar' : 'Registrar la semana de ' + escapeHtml(c.nombre)}">
-                  <span>${done ? '✅' : '○'}</span><span class="truncate">${escapeHtml(c.nombre)}</span>
-                </button>`;
-              }).join('')}
-            </div>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>`;
-}
-
 routes.seguimiento = async () => {
   view.innerHTML = '<div class="card">Cargando…</div>';
   const [clientes, allSegs] = await Promise.all([db.clientes.list(), db.seguimientos.listAll()]);
@@ -1946,7 +1910,6 @@ routes.seguimiento = async () => {
         <button class="btn btn-primary" onclick="abrirNuevoSeguimiento(_selectedClienteId)">+ Nueva semana</button>
       </div>
     </div>
-    ${renderTandasBanner(clientes, allSegs)}
     <div id="seg-content"></div>
   `;
 
@@ -2183,16 +2146,14 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
 function seguimientoCard(s, coachPends = []) {
   const prom = helpers.promedioAdh(s);
   const ring = prom === null ? '' : prom >= 7.5 ? 'ring-good' : prom >= 5 ? 'ring-mid' : 'ring-bad';
-  const animos = { excelente: '🤩', bien: '😊', neutro: '😐', bajo: '😕', 'muy bajo': '😔' };
-  const animo = animos[s.estado_animo] || '';
   const pctAsis = helpers.pctAsistencia(s);
   return `
     <div class="card card-hover ${ring} cursor-pointer" onclick="editarSeguimiento('${s.id}')">
       <div class="flex items-start justify-between gap-3">
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 mb-1 flex-wrap">
-            <span class="font-bold text-slate-900">${fmt.labelSemana(s.semana)}</span>
-            <span class="text-xs text-slate-400">· ${fmt.fecha(s.fecha)}</span>
+            <span class="font-bold text-slate-900">Sem ${fmt.rangoSemana(s.semana)}</span>
+            <span class="text-xs text-slate-400">${fmt.labelSemana(s.semana)} · reg. ${fmt.fechaCorta(s.fecha)}</span>
             ${pctAsis !== null ? `<span class="tag ${pctAsis >= 90 ? 'tag-green' : pctAsis >= 60 ? 'tag-yellow' : 'tag-red'}">📆 ${s.dias_asistidos}/${s.dias_planeados} días · ${pctAsis}%</span>` : ''}
           </div>
           ${s.avances ? `<p class="text-sm text-slate-700 mb-2 whitespace-pre-line">${escapeHtml(s.avances)}</p>` : '<p class="text-sm text-slate-400 italic">Sin avances escritos</p>'}
@@ -2206,7 +2167,6 @@ function seguimientoCard(s, coachPends = []) {
         </div>
         <div class="flex flex-col items-end gap-1 flex-shrink-0">
           ${prom !== null ? `<span class="tag ${prom >= 7.5 ? 'tag-green' : prom >= 5 ? 'tag-yellow' : 'tag-red'}" style="font-size:0.8rem; padding: 0.25rem 0.55rem; font-weight: 700">${prom.toFixed(1)}/10</span>` : ''}
-          ${animo ? `<span class="text-xs text-slate-500">${animo} ${s.estado_animo}</span>` : ''}
         </div>
       </div>
       <div class="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-slate-100 text-xs">
@@ -2251,7 +2211,7 @@ function renderSegBoard(clientes, allSegs) {
               const ring = prom === null ? '' : prom >= 7.5 ? 'ring-good' : prom >= 5 ? 'ring-mid' : 'ring-bad';
               return `
                 <div class="bg-white rounded-xl p-3 ring-1 ring-slate-100 ${ring} cursor-pointer" onclick="editarSeguimiento('${s.id}')">
-                  <div class="text-xs text-slate-400 mb-1">${fmt.labelSemana(s.semana)} · ${fmt.fechaCorta(s.fecha)} · ${prom !== null ? prom.toFixed(1) + '/10' : '—'}</div>
+                  <div class="text-xs text-slate-400 mb-1">Sem ${fmt.rangoSemana(s.semana)} <span class="text-slate-300">· ${fmt.labelSemana(s.semana)}</span> · ${prom !== null ? prom.toFixed(1) + '/10' : '—'}</div>
                   ${s.avances ? `<div class="text-sm text-slate-700 line-clamp-3">${escapeHtml(s.avances)}</div>` : '<div class="text-xs text-slate-400 italic">Sin avances</div>'}
                   ${s.pendientes_semana ? `<div class="bg-red-50 text-red-800 text-xs rounded px-2 py-1 mt-2 line-clamp-2 whitespace-pre-line">${escapeHtml(checklistTextoPlano(s.pendientes_semana))}</div>` : ''}
                 </div>
@@ -2278,8 +2238,6 @@ function ctxSeguimientoHTML(cliente, past, pendsCliente) {
     const a = helpers.promedioAdh(past[0]), b = helpers.promedioAdh(past[1]);
     if (a !== null && b !== null) { if (a > b + 0.3) { tend = '↗'; tcol = '#059669'; } else if (a < b - 0.3) { tend = '↘'; tcol = '#dc2626'; } }
   }
-  const ult = past[0];
-  const animos = { excelente: '🤩', bien: '😊', neutro: '😐', bajo: '😕', 'muy bajo': '😔' };
   const fase = (FASES_PROGRAMA.find(f => f.key === cliente.fase_programa)?.label) || '';
   const linea = (t) => `<div class="text-xs text-slate-600 mb-1">${t}</div>`;
   const col = (titulo, color, inner) => `<div class="ctx-col" style="border-top:3px solid ${color}"><div class="ctx-col-title">${titulo}</div>${inner || linea('<span class="text-slate-400">—</span>')}</div>`;
@@ -2290,14 +2248,13 @@ function ctxSeguimientoHTML(cliente, past, pendsCliente) {
     fase ? linea(`Fase: ${fase}`) : '',
     linea(`${past.length} semana(s) registradas`),
     promAdh !== null ? linea(`Adherencia 4 sem: <strong style="color:${promAdh >= 7.5 ? '#059669' : promAdh >= 5 ? '#d97706' : '#dc2626'}">${promAdh.toFixed(1)}/10</strong> <span style="color:${tcol};font-weight:700">${tend}</span>`) : linea('Sin adherencia previa'),
-    ult && ult.estado_animo ? linea(`Ánimo última: ${animos[ult.estado_animo] || ''} ${ult.estado_animo}`) : '',
   ].join('');
 
   // 2. Entrenamiento
   const filaEnt = (s2) => {
     const f = s2.fuerza_planeados ? `${s2.fuerza_ejecutados ?? 0}/${s2.fuerza_planeados}` : '—';
     const comp = s2.cardio_ejecutados ? ` +${s2.cardio_ejecutados}d compl.` : '';
-    return `<div class="text-xs text-slate-600">${fmt.labelSemana(s2.semana)}: fuerza <strong>${f}</strong>${comp}${s2.score_entreno != null ? ` · <span style="color:#10b981;font-weight:700">${Math.round(s2.score_entreno)}%</span>` : ''}</div>`;
+    return `<div class="text-xs text-slate-600">${fmt.rangoSemana(s2.semana)}: fuerza <strong>${f}</strong>${comp}${s2.score_entreno != null ? ` · <span style="color:#10b981;font-weight:700">${Math.round(s2.score_entreno)}%</span>` : ''}</div>`;
   };
   const streakF = calcStreakDim(past, s2 => s2.fuerza_planeados > 0 && (s2.fuerza_ejecutados / s2.fuerza_planeados) >= 0.75);
   const entreno = (recientes.length ? recientes.slice(0, 3).map(filaEnt).join('') : linea('Sin registros de entreno'))
@@ -2305,7 +2262,7 @@ function ctxSeguimientoHTML(cliente, past, pendsCliente) {
     + (metaDiasEntreno(cliente) ? `<div class="text-xs text-slate-400 mt-1">Meta: ${metaDiasEntreno(cliente)} días/sem</div>` : '');
 
   // 3. Alimentación
-  const filaAlim = (s2) => `<div class="text-xs text-slate-600">${fmt.labelSemana(s2.semana)}: ${s2.kcal_promedio ?? '—'} kcal · ${s2.proteina_promedio_g ?? '—'}g P · ${s2.dias_registro_alim ?? 0}/7 reg</div>`;
+  const filaAlim = (s2) => `<div class="text-xs text-slate-600">${fmt.rangoSemana(s2.semana)}: ${s2.kcal_promedio ?? '—'} kcal · ${s2.proteina_promedio_g ?? '—'}g P · ${s2.dias_registro_alim ?? 0}/7 reg</div>`;
   const alim = (recientes.length ? recientes.slice(0, 3).map(filaAlim).join('') : linea('Sin registros de alimentación'))
     + (cliente.meta_calorias ? `<div class="text-xs text-slate-400 mt-1">Meta: ${cliente.meta_calorias} kcal · ${cliente.meta_proteina_g}g P</div>` : `<div class="text-xs text-amber-600 mt-1">Sin meta definida</div>`);
 
@@ -2387,19 +2344,16 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
 
     <div class="p-5 space-y-5">
 
+      <!-- SCORES vivos · lo primero: la foto de adherencia de la semana -->
+      <div>
+        <div class="seg-section-title">📊 Scores de la semana</div>
+        <div id="sg-scores" class="grid grid-cols-2 md:grid-cols-4 gap-2"></div>
+      </div>
+
       <!-- CONTEXTO · la película 360, se lee de izquierda a derecha -->
       <div>
         <div class="seg-section-title">📖 Contexto · la película del cliente <span style="text-transform:none;letter-spacing:normal;font-weight:400;color:#94a3b8">(lee de izquierda a derecha)</span></div>
         <div class="ctx-strip">${ctxSeguimientoHTML(cliente, segsCliente.filter(x => x.id !== s.id), pendsCliente)}</div>
-      </div>
-
-      <!-- TENDENCIA de cumplimiento -->
-      <div>
-        <div class="seg-section-title flex items-center justify-between">
-          <span>📈 Tendencia de cumplimiento</span>
-          <span class="flex" style="text-transform:none;letter-spacing:normal">${legendDot('#10b981', 'Entreno')}${legendDot('#3b82f6', 'Alim · metas')}${legendDot('#8b5cf6', 'Alim · registro')}</span>
-        </div>
-        <div class="bg-slate-50 rounded-xl p-3">${tendenciaChart}</div>
       </div>
 
       <!-- REGISTRO · 3 pilares -->
@@ -2476,10 +2430,6 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
           <div class="seg-pillar seg-pillar-gen">
             <div class="seg-pillar-title">📋 General</div>
             <div>
-              <label class="text-xs">Ánimo de la semana</label>
-              <select id="sg-animo"><option value="">—</option>${['excelente','bien','neutro','bajo','muy bajo'].map(o => `<option value="${o}" ${s.estado_animo === o ? 'selected' : ''}>${o}</option>`).join('')}</select>
-            </div>
-            <div>
               <div class="flex items-center justify-between mb-1">
                 <label class="text-xs mb-0">Avances</label>
                 <div class="flex gap-1">
@@ -2520,10 +2470,13 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
         </div>
       </div>
 
-      <!-- SCORES vivos -->
+      <!-- TENDENCIA de cumplimiento · al final, como cierre de contexto -->
       <div>
-        <div class="seg-section-title">📊 Scores de la semana</div>
-        <div id="sg-scores" class="grid grid-cols-2 md:grid-cols-4 gap-2"></div>
+        <div class="seg-section-title flex items-center justify-between">
+          <span>📈 Tendencia de cumplimiento</span>
+          <span class="flex" style="text-transform:none;letter-spacing:normal">${legendDot('#10b981', 'Entreno')}${legendDot('#3b82f6', 'Alim · metas')}${legendDot('#8b5cf6', 'Alim · registro')}</span>
+        </div>
+        <div class="bg-slate-50 rounded-xl p-3">${tendenciaChart}</div>
       </div>
     </div>
 
