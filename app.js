@@ -153,6 +153,115 @@ async function setMealtrackerGoals(mealtrackerId, metas) {
   return { ok: false, causa: 'No hay conexión configurada al Mealtracker (config.js o Ajustes).' };
 }
 
+// =====================================================
+// RECORDATORIOS EN LA APP DEL CLIENTE (Mealtracker)
+// El coach los escribe desde el modal de seguimiento; el cliente los ve en
+// Herramientas → Mis recordatorios (y con anuncio en su chat) y los marca
+// "cumplido" — ese ✓ vuelve aquí. Cada item:
+//   { id, text, created_at, done_at|null, done_by: 'cliente'|'coach'|null }
+// =====================================================
+let _mtRem = { userId: null, list: [] };
+
+async function fetchRemindersMT(mtId) {
+  if (mtApiBase()) {
+    const res = await mtApiGet(`/api/coach-data?action=reminders&user_id=${encodeURIComponent(mtId)}`);
+    if (res && Array.isArray(res.reminders)) return res.reminders;
+  }
+  const mt = mtClient();
+  if (mt) {
+    const { data: row } = await mt.from('user_data').select('rem:data->coach_reminders').eq('user_id', mtId).maybeSingle();
+    if (row && Array.isArray(row.rem)) return row.rem;
+  }
+  return [];
+}
+
+async function saveRemindersMT(mtId, list) {
+  if (mtApiBase()) {
+    const res = await mtApiPatch(`/api/coach-data?action=reminders&user_id=${encodeURIComponent(mtId)}`, { reminders: list });
+    if (res && res.ok) return true;
+  }
+  const mt = mtClient();
+  if (mt) {
+    const { data: row, error } = await mt.from('user_data').select('data').eq('user_id', mtId).maybeSingle();
+    if (error || !row) return false;
+    const blob = row.data || {};
+    blob.coach_reminders = list;
+    blob.reminders_updated = { at: new Date().toISOString(), by: 'coach' };
+    const { error: e2 } = await mt.from('user_data')
+      .update({ data: blob, updated_at: new Date().toISOString() })
+      .eq('user_id', mtId);
+    return !e2;
+  }
+  return false;
+}
+
+function renderRemindersMT() {
+  const el = $('#sg-mt-rem-list');
+  if (!el) return;
+  if (!_mtRem.userId) {
+    el.innerHTML = '<div class="text-xs text-slate-400">Este cliente no está vinculado al Mealtracker.</div>';
+    return;
+  }
+  if (!_mtRem.list.length) {
+    el.innerHTML = '<div class="text-xs text-slate-400">Sin recordatorios en su app. Agrega uno abajo 👇</div>';
+    return;
+  }
+  el.innerHTML = _mtRem.list.map(r => `
+    <div class="flex items-center gap-2 text-xs ${r.done_at ? 'opacity-60' : ''}">
+      <input type="checkbox" class="rounded flex-shrink-0" ${r.done_at ? 'checked' : ''} onchange="toggleReminderMT('${r.id}')" title="${r.done_at ? 'Desmarcar' : 'Marcar cumplido'}">
+      <span class="flex-1 min-w-0 ${r.done_at ? 'line-through text-slate-400' : 'text-slate-700'}">${escapeHtml(r.text)}</span>
+      ${r.done_at ? `<span class="tag tag-green flex-shrink-0" title="${r.done_at.slice(0, 10)}">✓ ${r.done_by === 'cliente' ? 'cliente' : 'tú'}</span>` : ''}
+      <button type="button" class="text-slate-300 hover:text-red-500 flex-shrink-0 font-bold" onclick="quitarReminderMT('${r.id}')" title="Quitar de su app">✕</button>
+    </div>`).join('');
+}
+
+async function cargarRemindersMT(cliente) {
+  _mtRem = { userId: null, list: [] };
+  const el = $('#sg-mt-rem-list');
+  if (el) el.innerHTML = '<div class="text-xs text-slate-400">Cargando…</div>';
+  if (!mtConfigured()) {
+    if (el) el.innerHTML = '<div class="text-xs text-amber-600">Configura la conexión al Mealtracker en Ajustes para usar esto.</div>';
+    return;
+  }
+  const mtId = await resolverMealtrackerId(cliente);
+  if (!mtId) { renderRemindersMT(); return; }
+  _mtRem.userId = mtId;
+  _mtRem.list = await fetchRemindersMT(mtId);
+  renderRemindersMT();
+}
+
+async function persistRemindersMT() {
+  renderRemindersMT(); // pintar optimista
+  const ok = await saveRemindersMT(_mtRem.userId, _mtRem.list);
+  if (!ok) toast('⚠️ No se pudo guardar el recordatorio en el Mealtracker');
+}
+
+window.agregarReminderMT = async () => {
+  const inp = $('#sg-mt-rem-nuevo');
+  const texto = (inp?.value || '').trim();
+  if (!texto || !_mtRem.userId) { if (!_mtRem.userId) toast('Este cliente no está vinculado al Mealtracker'); return; }
+  inp.value = '';
+  _mtRem.list = [..._mtRem.list, {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    text: texto.slice(0, 200),
+    created_at: new Date().toISOString(),
+    done_at: null, done_by: null,
+  }];
+  await persistRemindersMT();
+};
+
+window.toggleReminderMT = async (id) => {
+  _mtRem.list = _mtRem.list.map(r => r.id === id
+    ? (r.done_at ? { ...r, done_at: null, done_by: null } : { ...r, done_at: new Date().toISOString(), done_by: 'coach' })
+    : r);
+  await persistRemindersMT();
+};
+
+window.quitarReminderMT = async (id) => {
+  _mtRem.list = _mtRem.list.filter(r => r.id !== id);
+  await persistRemindersMT();
+};
+
 // --- Modo directo (legado): lectura con anon key. Deja de funcionar si
 // activas RLS en el Mealtracker; migra al modo seguro en Ajustes. ---
 function mtClient() {
@@ -2458,6 +2567,14 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
                 <button type="button" class="btn btn-secondary btn-sm flex-shrink-0" onclick="agregarPendCoachSeg()">+</button>
               </div>
             </div>
+            <div class="bg-sky-50 border border-sky-200 rounded-lg p-2">
+              <div class="text-xs font-bold text-sky-800 mb-1" title="El cliente los ve en su app (Herramientas → Mis recordatorios) con anuncio en su chat. Cuando lo marque cumplido, aquí aparece el ✓.">📲 Recordatorios en su app</div>
+              <div id="sg-mt-rem-list" class="space-y-1 mb-1"></div>
+              <div class="flex gap-1">
+                <input id="sg-mt-rem-nuevo" class="text-xs" placeholder="Ej: usar el mealtracker a diario…" onkeydown="if(event.key==='Enter'){event.preventDefault();agregarReminderMT();}">
+                <button type="button" class="btn btn-secondary btn-sm flex-shrink-0" onclick="agregarReminderMT()">+</button>
+              </div>
+            </div>
             <div>
               <label class="text-xs">Notas</label>
               <textarea id="sg-notas" rows="2" placeholder="Otras observaciones…">${escapeHtml(s.notas || '')}</textarea>
@@ -2495,6 +2612,8 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
   window._segCliente = cliente;
   window._segId = s.id || null;
   setTimeout(() => { recalcScores(); renderPendEditPreview(); renderPendCoachSeg(); }, 0);
+  // Recordatorios visibles en la app del cliente (async, no bloquea el modal)
+  cargarRemindersMT(cliente);
 
   // Auto-resolver y jalar del Mealtracker si aún no hay data
   if (mtConfigured() && !s.kcal_promedio && !s.proteina_promedio_g) {
