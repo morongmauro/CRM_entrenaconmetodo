@@ -166,16 +166,16 @@ async function fetchRemindersMT(mtId) {
   if (mtApiBase()) {
     const res = await mtApiGet(`/api/coach-data?action=reminders&user_id=${encodeURIComponent(mtId)}`);
     if (res && Array.isArray(res.reminders)) {
-      return { list: res.reminders, device: { pwa: res.pwa_installed_at || null, push: res.push_enabled_at || null } };
+      return { list: res.reminders, device: { pwa: res.pwa_installed_at || null, push: res.push_enabled_at || null, upd: res.mt_updated_at || null } };
     }
   }
   const mt = mtClient();
   if (mt) {
     const { data: row } = await mt.from('user_data')
-      .select('rem:data->coach_reminders,pwa:data->pwa_installed_at,push:data->push_enabled_at')
+      .select('rem:data->coach_reminders,pwa:data->pwa_installed_at,push:data->push_enabled_at,upd:updated_at')
       .eq('user_id', mtId).maybeSingle();
     if (row && Array.isArray(row.rem)) {
-      return { list: row.rem, device: { pwa: row.pwa || null, push: row.push || null } };
+      return { list: row.rem, device: { pwa: row.pwa || null, push: row.push || null, upd: row.upd || null } };
     }
   }
   return { list: [], device: null };
@@ -291,6 +291,141 @@ window.quitarReminderMT = async (id) => {
   _mtRem.list = _mtRem.list.filter(r => r.id !== id);
   await persistRemindersMT();
 };
+
+// =====================================================
+// JOURNEY DEL CLIENTE — la línea de onboarding→rutina que muestra en qué
+// paso va cada cliente. Los pasos `auto` se llenan solos con señales reales
+// (mediciones, seguimientos, la app del cliente); los demás los marca el
+// coach con un clic. Se guarda en clientes.journey (jsonb: { pasoId: fecha }).
+// Requiere columna:  alter table clientes add column if not exists journey jsonb default '{}'::jsonb;
+// =====================================================
+const JOURNEY_STEPS = [
+  { id: 'onboarding',    label: 'Vio el onboarding / bienvenida', auto: true, hint: 'Se marca solo cuando lee "Cómo funciona el programa" en el Centro de Recursos' },
+  { id: 'peso',          label: 'Peso inicial registrado', auto: true, hint: 'Se marca solo con la primera medición corporal en el CRM' },
+  { id: 'fotos',         label: 'Fotos iniciales' },
+  { id: 'clips',         label: 'Clips iniciales enviados' },
+  { id: 'dudas',         label: 'Dudas iniciales resueltas' },
+  { id: 'faq',           label: 'Leyó preguntas frecuentes', auto: true, hint: 'Se marca solo cuando lee la sección FAQ del Centro de Recursos' },
+  { id: 'app_instalada', label: 'App en su pantalla de inicio', auto: true, hint: 'Lo reporta su app al abrirla instalada' },
+  { id: 'push',          label: 'Notificaciones push activadas', auto: true, hint: 'Lo reporta su app al aceptar los avisos' },
+  { id: 'registra',      label: 'Usó el mealtracker por primera vez', auto: true, hint: 'Primera sincronización de su app' },
+  { id: 'training',      label: 'Entrenamiento en marcha', auto: true, hint: 'Se marca solo con el primer seguimiento semanal en el CRM' },
+  { id: 'guia',          label: 'Leyó la guía de alimentación', auto: true, hint: 'Se marca solo cuando lee capítulos de la guía en el Centro de Recursos' },
+];
+
+// ── Lecturas del Centro de Recursos (Supabase propio del centro) ──
+// El centro guarda qué sección leyó cada cliente en reading_state
+// (client_name, source: 'hub'|'ga', section_key). La llave es pública
+// (misma que usa la página del centro), solo lectura.
+const CENTRO_SUPA_URL = 'https://kkoayfexdhpazufmyeoj.supabase.co';
+const CENTRO_SUPA_KEY = 'sb_publishable_9UimuwTGp2aIhe-4oSwJpw_ORwmzzhn';
+let _centroLecturas = null; // cache de sesión: todas las filas
+
+async function fetchLecturasCentro(nombre) {
+  try {
+    if (!_centroLecturas) {
+      const r = await fetch(`${CENTRO_SUPA_URL}/rest/v1/reading_state?select=client_name,source,section_key`, {
+        headers: { apikey: CENTRO_SUPA_KEY, Authorization: `Bearer ${CENTRO_SUPA_KEY}` },
+      });
+      _centroLecturas = r.ok ? await r.json() : [];
+    }
+    const buscado = normalizeName(nombre);
+    const filas = (_centroLecturas || []).filter(f => normalizeName(f.client_name) === buscado);
+    return {
+      onboarding: filas.some(f => f.source === 'hub' && f.section_key === 'programa'),
+      faq: filas.some(f => f.source === 'hub' && f.section_key === 'faq'),
+      guia: filas.some(f => f.source === 'ga'),
+    };
+  } catch (e) {
+    return null; // sin conexión al centro: esos pasos quedan pendientes
+  }
+}
+
+let _journeyCtx = { id: null, journey: {} };
+
+function renderJourneyList() {
+  const el = $('#journey-list');
+  if (!el) return;
+  const j = _journeyCtx.journey || {};
+  const hechos = JOURNEY_STEPS.filter(s => j[s.id]).length;
+  const prog = $('#journey-prog');
+  if (prog) {
+    prog.textContent = `${hechos}/${JOURNEY_STEPS.length}`;
+    prog.className = `tag flex-shrink-0 ${hechos === JOURNEY_STEPS.length ? 'tag-green' : ''}`;
+  }
+  el.innerHTML = JOURNEY_STEPS.map((s, i) => {
+    const done = j[s.id];
+    return `
+      <div class="flex items-center gap-2 text-xs py-0.5">
+        <span class="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${done ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}">${done ? '✓' : i + 1}</span>
+        <span class="flex-1 min-w-0 ${done ? 'text-slate-400 line-through' : 'text-slate-700'}" ${s.hint ? `title="${s.hint}"` : ''}>${s.label}${s.auto ? ' <span class="text-[9px] text-sky-500 no-underline" title="' + (s.hint || 'Se llena solo') + '">⚡auto</span>' : ''}</span>
+        ${done
+          ? `<span class="flex-shrink-0 text-slate-300" title="Completado">${fmt.fechaCorta(String(done).slice(0, 10))}</span>
+             <button type="button" class="flex-shrink-0 text-slate-300 hover:text-red-400" title="Desmarcar" onclick="toggleJourney('${s.id}')">✕</button>`
+          : `<button type="button" class="flex-shrink-0 tag" style="background:#f1f5f9;color:#475569" onclick="toggleJourney('${s.id}')">marcar ✓</button>`}
+      </div>`;
+  }).join('');
+}
+
+async function persistJourney() {
+  renderJourneyList();
+  const { error } = await sb.from('clientes').update({ journey: _journeyCtx.journey }).eq('id', _journeyCtx.id);
+  if (error) toast('⚠️ No se pudo guardar el journey. ¿Corriste el SQL de la columna `journey`?');
+  _clientesCache = null;
+}
+
+window.toggleJourney = async (stepId) => {
+  const j = { ..._journeyCtx.journey };
+  if (j[stepId]) delete j[stepId];
+  else j[stepId] = new Date().toISOString();
+  _journeyCtx.journey = j;
+  await persistJourney();
+};
+
+// Llena los pasos automáticos con señales reales. Marca solo hacia ADELANTE
+// (nunca desmarca): una vez logrado, el paso queda como hito histórico.
+async function autollenarJourney(cliente, segs, meds) {
+  const j = { ...(_journeyCtx.journey || {}) };
+  let cambio = false;
+  const marca = (id, fecha) => {
+    if (!j[id]) { j[id] = fecha || new Date().toISOString(); cambio = true; }
+  };
+
+  // Primer hito = fecha más antigua (medición inicial / primer seguimiento)
+  const primera = (arr, k) => arr.slice().sort((a, b) => String(a[k] || '').localeCompare(String(b[k] || '')))[0]?.[k];
+  if (meds && meds.length) marca('peso', primera(meds, 'fecha'));
+  if (segs && segs.length) marca('training', primera(segs, 'fecha'));
+
+  // Lecturas del Centro de Recursos: onboarding, FAQ y guía de alimentación
+  const lec = await fetchLecturasCentro(cliente.nombre);
+  if (lec) {
+    if (lec.onboarding) marca('onboarding');
+    if (lec.faq) marca('faq');
+    if (lec.guia) marca('guia');
+  }
+
+  // Señales de la app del cliente (si está vinculado al Mealtracker)
+  try {
+    if (mtConfigured()) {
+      const mtId = await resolverMealtrackerId(cliente);
+      if (mtId) {
+        const r = await fetchRemindersMT(mtId);
+        if (r.device) {
+          if (r.device.pwa) marca('app_instalada', r.device.pwa);
+          if (r.device.push) marca('push', r.device.push);
+          // Primera vez que usó el tracker = existe sincronización (la cuenta
+          // vinculada ya subió datos alguna vez)
+          if (r.device.upd) marca('registra', r.device.upd);
+        }
+      }
+    }
+  } catch (e) { /* sin conexión MT: los pasos auto quedan pendientes */ }
+
+  if (cambio) {
+    _journeyCtx.journey = j;
+    await persistJourney();
+  }
+}
 
 // --- Modo directo (legado): lectura con anon key. Deja de funcionar si
 // activas RLS en el Mealtracker; migra al modo seguro en Ajustes. ---
@@ -3798,6 +3933,12 @@ routes.clientes = async () => {
               <div class="flex justify-between"><span class="text-slate-500">Adherencia</span><span class="font-medium ${adh === null ? 'text-slate-400' : adh >= 7.5 ? 'text-emerald-600' : adh >= 5 ? 'text-amber-600' : 'text-red-600'}">${adh === null ? '—' : adh.toFixed(1) + '/10'}</span></div>
               <div class="flex justify-between"><span class="text-slate-500">Inicio</span><span class="font-medium">${c.fecha_inicio ? fmt.fechaCorta(c.fecha_inicio) : '—'}</span></div>
               <div class="flex justify-between"><span class="text-slate-500">Canal</span><span class="font-medium capitalize">${c.canal_adquisicion || '—'}</span></div>
+              ${(() => {
+                const j = (c.journey && typeof c.journey === 'object') ? c.journey : {};
+                const n = JOURNEY_STEPS.filter(s => j[s.id]).length;
+                const tot = JOURNEY_STEPS.length;
+                return `<div class="flex justify-between" title="Journey del cliente — abre la ficha para ver el detalle"><span class="text-slate-500">Journey</span><span class="font-medium ${n === tot ? 'text-emerald-600' : n >= tot / 2 ? 'text-amber-600' : 'text-slate-500'}">🚀 ${n}/${tot}</span></div>`;
+              })()}
             </div>
             ${(c.tags && c.tags.length) ? `<div class="mt-3 pt-3 border-t border-slate-100">${c.tags.map(t => `<span class="tag-pill">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
           </div>
@@ -4798,6 +4939,9 @@ window.verCliente = async (id) => {
 
   // El quick view se llena async cuando el modal ya está en el DOM
   setTimeout(() => quickAdherencia3Sem(c, 'quick3-modal', segs), 60);
+  // Journey: pinta lo guardado ya, y los pasos auto se completan async
+  _journeyCtx = { id: c.id, journey: (c.journey && typeof c.journey === 'object') ? { ...c.journey } : {} };
+  setTimeout(() => { renderJourneyList(); autollenarJourney(c, segs, meds); }, 80);
   openModal(modalShell(escapeHtml(c.nombre), `
     <div class="space-y-4">
       <div class="flex gap-2 flex-wrap">
@@ -4828,6 +4972,14 @@ window.verCliente = async (id) => {
       <div class="sec sec-slate">
         <div class="sec-title">⚡ Adherencia rápida · últimas 3 semanas</div>
         <div id="quick3-modal"><div class="text-xs text-slate-400">Cargando…</div></div>
+      </div>
+
+      <!-- Journey del cliente: del onboarding a la rutina. Lo automático se
+           llena solo (mediciones, seguimientos, señales de su app); el resto
+           lo marca el coach. -->
+      <div class="sec sec-violet">
+        <div class="sec-title flex items-center justify-between">🚀 Journey del cliente <span id="journey-prog" class="tag flex-shrink-0">…</span></div>
+        <div id="journey-list" class="space-y-0.5"><div class="text-xs text-slate-400">Cargando…</div></div>
       </div>
 
       <!-- 1. IDENTIDAD -->
