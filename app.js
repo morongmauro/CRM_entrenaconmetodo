@@ -160,19 +160,25 @@ async function setMealtrackerGoals(mealtrackerId, metas) {
 // "cumplido" — ese ✓ vuelve aquí. Cada item:
 //   { id, text, created_at, done_at|null, done_by: 'cliente'|'coach'|null }
 // =====================================================
-let _mtRem = { userId: null, list: [] };
+let _mtRem = { userId: null, list: [], device: null };
 
 async function fetchRemindersMT(mtId) {
   if (mtApiBase()) {
     const res = await mtApiGet(`/api/coach-data?action=reminders&user_id=${encodeURIComponent(mtId)}`);
-    if (res && Array.isArray(res.reminders)) return res.reminders;
+    if (res && Array.isArray(res.reminders)) {
+      return { list: res.reminders, device: { pwa: res.pwa_installed_at || null, push: res.push_enabled_at || null } };
+    }
   }
   const mt = mtClient();
   if (mt) {
-    const { data: row } = await mt.from('user_data').select('rem:data->coach_reminders').eq('user_id', mtId).maybeSingle();
-    if (row && Array.isArray(row.rem)) return row.rem;
+    const { data: row } = await mt.from('user_data')
+      .select('rem:data->coach_reminders,pwa:data->pwa_installed_at,push:data->push_enabled_at')
+      .eq('user_id', mtId).maybeSingle();
+    if (row && Array.isArray(row.rem)) {
+      return { list: row.rem, device: { pwa: row.pwa || null, push: row.push || null } };
+    }
   }
-  return [];
+  return { list: [], device: null };
 }
 
 async function saveRemindersMT(mtId, list) {
@@ -196,6 +202,24 @@ async function saveRemindersMT(mtId, list) {
 }
 
 function renderRemindersMT() {
+  // Badges de dispositivo: ¿tiene la app en homescreen? ¿activó los push?
+  // (las marcas las manda la propia app del cliente al sincronizar)
+  const dev = $('#sg-mt-device');
+  if (dev) {
+    if (!_mtRem.userId || !_mtRem.device) {
+      dev.innerHTML = '';
+    } else {
+      const d = _mtRem.device;
+      dev.innerHTML = [
+        d.pwa
+          ? `<span class="tag tag-green" title="Abrió la app instalada (pantalla de inicio) el ${fmt.fecha(String(d.pwa).slice(0, 10))}">📲 instalada</span>`
+          : `<span class="tag" style="background:#f1f5f9;color:#94a3b8" title="Aún no ha abierto la app desde la pantalla de inicio — quizás no la ha agregado">sin instalar</span>`,
+        d.push
+          ? `<span class="tag tag-green" title="Activó las notificaciones push el ${fmt.fecha(String(d.push).slice(0, 10))}">🔔 push activo</span>`
+          : `<span class="tag" style="background:#fef3c7;color:#b45309" title="No ha aceptado los recordatorios push — pídele tocar Activar en el aviso de su app">🔕 sin push</span>`,
+      ].join(' ');
+    }
+  }
   const el = $('#sg-mt-rem-list');
   if (!el) return;
   if (!_mtRem.userId) {
@@ -220,7 +244,7 @@ function renderRemindersMT() {
 }
 
 async function cargarRemindersMT(cliente) {
-  _mtRem = { userId: null, list: [] };
+  _mtRem = { userId: null, list: [], device: null };
   const el = $('#sg-mt-rem-list');
   if (el) el.innerHTML = '<div class="text-xs text-slate-400">Cargando…</div>';
   if (!mtConfigured()) {
@@ -230,7 +254,9 @@ async function cargarRemindersMT(cliente) {
   const mtId = await resolverMealtrackerId(cliente);
   if (!mtId) { renderRemindersMT(); return; }
   _mtRem.userId = mtId;
-  _mtRem.list = await fetchRemindersMT(mtId);
+  const r = await fetchRemindersMT(mtId);
+  _mtRem.list = r.list;
+  _mtRem.device = r.device;
   renderRemindersMT();
 }
 
@@ -2573,7 +2599,7 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
               </div>
             </div>
             <div class="bg-sky-50 border border-sky-200 rounded-lg p-2">
-              <div class="text-xs font-bold text-sky-800 mb-1" title="El cliente los ve en su app (Herramientas → Mis recordatorios) con anuncio en su chat. Cuando lo marque cumplido, aquí aparece el ✓.">📲 Recordatorios en su app</div>
+              <div class="text-xs font-bold text-sky-800 mb-1 flex items-center gap-1 flex-wrap" title="El cliente los ve en su app (Herramientas → Mis recordatorios) con anuncio en su chat. Cuando lo marque cumplido, aquí aparece el ✓.">📲 Recordatorios en su app <span id="sg-mt-device" class="font-normal"></span></div>
               <div id="sg-mt-rem-list" class="space-y-1 mb-1"></div>
               <div class="flex gap-1">
                 <input id="sg-mt-rem-nuevo" class="text-xs" placeholder="Ej: usar el mealtracker a diario…" onkeydown="if(event.key==='Enter'){event.preventDefault();agregarReminderMT();}">
