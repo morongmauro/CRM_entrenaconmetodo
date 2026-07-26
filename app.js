@@ -210,7 +210,11 @@ function renderRemindersMT() {
     <div class="flex items-center gap-2 text-xs ${r.done_at ? 'opacity-60' : ''}">
       <input type="checkbox" class="rounded flex-shrink-0" ${r.done_at ? 'checked' : ''} onchange="toggleReminderMT('${r.id}')" title="${r.done_at ? 'Desmarcar' : 'Marcar cumplido'}">
       <span class="flex-1 min-w-0 ${r.done_at ? 'line-through text-slate-400' : 'text-slate-700'}">${escapeHtml(r.text)}</span>
-      ${r.done_at ? `<span class="tag tag-green flex-shrink-0" title="${r.done_at.slice(0, 10)}">✓ ${r.done_by === 'cliente' ? 'cliente' : 'tú'}</span>` : ''}
+      ${r.done_at
+        ? `<span class="tag tag-green flex-shrink-0" title="${r.done_at.slice(0, 10)}">✓ ${r.done_by === 'cliente' ? 'cliente' : 'tú'}</span>`
+        : r.seen_at
+          ? `<span class="tag flex-shrink-0" style="background:#e0f2fe;color:#0369a1" title="Lo vio en su app el ${fmt.fecha(r.seen_at.slice(0, 10))}">👁 visto</span>`
+          : `<span class="flex-shrink-0 text-slate-300" title="Aún no ha abierto la app desde que lo dejaste">sin ver</span>`}
       <button type="button" class="text-slate-300 hover:text-red-500 flex-shrink-0 font-bold" onclick="quitarReminderMT('${r.id}')" title="Quitar de su app">✕</button>
     </div>`).join('');
 }
@@ -1674,28 +1678,16 @@ routes.dashboard = async () => {
   const hoy = fmt.hoy();
   const mes = fmt.mesActual();
   const semana = fmt.semanaISO();
-  // El seguimiento se hace sobre la semana vencida (la que acaba de cerrar),
-  // no la semana en curso: la bandeja rastrea a quién le falta ESA semana.
-  const semanaSeg = fmt.semanaPrev(semana);
   const en7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
 
-  const [clientes, pagosMes, segSemana, pendAbiertos, allSegs] = await Promise.all([
+  const [clientes, pagosMes, pendAbiertos, allSegs] = await Promise.all([
     db.clientes.list(),
     db.pagos.listMes(mes),
-    db.seguimientos.listSemana(semanaSeg),
     db.pendientes.listAbiertos(),
     db.seguimientos.listAll(),
   ]);
 
   const activos = clientes.filter(c => c.estado === 'activo');
-  const conSeg = new Set(segSemana.map(s => s.cliente_id));
-  const faltaSeguimiento = activos.filter(c => !conSeg.has(c.id))
-    .map(c => {
-      const segCli = allSegs.filter(s => s.cliente_id === c.id).sort((a, b) => b.fecha.localeCompare(a.fecha));
-      const dias = segCli.length ? fmt.diasDesde(segCli[0].fecha) : fmt.diasDesde(c.fecha_inicio || c.created_at?.slice(0, 10));
-      return { ...c, dias_desde: dias };
-    })
-    .sort((a, b) => (b.dias_desde || 999) - (a.dias_desde || 999));
 
   // Cobrado y pendiente del mes
   const pagadosMes = pagosMes.filter(p => p.pagado);
@@ -1773,28 +1765,6 @@ routes.dashboard = async () => {
         <div class="text-3xl font-bold text-red-600">${enRiesgo.length}</div>
         <div class="text-xs text-slate-500 mt-1">requieren atención</div>
       </div>
-    </div>
-
-    <!-- Bandeja semanal -->
-    <div class="card mb-6">
-      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <h3 class="font-bold text-slate-900 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>Bandeja de la semana <span class="text-xs font-normal text-slate-400">· semana vencida ${fmt.rangoSemana(semanaSeg)}</span></h3>
-        <div class="text-xs text-slate-500"><strong class="text-slate-900">${activos.length - faltaSeguimiento.length}</strong> hechos · <strong class="text-amber-600">${faltaSeguimiento.length}</strong> faltan</div>
-      </div>
-      ${faltaSeguimiento.length === 0
-        ? '<p class="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-xl">✓ ¡Todo al día! No queda nadie sin seguimiento de la semana vencida.</p>'
-        : `<div class="space-y-2">${faltaSeguimiento.slice(0, 8).map(c => `
-            <div class="flex items-center gap-3 p-3 hover:bg-slate-50 rounded-xl cursor-pointer" onclick="abrirNuevoSeguimiento('${c.id}')">
-              ${helpers.avatar(c.nombre, 10)}
-              <div class="flex-1 min-w-0">
-                <div class="font-medium text-sm truncate">${escapeHtml(c.nombre)}</div>
-                <div class="text-xs ${(c.dias_desde || 999) > 14 ? 'text-red-600' : 'text-slate-500'}">${c.dias_desde !== null ? `Último seguimiento hace ${c.dias_desde} días` : 'Sin seguimientos previos'}</div>
-              </div>
-              <button class="btn btn-primary btn-sm">Registrar</button>
-            </div>
-          `).join('')}
-          ${faltaSeguimiento.length > 8 ? `<p class="text-xs text-slate-500 text-center pt-2">+ ${faltaSeguimiento.length - 8} más en Seguimiento</p>` : ''}
-        </div>`}
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -1994,9 +1964,13 @@ window.confirmarPagoRapido = async (clienteId, mes) => {
 // =====================================================
 // VIEW: SEGUIMIENTO
 // =====================================================
+// Caché de datos del seguimiento: al hacer click en un cliente se pinta AL
+// INSTANTE con los datos ya cargados (cero parpadeo de "Cargando…") y la
+// data fresca se trae en silencio por detrás y re-pinta solo si cambió algo.
+let _segDataCache = null;
+
 routes.seguimiento = async () => {
-  view.innerHTML = '<div class="card">Cargando…</div>';
-  const [clientes, allSegs] = await Promise.all([db.clientes.list(), db.seguimientos.listAll()]);
+  const renderSeguimiento = (clientes, allSegs) => {
   if (!_selectedClienteId && clientes.length) _selectedClienteId = clientes.find(c => c.estado === 'activo')?.id || clientes[0].id;
 
   // Calcular última semana por cliente
@@ -2024,11 +1998,30 @@ routes.seguimiento = async () => {
 
   if (_segView === 'focus') renderSegFocus(clientes, allSegs, ultPorCliente);
   else renderSegBoard(clientes, allSegs);
+  };
+
+  if (_segDataCache) {
+    renderSeguimiento(_segDataCache.clientes, _segDataCache.allSegs);
+  } else {
+    view.innerHTML = '<div class="card">Cargando…</div>';
+  }
+  const [clientes, allSegs] = await Promise.all([db.clientes.list(), db.seguimientos.listAll()]);
+  // Re-pintar solo si la data cambió respecto a lo ya pintado (evita el
+  // doble render — y el salto de scroll — cuando no hay nada nuevo). La
+  // firma es el contenido completo: cualquier edición, por chica que sea,
+  // sí re-pinta.
+  const firma = JSON.stringify([clientes, allSegs]);
+  const igual = _segDataCache && _segDataCache.firma === firma;
+  _segDataCache = { clientes, allSegs, firma };
+  if (!igual) renderSeguimiento(clientes, allSegs);
 };
 
 window.switchSegView = (which) => { _segView = which; routes.seguimiento(); };
 
 async function renderSegFocus(clientes, allSegs, ultPorCliente) {
+  // Conservar la posición de scroll del sidebar entre re-renders (al
+  // seleccionar un cliente la lista no debe saltar al inicio).
+  const prevScroll = $('#seg-list')?.scrollTop || 0;
   const cliente = clientes.find(c => c.id === _selectedClienteId);
   const segs = allSegs.filter(s => s.cliente_id === _selectedClienteId).sort((a, b) => b.semana.localeCompare(a.semana));
   const ordenados = clientes.slice().sort(sortByEstado);
@@ -2059,6 +2052,7 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
 
   if (!cliente) {
     $('#seg-content').innerHTML = sidebar + '<div class="col-span-12 lg:col-span-8 card text-slate-500">Selecciona un cliente.</div>';
+    const sl0 = $('#seg-list'); if (sl0 && prevScroll) sl0.scrollTop = prevScroll;
     return;
   }
 
@@ -2095,6 +2089,7 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
       </div>
     </div>
   `;
+  const sl = $('#seg-list'); if (sl && prevScroll) sl.scrollTop = prevScroll;
 }
 
 function clienteSidebarItem(c, ult) {
@@ -2278,18 +2273,28 @@ function seguimientoCard(s, coachPends = []) {
           ${prom !== null ? `<span class="tag ${prom >= 7.5 ? 'tag-green' : prom >= 5 ? 'tag-yellow' : 'tag-red'}" style="font-size:0.8rem; padding: 0.25rem 0.55rem; font-weight: 700">${prom.toFixed(1)}/10</span>` : ''}
         </div>
       </div>
+      ${(() => {
+        // Una sola fuente de verdad por pilar: el SCORE calculado (0-100).
+        // Antes la barra y el "x/10" salían de la adherencia subjetiva (que
+        // ya no se diligencia → "—/10" rojo con barra vacía) mientras el %
+        // verdadero aparecía aparte — se veía contradictorio. Fallback: si
+        // la semana es vieja y solo tiene adherencia, se usa esa ×10.
+        const pilar = (nombre, score, adh) => {
+          const val = score != null ? Math.round(score) : (adh != null ? adh * 10 : null);
+          const cls = val == null ? 'text-slate-300' : val >= 75 ? 'text-emerald-600' : val >= 50 ? 'text-amber-600' : 'text-red-600';
+          const bar = val == null ? 'bg-slate-200' : val >= 75 ? 'bg-emerald-500' : val >= 50 ? 'bg-amber-500' : 'bg-red-500';
+          return `
+          <div>
+            <div class="flex items-center justify-between mb-1"><span class="text-slate-400">${nombre}</span><span class="font-bold ${cls}">${val == null ? 'sin datos' : val + '%'}</span></div>
+            <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full rounded-full ${bar}" style="width:${val || 0}%"></div></div>
+          </div>`;
+        };
+        return `
       <div class="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-slate-100 text-xs">
-        <div>
-          <div class="flex items-center justify-between mb-1"><span class="text-slate-400">Entreno</span><span class="font-bold ${(s.adherencia_entreno || 0) >= 7 ? 'text-emerald-600' : (s.adherencia_entreno || 0) >= 4 ? 'text-amber-600' : 'text-red-600'}">${s.adherencia_entreno ?? '—'}/10</span></div>
-          <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full rounded-full ${(s.adherencia_entreno || 0) >= 7 ? 'bg-emerald-500' : (s.adherencia_entreno || 0) >= 4 ? 'bg-amber-500' : 'bg-red-500'}" style="width:${(s.adherencia_entreno || 0) * 10}%"></div></div>
-          ${s.score_entreno != null ? `<div class="text-right mt-0.5 font-semibold" style="color:#10b981">${Math.round(s.score_entreno)}%</div>` : ''}
-        </div>
-        <div>
-          <div class="flex items-center justify-between mb-1"><span class="text-slate-400">Alimentación</span><span class="font-bold ${(s.adherencia_alimentacion || 0) >= 7 ? 'text-emerald-600' : (s.adherencia_alimentacion || 0) >= 4 ? 'text-amber-600' : 'text-red-600'}">${s.adherencia_alimentacion ?? '—'}/10</span></div>
-          <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full rounded-full ${(s.adherencia_alimentacion || 0) >= 7 ? 'bg-emerald-500' : (s.adherencia_alimentacion || 0) >= 4 ? 'bg-amber-500' : 'bg-red-500'}" style="width:${(s.adherencia_alimentacion || 0) * 10}%"></div></div>
-          ${s.score_alim_metas != null ? `<div class="text-right mt-0.5 font-semibold" style="color:#3b82f6">${Math.round(s.score_alim_metas)}%</div>` : ''}
-        </div>
-      </div>
+        ${pilar('Entreno', s.score_entreno, s.adherencia_entreno)}
+        ${pilar('Alimentación', s.score_alim_metas, s.adherencia_alimentacion)}
+      </div>`;
+      })()}
     </div>
   `;
 }
@@ -2600,6 +2605,7 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
     <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-between gap-2 sticky bottom-0 flex-wrap">
       <div>${s.id ? `<button class="btn btn-danger" onclick="eliminarSeguimiento('${s.id}', '${clienteId}')">Eliminar</button>` : ''}</div>
       <div class="flex gap-2 flex-wrap">
+        <button class="btn btn-secondary" onclick="enviarPushManual('${clienteId}')" title="Escribe un mensaje y le llega al teléfono como notificación push (si tiene los recordatorios activados en su app)">📲 Push al teléfono</button>
         <button class="btn btn-secondary" onclick="copiarMensajeWhatsApp('${clienteId}')" title="Genera y copia un borrador de mensaje para pegar en WhatsApp">💬 Copiar mensaje</button>
         <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
         <button class="btn btn-primary" onclick="guardarSeguimiento('${clienteId}', '${semana}', ${s.id ? `'${s.id}'` : 'null'})">Guardar semana</button>
@@ -3720,9 +3726,11 @@ window.eliminarPendiente = async (id) => {
 // =====================================================
 // VIEW: CLIENTES
 // =====================================================
+// Misma estrategia anti-parpadeo que Seguimiento: con caché se pinta al
+// instante y la data fresca re-pinta solo si algo cambió.
+let _cliDataCache = null;
 routes.clientes = async () => {
-  view.innerHTML = '<div class="card">Cargando…</div>';
-  const [clientes, allSegs] = await Promise.all([db.clientes.list(), db.seguimientos.listAll()]);
+  const renderClientes = (clientes, allSegs) => {
   const activos = clientes.filter(c => c.estado === 'activo');
   const pausa = clientes.filter(c => c.estado === 'pausa');
   const fin = clientes.filter(c => c.estado === 'finalizado');
@@ -3772,6 +3780,18 @@ routes.clientes = async () => {
       ${clientes.length === 0 ? '<div class="col-span-3 card text-center text-slate-500 py-10">Aún no hay clientes. <button class="text-emerald-600 font-semibold" onclick="nuevoCliente()">+ Crear el primero</button></div>' : ''}
     </div>
   `;
+  };
+
+  if (_cliDataCache) {
+    renderClientes(_cliDataCache.clientes, _cliDataCache.allSegs);
+  } else {
+    view.innerHTML = '<div class="card">Cargando…</div>';
+  }
+  const [clientes, allSegs] = await Promise.all([db.clientes.list(), db.seguimientos.listAll()]);
+  const firma = JSON.stringify([clientes, allSegs]);
+  const igual = _cliDataCache && _cliDataCache.firma === firma;
+  _cliDataCache = { clientes, allSegs, firma };
+  if (!igual) renderClientes(clientes, allSegs);
 };
 
 function clienteForm(c = {}) {
