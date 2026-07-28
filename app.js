@@ -5757,3 +5757,148 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
   });
   setInterval(chequear, 5 * 60 * 1000);
 })();
+
+// =====================================================
+// CONSUMO DE IA · Tablero de tokens y costo por cliente
+// Lee la tabla ia_uso (la llena api/chat.js del Mealtracker). Muestra
+// totales del período, tabla por cliente y detalle de mensajes.
+// =====================================================
+let _iaPeriod = 'mes'; // 'dia' | 'semana' | 'mes'
+
+function _iaDesde(period) {
+  const d = new Date();
+  if (period === 'dia') { d.setHours(0, 0, 0, 0); return d.toISOString(); }
+  if (period === 'semana') { d.setDate(d.getDate() - 7); return d.toISOString(); }
+  // mes: primer día del mes en curso
+  const m = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0);
+  return m.toISOString();
+}
+
+const _usd = (n) => `$${(Number(n) || 0).toFixed(Math.abs(Number(n) || 0) < 1 ? 3 : 2)}`;
+const _cop = (n) => `COP ${Math.round((Number(n) || 0) * (Number(_settings.usd_cop_rate) || 4000)).toLocaleString('es-CO')}`;
+const _fmtDateTime = (s) => { try { return new Date(s).toLocaleString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch (e) { return s; } };
+
+routes.ia = async () => {
+  view.innerHTML = '<div class="card">Cargando consumo…</div>';
+  const desde = _iaDesde(_iaPeriod);
+  const { data, error } = await sb.from('ia_uso')
+    .select('cliente_nombre,modelo,accion,input_tokens,output_tokens,cache_read,cache_write,costo_usd,creado_en')
+    .gte('creado_en', desde)
+    .order('creado_en', { ascending: false });
+
+  if (error) {
+    view.innerHTML = `<div class="card text-red-600">No se pudo leer el consumo: ${error.message}.<br><span class="text-slate-500 text-sm">Si la tabla no existe aún, corre el bloque <code>ia_uso</code> del schema.sql en Supabase.</span></div>`;
+    return;
+  }
+
+  const rows = data || [];
+  // Agregado por cliente
+  const porCliente = {};
+  let totCosto = 0, totTokens = 0, totMsgs = 0;
+  for (const r of rows) {
+    const nombre = r.cliente_nombre || '(sin nombre)';
+    const tk = (r.input_tokens || 0) + (r.output_tokens || 0) + (r.cache_read || 0) + (r.cache_write || 0);
+    if (!porCliente[nombre]) porCliente[nombre] = { nombre, msgs: 0, tokens: 0, costo: 0, planes: 0 };
+    porCliente[nombre].msgs++;
+    porCliente[nombre].tokens += tk;
+    porCliente[nombre].costo += Number(r.costo_usd || 0);
+    if (r.accion === 'plan') porCliente[nombre].planes++;
+    totCosto += Number(r.costo_usd || 0); totTokens += tk; totMsgs++;
+  }
+  const lista = Object.values(porCliente).sort((a, b) => b.costo - a.costo);
+  const activos = lista.length;
+  const proyMes = _iaPeriod === 'dia' ? totCosto * 30 : _iaPeriod === 'semana' ? totCosto * 4.3 : totCosto;
+
+  const periodoLabel = { dia: 'Hoy', semana: 'Últimos 7 días', mes: 'Este mes' }[_iaPeriod];
+  const tab = (k, txt) => `<button class="toggle-btn ${_iaPeriod === k ? 'active' : ''}" onclick="switchIaPeriod('${k}')">${txt}</button>`;
+
+  view.innerHTML = `
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+      <div>
+        <h2 class="text-xl font-bold text-slate-900">Consumo de IA</h2>
+        <p class="text-xs text-slate-500 mt-1">Tokens y costo del chat del Mealtracker · ${periodoLabel}</p>
+      </div>
+      <div class="flex gap-1">${tab('dia', 'Hoy')}${tab('semana', 'Semana')}${tab('mes', 'Mes')}</div>
+    </div>
+
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+      <div class="card"><div class="text-xs text-slate-500">Costo ${periodoLabel.toLowerCase()}</div><div class="text-2xl font-bold text-slate-900 mt-1">${_usd(totCosto)}</div><div class="text-xs text-slate-400">${_cop(totCosto)}</div></div>
+      <div class="card"><div class="text-xs text-slate-500">${_iaPeriod === 'mes' ? 'Costo del mes' : 'Proyección a 30 días'}</div><div class="text-2xl font-bold text-slate-900 mt-1">${_usd(proyMes)}</div><div class="text-xs text-slate-400">${_cop(proyMes)}</div></div>
+      <div class="card"><div class="text-xs text-slate-500">Mensajes</div><div class="text-2xl font-bold text-slate-900 mt-1">${totMsgs.toLocaleString('es-CO')}</div><div class="text-xs text-slate-400">${activos} cliente(s) activo(s)</div></div>
+      <div class="card"><div class="text-xs text-slate-500">Tokens</div><div class="text-2xl font-bold text-slate-900 mt-1">${(totTokens / 1000).toFixed(0)}K</div><div class="text-xs text-slate-400">${totTokens.toLocaleString('es-CO')}</div></div>
+    </div>
+
+    <div class="card">
+      ${lista.length === 0 ? '<div class="text-slate-500 text-sm py-6 text-center">Sin actividad en este período. En cuanto los clientes usen el chat, aparecerá aquí.</div>' : `
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-slate-400 border-b border-slate-100">
+            <th class="py-2 pr-3 font-medium">Cliente</th>
+            <th class="py-2 px-3 font-medium text-right">Mensajes</th>
+            <th class="py-2 px-3 font-medium text-right">Planes</th>
+            <th class="py-2 px-3 font-medium text-right">Tokens</th>
+            <th class="py-2 px-3 font-medium text-right">Costo</th>
+            <th class="py-2 pl-3 font-medium text-right">≈ COP</th>
+          </tr></thead>
+          <tbody>
+            ${lista.map(c => `
+              <tr class="border-b border-slate-50 hover:bg-slate-50 cursor-pointer" onclick="verClienteIA(${JSON.stringify(c.nombre).replace(/"/g, '&quot;')})">
+                <td class="py-2 pr-3 font-medium text-slate-800">${c.nombre}</td>
+                <td class="py-2 px-3 text-right text-slate-600">${c.msgs}</td>
+                <td class="py-2 px-3 text-right text-slate-600">${c.planes || '·'}</td>
+                <td class="py-2 px-3 text-right text-slate-600">${(c.tokens / 1000).toFixed(0)}K</td>
+                <td class="py-2 px-3 text-right font-semibold text-slate-900">${_usd(c.costo)}</td>
+                <td class="py-2 pl-3 text-right text-slate-400">${_cop(c.costo)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <p class="text-xs text-slate-400 mt-3">Toca un cliente para ver sus mensajes y en qué se fue el gasto.</p>`}
+    </div>`;
+};
+
+window.switchIaPeriod = (k) => { _iaPeriod = k; routes.ia(); };
+
+window.verClienteIA = async (nombre) => {
+  openModal('<div class="card">Cargando…</div>', { wide: true });
+  const desde = _iaDesde(_iaPeriod);
+  const { data, error } = await sb.from('ia_uso')
+    .select('creado_en,accion,modelo,input_tokens,output_tokens,cache_read,cache_write,costo_usd,mensaje')
+    .eq('cliente_nombre', nombre)
+    .gte('creado_en', desde)
+    .order('creado_en', { ascending: false })
+    .limit(200);
+  if (error) { modalContent.innerHTML = `<div class="card text-red-600">${error.message}</div>`; return; }
+  const rows = data || [];
+  const totCosto = rows.reduce((s, r) => s + Number(r.costo_usd || 0), 0);
+  openModal(`
+    <div class="flex items-center justify-between mb-3">
+      <div><h3 class="font-bold text-slate-900">${nombre}</h3><p class="text-xs text-slate-500">${rows.length} mensaje(s) · ${_usd(totCosto)} · ${_cop(totCosto)}</p></div>
+      <button class="btn btn-secondary btn-sm" onclick="closeModal()">Cerrar</button>
+    </div>
+    <div class="overflow-y-auto" style="max-height:60vh">
+      ${rows.length === 0 ? '<div class="text-slate-500 text-sm py-4">Sin mensajes en este período.</div>' : rows.map(r => `
+        <div class="py-2 border-b border-slate-50">
+          <div class="flex items-center justify-between text-xs text-slate-400 mb-0.5">
+            <span>${_fmtDateTime(r.creado_en)} · ${r.accion === 'plan' ? '🍽 plan' : '💬 registro'}</span>
+            <span class="font-semibold text-slate-600">${_usd(r.costo_usd)} · ${((r.input_tokens||0)+(r.output_tokens||0)+(r.cache_read||0)+(r.cache_write||0)).toLocaleString('es-CO')} tk</span>
+          </div>
+          <div class="text-sm text-slate-700">${(r.mensaje || '(sin texto)').replace(/</g, '&lt;')}</div>
+        </div>`).join('')}
+    </div>`, { wide: true });
+};
+
+// Inyecta el botón "IA" en la barra de navegación clonando uno existente,
+// así no hace falta editar el HTML del shell (que vive fuera de app.js).
+(function addIaNav() {
+  try {
+    const anchor = document.querySelector('.nav-item');
+    if (!anchor || document.querySelector('.nav-item[data-view="ia"]')) return;
+    const btn = anchor.cloneNode(true);
+    btn.dataset.view = 'ia';
+    btn.classList.remove('active');
+    btn.textContent = '🤖 IA';
+    anchor.parentNode.appendChild(btn);
+    btn.addEventListener('click', () => navigate('ia'));
+  } catch (e) { /* si el shell cambia, no rompe nada */ }
+})();

@@ -168,3 +168,33 @@ alter table clientes add column if not exists meta_enviada_mt jsonb;
 -- Nota: el acceso de clientes al Mealtracker / Centro de Recursos lo
 -- resuelve el Mealtracker (api/authorize.js) leyendo la tabla clientes
 -- directo con la service_role key. No requiere tabla extra en el CRM.
+
+-- ================================================================
+-- CONSUMO DE IA · Registro por llamada al chat del Mealtracker.
+-- Lo escribe el proxy api/chat.js del Mealtracker con la service_role
+-- key del CRM (fire-and-forget: si falla, nunca rompe el chat). Sirve
+-- para el tablero de consumo: tokens y costo por cliente, por día /
+-- semana / mes, y qué mensajes generaron ese gasto.
+-- Segura de repetir.
+-- ================================================================
+create table if not exists ia_uso (
+  id            bigint generated always as identity primary key,
+  creado_en     timestamptz default now(),
+  cliente_nombre text,                 -- nombre con el que el cliente entra a la app
+  modelo        text,                  -- claude-sonnet-5 | claude-haiku-4-5-...
+  accion        text default 'chat',   -- 'chat' (registro) | 'plan' (generación)
+  input_tokens  int  default 0,
+  output_tokens int  default 0,
+  cache_read    int  default 0,        -- tokens servidos de caché (~10% costo)
+  cache_write   int  default 0,        -- tokens escritos a caché (~125% costo)
+  costo_usd     numeric(10,6) default 0,
+  mensaje       text                   -- últimos ~500 chars del mensaje del cliente
+);
+create index if not exists idx_ia_uso_fecha   on ia_uso (creado_en);
+create index if not exists idx_ia_uso_cliente on ia_uso (cliente_nombre);
+
+alter table ia_uso enable row level security;
+-- El coach (autenticado en el CRM) puede leer todo; la escritura llega por
+-- service_role (bypassa RLS), así que no hace falta política de insert.
+drop policy if exists "coach lee ia_uso" on ia_uso;
+create policy "coach lee ia_uso" on ia_uso for select using (auth.role() = 'authenticated');
