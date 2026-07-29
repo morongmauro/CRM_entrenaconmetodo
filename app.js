@@ -5796,17 +5796,24 @@ routes.ia = async () => {
   const rows = data || [];
   // Agregado por cliente
   const porCliente = {};
-  let totCosto = 0, totTokens = 0, totMsgs = 0;
+  let totCosto = 0, totTokens = 0, totMsgs = 0, totCacheRead = 0, totInputAll = 0;
   for (const r of rows) {
     const nombre = r.cliente_nombre || '(sin nombre)';
     const tk = (r.input_tokens || 0) + (r.output_tokens || 0) + (r.cache_read || 0) + (r.cache_write || 0);
-    if (!porCliente[nombre]) porCliente[nombre] = { nombre, msgs: 0, tokens: 0, costo: 0, planes: 0 };
+    // Entrada total y qué parte vino del caché (al ~10% del precio): el
+    // termómetro del ahorro del prompt compartido.
+    const inputAll = (r.input_tokens || 0) + (r.cache_read || 0) + (r.cache_write || 0);
+    if (!porCliente[nombre]) porCliente[nombre] = { nombre, msgs: 0, tokens: 0, costo: 0, planes: 0, cacheRead: 0, inputAll: 0 };
     porCliente[nombre].msgs++;
     porCliente[nombre].tokens += tk;
     porCliente[nombre].costo += Number(r.costo_usd || 0);
+    porCliente[nombre].cacheRead += (r.cache_read || 0);
+    porCliente[nombre].inputAll += inputAll;
     if (r.accion === 'plan') porCliente[nombre].planes++;
     totCosto += Number(r.costo_usd || 0); totTokens += tk; totMsgs++;
+    totCacheRead += (r.cache_read || 0); totInputAll += inputAll;
   }
+  const pctCache = (cr, ia) => ia > 0 ? Math.round(cr / ia * 100) : 0;
   const lista = Object.values(porCliente).sort((a, b) => b.costo - a.costo);
   const activos = lista.length;
   const proyMes = _iaPeriod === 'dia' ? totCosto * 30 : _iaPeriod === 'semana' ? totCosto * 4.3 : totCosto;
@@ -5827,7 +5834,7 @@ routes.ia = async () => {
       <div class="card"><div class="text-xs text-slate-500">Costo ${periodoLabel.toLowerCase()}</div><div class="text-2xl font-bold text-slate-900 mt-1">${_usd(totCosto)}</div><div class="text-xs text-slate-400">${_cop(totCosto)}</div></div>
       <div class="card"><div class="text-xs text-slate-500">${_iaPeriod === 'mes' ? 'Costo del mes' : 'Proyección a 30 días'}</div><div class="text-2xl font-bold text-slate-900 mt-1">${_usd(proyMes)}</div><div class="text-xs text-slate-400">${_cop(proyMes)}</div></div>
       <div class="card"><div class="text-xs text-slate-500">Mensajes</div><div class="text-2xl font-bold text-slate-900 mt-1">${totMsgs.toLocaleString('es-CO')}</div><div class="text-xs text-slate-400">${activos} cliente(s) activo(s)</div></div>
-      <div class="card"><div class="text-xs text-slate-500">Tokens</div><div class="text-2xl font-bold text-slate-900 mt-1">${(totTokens / 1000).toFixed(0)}K</div><div class="text-xs text-slate-400">${totTokens.toLocaleString('es-CO')}</div></div>
+      <div class="card"><div class="text-xs text-slate-500">Tokens</div><div class="text-2xl font-bold text-slate-900 mt-1">${(totTokens / 1000).toFixed(0)}K</div><div class="text-xs ${pctCache(totCacheRead, totInputAll) >= 40 ? 'text-emerald-600' : 'text-slate-400'}" title="Porcentaje de la entrada servido desde el caché (cuesta ~10% del precio normal). Más alto = más ahorro.">${pctCache(totCacheRead, totInputAll)}% servido de caché</div></div>
     </div>
 
     <div class="card">
@@ -5839,6 +5846,7 @@ routes.ia = async () => {
             <th class="py-2 px-3 font-medium text-right">Mensajes</th>
             <th class="py-2 px-3 font-medium text-right">Planes</th>
             <th class="py-2 px-3 font-medium text-right">Tokens</th>
+            <th class="py-2 px-3 font-medium text-right" title="Parte de la entrada servida desde caché (~10% del precio). Más alto = más barato.">% caché</th>
             <th class="py-2 px-3 font-medium text-right">Costo</th>
             <th class="py-2 pl-3 font-medium text-right">≈ COP</th>
           </tr></thead>
@@ -5849,6 +5857,7 @@ routes.ia = async () => {
                 <td class="py-2 px-3 text-right text-slate-600">${c.msgs}</td>
                 <td class="py-2 px-3 text-right text-slate-600">${c.planes || '·'}</td>
                 <td class="py-2 px-3 text-right text-slate-600">${(c.tokens / 1000).toFixed(0)}K</td>
+                <td class="py-2 px-3 text-right ${pctCache(c.cacheRead, c.inputAll) >= 40 ? 'text-emerald-600 font-semibold' : 'text-slate-500'}">${pctCache(c.cacheRead, c.inputAll)}%</td>
                 <td class="py-2 px-3 text-right font-semibold text-slate-900">${_usd(c.costo)}</td>
                 <td class="py-2 pl-3 text-right text-slate-400">${_cop(c.costo)}</td>
               </tr>`).join('')}
