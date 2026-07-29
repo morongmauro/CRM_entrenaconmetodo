@@ -5870,29 +5870,50 @@ window.enviarRecordatoriosPago = async () => {
   if (deudores.length === 0) { openModal('<div class="text-center py-4"><p class="text-slate-700">🎉 Nadie está en deuda hoy — no hay a quién recordarle.</p><button class="btn btn-secondary btn-sm mt-4" onclick="closeModal()">Cerrar</button></div>'); return; }
   const conPush = deudores.filter(d => d.tiene_push);
   const sinPush = deudores.filter(d => !d.tiene_push);
-  const fila = (d) => `<div class="flex items-center justify-between py-1.5 border-b border-slate-50 text-sm">
-      <span class="text-slate-800">${d.nombre}</span>
-      <span class="text-xs ${d.tiene_push ? 'text-emerald-600' : 'text-slate-400'}">${d.tiene_push ? `✓ ${d.dias_vencido}d vencido` : 'sin push · no le llega'}</span>
+  const esc = (t) => String(t).replace(/"/g, '&quot;');
+  // Los que tienen push: fila CON checkbox (marcado por defecto) para elegir
+  // a quién sí y a quién no.
+  const filaChk = (d) => `<label class="flex items-center justify-between py-2 border-b border-slate-50 text-sm cursor-pointer">
+      <span class="flex items-center gap-2 min-w-0">
+        <input type="checkbox" class="pago-chk" data-nombre="${esc(d.nombre)}" checked onchange="actualizarConteoPago()" style="width:16px;height:16px;flex-shrink:0">
+        <span class="text-slate-800 truncate">${d.nombre}</span>
+      </span>
+      <span class="text-xs text-emerald-600 flex-shrink-0">${d.dias_vencido}d vencido</span>
+    </label>`;
+  const filaInfo = (d) => `<div class="flex items-center justify-between py-1.5 border-b border-slate-50 text-sm">
+      <span class="text-slate-500">${d.nombre}</span>
+      <span class="text-xs text-slate-400">sin push · no le llega</span>
     </div>`;
   openModal(`
     <div class="flex items-center justify-between mb-3">
       <h3 class="font-bold text-slate-900">Enviar recordatorio de pago</h3>
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">✕</button>
     </div>
-    <p class="text-sm text-slate-600 mb-3">Le va a llegar el push a <strong>${conPush.length}</strong> cliente(s) en deuda con la app activa:</p>
+    <p class="text-sm text-slate-600 mb-1">Marca a quién enviarle (destildá a quien NO quieras molestar hoy):</p>
     <div class="overflow-y-auto mb-3" style="max-height:45vh">
-      ${conPush.map(fila).join('') || '<p class="text-slate-500 text-sm">Ninguno de los deudores tiene el push activo.</p>'}
-      ${sinPush.length ? `<p class="text-xs text-slate-400 mt-3 mb-1">${sinPush.length} deudor(es) SIN push activo (no les llega):</p>${sinPush.map(fila).join('')}` : ''}
+      ${conPush.map(filaChk).join('') || '<p class="text-slate-500 text-sm py-2">Ninguno de los deudores tiene el push activo.</p>'}
+      ${sinPush.length ? `<p class="text-xs text-slate-400 mt-3 mb-1">${sinPush.length} deudor(es) SIN push activo (no les llega — que lo activen en su app):</p>${sinPush.map(filaInfo).join('')}` : ''}
     </div>
-    <div class="flex gap-2 justify-end">
+    <div class="flex gap-2 justify-end items-center">
       <button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-primary btn-sm" ${conPush.length ? '' : 'disabled'} onclick="confirmarEnvioPago()">Sí, enviar a ${conPush.length}</button>
+      <button id="btn-enviar-pago" class="btn btn-primary btn-sm" ${conPush.length ? '' : 'disabled'} onclick="confirmarEnvioPago()">Enviar a <span id="cnt-pago">${conPush.length}</span></button>
     </div>`, { wide: true });
 };
 
+// Actualiza el número del botón según los checkboxes marcados.
+window.actualizarConteoPago = () => {
+  const n = document.querySelectorAll('.pago-chk:checked').length;
+  const cnt = document.getElementById('cnt-pago');
+  const btn = document.getElementById('btn-enviar-pago');
+  if (cnt) cnt.textContent = n;
+  if (btn) btn.disabled = n === 0;
+};
+
 window.confirmarEnvioPago = async () => {
+  const names = Array.from(document.querySelectorAll('.pago-chk:checked')).map(el => el.dataset.nombre);
+  if (names.length === 0) { toast('No marcaste a nadie.'); return; }
   toast('Enviando…');
-  const res = await mtApiPost('/api/push-send', { mode: 'send_payment_all' });
+  const res = await mtApiPost('/api/push-send', { mode: 'send_payment_all', names });
   if (!res) { toast('No hubo respuesta del servidor.'); return; }
   openModal(`
     <div class="text-center py-3">
