@@ -5818,7 +5818,10 @@ routes.ia = async () => {
         <h2 class="text-xl font-bold text-slate-900">Consumo de IA</h2>
         <p class="text-xs text-slate-500 mt-1">Tokens y costo del chat del Mealtracker · ${periodoLabel}</p>
       </div>
-      <div class="flex gap-1">${tab('dia', 'Hoy')}${tab('semana', 'Semana')}${tab('mes', 'Mes')}</div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <button class="text-xs px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600" onclick="probarPushPago()" title="Dispara el recordatorio de pago a un cliente AHORA (misma lógica que el automático de las 7:30pm) y te dice si es deudor, si tiene push activo y si se envió.">🔔 Probar push de pago</button>
+        <div class="flex gap-1">${tab('dia', 'Hoy')}${tab('semana', 'Semana')}${tab('mes', 'Mes')}</div>
+      </div>
     </div>
 
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
@@ -5858,6 +5861,28 @@ routes.ia = async () => {
 };
 
 window.switchIaPeriod = (k) => { _iaPeriod = k; routes.ia(); };
+
+// Prueba a demanda del push de pago: corre la MISMA lógica del recordatorio
+// automático de las 7:30pm para un cliente y reporta cada etapa.
+window.probarPushPago = async () => {
+  const nombre = prompt('¿A qué cliente le pruebo el recordatorio de pago?\n\nEscribe su nombre tal cual está en el CRM (ej: Mauro Moron). Debe tener el push activado en su app y estar en deuda.');
+  if (!nombre || !nombre.trim()) return;
+  toast('Probando…');
+  const res = await mtApiPost('/api/push-send', { mode: 'test_payment', name: nombre.trim() });
+  if (!res) { toast('No hubo respuesta del servidor (revisa la conexión con el Mealtracker en Ajustes).'); return; }
+  // Muestra el diagnóstico completo en un modal para que se lea bien.
+  openModal(`
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="font-bold text-slate-900">Prueba de push de pago</h3>
+      <button class="btn btn-secondary btn-sm" onclick="closeModal()">Cerrar</button>
+    </div>
+    <div class="space-y-2 text-sm">
+      <div class="flex items-center gap-2">${res.es_deudor ? '✅' : '❌'} <span>¿Figura en deuda hoy? <strong>${res.es_deudor ? 'Sí' : 'No'}</strong></span></div>
+      <div class="flex items-center gap-2">${res.tiene_push_activo ? '✅' : '❌'} <span>¿Tiene el push activado en su app? <strong>${res.tiene_push_activo ? 'Sí' : 'No'}</strong></span></div>
+      <div class="flex items-center gap-2">${res.enviados > 0 ? '✅' : '❌'} <span>¿Se envió la notificación? <strong>${res.enviados > 0 ? 'Sí (' + res.enviados + ')' : 'No'}</strong></span></div>
+      <div class="mt-3 p-3 rounded-xl ${res.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'} text-xs">${res.causa || ''}</div>
+    </div>`);
+};
 
 window.verClienteIA = async (nombre) => {
   openModal('<div class="card">Cargando…</div>', { wide: true });
