@@ -3261,6 +3261,8 @@ routes.pagos = async () => {
           <button class="toggle-btn ${_pagosView === 'cards' ? 'active' : ''}" onclick="switchPagView('cards')">Cards del mes</button>
         </div>
         <button class="btn btn-secondary btn-sm" onclick="generarMesActual()" title="Crea pagos pendientes del mes actual basado en el último monto de cada cliente">📅 Generar mes</button>
+        <button class="btn btn-secondary btn-sm" onclick="enviarRecordatoriosPago()" title="Envía un push de recordatorio de pago a TODOS los clientes en deuda (con push activo). Te muestra la lista antes de enviar.">🔔 Recordatorio de pago</button>
+        <button class="btn btn-ghost btn-sm" onclick="verHistorialPago()" title="Ver a quiénes y qué día se enviaron recordatorios de pago">🗒️ Historial</button>
         <div class="flex items-center gap-1">
           <button class="btn btn-ghost" onclick="cambiarAnio(-1)">‹</button>
           <span class="font-semibold px-2">${_pagosYear}</span>
@@ -5818,10 +5820,7 @@ routes.ia = async () => {
         <h2 class="text-xl font-bold text-slate-900">Consumo de IA</h2>
         <p class="text-xs text-slate-500 mt-1">Tokens y costo del chat del Mealtracker · ${periodoLabel}</p>
       </div>
-      <div class="flex items-center gap-2 flex-wrap">
-        <button class="text-xs px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600" onclick="probarPushPago()" title="Dispara el recordatorio de pago a un cliente AHORA (misma lógica que el automático de las 7:30pm) y te dice si es deudor, si tiene push activo y si se envió.">🔔 Probar push de pago</button>
-        <div class="flex gap-1">${tab('dia', 'Hoy')}${tab('semana', 'Semana')}${tab('mes', 'Mes')}</div>
-      </div>
+      <div class="flex gap-1">${tab('dia', 'Hoy')}${tab('semana', 'Semana')}${tab('mes', 'Mes')}</div>
     </div>
 
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
@@ -5862,26 +5861,79 @@ routes.ia = async () => {
 
 window.switchIaPeriod = (k) => { _iaPeriod = k; routes.ia(); };
 
-// Prueba a demanda del push de pago: corre la MISMA lógica del recordatorio
-// automático de las 7:30pm para un cliente y reporta cada etapa.
-window.probarPushPago = async () => {
-  const nombre = prompt('¿A qué cliente le pruebo el recordatorio de pago?\n\nEscribe su nombre tal cual está en el CRM (ej: Mauro Moron). Debe tener el push activado en su app y estar en deuda.');
-  if (!nombre || !nombre.trim()) return;
-  toast('Probando…');
-  const res = await mtApiPost('/api/push-send', { mode: 'test_payment', name: nombre.trim() });
-  if (!res) { toast('No hubo respuesta del servidor (revisa la conexión con el Mealtracker en Ajustes).'); return; }
-  // Muestra el diagnóstico completo en un modal para que se lea bien.
+// ── Recordatorio de pago manual: lista los deudores, confirma y envía ──
+window.enviarRecordatoriosPago = async () => {
+  toast('Buscando deudores…');
+  const lista = await mtApiPost('/api/push-send', { mode: 'list_debtors' });
+  if (!lista || !lista.ok) { toast('No se pudo consultar (revisa la conexión con el Mealtracker en Ajustes).'); return; }
+  const deudores = lista.deudores || [];
+  if (deudores.length === 0) { openModal('<div class="text-center py-4"><p class="text-slate-700">🎉 Nadie está en deuda hoy — no hay a quién recordarle.</p><button class="btn btn-secondary btn-sm mt-4" onclick="closeModal()">Cerrar</button></div>'); return; }
+  const conPush = deudores.filter(d => d.tiene_push);
+  const sinPush = deudores.filter(d => !d.tiene_push);
+  const fila = (d) => `<div class="flex items-center justify-between py-1.5 border-b border-slate-50 text-sm">
+      <span class="text-slate-800">${d.nombre}</span>
+      <span class="text-xs ${d.tiene_push ? 'text-emerald-600' : 'text-slate-400'}">${d.tiene_push ? `✓ ${d.dias_vencido}d vencido` : 'sin push · no le llega'}</span>
+    </div>`;
   openModal(`
     <div class="flex items-center justify-between mb-3">
-      <h3 class="font-bold text-slate-900">Prueba de push de pago</h3>
+      <h3 class="font-bold text-slate-900">Enviar recordatorio de pago</h3>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">✕</button>
+    </div>
+    <p class="text-sm text-slate-600 mb-3">Le va a llegar el push a <strong>${conPush.length}</strong> cliente(s) en deuda con la app activa:</p>
+    <div class="overflow-y-auto mb-3" style="max-height:45vh">
+      ${conPush.map(fila).join('') || '<p class="text-slate-500 text-sm">Ninguno de los deudores tiene el push activo.</p>'}
+      ${sinPush.length ? `<p class="text-xs text-slate-400 mt-3 mb-1">${sinPush.length} deudor(es) SIN push activo (no les llega):</p>${sinPush.map(fila).join('')}` : ''}
+    </div>
+    <div class="flex gap-2 justify-end">
+      <button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary btn-sm" ${conPush.length ? '' : 'disabled'} onclick="confirmarEnvioPago()">Sí, enviar a ${conPush.length}</button>
+    </div>`, { wide: true });
+};
+
+window.confirmarEnvioPago = async () => {
+  toast('Enviando…');
+  const res = await mtApiPost('/api/push-send', { mode: 'send_payment_all' });
+  if (!res) { toast('No hubo respuesta del servidor.'); return; }
+  openModal(`
+    <div class="text-center py-3">
+      <div class="text-3xl mb-2">${res.enviados > 0 ? '✅' : '⚠️'}</div>
+      <p class="text-slate-800 font-semibold mb-1">${res.enviados > 0 ? `Enviado a ${res.enviados} cliente(s)` : 'No se envió a nadie'}</p>
+      ${res.destinatarios && res.destinatarios.length ? `<p class="text-xs text-slate-500 mb-4">${res.destinatarios.join(', ')}</p>` : ''}
+      ${res.causa ? `<p class="text-xs text-amber-700 mb-4">${res.causa}</p>` : ''}
+      <button class="btn btn-secondary btn-sm" onclick="closeModal()">Listo</button>
+    </div>`);
+};
+
+window.verHistorialPago = async () => {
+  openModal('<div class="card">Cargando…</div>', { wide: true });
+  const { data, error } = await sb.from('push_pago_log')
+    .select('creado_en,enviados,destinatarios')
+    .order('creado_en', { ascending: false })
+    .limit(90);
+  if (error) { modalContent.innerHTML = `<div class="text-red-600 text-sm">No se pudo leer el historial: ${error.message}.<br>Si la tabla no existe aún, corre el bloque <code>push_pago_log</code> del schema.sql.</div>`; return; }
+  const rows = data || [];
+  openModal(`
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="font-bold text-slate-900">Historial de recordatorios de pago</h3>
       <button class="btn btn-secondary btn-sm" onclick="closeModal()">Cerrar</button>
     </div>
-    <div class="space-y-2 text-sm">
-      <div class="flex items-center gap-2">${res.es_deudor ? '✅' : '❌'} <span>¿Figura en deuda hoy? <strong>${res.es_deudor ? 'Sí' : 'No'}</strong></span></div>
-      <div class="flex items-center gap-2">${res.tiene_push_activo ? '✅' : '❌'} <span>¿Tiene el push activado en su app? <strong>${res.tiene_push_activo ? 'Sí' : 'No'}</strong></span></div>
-      <div class="flex items-center gap-2">${res.enviados > 0 ? '✅' : '❌'} <span>¿Se envió la notificación? <strong>${res.enviados > 0 ? 'Sí (' + res.enviados + ')' : 'No'}</strong></span></div>
-      <div class="mt-3 p-3 rounded-xl ${res.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'} text-xs">${res.causa || ''}</div>
-    </div>`);
+    ${rows.length === 0 ? '<p class="text-slate-500 text-sm py-4">Todavía no has enviado ningún recordatorio de pago.</p>' : `
+    <div class="overflow-y-auto" style="max-height:60vh">
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-slate-400 border-b border-slate-100">
+          <th class="py-2 pr-3 font-medium">Fecha</th>
+          <th class="py-2 px-3 font-medium text-right">Enviados</th>
+          <th class="py-2 pl-3 font-medium">A quiénes</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(r => `<tr class="border-b border-slate-50 align-top">
+            <td class="py-2 pr-3 text-slate-600 whitespace-nowrap">${_fmtDateTime(r.creado_en)}</td>
+            <td class="py-2 px-3 text-right font-semibold text-slate-900">${r.enviados || 0}</td>
+            <td class="py-2 pl-3 text-slate-600">${Array.isArray(r.destinatarios) ? r.destinatarios.join(', ') : '—'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`}`, { wide: true });
 };
 
 window.verClienteIA = async (nombre) => {

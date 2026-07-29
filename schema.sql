@@ -198,3 +198,21 @@ alter table ia_uso enable row level security;
 -- service_role (bypassa RLS), así que no hace falta política de insert.
 drop policy if exists "coach lee ia_uso" on ia_uso;
 create policy "coach lee ia_uso" on ia_uso for select using (auth.role() = 'authenticated');
+
+-- ================================================================
+-- HISTORIAL de recordatorios de PAGO enviados (push masivo desde
+-- el CRM → Pagos → "Enviar recordatorios de pago"). Lo escribe
+-- push-cron.js con service_role. Cada fila = un envío: fecha,
+-- cuántos y a quiénes. Segura de repetir.
+-- ================================================================
+create table if not exists push_pago_log (
+  id            bigint generated always as identity primary key,
+  creado_en     timestamptz default now(),
+  enviados      int default 0,
+  destinatarios jsonb           -- array de nombres a los que llegó
+);
+create index if not exists idx_push_pago_log_fecha on push_pago_log (creado_en);
+
+alter table push_pago_log enable row level security;
+drop policy if exists "coach lee push_pago_log" on push_pago_log;
+create policy "coach lee push_pago_log" on push_pago_log for select using (auth.role() = 'authenticated');
