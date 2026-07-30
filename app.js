@@ -3892,6 +3892,83 @@ window.eliminarPendiente = async (id) => {
 // Misma estrategia anti-parpadeo que Seguimiento: con caché se pinta al
 // instante y la data fresca re-pinta solo si algo cambió.
 let _cliDataCache = null;
+// =====================================================
+// 📲 APP EN PANTALLA DE INICIO — listado global (vista Clientes)
+// La app del cliente marca data.pwa_installed_at la primera vez que se abre
+// instalada (Agregar a inicio); aquí se cruza esa señal con los clientes del
+// CRM para ver de un vistazo quién ya la tiene y a quién recordárselo.
+// =====================================================
+let _pwaInstallCache = null; // { rows, at } — caché corto para no re-pedir en cada re-render
+
+async function fetchInstalacionesMT() {
+  if (_pwaInstallCache && Date.now() - _pwaInstallCache.at < 60000) return _pwaInstallCache.rows;
+  let filas = null;
+  // Modo seguro (API de coach): action=list ya incluye pwa_installed_at/push_enabled_at
+  if (mtApiBase()) {
+    const res = await mtApiGet('/api/coach-data?action=list');
+    if (res && Array.isArray(res.clients)) {
+      filas = res.clients.map(c => ({ name: c.name, pwa: c.pwa_installed_at || null, push: c.push_enabled_at || null }));
+    }
+  }
+  // Modo directo (anon key)
+  if (!filas) {
+    const mt = mtClient();
+    if (mt) {
+      const { data } = await mt.from('user_data').select('name,pwa:data->pwa_installed_at,push:data->push_enabled_at');
+      if (Array.isArray(data)) filas = data.map(r => ({ name: r.name, pwa: r.pwa || null, push: r.push || null }));
+    }
+  }
+  if (!filas) return null;
+  // Un cliente puede tener varias sesiones/dispositivos con el mismo nombre:
+  // basta con que UNA haya marcado la instalación. Se conserva la fecha más antigua.
+  const porNombre = new Map();
+  for (const f of filas) {
+    const n = normalizeName(f.name || '');
+    if (!n) continue;
+    const prev = porNombre.get(n);
+    if (!prev) { porNombre.set(n, { pwa: f.pwa, push: f.push }); continue; }
+    if (f.pwa && (!prev.pwa || String(f.pwa) < String(prev.pwa))) prev.pwa = f.pwa;
+    if (f.push && (!prev.push || String(f.push) < String(prev.push))) prev.push = f.push;
+  }
+  _pwaInstallCache = { rows: porNombre, at: Date.now() };
+  return porNombre;
+}
+
+async function cargarPanelInstalaciones(clientes) {
+  const el = $('#cli-pwa-panel');
+  if (!el) return;
+  if (!mtConfigured()) {
+    el.innerHTML = '<div class="text-xs text-amber-600">Configura la conexión al Mealtracker en Ajustes para ver quién tiene la app instalada.</div>';
+    return;
+  }
+  const mapa = await fetchInstalacionesMT();
+  const el2 = $('#cli-pwa-panel'); // la vista pudo re-renderizarse mientras cargaba
+  if (!el2) return;
+  if (!mapa) {
+    el2.innerHTML = '<div class="text-xs text-amber-600">No se pudo consultar el Mealtracker (revisa la conexión en Ajustes).</div>';
+    return;
+  }
+  const conApp = [], sinApp = [];
+  for (const c of clientes) {
+    const d = mapa.get(normalizeName(c.nombre || ''));
+    if (d && d.pwa) conApp.push({ c, pwa: d.pwa, push: d.push });
+    else sinApp.push(c);
+  }
+  conApp.sort((a, b) => String(b.pwa).localeCompare(String(a.pwa)));
+  el2.innerHTML = `
+    <div class="text-xs text-slate-500 mb-2">${conApp.length} de ${clientes.length} clientes ya abrieron la app desde su pantalla de inicio.</div>
+    ${conApp.length ? `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+      ${conApp.map(({ c, pwa, push }) => `
+        <div class="flex items-center gap-2 text-xs bg-emerald-50/60 border border-emerald-100 rounded-lg px-2 py-1.5 cursor-pointer" onclick="verCliente('${c.id}')" title="Abrió la app instalada por primera vez el ${fmt.fecha(String(pwa).slice(0, 10))}">
+          <span class="flex-1 min-w-0 font-medium text-slate-700 truncate">📲 ${escapeHtml(c.nombre)}${c.estado !== 'activo' ? ` <span class="text-slate-400 font-normal">(${c.estado})</span>` : ''}</span>
+          <span class="text-slate-400 flex-shrink-0">${fmt.fechaCorta(String(pwa).slice(0, 10))}</span>
+          ${push ? '<span class="flex-shrink-0" title="También tiene los recordatorios push activados">🔔</span>' : '<span class="flex-shrink-0 opacity-40" title="Aún sin activar los recordatorios push">🔕</span>'}
+        </div>`).join('')}
+    </div>` : '<div class="text-xs text-slate-400">Ningún cliente ha abierto la app desde la pantalla de inicio todavía.</div>'}
+    ${sinApp.length ? `<div class="text-xs text-slate-400 mt-2"><span class="font-semibold text-slate-500">Sin instalar aún:</span> ${sinApp.map(c => escapeHtml(c.nombre)).join(' · ')}</div>` : ''}
+  `;
+}
+
 routes.clientes = async () => {
   const renderClientes = (clientes, allSegs) => {
   const activos = clientes.filter(c => c.estado === 'activo');
@@ -3914,6 +3991,11 @@ routes.clientes = async () => {
         <button class="btn btn-secondary" onclick="revisarEntrevistas()" title="Lee las entrevistas iniciales y propone llenar los campos vacíos de las fichas (con tu revisión antes de guardar)">🪄 Completar fichas desde entrevistas</button>
         <button class="btn btn-primary" onclick="nuevoCliente()">+ Nuevo cliente</button>
       </div>
+    </div>
+
+    <div class="card mb-5">
+      <div class="font-bold text-slate-900 text-sm mb-2" title="La app del cliente lo reporta sola la primera vez que la abre instalada (Agregar a pantalla de inicio)">📲 App en pantalla de inicio</div>
+      <div id="cli-pwa-panel" class="text-xs text-slate-400">Cargando…</div>
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -3949,6 +4031,7 @@ routes.clientes = async () => {
       ${clientes.length === 0 ? '<div class="col-span-3 card text-center text-slate-500 py-10">Aún no hay clientes. <button class="text-emerald-600 font-semibold" onclick="nuevoCliente()">+ Crear el primero</button></div>' : ''}
     </div>
   `;
+  cargarPanelInstalaciones(clientes);
   };
 
   if (_cliDataCache) {
