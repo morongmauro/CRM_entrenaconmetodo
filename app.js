@@ -5913,9 +5913,10 @@ routes.ia = async () => {
   if (_iaTab === 'mensajes') {
     // Se excluyen las filas de prueba Y las filas viejas que guardaron el
     // bloque de CONTEXTO interno en vez del texto del cliente (bug corregido
-    // en api/chat.js del Mealtracker: se veía "lo mismo" en todos).
+    // en api/chat.js del Mealtracker: se veía "lo mismo" en todos). El texto
+    // viejo puede empezar con salto de línea, por eso el trim().
     const conTexto = rows.filter(r => r.mensaje &&
-      !String(r.mensaje).startsWith('CONTEXTO DEL CLIENTE') &&
+      !String(r.mensaje).trim().startsWith('CONTEXTO DEL CLIENTE') &&
       r.cliente_nombre !== '__PRUEBA__' && r.cliente_nombre !== '__PING_CHAT__');
     const nombres = Array.from(new Set(conTexto.map(r => r.cliente_nombre || '(sin nombre)'))).sort((a, b) => a.localeCompare(b));
     if (_iaMsgCliente && !nombres.includes(_iaMsgCliente)) _iaMsgCliente = '';
@@ -6128,7 +6129,7 @@ window.verClienteIA = async (nombre) => {
             <span>${_fmtDateTime(r.creado_en)} · ${r.accion === 'plan' ? '🍽 plan' : '💬 registro'}</span>
             <span class="font-semibold text-slate-600">${_usd(r.costo_usd)} · ${((r.input_tokens||0)+(r.output_tokens||0)+(r.cache_read||0)+(r.cache_write||0)).toLocaleString('es-CO')} tk</span>
           </div>
-          <div class="text-sm text-slate-700">${(String(r.mensaje || '').startsWith('CONTEXTO DEL CLIENTE')
+          <div class="text-sm text-slate-700">${(String(r.mensaje || '').trim().startsWith('CONTEXTO DEL CLIENTE')
             ? '(texto no capturado — registro de una versión anterior de la app)'
             : (r.mensaje || '(sin texto)')).replace(/</g, '&lt;')}</div>
         </div>`).join('')}
