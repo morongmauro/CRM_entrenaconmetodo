@@ -5849,6 +5849,8 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 // totales del período, tabla por cliente y detalle de mensajes.
 // =====================================================
 let _iaPeriod = 'mes'; // 'dia' | 'semana' | 'mes'
+let _iaTab = 'consumo'; // 'consumo' | 'mensajes' — qué sub-vista de IA se muestra
+let _iaMsgCliente = ''; // filtro de cliente en la sub-vista de mensajes ('' = todos)
 
 function _iaDesde(period) {
   const d = new Date();
@@ -5867,7 +5869,7 @@ routes.ia = async () => {
   view.innerHTML = '<div class="card">Cargando consumo…</div>';
   const desde = _iaDesde(_iaPeriod);
   const { data, error } = await sb.from('ia_uso')
-    .select('cliente_nombre,modelo,accion,input_tokens,output_tokens,cache_read,cache_write,costo_usd,creado_en')
+    .select('cliente_nombre,modelo,accion,input_tokens,output_tokens,cache_read,cache_write,costo_usd,creado_en,mensaje')
     .gte('creado_en', desde)
     .order('creado_en', { ascending: false });
 
@@ -5903,6 +5905,54 @@ routes.ia = async () => {
 
   const periodoLabel = { dia: 'Hoy', semana: 'Últimos 7 días', mes: 'Este mes' }[_iaPeriod];
   const tab = (k, txt) => `<button class="toggle-btn ${_iaPeriod === k ? 'active' : ''}" onclick="switchIaPeriod('${k}')">${txt}</button>`;
+  const vtab = (k, txt) => `<button class="toggle-btn ${_iaTab === k ? 'active' : ''}" onclick="switchIaTab('${k}')">${txt}</button>`;
+
+  // ── Sub-vista MENSAJES: qué le escriben los clientes al chat, tal cual ──
+  // (la columna `mensaje` la llena api/chat.js del Mealtracker en cada envío;
+  // recortada a 500 caracteres). Sirve para analizar CÓMO usan la app.
+  if (_iaTab === 'mensajes') {
+    // Se excluyen las filas de prueba Y las filas viejas que guardaron el
+    // bloque de CONTEXTO interno en vez del texto del cliente (bug corregido
+    // en api/chat.js del Mealtracker: se veía "lo mismo" en todos).
+    const conTexto = rows.filter(r => r.mensaje &&
+      !String(r.mensaje).startsWith('CONTEXTO DEL CLIENTE') &&
+      r.cliente_nombre !== '__PRUEBA__' && r.cliente_nombre !== '__PING_CHAT__');
+    const nombres = Array.from(new Set(conTexto.map(r => r.cliente_nombre || '(sin nombre)'))).sort((a, b) => a.localeCompare(b));
+    if (_iaMsgCliente && !nombres.includes(_iaMsgCliente)) _iaMsgCliente = '';
+    const filtradas = _iaMsgCliente ? conTexto.filter(r => (r.cliente_nombre || '(sin nombre)') === _iaMsgCliente) : conTexto;
+    const esc = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    view.innerHTML = `
+      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div>
+          <h2 class="text-xl font-bold text-slate-900">Mensajes de los clientes</h2>
+          <p class="text-xs text-slate-500 mt-1">Todo lo que escriben (o dictan) al chat del Mealtracker · ${periodoLabel}</p>
+        </div>
+        <div class="flex gap-2 flex-wrap items-center">
+          <div class="flex gap-1">${vtab('consumo', '📊 Consumo')}${vtab('mensajes', '💬 Mensajes')}</div>
+          <div class="flex gap-1">${tab('dia', 'Hoy')}${tab('semana', 'Semana')}${tab('mes', 'Mes')}</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
+          <div class="text-sm text-slate-600">${filtradas.length} mensaje(s) · ${_iaMsgCliente ? escapeHtml(_iaMsgCliente) : `${nombres.length} cliente(s)`}</div>
+          <select class="text-sm border border-slate-200 rounded-lg px-2 py-1.5 bg-white" onchange="filtrarIaMsgs(this.value)">
+            <option value="">Todos los clientes</option>
+            ${nombres.map(n => `<option value="${esc(n)}" ${n === _iaMsgCliente ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
+          </select>
+        </div>
+        ${filtradas.length === 0 ? '<div class="text-slate-500 text-sm py-6 text-center">Sin mensajes en este período. En cuanto los clientes escriban al chat, aparecerán aquí.</div>' : `
+        <div>
+          ${filtradas.slice(0, 500).map(r => `
+            <div class="py-2 border-b border-slate-50">
+              <div class="text-xs text-slate-400 mb-0.5"><strong class="text-slate-600">${escapeHtml(r.cliente_nombre || '(sin nombre)')}</strong> · ${_fmtDateTime(r.creado_en)} · ${r.accion === 'plan' ? '🍽 plan' : '💬 chat'}</div>
+              <div class="text-sm text-slate-700">${escapeHtml(r.mensaje)}</div>
+            </div>`).join('')}
+          ${filtradas.length > 500 ? `<div class="text-xs text-slate-400 pt-2">Mostrando los 500 más recientes de ${filtradas.length}.</div>` : ''}
+        </div>`}
+        <p class="text-xs text-slate-400 mt-3">Cada mensaje queda recortado a 500 caracteres. Útil para ver cómo le hablan a la app, qué piden y dónde se traban.</p>
+      </div>`;
+    return;
+  }
 
   view.innerHTML = `
     <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -5910,7 +5960,10 @@ routes.ia = async () => {
         <h2 class="text-xl font-bold text-slate-900">Consumo de IA</h2>
         <p class="text-xs text-slate-500 mt-1">Tokens y costo del chat del Mealtracker · ${periodoLabel}</p>
       </div>
-      <div class="flex gap-1">${tab('dia', 'Hoy')}${tab('semana', 'Semana')}${tab('mes', 'Mes')}</div>
+      <div class="flex gap-2 flex-wrap items-center">
+        <div class="flex gap-1">${vtab('consumo', '📊 Consumo')}${vtab('mensajes', '💬 Mensajes')}</div>
+        <div class="flex gap-1">${tab('dia', 'Hoy')}${tab('semana', 'Semana')}${tab('mes', 'Mes')}</div>
+      </div>
     </div>
 
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
@@ -5952,6 +6005,8 @@ routes.ia = async () => {
 };
 
 window.switchIaPeriod = (k) => { _iaPeriod = k; routes.ia(); };
+window.switchIaTab = (k) => { _iaTab = k; routes.ia(); };
+window.filtrarIaMsgs = (nombre) => { _iaMsgCliente = nombre; routes.ia(); };
 
 // ── Recordatorio de pago manual: lista los deudores, confirma y envía ──
 window.enviarRecordatoriosPago = async () => {
@@ -6073,7 +6128,9 @@ window.verClienteIA = async (nombre) => {
             <span>${_fmtDateTime(r.creado_en)} · ${r.accion === 'plan' ? '🍽 plan' : '💬 registro'}</span>
             <span class="font-semibold text-slate-600">${_usd(r.costo_usd)} · ${((r.input_tokens||0)+(r.output_tokens||0)+(r.cache_read||0)+(r.cache_write||0)).toLocaleString('es-CO')} tk</span>
           </div>
-          <div class="text-sm text-slate-700">${(r.mensaje || '(sin texto)').replace(/</g, '&lt;')}</div>
+          <div class="text-sm text-slate-700">${(String(r.mensaje || '').startsWith('CONTEXTO DEL CLIENTE')
+            ? '(texto no capturado — registro de una versión anterior de la app)'
+            : (r.mensaje || '(sin texto)')).replace(/</g, '&lt;')}</div>
         </div>`).join('')}
     </div>`, { wide: true });
 };
