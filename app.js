@@ -1802,6 +1802,29 @@ const db = {
     async update(id, row) { await sb.from('mediciones_corporales').update(row).eq('id', id); },
     async remove(id) { await sb.from('mediciones_corporales').delete().eq('id', id); },
   },
+  // Historial de metas nutricionales. Cada meta que se fija o se envía al
+  // Mealtracker deja una fila, para poder leer cualquier resultado contra la
+  // meta que estaba VIGENTE en ese momento.
+  // listCliente devuelve null (no []) si la tabla aún no existe en Supabase:
+  // así la UI distingue "sin historial" de "falta la migración" y nunca
+  // rompe una ficha por una tabla que no se ha creado.
+  metas: {
+    async listCliente(cliente_id) {
+      const { data, error } = await sb.from('metas_historial').select('*')
+        .eq('cliente_id', cliente_id)
+        .order('fecha', { ascending: false })
+        .order('created_at', { ascending: false });
+      if (error) return null;
+      return data || [];
+    },
+    async insert(row) {
+      const { data, error } = await sb.from('metas_historial').insert(row).select().single();
+      if (error) return null;
+      return data;
+    },
+    async update(id, row) { await sb.from('metas_historial').update(row).eq('id', id); },
+    async remove(id) { await sb.from('metas_historial').delete().eq('id', id); },
+  },
   settings: {
     async save(s) {
       const { data: { user } } = await sb.auth.getUser();
@@ -2191,9 +2214,17 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
   // pertenecen, para mostrarlos en cada tarjeta del timeline junto a los
   // del cliente.
   const coachPorSeg = {};
+  let medsCliente = [];
+  let metasCliente = [];
   if (cliente) {
-    const pendsCoach = (await db.pendientes.listCliente(_selectedClienteId)).filter(p => p.para === 'coach');
-    for (const p of pendsCoach) {
+    const [pendsAll, meds, metas] = await Promise.all([
+      db.pendientes.listCliente(_selectedClienteId),
+      db.mediciones.listCliente(_selectedClienteId),
+      db.metas.listCliente(_selectedClienteId),
+    ]);
+    medsCliente = meds;
+    metasCliente = metas;
+    for (const p of pendsAll.filter(p => p.para === 'coach')) {
       if (!p.seguimiento_id) continue;
       (coachPorSeg[p.seguimiento_id] ||= []).push(p);
     }
@@ -2242,6 +2273,16 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
       ${sidebar}
       <div class="col-span-12 lg:col-span-8 space-y-4">
         ${clienteHeaderCard(cliente, segs, promAdh, tend, tendColor, sparkPoints)}
+
+        <details class="card">
+          <summary class="cursor-pointer text-xs font-bold text-slate-500 uppercase tracking-wider">🥗 Historial de meta nutricional y macros</summary>
+          <div class="mt-3">${historialMetasHTML(cliente, metasCliente, { max: 12 })}</div>
+        </details>
+
+        <details class="card">
+          <summary class="cursor-pointer text-xs font-bold text-slate-500 uppercase tracking-wider">📏 Historial de peso y composición corporal</summary>
+          <div class="mt-3">${historialCorporalHTML(cliente, medsCliente, {})}</div>
+        </details>
 
         <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider px-1 pt-2">Timeline · ${segs.length} semana(s)</h4>
         <div class="space-y-3">
@@ -2351,8 +2392,8 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
             <span>${fmt.money(c.monto, c.moneda)}/mes · día ${c.dia_pago || '—'}</span>
             ${metaDiasEntreno(c) ? `<span>·</span><span>📆 ${metaDiasEntreno(c)} días/sem${(c.dias_entreno || []).length ? ` (${c.dias_entreno.join('·')})` : ''}</span>` : ''}
           </div>
-          ${c.objetivo ? `<p class="text-xs text-slate-600 mt-2 italic">🎯 ${escapeHtml(c.objetivo)}</p>` : ''}
-          ${c.restricciones_lesiones ? `<p class="text-xs text-red-700 mt-1">⚕️ ${escapeHtml(c.restricciones_lesiones)}</p>` : ''}
+          ${c.objetivo ? `<p class="text-xs text-slate-600 mt-2 italic">🎯 ${textoExpandible(c.objetivo, 110)}</p>` : ''}
+          ${c.restricciones_lesiones ? `<p class="text-xs text-red-700 mt-1">⚕️ ${textoExpandible(c.restricciones_lesiones, 110)}</p>` : ''}
           ${(c.tags && c.tags.length) ? `<div class="mt-2">${c.tags.map(t => `<span class="tag-pill">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
         </div>
         <div class="text-right">
@@ -2421,14 +2462,14 @@ function seguimientoCard(s, coachPends = []) {
             <span class="text-xs text-slate-400">${fmt.labelSemana(s.semana)} · reg. ${fmt.fechaCorta(s.fecha)}</span>
             ${pctAsis !== null ? `<span class="tag ${pctAsis >= 90 ? 'tag-green' : pctAsis >= 60 ? 'tag-yellow' : 'tag-red'}">📆 ${s.dias_asistidos}/${s.dias_planeados} días · ${pctAsis}%</span>` : ''}
           </div>
-          ${s.avances ? `<p class="text-sm text-slate-700 mb-2 whitespace-pre-line">${escapeHtml(s.avances)}</p>` : '<p class="text-sm text-slate-400 italic">Sin avances escritos</p>'}
+          ${s.avances ? `<p class="text-sm text-slate-700 mb-2 whitespace-pre-line">${textoExpandible(s.avances, 220)}</p>` : '<p class="text-sm text-slate-400 italic">Sin avances escritos</p>'}
           ${s.pendientes_semana ? `<div class="bg-amber-50 rounded-lg px-3 py-2 mt-2"><div class="text-xs font-bold text-amber-800 mb-1">👥 Le pediste al cliente:</div>${checklistHtml(s.pendientes_semana, s.id)}</div>` : ''}
           ${coachPends.length ? `<div class="bg-emerald-50 rounded-lg px-3 py-2 mt-2"><div class="text-xs font-bold text-emerald-800 mb-1">🧢 Tus tareas (coach):</div><div class="space-y-1" onclick="event.stopPropagation()">${coachPends.map(p => `
             <label class="chk-item chk-ink ${p.estado === 'completado' ? 'chk-done' : ''}">
               <input type="checkbox" class="rounded" ${p.estado === 'completado' ? 'checked' : ''} onchange="togglePendienteTimeline('${p.id}', '${p.estado}')">
               <span class="chk-text">${escapeHtml(p.descripcion)}</span>
             </label>`).join('')}${coachPends.length > 1 ? `<div class="chk-count">${coachPends.filter(p => p.estado === 'completado').length}/${coachPends.length} completados</div>` : ''}</div></div>` : ''}
-          ${s.notas ? `<p class="text-xs text-slate-500 mt-2 whitespace-pre-line">📝 ${escapeHtml(s.notas)}</p>` : ''}
+          ${s.notas ? `<p class="text-xs text-slate-500 mt-2 whitespace-pre-line">📝 ${textoExpandible(s.notas, 140)}</p>` : ''}
         </div>
         <div class="flex flex-col items-end gap-1 flex-shrink-0">
           ${prom !== null ? `<span class="tag ${prom >= 7.5 ? 'tag-green' : prom >= 5 ? 'tag-yellow' : 'tag-red'}" style="font-size:0.8rem; padding: 0.25rem 0.55rem; font-weight: 700">${prom.toFixed(1)}/10</span>` : ''}
@@ -2464,6 +2505,31 @@ function escapeHtml(s) {
   if (!s) return '';
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+
+// ===== Texto largo compacto =====
+// Los campos libres (patologías, restricciones, antecedentes, avances) se
+// escriben largos y estiraban las tarjetas hasta volver ilegible la vista.
+// Se muestran los primeros caracteres y el resto queda a un click.
+let _txtSeq = 0;
+function textoExpandible(texto, max = 90) {
+  const t = (texto || '').trim();
+  if (!t) return '';
+  if (t.length <= max) return escapeHtml(t);
+  const id = `tx${++_txtSeq}`;
+  // Corta en el último espacio para no partir una palabra por la mitad.
+  const corto = t.slice(0, max).replace(/\s+\S*$/, '');
+  const boton = (accion, label) => `<button type="button" class="text-[11px] font-semibold ml-1" style="color:#2563eb;background:none;padding:0" onclick="event.stopPropagation(); ${accion}('${id}')">${label}</button>`;
+  return `<span id="${id}-c">${escapeHtml(corto)}…${boton('verTextoCompleto', 'ver más')}</span>`
+       + `<span id="${id}-f" class="hidden whitespace-pre-line">${escapeHtml(t)}${boton('verTextoCorto', 'ver menos')}</span>`;
+}
+window.verTextoCompleto = (id) => {
+  $(`#${id}-c`)?.classList.add('hidden');
+  $(`#${id}-f`)?.classList.remove('hidden');
+};
+window.verTextoCorto = (id) => {
+  $(`#${id}-f`)?.classList.add('hidden');
+  $(`#${id}-c`)?.classList.remove('hidden');
+};
 
 function renderSegBoard(clientes, allSegs) {
   const activos = clientes.filter(c => c.estado === 'activo');
@@ -2519,7 +2585,7 @@ function ctxSeguimientoHTML(cliente, past, pendsCliente) {
 
   // 1. Panorama
   const panorama = [
-    cliente.objetivo ? linea(`🎯 <strong>${escapeHtml(cliente.objetivo)}</strong>`) : '',
+    cliente.objetivo ? linea(`🎯 <strong>${textoExpandible(cliente.objetivo, 70)}</strong>`) : '',
     fase ? linea(`Fase: ${fase}`) : '',
     linea(`${past.length} semana(s) registradas`),
     promAdh !== null ? linea(`Adherencia 4 sem: <strong style="color:${promAdh >= 7.5 ? '#059669' : promAdh >= 5 ? '#d97706' : '#dc2626'}">${promAdh.toFixed(1)}/10</strong> <span style="color:${tcol};font-weight:700">${tend}</span>`) : linea('Sin adherencia previa'),
@@ -2541,12 +2607,13 @@ function ctxSeguimientoHTML(cliente, past, pendsCliente) {
   const alim = (recientes.length ? recientes.slice(0, 3).map(filaAlim).join('') : linea('Sin registros de alimentación'))
     + (cliente.meta_calorias ? `<div class="text-xs text-slate-400 mt-1">Meta: ${cliente.meta_calorias} kcal · ${cliente.meta_proteina_g}g P</div>` : `<div class="text-xs text-amber-600 mt-1">Sin meta definida</div>`);
 
-  // 4. Salud y lesiones
+  // 4. Salud y lesiones — texto recortado: la columna no puede crecer sin
+  // límite o empuja el resto de la franja fuera de pantalla.
   const salud = [
-    cliente.lesion_actual ? `<div class="text-xs text-red-700 mb-1">🩹 <strong>Lesión:</strong> ${escapeHtml(cliente.lesion_actual)}${cliente.lesion_estado ? ` (${cliente.lesion_estado.replace('_', ' ')})` : ''}</div>` : '',
-    cliente.restricciones_lesiones ? `<div class="text-xs text-red-700 mb-1"><strong>Restric.:</strong> ${escapeHtml(cliente.restricciones_lesiones)}</div>` : '',
-    cliente.patologias ? `<div class="text-xs text-red-700 mb-1"><strong>Patologías:</strong> ${escapeHtml(cliente.patologias)}</div>` : '',
-    cliente.suplementos ? `<div class="text-xs text-slate-600 mb-1">💊 ${escapeHtml(cliente.suplementos)}</div>` : '',
+    cliente.lesion_actual ? `<div class="text-xs text-red-700 mb-1">🩹 <strong>Lesión:</strong> ${textoExpandible(cliente.lesion_actual, 70)}${cliente.lesion_estado ? ` (${cliente.lesion_estado.replace('_', ' ')})` : ''}</div>` : '',
+    cliente.restricciones_lesiones ? `<div class="text-xs text-red-700 mb-1"><strong>Restric.:</strong> ${textoExpandible(cliente.restricciones_lesiones, 70)}</div>` : '',
+    cliente.patologias ? `<div class="text-xs text-red-700 mb-1"><strong>Patologías:</strong> ${textoExpandible(cliente.patologias, 70)}</div>` : '',
+    cliente.suplementos ? `<div class="text-xs text-slate-600 mb-1">💊 ${textoExpandible(cliente.suplementos, 70)}</div>` : '',
   ].filter(Boolean).join('') || linea('Sin alertas de salud ✓');
 
   // 5. Pendientes y foco
@@ -2558,7 +2625,7 @@ function ctxSeguimientoHTML(cliente, past, pendsCliente) {
     ['Registro comidas', avg(recientes.map(s2 => s2.score_alim_registro).filter(v => v != null))],
   ].filter(c => c[1] != null).sort((a, b) => a[1] - b[1]);
   const foco = cands.length && cands[0][1] < 75 ? `<div class="text-xs mt-1" style="color:#d97706;font-weight:600">👉 Reforzar: ${cands[0][0]} (${Math.round(cands[0][1])}%)</div>` : '';
-  const pend = (abiertos.length ? abiertos.slice(0, 6).map(p => `<div class="text-xs text-slate-600">${p.para === 'coach' ? '🧢' : '👥'} ${escapeHtml(p.descripcion)}</div>`).join('') : linea('Sin pendientes abiertos ✓')) + foco;
+  const pend = (abiertos.length ? abiertos.slice(0, 6).map(p => `<div class="text-xs text-slate-600">${p.para === 'coach' ? '🧢' : '👥'} ${textoExpandible(p.descripcion, 60)}</div>`).join('') : linea('Sin pendientes abiertos ✓')) + foco;
 
   return col('📌 Panorama', '#0ea5e9', panorama)
     + col('🏋️ Entrenamiento', '#10b981', entreno)
@@ -2568,13 +2635,397 @@ function ctxSeguimientoHTML(cliente, past, pendsCliente) {
 }
 
 // =====================================================
+// HISTORIAL DE METAS NUTRICIONALES · trazabilidad
+// =====================================================
+// Un resultado ("bajó 2 kg", "se estancó") solo se puede leer contra la meta
+// que estaba VIGENTE cuando pasó. Por eso cada meta que se fija o se envía al
+// Mealtracker deja una fila en metas_historial: los números, desde cuándo,
+// con qué método y sobre qué peso de referencia se calcularon.
+const ORIGENES_META = {
+  calculo:  { icono: '🧮', label: 'Calculada en la ficha' },
+  envio_mt: { icono: '📤', label: 'Enviada al Mealtracker' },
+  manual:   { icono: '✍️', label: 'Ajuste manual' },
+  ficha:    { icono: '📋', label: 'Meta vigente de la ficha' },
+};
+
+function metaNums(m) {
+  return { kcal: m?.kcal ?? null, p: m?.proteina_g ?? null, c: m?.carbos_g ?? null, g: m?.grasas_g ?? null };
+}
+function mismaMeta(a, b) {
+  const x = metaNums(a), y = metaNums(b);
+  return x.kcal === y.kcal && x.p === y.p && x.c === y.c && x.g === y.g;
+}
+
+// Une el historial guardado con la meta vigente de la ficha. La vigente
+// SIEMPRE aparece, aunque la tabla esté vacía o falte la migración: así la
+// trazabilidad se ve desde hoy y no desde el próximo cambio de meta.
+function metasHistorialFilas(cliente, rows) {
+  const lista = (rows || []).map(r => ({ ...r, fecha: r.fecha || (r.created_at || '').slice(0, 10) }));
+  const vigente = cliente && cliente.meta_calorias ? {
+    kcal: cliente.meta_calorias,
+    proteina_g: cliente.meta_proteina_g,
+    carbos_g: cliente.meta_carbos_g,
+    grasas_g: cliente.meta_grasas_g,
+  } : null;
+  if (vigente && !lista.some(m => mismaMeta(m, vigente))) {
+    lista.push({
+      ...vigente,
+      id: null,
+      virtual: true,
+      fecha: (cliente.meta_calculada_en || '').slice(0, 10) || null,
+      metodo: cliente.meta_metodo || null,
+      argumento: cliente.meta_argumento || null,
+      origen: 'ficha',
+      enviada_mt: !!(cliente.meta_enviada_mt && cliente.meta_enviada_mt.kcal === cliente.meta_calorias),
+      enviada_at: (cliente.meta_enviada_mt || {}).at || null,
+    });
+  }
+  // Más nueva primero. Sin fecha = meta vigente recién puesta → va arriba.
+  return lista.sort((a, b) => (b.fecha || '9999-99-99').localeCompare(a.fecha || '9999-99-99'));
+}
+
+// Delta neutro: una meta que sube no es "buena" ni "mala" por sí sola, así
+// que se colorea por dirección (azul sube · ámbar baja), no por juicio.
+function deltaMeta(actual, previo, unidad = '') {
+  if (actual == null || previo == null) return '<span class="text-slate-300">—</span>';
+  const d = actual - previo;
+  if (!d) return '<span class="text-slate-400">=</span>';
+  return `<span style="color:${d > 0 ? '#2563eb' : '#d97706'};font-weight:600">${d > 0 ? '+' : ''}${d}${unidad}</span>`;
+}
+
+// Historial completo de metas y macros: gráficas + tabla con el delta contra
+// la meta anterior y el periodo en que estuvo vigente cada una.
+function historialMetasHTML(cliente, rows, opts = {}) {
+  const filas = metasHistorialFilas(cliente, rows);
+  const aviso = rows === null
+    ? '<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-2 py-1 mb-2">⚠️ El historial de metas aún no se está guardando: falta crear la tabla <strong>metas_historial</strong> en Supabase (corre <strong>schema.sql</strong>, al final está la migración). Por ahora solo se ve la meta vigente.</div>'
+    : '';
+  if (!filas.length) {
+    return aviso + '<p class="text-xs text-slate-500">Sin metas registradas. Calcula la meta en la ficha del cliente (sección 5 · 🥗) y quedará el primer punto del historial.</p>';
+  }
+
+  const max = opts.max || 12;
+  const visibles = filas.slice(0, max);
+  const asc = filas.slice().filter(m => m.kcal).reverse();
+
+  // Gráficas: kcal por un lado (escala de miles) y macros por otro (gramos).
+  const labels = asc.map(m => m.fecha ? fmt.fechaCorta(m.fecha) : 'hoy');
+  let graficas = '';
+  if (asc.length >= 2) {
+    const kcals = asc.map(m => m.kcal);
+    const macros = asc.flatMap(m => [m.proteina_g, m.carbos_g, m.grasas_g]).filter(v => v != null);
+    const minK = Math.min(...kcals), maxK = Math.max(...kcals);
+    graficas = `
+      <div class="grid grid-cols-1 ${opts.compacto ? '' : 'md:grid-cols-2'} gap-3 mb-3">
+        <div class="bg-slate-50 rounded-xl p-3">
+          <div class="text-xs font-bold text-slate-700 mb-1">Meta de calorías</div>
+          ${lineChart([{ label: 'kcal', color: '#059669', points: kcals }], labels,
+            { yMin: Math.max(0, Math.floor((minK - 200) / 100) * 100), yMax: Math.ceil((maxK + 200) / 100) * 100, height: 150 })}
+        </div>
+        <div class="bg-slate-50 rounded-xl p-3">
+          <div class="text-xs font-bold text-slate-700 mb-1">Macros (g/día)</div>
+          ${macros.length ? lineChart([
+            { label: 'Proteína', color: '#2563eb', points: asc.map(m => m.proteina_g ?? null) },
+            { label: 'Carbos', color: '#d97706', points: asc.map(m => m.carbos_g ?? null) },
+            { label: 'Grasas', color: '#dc2626', points: asc.map(m => m.grasas_g ?? null) },
+          ], labels, { yMin: 0, yMax: Math.ceil((Math.max(...macros) + 30) / 25) * 25, height: 150 })
+            : '<p class="text-xs text-slate-400">Sin macros registrados</p>'}
+          <div class="mt-1">${legendDot('#2563eb', 'Proteína')}${legendDot('#d97706', 'Carbos')}${legendDot('#dc2626', 'Grasas')}</div>
+        </div>
+      </div>`;
+  }
+
+  const fila = (m, i) => {
+    const prev = filas[i + 1];                       // la meta anterior en el tiempo
+    const sig = i === 0 ? null : filas[i - 1];       // la que la reemplazó
+    const vigencia = sig
+      ? `hasta ${sig.fecha ? fmt.fechaCorta(sig.fecha) : '—'}${m.fecha && sig.fecha ? ` · ${fmt.diasEntre(m.fecha, sig.fecha)} días` : ''}`
+      : `<span class="text-emerald-700 font-semibold">vigente hoy</span>${m.fecha ? ` · ${fmt.diasDesde(m.fecha)} días` : ''}`;
+    const org = ORIGENES_META[m.origen] || ORIGENES_META.manual;
+    const ref = [
+      m.peso_kg ? `${m.peso_kg} kg` : '',
+      m.grasa_pct ? `${m.grasa_pct}% grasa` : '',
+      m.objetivo ? escapeHtml(m.objetivo) : '',
+      m.tdee ? `TDEE ${m.tdee}` : '',
+      m.proteina_g_kg ? `${m.proteina_g_kg} g/kg prote` : '',
+    ].filter(Boolean).join(' · ');
+    return `
+      <tr class="align-top">
+        <td class="whitespace-nowrap">
+          <div class="font-semibold text-slate-800">${m.fecha ? fmt.fechaCorta(m.fecha) : 'sin fecha'}</div>
+          <div class="text-[10px] text-slate-500">${vigencia}</div>
+        </td>
+        <td class="whitespace-nowrap">
+          <div class="font-bold text-emerald-700">${m.kcal ?? '—'} kcal</div>
+          <div class="text-[10px]">${deltaMeta(m.kcal, prev?.kcal, ' kcal')}</div>
+        </td>
+        <td class="whitespace-nowrap text-xs">
+          <span style="color:#2563eb;font-weight:700">${m.proteina_g ?? '—'}P</span> ·
+          <span style="color:#d97706;font-weight:700">${m.carbos_g ?? '—'}C</span> ·
+          <span style="color:#dc2626;font-weight:700">${m.grasas_g ?? '—'}G</span>
+          <div class="text-[10px] text-slate-500">${deltaMeta(m.proteina_g, prev?.proteina_g)} / ${deltaMeta(m.carbos_g, prev?.carbos_g)} / ${deltaMeta(m.grasas_g, prev?.grasas_g)}</div>
+        </td>
+        <td class="text-xs">
+          <div>${org.icono} ${org.label}</div>
+          ${m.metodo ? `<div class="text-[10px] text-slate-500">${escapeHtml(m.metodo)}</div>` : ''}
+          ${ref ? `<div class="text-[10px] text-slate-500">${ref}</div>` : ''}
+          ${m.nota ? `<div class="text-[10px] text-slate-500">${escapeHtml(m.nota)}</div>` : ''}
+        </td>
+        <td class="text-xs whitespace-nowrap">
+          ${m.enviada_mt
+            ? `<span class="tag tag-violet">📤 en la app</span>${m.enviada_at ? `<div class="text-[10px] text-slate-500">${fmt.fechaCorta(String(m.enviada_at).slice(0, 10))}</div>` : ''}`
+            : '<span class="text-slate-400">—</span>'}
+        </td>
+      </tr>
+      ${m.argumento ? `
+      <tr><td colspan="5" class="pt-0">
+        <details><summary class="text-[11px] text-emerald-700 cursor-pointer">Ver argumento del cálculo</summary><pre class="text-[11px] text-slate-600 mt-1 whitespace-pre-wrap">${escapeHtml(m.argumento)}</pre></details>
+      </td></tr>` : ''}`;
+  };
+
+  return `
+    ${aviso}
+    <div class="text-xs text-slate-500 mb-2">${filas.length} meta(s) en el historial${filas.length > 1 && filas[0].kcal && filas[filas.length - 1].kcal ? ` · desde ${filas[filas.length - 1].kcal} kcal hasta ${filas[0].kcal} kcal (${filas[0].kcal - filas[filas.length - 1].kcal >= 0 ? '+' : ''}${filas[0].kcal - filas[filas.length - 1].kcal})` : ''}</div>
+    ${graficas}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr><th>Desde</th><th>Calorías</th><th>Macros</th><th>Origen y referencia</th><th>Mealtracker</th></tr></thead>
+        <tbody>${visibles.map(fila).join('')}</tbody>
+      </table>
+    </div>
+    ${filas.length > visibles.length ? `<div class="text-xs text-slate-400 mt-1">Mostrando las ${visibles.length} más recientes de ${filas.length}.</div>` : ''}`;
+}
+
+// Guarda un punto del historial de metas. No duplica: si la última fila tiene
+// exactamente los mismos números, solo la marca como enviada al Mealtracker
+// cuando corresponde.
+async function registrarMetaHistorial(clienteId, meta, opts = {}) {
+  if (!clienteId || !meta || !meta.kcal) return null;
+  const rows = await db.metas.listCliente(clienteId);
+  if (rows === null) return null;                     // sin tabla: no se registra
+  const ultima = rows[0];
+  if (ultima && mismaMeta(ultima, meta)) {
+    if (opts.enviada_mt && !ultima.enviada_mt) {
+      await db.metas.update(ultima.id, { enviada_mt: true, enviada_at: new Date().toISOString() });
+    }
+    return ultima;
+  }
+  return db.metas.insert({
+    cliente_id: clienteId,
+    fecha: fmt.hoy(),
+    ...meta,
+    ...(opts.enviada_mt ? { enviada_mt: true, enviada_at: new Date().toISOString() } : {}),
+  });
+}
+
+// =====================================================
+// HISTORIAL DE PESO Y COMPOSICIÓN CORPORAL
+// =====================================================
+// Todas las mediciones cargadas, con el delta contra la anterior y contra la
+// primera: el peso solo dice algo comparado consigo mismo en el tiempo.
+function historialCorporalHTML(cliente, meds, opts = {}) {
+  const asc = (meds || []).slice().sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
+  if (!asc.length) {
+    return `<p class="text-xs text-slate-500">Sin mediciones registradas.${cliente.estatura_cm ? '' : ' Falta la estatura en el perfil para estimar composición.'}</p>`;
+  }
+  const edad = helpers.edadDe(cliente.fecha_nacimiento);
+  const compDe = (m) => calcComposicionCorporal({ peso: m.peso, grasa_pct: m.grasa_pct, edad, sexo: cliente.sexo, altura_cm: cliente.estatura_cm });
+  const comps = asc.map(compDe);
+
+  const conPeso = asc.filter(m => m.peso != null);
+  const primera = conPeso[0];
+  const ultima = conPeso[conPeso.length - 1];
+  const anterior = conPeso.length >= 2 ? conPeso[conPeso.length - 2] : null;
+  const dTotal = primera && ultima && primera !== ultima ? +(ultima.peso - primera.peso).toFixed(1) : null;
+  const dUlt = anterior ? +(ultima.peso - anterior.peso).toFixed(1) : null;
+  const semanasEntre = anterior && ultima.fecha && anterior.fecha ? fmt.diasEntre(anterior.fecha, ultima.fecha) / 7 : null;
+  const ritmo = dUlt != null && semanasEntre > 0 ? +(dUlt / semanasEntre).toFixed(2) : null;
+  const flecha = (d) => d == null ? '' : d > 0 ? '▲' : d < 0 ? '▼' : '=';
+  const colD = (d) => d == null ? '#94a3b8' : d > 0 ? '#2563eb' : d < 0 ? '#d97706' : '#94a3b8';
+
+  const resumen = ultima ? `
+    <div class="bg-teal-50 ring-1 ring-teal-100 rounded-xl px-3 py-2 mb-2 text-sm text-teal-900 flex flex-wrap gap-x-4 gap-y-1">
+      <span><strong>Último:</strong> ${ultima.peso} kg${ultima.grasa_pct ? ` · ${ultima.grasa_pct}% grasa` : ''}${ultima.cintura ? ` · ${ultima.cintura} cm cintura` : ''} <span class="text-teal-700/70 text-xs">(${fmt.fechaCorta(ultima.fecha)})</span></span>
+      ${dUlt != null ? `<span style="color:${colD(dUlt)}"><strong>vs anterior:</strong> ${flecha(dUlt)} ${dUlt > 0 ? '+' : ''}${dUlt} kg${ritmo != null ? ` (${ritmo > 0 ? '+' : ''}${ritmo} kg/sem)` : ''}</span>` : ''}
+      ${dTotal != null ? `<span style="color:${colD(dTotal)}"><strong>vs inicio:</strong> ${flecha(dTotal)} ${dTotal > 0 ? '+' : ''}${dTotal} kg <span class="text-xs text-teal-700/70">(desde ${fmt.fechaCorta(primera.fecha)})</span></span>` : ''}
+    </div>` : '';
+
+  const labels = asc.map(m => fmt.fechaCorta(m.fecha));
+  const pesos = asc.map(m => m.peso ?? null).filter(v => v !== null);
+  const grasasPct = asc.map(m => m.grasa_pct ?? null).filter(v => v !== null);
+  let graficas = '';
+  if (pesos.length >= 2) {
+    const series = [{ label: 'Peso', color: '#10b981', points: asc.map(m => m.peso ?? null) }];
+    if (grasasPct.length >= 2) series.push({ label: '% grasa', color: '#f59e0b', points: asc.map(m => m.grasa_pct ?? null) });
+    graficas += `
+      <div class="bg-slate-50 rounded-xl p-3 mb-2">
+        <div class="text-xs font-bold text-slate-700 mb-2">Evolución peso ${grasasPct.length >= 2 ? '· % grasa' : ''}</div>
+        ${lineChart(series, labels, { yMin: Math.floor(Math.min(...pesos) - 3), yMax: Math.ceil(Math.max(...pesos) + 3), height: 160 })}
+        <div class="mt-1">${legendDot('#10b981', 'Peso (kg)')}${grasasPct.length >= 2 ? legendDot('#f59e0b', '% grasa') : ''}</div>
+      </div>`;
+  }
+  const conComp = comps.filter(Boolean);
+  if (conComp.length >= 2 && conComp.some(x => x.masa_muscular_smm_kg)) {
+    const magras = comps.map(x => x?.masa_magra_kg ?? null);
+    const grasasKg = comps.map(x => x?.masa_grasa_kg ?? null);
+    const smm = comps.map(x => x?.masa_muscular_smm_kg ?? null);
+    const todos = [...magras, ...grasasKg, ...smm].filter(v => v !== null);
+    if (todos.length) {
+      graficas += `
+        <div class="bg-slate-50 rounded-xl p-3 mb-2">
+          <div class="text-xs font-bold text-slate-700 mb-2">Evolución composición corporal (estimada)</div>
+          ${lineChart([
+            { label: 'Masa magra', color: '#10b981', points: magras },
+            { label: 'Músculo esquel.', color: '#3b82f6', points: smm },
+            { label: 'Masa grasa', color: '#f59e0b', points: grasasKg },
+          ], labels, { yMin: Math.max(0, Math.floor(Math.min(...todos) - 3)), yMax: Math.ceil(Math.max(...todos) + 3), height: 160 })}
+          <div class="mt-1">${legendDot('#10b981', 'Masa magra')}${legendDot('#3b82f6', 'Músculo esquel.')}${legendDot('#f59e0b', 'Masa grasa')}</div>
+          <div class="text-[10px] text-slate-500 mt-1">Fórmulas: Lee 2000 (SMM) · peso × (1 − %grasa) (magra). Estimaciones, no DEXA.</div>
+        </div>`;
+    }
+  }
+
+  // Tabla completa, de la más reciente a la más antigua, con delta contra la
+  // medición previa (que es la lectura que de verdad usa el coach).
+  const idxDesc = asc.map((_, i) => i).reverse();
+  const filas = idxDesc.map(i => {
+    const m = asc[i], c = comps[i];
+    const p = i > 0 ? asc[i - 1] : null;
+    const dp = p && m.peso != null && p.peso != null ? +(m.peso - p.peso).toFixed(1) : null;
+    const dg = p && m.grasa_pct != null && p.grasa_pct != null ? +(m.grasa_pct - p.grasa_pct).toFixed(1) : null;
+    return `
+      <tr>
+        <td class="whitespace-nowrap">${fmt.fechaCorta(m.fecha)}</td>
+        <td class="whitespace-nowrap">${m.peso ?? '—'}${dp != null ? ` <span class="text-[10px]" style="color:${colD(dp)}">${dp > 0 ? '+' : ''}${dp}</span>` : ''}</td>
+        <td class="whitespace-nowrap">${m.grasa_pct ?? '—'}${dg != null ? ` <span class="text-[10px]" style="color:${colD(dg)}">${dg > 0 ? '+' : ''}${dg}</span>` : ''}</td>
+        <td>${c?.masa_magra_kg ?? '—'}</td>
+        <td>${c?.masa_muscular_smm_kg ?? '—'}</td>
+        <td>${c?.masa_grasa_kg ?? '—'}</td>
+        <td>${m.cintura ?? '—'}</td>
+        ${opts.editable ? `<td class="text-right"><button class="btn btn-ghost text-xs" onclick="eliminarMedicion('${m.id}', '${cliente.id}')" title="Eliminar medición">✕</button></td>` : ''}
+      </tr>
+      ${m.notas ? `<tr><td colspan="${opts.editable ? 8 : 7}" class="text-[11px] text-slate-500 pt-0">📝 ${textoExpandible(m.notas, 100)}</td></tr>` : ''}`;
+  }).join('');
+
+  return `
+    ${resumen}
+    ${graficas}
+    <div class="overflow-x-auto" style="max-height:${opts.compacto ? '260px' : '420px'};overflow-y:auto">
+      <table class="w-full text-sm">
+        <thead><tr><th>Fecha</th><th>Peso</th><th>% grasa</th><th>Magra</th><th>SMM</th><th>Grasa kg</th><th>Cintura</th>${opts.editable ? '<th></th>' : ''}</tr></thead>
+        <tbody>${filas}</tbody>
+      </table>
+    </div>
+    <div class="text-[10px] text-slate-400 mt-1">Magra · SMM · Grasa kg son estimaciones a partir de peso, %grasa, edad, sexo y estatura.</div>`;
+}
+
+// =====================================================
+// SEMANAS ANTERIORES · la visual completa dentro del modal de la semana
+// =====================================================
+// Antes tocaba salir del modal para recordar qué se registró la semana
+// pasada (días cumplidos, qué se le pidió al cliente, qué quedó pendiente del
+// coach). Ahora esa película va DENTRO de la edición: se decide qué poner en
+// la semana nueva sin cerrar nada.
+function semanaAnteriorCardHTML(cliente, s, coachPends = [], abierta = false) {
+  const pctF = s.fuerza_planeados ? Math.round(((s.fuerza_ejecutados ?? 0) / s.fuerza_planeados) * 100) : null;
+  const colorPct = (p) => p == null ? '#94a3b8' : p >= 90 ? '#059669' : p >= 60 ? '#d97706' : '#dc2626';
+  const animos = { excelente: '🤩', bien: '😊', neutro: '😐', bajo: '😕', 'muy bajo': '😔' };
+  const pendCliente = parseChecklist(s.pendientes_semana);
+  const pendPendientes = pendCliente.filter(p => !p.done);
+  const coachAbiertos = coachPends.filter(p => p.estado !== 'completado');
+  const chip = (txt, color) => `<span class="tag" style="background:${color}18;color:${color};font-weight:700">${txt}</span>`;
+  const metaAlim = cliente.meta_calorias;
+  const dKcal = metaAlim && s.kcal_promedio != null ? s.kcal_promedio - metaAlim : null;
+
+  return `
+    <details class="bg-white rounded-xl ring-1 ring-slate-200 mb-2" ${abierta ? 'open' : ''}>
+      <summary class="cursor-pointer px-3 py-2 flex items-center gap-2 flex-wrap">
+        <span class="font-bold text-slate-800">${fmt.labelSemana(s.semana)}</span>
+        <span class="text-xs text-slate-400">${fmt.fechaCorta(s.fecha)}</span>
+        ${s.score_global != null ? chip(`${Math.round(s.score_global)}% global`, colorPct(s.score_global)) : ''}
+        ${pctF != null ? chip(`💪 ${s.fuerza_ejecutados ?? 0}/${s.fuerza_planeados}`, colorPct(pctF)) : ''}
+        ${s.dias_registro_alim != null ? chip(`📓 ${s.dias_registro_alim}/7 reg`, colorPct(Math.round((s.dias_registro_alim / 7) * 100))) : ''}
+        ${s.estado_animo ? `<span class="text-xs text-slate-500">${animos[s.estado_animo] || ''} ${s.estado_animo}</span>` : ''}
+        ${pendPendientes.length ? chip(`👥 ${pendPendientes.length} sin cumplir`, '#b45309') : ''}
+        ${coachAbiertos.length ? chip(`🧢 ${coachAbiertos.length} tuyas abiertas`, '#047857') : ''}
+      </summary>
+      <div class="px-3 pb-3 space-y-2">
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+          <div class="bg-slate-50 rounded-lg p-2">
+            <div class="text-slate-400">Fuerza</div>
+            <div class="font-bold" style="color:${colorPct(pctF)}">${s.fuerza_planeados ? `${s.fuerza_ejecutados ?? 0}/${s.fuerza_planeados} · ${pctF}%` : '—'}</div>
+          </div>
+          <div class="bg-slate-50 rounded-lg p-2">
+            <div class="text-slate-400">Complementaria</div>
+            <div class="font-bold text-violet-600">${s.cardio_ejecutados ? `${s.cardio_ejecutados} día(s)` : '—'}</div>
+          </div>
+          <div class="bg-slate-50 rounded-lg p-2">
+            <div class="text-slate-400">kcal promedio</div>
+            <div class="font-bold text-blue-700">${s.kcal_promedio ?? '—'}${dKcal != null ? ` <span class="text-[10px]" style="color:${dKcal > 0 ? '#2563eb' : '#d97706'}">${dKcal > 0 ? '+' : ''}${dKcal} vs meta</span>` : ''}</div>
+          </div>
+          <div class="bg-slate-50 rounded-lg p-2">
+            <div class="text-slate-400">Proteína prom.</div>
+            <div class="font-bold text-blue-700">${s.proteina_promedio_g != null ? `${s.proteina_promedio_g} g` : '—'}${cliente.meta_proteina_g && s.proteina_promedio_g != null ? ` <span class="text-[10px] text-slate-400">/ ${cliente.meta_proteina_g}</span>` : ''}</div>
+          </div>
+        </div>
+
+        ${s.avances ? `<div><div class="text-xs font-bold text-slate-500 uppercase mb-1">Avances</div><p class="text-sm text-slate-700 whitespace-pre-line">${textoExpandible(s.avances, 260)}</p></div>` : '<p class="text-xs text-slate-400 italic">Sin avances escritos</p>'}
+
+        ${pendCliente.length ? `
+          <div class="bg-amber-50 rounded-lg px-3 py-2">
+            <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
+              <div class="text-xs font-bold text-amber-800">👥 Le pediste al cliente (${pendCliente.filter(p => p.done).length}/${pendCliente.length} cumplidos)</div>
+              ${pendPendientes.length ? `<button type="button" class="btn btn-secondary btn-sm" onclick="traerPendientesPrevios('${s.semana}')" title="Copia a esta semana lo que quedó sin cumplir">↓ Traer ${pendPendientes.length} sin cumplir</button>` : ''}
+            </div>
+            <div class="space-y-0.5">${pendCliente.map(p => `<div class="text-xs ${p.done ? 'text-slate-400 line-through' : 'text-amber-900'}">${p.done ? '✓' : '○'} ${escapeHtml(p.texto)}</div>`).join('')}</div>
+          </div>` : ''}
+
+        ${coachPends.length ? `
+          <div class="bg-emerald-50 rounded-lg px-3 py-2">
+            <div class="text-xs font-bold text-emerald-800 mb-1">🧢 Tus tareas de esa semana (${coachPends.filter(p => p.estado === 'completado').length}/${coachPends.length} hechas)</div>
+            <div class="space-y-0.5">${coachPends.map(p => `<div class="text-xs ${p.estado === 'completado' ? 'text-slate-400 line-through' : 'text-emerald-900'}">${p.estado === 'completado' ? '✓' : '○'} ${escapeHtml(p.descripcion)}</div>`).join('')}</div>
+          </div>` : ''}
+
+        ${s.lesion_actualizacion || s.lesion_estado_semana ? `<div class="text-xs text-red-700 bg-red-50 rounded-lg px-3 py-2">🩹 Lesión: <strong>${escapeHtml(s.lesion_estado_semana || '')}</strong> ${escapeHtml(s.lesion_actualizacion || '')}</div>` : ''}
+        ${s.notas ? `<div class="text-xs text-slate-500 whitespace-pre-line">📝 ${textoExpandible(s.notas, 160)}</div>` : ''}
+      </div>
+    </details>`;
+}
+
+function semanasAnterioresHTML(cliente, segs, coachPorSeg = {}, opts = {}) {
+  const lista = (segs || []).slice(0, opts.max || 6);
+  if (!lista.length) return '<p class="text-xs text-slate-500">Es la primera semana registrada de este cliente: no hay historial que revisar todavía.</p>';
+  return lista.map((s, i) => semanaAnteriorCardHTML(cliente, s, coachPorSeg[s.id] || [], i === 0)).join('');
+}
+
+// Copia a la semana en edición los pendientes que el cliente NO cumplió en la
+// semana elegida, sin duplicar los que ya estén escritos.
+window.traerPendientesPrevios = (semana) => {
+  const s = (window._segPrevios || []).find(x => x.semana === semana);
+  const ta = $('#sg-pend');
+  if (!s || !ta) return;
+  const faltantes = parseChecklist(s.pendientes_semana).filter(p => !p.done);
+  if (!faltantes.length) { toast('No quedó nada sin cumplir esa semana'); return; }
+  const actuales = parseChecklist(ta.value);
+  const yaEstan = new Set(actuales.map(p => p.texto.toLowerCase()));
+  const nuevos = faltantes.filter(p => !yaEstan.has(p.texto.toLowerCase()));
+  if (!nuevos.length) { toast('Ya están todos en esta semana'); return; }
+  ta.value = serializeChecklist([...actuales, ...nuevos.map(p => ({ done: false, texto: p.texto }))]);
+  renderPendEditPreview();
+  toast(`↓ ${nuevos.length} pendiente(s) traído(s) de ${fmt.labelSemana(semana)}`);
+};
+
+// =====================================================
 // MODAL: SEGUIMIENTO con panel contexto
 // =====================================================
 async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
-  const [cliente, segsCliente, pendsCliente] = await Promise.all([
+  const [cliente, segsCliente, pendsCliente, medsCliente, metasCliente] = await Promise.all([
     db.clientes.get(clienteId),
     db.seguimientos.listCliente(clienteId),
     db.pendientes.listCliente(clienteId),
+    db.mediciones.listCliente(clienteId),
+    db.metas.listCliente(clienteId),
   ]);
 
   const semanaPrev = segsCliente.find(s => s.semana < semana);
@@ -2599,6 +3050,24 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
         chartSerie('score_alim_registro', '#8b5cf6', 'Alim · registro'),
       ], chartLabels, { yMin: 0, yMax: 100, height: 150 })
     : '<p class="text-xs text-slate-400 text-center py-4">Necesitas 2+ semanas registradas para ver la tendencia.</p>';
+
+  // Semanas ya registradas (sin contar la que se está editando) + las tareas
+  // del coach que pertenecen a cada una: es la visual que antes obligaba a
+  // salir del modal para consultarla.
+  const previas = segsCliente.filter(x => x.semana < semana).sort((a, b) => b.semana.localeCompare(a.semana));
+  const coachPorSegModal = {};
+  for (const p of pendsCliente) {
+    if (p.para !== 'coach' || !p.seguimiento_id) continue;
+    (coachPorSegModal[p.seguimiento_id] ||= []).push(p);
+  }
+  window._segPrevios = previas;
+
+  // Última medición corporal, solo para mostrarla (el registro vive en el perfil)
+  const medsAscModal = (medsCliente || []).slice().sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
+  const ultMedModal = medsAscModal.length ? medsAscModal[medsAscModal.length - 1] : null;
+  const prevMedModal = medsAscModal.length >= 2 ? medsAscModal[medsAscModal.length - 2] : null;
+  const deltaPesoModal = ultMedModal?.peso != null && prevMedModal?.peso != null
+    ? +(ultMedModal.peso - prevMedModal.peso).toFixed(1) : null;
 
   const html = `
     <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-10">
@@ -2629,6 +3098,24 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
       <div>
         <div class="seg-section-title">📖 Contexto · la película del cliente <span style="text-transform:none;letter-spacing:normal;font-weight:400;color:#94a3b8">(lee de izquierda a derecha)</span></div>
         <div class="ctx-strip">${ctxSeguimientoHTML(cliente, segsCliente.filter(x => x.id !== s.id), pendsCliente)}</div>
+      </div>
+
+      <!-- SEMANAS ANTERIORES · toda la visual sin salir de la edición -->
+      <div>
+        <div class="seg-section-title">🗓 Semanas anteriores <span style="text-transform:none;letter-spacing:normal;font-weight:400;color:#94a3b8">(consistencia, lo que le pediste, tus tareas y comentarios — abre la que necesites)</span></div>
+        <div class="bg-slate-50 rounded-xl p-3">${semanasAnterioresHTML(cliente, previas, coachPorSegModal, { max: 6 })}</div>
+      </div>
+
+      <!-- HISTORIAL DE METAS Y DE CUERPO · trazabilidad a la mano -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <details class="bg-slate-50 rounded-xl p-3">
+          <summary class="cursor-pointer text-xs font-bold text-slate-600 uppercase tracking-wider">🥗 Historial de meta nutricional y macros</summary>
+          <div class="mt-3">${historialMetasHTML(cliente, metasCliente, { compacto: true, max: 8 })}</div>
+        </details>
+        <details class="bg-slate-50 rounded-xl p-3">
+          <summary class="cursor-pointer text-xs font-bold text-slate-600 uppercase tracking-wider">📏 Historial de peso y composición corporal</summary>
+          <div class="mt-3">${historialCorporalHTML(cliente, medsCliente, { compacto: true })}</div>
+        </details>
       </div>
 
       <!-- REGISTRO · 3 pilares -->
@@ -2667,15 +3154,19 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
                 <input id="sg-lesion-txt" class="text-xs" value="${escapeHtml(s.lesion_actualizacion || '')}" placeholder="Evolución…">
               </div>
             </div>` : ''}
+            <!-- Composición: SOLO lectura aquí. Se registra desde el perfil
+                 del cliente, que es donde vive la calculadora de metas y
+                 donde se decide si el peso nuevo cambia la meta. -->
             <div class="bg-white rounded-lg p-2 ring-1 ring-slate-200">
-              <div class="text-xs font-semibold text-slate-600 mb-1">🧬 Composición (opcional)</div>
-              <div class="grid grid-cols-3 gap-2">
-                <input id="sg-peso" type="number" step="0.1" placeholder="Peso" oninput="recalcCompSeg()">
-                <input id="sg-grasa" type="number" step="0.1" placeholder="%Grasa" oninput="recalcCompSeg()">
-                <input id="sg-cin" type="number" step="0.1" placeholder="Cintura">
-              </div>
-              <div id="sg-comp-preview" class="hidden text-xs mt-2"><div id="sg-comp-body"></div></div>
-              <div class="mt-2 pt-2 border-t border-slate-100">${tablaGrasaHtml()}</div>
+              <div class="text-xs font-semibold text-slate-600 mb-1">🧬 Composición corporal</div>
+              ${ultMedModal ? `
+                <div class="text-xs text-slate-700">
+                  <strong>${ultMedModal.peso ?? '—'} kg</strong>${ultMedModal.grasa_pct ? ` · ${ultMedModal.grasa_pct}% grasa` : ''}${ultMedModal.cintura ? ` · ${ultMedModal.cintura} cm cintura` : ''}
+                  <span class="text-slate-400">(${fmt.fechaCorta(ultMedModal.fecha)}${fmt.diasDesde(ultMedModal.fecha) != null ? ` · hace ${fmt.diasDesde(ultMedModal.fecha)}d` : ''})</span>
+                </div>
+                ${deltaPesoModal != null ? `<div class="text-xs mt-0.5" style="color:${deltaPesoModal > 0 ? '#2563eb' : deltaPesoModal < 0 ? '#d97706' : '#94a3b8'}">${deltaPesoModal > 0 ? '+' : ''}${deltaPesoModal} kg vs la medición anterior</div>` : ''}`
+                : '<div class="text-xs text-slate-400">Sin mediciones registradas.</div>'}
+              <p class="text-xs text-slate-400 mt-1">Se registra desde el perfil del cliente (✎ Editar → 📏 Agregar): allí se ve al instante si el peso nuevo cambia la meta y decides si la actualizas.</p>
             </div>
           </div>
 
@@ -2883,24 +3374,10 @@ window.guardarSeguimiento = async (cliente_id, semana, id) => {
     estado: 'hecho',
   };
   await db.seguimientos.upsert(row);
-
-  // Si el coach llenó peso/grasa en el seguimiento, crear una medición corporal
-  const pesoSeg = Number($('#sg-peso')?.value);
-  const grasaSeg = Number($('#sg-grasa')?.value);
-  const cinSeg = Number($('#sg-cin')?.value);
-  if (pesoSeg > 0) {
-    await db.mediciones.insert({
-      cliente_id,
-      fecha: row.fecha,
-      peso: pesoSeg,
-      grasa_pct: grasaSeg || null,
-      cintura: cinSeg || null,
-      notas: `Registrado desde seguimiento semanal ${semana}`,
-    });
-    toast('Semana + medición corporal guardadas');
-  } else {
-    toast('Semana guardada');
-  }
+  // Las mediciones corporales ya NO se cargan desde aquí: se registran en el
+  // perfil del cliente, donde el peso nuevo se ve contra la calculadora de
+  // metas y el coach decide si actualiza la meta y la envía al Mealtracker.
+  toast('Semana guardada');
   closeModal();
   navigate('seguimiento');
 };
@@ -3150,6 +3627,17 @@ window.enviarMetaMealtracker = async (clienteId, metaOverride = null) => {
     // fue la última meta que el cliente efectivamente recibió en su app.
     const registro = { kcal: meta.kcal, p: meta.p, c: meta.c, g: meta.g, at: new Date().toISOString() };
     const { error: eReg } = await sb.from('clientes').update({ meta_enviada_mt: registro }).eq('id', clienteId);
+    // Y queda también en el historial de metas: así la trazabilidad muestra
+    // no solo qué se calculó, sino qué recibió de verdad el cliente en su app.
+    await registrarMetaHistorial(clienteId, {
+      kcal: meta.kcal,
+      proteina_g: meta.p ?? null,
+      carbos_g: meta.c ?? null,
+      grasas_g: meta.g ?? null,
+      metodo: cliente.meta_metodo || null,
+      origen: 'envio_mt',
+      nota: 'Cargada en la app del cliente',
+    }, { enviada_mt: true });
     // Si la columna aún no existe (falta migración), el envío igual fue OK.
     const info = $('#mt-enviada-info');
     if (info && !eReg) {
@@ -4324,6 +4812,7 @@ window.nuevoCliente = () => {
   window._editingClienteId = null;
   window._pendingEncuesta = null;
   window._pendingMeta = null;
+  window._pendingMetaCtx = null;
   openModal(modalShell('Nuevo cliente', clienteForm(), `
     <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
     <button class="btn btn-primary" onclick="guardarCliente()">Guardar</button>
@@ -4336,6 +4825,7 @@ window.editarCliente = async (id) => {
   window._editingClienteId = id;
   window._pendingEncuesta = c.nivel_actividad ? { nivel: c.nivel_actividad, pal: c.pal_factor || PAL_MAP[c.nivel_actividad], respuestas: c.nivel_actividad_encuesta } : null;
   window._pendingMeta = null;
+  window._pendingMetaCtx = null;
   openModal(modalShell(`Editar · ${escapeHtml(c.nombre)}`, clienteForm(c), `
     <button class="btn btn-danger mr-auto" onclick="eliminarCliente('${id}')">Eliminar</button>
     <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
@@ -4426,10 +4916,27 @@ window.guardarCliente = async (id = null) => {
     notas: $('#cl-notas').value.trim() || null,
   };
   if (!row.nombre) { toast('Falta el nombre'); return; }
+  const pendingMeta = window._pendingMeta;
+  const pendingCtx = window._pendingMetaCtx || {};
   const r = await guardarClienteSeguro(id, row);
   if (!r.ok) return;
+  // Trazabilidad: cada meta que se fija deja su punto en el historial, con el
+  // peso y el objetivo con que se calculó.
+  if (pendingMeta && r.id) {
+    await registrarMetaHistorial(r.id, {
+      kcal: pendingMeta.meta_calorias,
+      proteina_g: pendingMeta.meta_proteina_g,
+      carbos_g: pendingMeta.meta_carbos_g,
+      grasas_g: pendingMeta.meta_grasas_g,
+      metodo: pendingMeta.meta_metodo || null,
+      argumento: pendingMeta.meta_argumento || null,
+      origen: 'calculo',
+      ...pendingCtx,
+    });
+  }
   window._pendingEncuesta = null;
   window._pendingMeta = null;
+  window._pendingMetaCtx = null;
   closeModal();
   toast(r.sinColumnas ? '⚠️ Guardado, pero sin los campos nuevos: corre la migración de schema.sql en Supabase' : 'Guardado');
   navigate('clientes');
@@ -4439,18 +4946,22 @@ window.guardarCliente = async (id = null) => {
 // (email/telefono): si Supabase las rechaza, reintenta sin ellas y avisa.
 const COLS_NUEVAS_CLIENTE = ['email', 'telefono', 'suplementos', 'actividades_complementarias', 'grasa_pct_kcal'];
 async function guardarClienteSeguro(id, row) {
-  const q = (r) => id ? sb.from('clientes').update(r).eq('id', id) : sb.from('clientes').insert(r);
-  let { error } = await q(row);
+  // Devuelve el id (el que venía, o el que asigna Supabase al insertar) para
+  // poder colgar el punto del historial de metas del cliente recién creado.
+  const q = (r) => id
+    ? sb.from('clientes').update(r).eq('id', id).select('id').maybeSingle()
+    : sb.from('clientes').insert(r).select('id').single();
+  let { data, error } = await q(row);
   let sinColumnas = false;
   if (error && COLS_NUEVAS_CLIENTE.some(col => (error.message || '').includes(`'${col}'`))) {
     sinColumnas = true;
     const r2 = { ...row };
     COLS_NUEVAS_CLIENTE.forEach(col => delete r2[col]);
-    ({ error } = Object.keys(r2).length ? await q(r2) : { error: null });
+    ({ data, error } = Object.keys(r2).length ? await q(r2) : { data: null, error: null });
   }
   if (error) { toast(error.message); return { ok: false, sinColumnas }; }
   _clientesCache = null;
-  return { ok: true, sinColumnas };
+  return { ok: true, sinColumnas, id: id || data?.id || null };
 }
 
 // =====================================================
@@ -4924,6 +5435,21 @@ window.recalcularMeta = async () => {
     meta_argumento: meta.argumento,
     meta_calculada_en: new Date().toISOString(),
   };
+  // Contexto del cálculo: NO va en la fila del cliente (rompería el update
+  // con columnas que no existen), va al historial de metas para poder
+  // releer meses después con qué peso y qué objetivo se fijó esta meta.
+  window._pendingMetaCtx = {
+    peso_kg: i.peso || null,
+    grasa_pct: i.grasa ?? null,
+    objetivo: objData.label,
+    objetivo_pct: objData.pct,
+    proteina_g_kg: i.gkg ? Number(i.gkg) : null,
+    grasa_pct_kcal: meta.grasa_pct_kcal ?? null,
+    pal: i.pal || null,
+    bmr: meta.bmr,
+    tdee: meta.tdee,
+    cambio_semanal_kg: meta.cambioSemanalKg,
+  };
 
   // Meta específica (sección 2): se toma del cálculo, editable a mano después.
   // Si el coach escribió algo propio (no empieza con "#### kcal"), se conserva y
@@ -4978,12 +5504,13 @@ window.eliminarCliente = async (id) => {
 };
 
 window.verCliente = async (id) => {
-  const [c, segs, pends, pagos, meds] = await Promise.all([
+  const [c, segs, pends, pagos, meds, metas] = await Promise.all([
     db.clientes.get(id),
     db.seguimientos.listCliente(id),
     db.pendientes.listCliente(id),
     sb.from('pagos').select('*').eq('cliente_id', id).order('mes', { ascending: false }),
     db.mediciones.listCliente(id),
+    db.metas.listCliente(id),
   ]);
   const edad = helpers.edadDe(c.fecha_nacimiento);
 
@@ -4997,14 +5524,11 @@ window.verCliente = async (id) => {
   const streakC = calcStreakDim(segsDesc, s => s.cardio_planeados > 0 && (s.cardio_ejecutados / s.cardio_planeados) >= 0.75);
   const streakGlobal = calcStreakDim(segsDesc, s => (s.score_global ?? 0) >= 75);
 
-  // Serie de mediciones para gráfica
-  const medsAsc = meds.slice().sort((a, b) => a.fecha.localeCompare(b.fecha));
-  const labelsMed = medsAsc.map(m => fmt.fechaCorta(m.fecha));
-  const pesos = medsAsc.map(m => m.peso ?? null).filter(v => v !== null);
-  const grasas = medsAsc.map(m => m.grasa_pct ?? null).filter(v => v !== null);
-
-  // Composición corporal: última medición + estimaciones
-  const ultMed = meds.length ? meds[meds.length - 1] : null;
+  // Composición corporal: última medición + estimaciones. Las gráficas y la
+  // tabla completa del historial las arma historialCorporalHTML (compartido
+  // con la vista de Seguimiento y con el modal de la semana).
+  const medsAsc = meds.slice().sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
+  const ultMed = medsAsc.length ? medsAsc[medsAsc.length - 1] : null;
   const comp = ultMed ? calcComposicionCorporal({
     peso: ultMed.peso,
     grasa_pct: ultMed.grasa_pct,
@@ -5012,15 +5536,6 @@ window.verCliente = async (id) => {
     sexo: c.sexo,
     altura_cm: c.estatura_cm,
   }) : null;
-
-  // Historial de composición corporal para gráfica de barras estimadas
-  const compHist = medsAsc.map(m => calcComposicionCorporal({
-    peso: m.peso,
-    grasa_pct: m.grasa_pct,
-    edad,
-    sexo: c.sexo,
-    altura_cm: c.estatura_cm,
-  })).filter(x => x);
 
   // El quick view se llena async cuando el modal ya está en el DOM
   setTimeout(() => quickAdherencia3Sem(c, 'quick3-modal', segs), 60);
@@ -5082,8 +5597,8 @@ window.verCliente = async (id) => {
       ${c.objetivo || c.meta_especifica || c.fase_programa ? `
         <div class="sec sec-olive">
           <div class="sec-title">2 · 🎯 Objetivo y fase</div>
-          ${c.objetivo ? `<div class="text-slate-800">${escapeHtml(c.objetivo)}</div>` : ''}
-          ${c.meta_especifica ? `<div class="text-slate-600 text-xs mt-1">${escapeHtml(c.meta_especifica)}</div>` : ''}
+          ${c.objetivo ? `<div class="text-slate-800">${textoExpandible(c.objetivo, 140)}</div>` : ''}
+          ${c.meta_especifica ? `<div class="text-slate-600 text-xs mt-1">${textoExpandible(c.meta_especifica, 140)}</div>` : ''}
           ${c.fase_programa ? `<div class="text-slate-600 text-xs mt-1"><span class="text-slate-500">Fase:</span> ${FASES_PROGRAMA.find(f => f.key === c.fase_programa)?.label || c.fase_programa}</div>` : ''}
         </div>` : ''}
 
@@ -5205,64 +5720,23 @@ window.verCliente = async (id) => {
             ${mtConfigured() ? `<button class="btn btn-primary btn-sm" onclick="enviarMetaMealtracker('${c.id}')" title="Cambia la meta en la app Mealtracker del cliente (pide confirmación)">🎯 Enviar meta al Mealtracker</button>` : ''}
             ${c.mealtracker_id ? `<button class="text-xs text-blue-700 font-semibold hover:underline" onclick="abrirNutricionCliente('${c.id}')">📊 Ver dashboard de alimentación</button>` : ''}
           </div>
-        </div>` : ''}
+          <details class="mt-3 bg-white/70 rounded-lg p-2" open>
+            <summary class="text-xs text-blue-700 font-semibold cursor-pointer">📜 Historial de metas y macros cargadas · trazabilidad</summary>
+            <div class="mt-2">${historialMetasHTML(c, metas, { max: 12 })}</div>
+          </details>
+        </div>` : `
+        <div class="sec sec-blue">
+          <div class="sec-title">5 · 🥗 Meta nutricional diaria</div>
+          <p class="text-xs text-slate-500">Sin meta definida. Calcúlala en "✎ Editar" (sección 5) y desde ahí queda el historial.</p>
+          ${(metas || []).length ? `<details class="mt-2 bg-white/70 rounded-lg p-2"><summary class="text-xs text-blue-700 font-semibold cursor-pointer">📜 Metas anteriores</summary><div class="mt-2">${historialMetasHTML(c, metas, { max: 12 })}</div></details>` : ''}
+        </div>`}
 
       <div class="sec sec-teal">
         <div class="flex items-baseline justify-between mb-2">
-          <div class="sec-title" style="margin-bottom:0">📏 Mediciones corporales (${meds.length})</div>
+          <div class="sec-title" style="margin-bottom:0">📏 Historial de peso y composición corporal (${meds.length})</div>
           <button class="text-xs text-teal-700 font-semibold hover:underline" onclick="nuevaMedicion('${c.id}')">+ Agregar</button>
         </div>
-        ${ultMed ? `
-          <div class="bg-teal-50 ring-1 ring-teal-100 rounded-xl px-3 py-2 mb-2 text-sm text-teal-900">
-            <strong>Último registro vigente:</strong>
-            ${ultMed.peso ? ` <strong>${ultMed.peso} kg</strong>` : ''}
-            ${ultMed.grasa_pct ? ` · ${ultMed.grasa_pct}% grasa` : ''}
-            ${ultMed.cintura ? ` · ${ultMed.cintura} cm cintura` : ''}
-            ${ultMed.fecha ? ` <span class="text-teal-700/70 text-xs">(${fmt.fechaCorta(ultMed.fecha)})</span>` : ''}
-          </div>` : ''}
-        ${meds.length === 0 ? '<p class="text-xs text-slate-500">Sin mediciones registradas.</p>' : `
-          ${pesos.length >= 2 ? `
-            <div class="bg-slate-50 rounded-xl p-3 mb-2">
-              <div class="text-xs font-bold text-slate-700 mb-2">Evolución peso ${grasas.length >= 2 ? '· % grasa' : ''}</div>
-              ${(() => {
-                const series = [{ label: 'Peso', color: '#10b981', points: medsAsc.map(m => m.peso ?? null) }];
-                const minP = Math.min(...pesos), maxP = Math.max(...pesos);
-                const opts = { yMin: Math.floor(minP - 3), yMax: Math.ceil(maxP + 3), height: 160 };
-                if (grasas.length >= 2) {
-                  series.push({ label: '% grasa', color: '#f59e0b', points: medsAsc.map(m => m.grasa_pct ?? null) });
-                }
-                return lineChart(series, labelsMed, opts);
-              })()}
-            </div>` : ''}
-          ${compHist.length >= 2 && compHist.some(x => x.masa_muscular_smm_kg) ? `
-            <div class="bg-slate-50 rounded-xl p-3 mb-2">
-              <div class="text-xs font-bold text-slate-700 mb-2">Evolución composición corporal (estimada)</div>
-              ${(() => {
-                const magrasVals = compHist.map(x => x.masa_magra_kg ?? null);
-                const grasasKgVals = compHist.map(x => x.masa_grasa_kg ?? null);
-                const smmVals = compHist.map(x => x.masa_muscular_smm_kg ?? null);
-                const allVals = [...magrasVals, ...grasasKgVals, ...smmVals].filter(v => v !== null);
-                if (!allVals.length) return '';
-                const minV = Math.min(...allVals), maxV = Math.max(...allVals);
-                const labelsComp = medsAsc.map(m => fmt.fechaCorta(m.fecha));
-                return lineChart([
-                  { label: 'Masa magra', color: '#10b981', points: magrasVals },
-                  { label: 'Músculo esquel.', color: '#3b82f6', points: smmVals },
-                  { label: 'Masa grasa', color: '#f59e0b', points: grasasKgVals },
-                ], labelsComp, { yMin: Math.max(0, Math.floor(minV - 3)), yMax: Math.ceil(maxV + 3), height: 160 });
-              })()}
-              <div class="text-[10px] text-slate-500 mt-1">Fórmulas: Lee (SMM), peso × (1-%grasa) (magra)</div>
-            </div>` : ''}
-          <table><thead><tr><th>Fecha</th><th>Peso</th><th>% grasa</th><th>Cintura</th><th></th></tr></thead><tbody>
-            ${meds.slice().reverse().slice(0, 6).map(m => `
-              <tr>
-                <td>${fmt.fechaCorta(m.fecha)}</td>
-                <td>${m.peso ?? '—'}</td>
-                <td>${m.grasa_pct ?? '—'}</td>
-                <td>${m.cintura ?? '—'}</td>
-                <td class="text-right"><button class="btn btn-ghost text-xs" onclick="eliminarMedicion('${m.id}', '${c.id}')">✕</button></td>
-              </tr>`).join('')}
-          </tbody></table>`}
+        ${historialCorporalHTML(c, meds, { editable: true })}
       </div>
 
       <div class="sec sec-slate">
@@ -5291,15 +5765,48 @@ window.verCliente = async (id) => {
 };
 
 // ===== Mediciones corporales =====
+// Registrar peso/%grasa es el momento en que la meta puede quedar vieja: el
+// gasto se calcula sobre el peso. Por eso el modal recalcula la meta EN VIVO
+// con los mismos ajustes del cliente (objetivo, g/kg de proteína, % de grasa)
+// y muestra el delta contra la meta guardada — el coach decide si la actualiza
+// y si la manda al Mealtracker. Nada se cambia sin que él lo pida.
+function metaSugeridaDesdeMedicion(c, peso, grasaPct) {
+  const objData = OBJETIVOS_KCAL.find(o => o.key === c.objetivo_calorico);
+  const faltan = [];
+  if (!peso) faltan.push('peso');
+  if (!c.estatura_cm) faltan.push('estatura');
+  if (!c.fecha_nacimiento) faltan.push('fecha de nacimiento');
+  if (!c.sexo) faltan.push('sexo');
+  if (!c.pal_factor && !c.nivel_actividad) faltan.push('nivel de actividad');
+  if (!objData) faltan.push('objetivo calórico');
+  if (faltan.length) return { faltan };
+  const meta = calcMetaNutricional({
+    peso,
+    altura: c.estatura_cm,
+    edad: helpers.edadDe(c.fecha_nacimiento),
+    sexo: c.sexo,
+    grasa_pct: grasaPct,
+    pal: c.pal_factor || PAL_MAP[c.nivel_actividad],
+    objetivo_pct: objData.pct,
+    proteina_g_kg: c.proteina_g_kg,
+    grasa_pct_kcal: c.grasa_pct_kcal,
+  });
+  return meta ? { meta, objetivo: objData } : { faltan: ['datos suficientes'] };
+}
+
 window.nuevaMedicion = async (clienteId) => {
-  const c = await db.clientes.get(clienteId);
+  const [c, meds] = await Promise.all([db.clientes.get(clienteId), db.mediciones.listCliente(clienteId)]);
+  const ult = meds.length ? meds[meds.length - 1] : null;
   window._medCliente = c;
+  window._medUltima = ult;
+  window._medMetaSugerida = null;
   openModal(modalShell('Nueva medición corporal', `
+    ${ult ? `<div class="text-xs text-slate-500 mb-3">Última medición: <strong>${ult.peso ?? '—'} kg</strong>${ult.grasa_pct ? ` · ${ult.grasa_pct}% grasa` : ''}${ult.cintura ? ` · ${ult.cintura} cm cintura` : ''} · ${fmt.fechaCorta(ult.fecha)}</div>` : ''}
     <div class="grid grid-cols-2 gap-3">
       <div><label>Fecha</label><input id="me-fecha" type="date" value="${fmt.hoy()}"></div>
-      <div><label>Peso (kg)</label><input id="me-peso" type="number" step="0.1" placeholder="78.5" oninput="recalcComp()"></div>
-      <div><label>% Grasa</label><input id="me-grasa" type="number" step="0.1" placeholder="18.5" oninput="recalcComp()"></div>
-      <div><label>Cintura (cm)</label><input id="me-cin" type="number" step="0.1"></div>
+      <div><label>Peso (kg)</label><input id="me-peso" type="number" step="0.1" placeholder="${ult?.peso ?? '78.5'}" oninput="recalcComp()"></div>
+      <div><label>% Grasa</label><input id="me-grasa" type="number" step="0.1" placeholder="${ult?.grasa_pct ?? '18.5'}" oninput="recalcComp()"></div>
+      <div><label>Cintura (cm)</label><input id="me-cin" type="number" step="0.1" placeholder="${ult?.cintura ?? ''}"></div>
       <div><label>Cadera (cm)</label><input id="me-cad" type="number" step="0.1"></div>
       <div><label>Pecho (cm)</label><input id="me-pec" type="number" step="0.1"></div>
       <div><label>Brazo (cm)</label><input id="me-bra" type="number" step="0.1"></div>
@@ -5310,36 +5817,72 @@ window.nuevaMedicion = async (clienteId) => {
       <div class="font-bold text-slate-700 mb-2">🧬 Estimaciones de composición corporal</div>
       <div id="me-comp-body"></div>
       <div class="text-slate-500 mt-2">Basado en peso + %grasa + edad + sexo + estatura del perfil. Estimaciones, no diagnóstico.</div>
+      <div class="mt-2 pt-2 border-t border-slate-200">${tablaGrasaHtml()}</div>
     </div>
+    <div id="me-meta-impacto" class="mt-3 hidden rounded-xl p-3 text-xs" style="background:#eff6ff;border:1px solid #bfdbfe"></div>
   `, `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-primary" onclick="guardarMedicion('${clienteId}')">Guardar</button>`));
+      <button class="btn btn-secondary" onclick="guardarMedicion('${clienteId}', false)">Guardar solo la medición</button>
+      <button id="me-btn-meta" class="btn btn-primary hidden" onclick="guardarMedicion('${clienteId}', true)">Guardar y actualizar meta</button>`));
 };
 
-// Cálculo de composición en el modal de seguimiento semanal
-window.recalcCompSeg = () => {
-  const c = window._segCliente;
-  if (!c) return;
-  const peso = Number($('#sg-peso')?.value);
-  const grasa = Number($('#sg-grasa')?.value);
-  if (!peso) { $('#sg-comp-preview')?.classList.add('hidden'); return; }
-  const edad = helpers.edadDe(c.fecha_nacimiento);
-  const comp = calcComposicionCorporal({ peso, grasa_pct: grasa || null, edad, sexo: c.sexo, altura_cm: c.estatura_cm });
-  if (!comp) { $('#sg-comp-preview')?.classList.add('hidden'); return; }
-  const body = $('#sg-comp-body');
-  if (!body) return;
-  const parts = [];
-  if (comp.masa_grasa_kg != null) parts.push(`Grasa: <strong style="color:#f59e0b">${comp.masa_grasa_kg} kg</strong>`);
-  if (comp.masa_magra_kg != null) parts.push(`Magra: <strong style="color:#10b981">${comp.masa_magra_kg} kg</strong>`);
-  if (comp.masa_muscular_smm_kg != null) parts.push(`SMM: <strong style="color:#3b82f6">${comp.masa_muscular_smm_kg} kg</strong>`);
-  if (comp.masa_osea_kg != null) parts.push(`Hueso: <strong style="color:#8b5cf6">${comp.masa_osea_kg} kg</strong>`);
-  if (comp.agua_corporal_L != null) parts.push(`Agua: <strong style="color:#0ea5e9">${comp.agua_corporal_L} L</strong>`);
-  body.innerHTML = parts.join(' · ');
-  $('#sg-comp-preview')?.classList.remove('hidden');
+// Panel de impacto: meta guardada vs meta recalculada con el peso nuevo.
+window.renderImpactoMetaMedicion = () => {
+  const c = window._medCliente;
+  const box = $('#me-meta-impacto');
+  const btn = $('#me-btn-meta');
+  if (!c || !box) return;
+  window._medMetaSugerida = null;
+  btn?.classList.add('hidden');
+
+  const peso = Number($('#me-peso')?.value);
+  if (!peso) { box.classList.add('hidden'); return; }
+  // Si no escriben %grasa, se usa el de la última medición: el método del
+  // cálculo (Katch-McArdle vs Mifflin) depende de tenerlo o no.
+  const grasaInput = $('#me-grasa')?.value;
+  const grasa = grasaInput ? Number(grasaInput) : (window._medUltima?.grasa_pct ?? null);
+  const grasaHeredada = !grasaInput && grasa != null;
+
+  const r = metaSugeridaDesdeMedicion(c, peso, grasa);
+  box.classList.remove('hidden');
+  if (r.faltan) {
+    box.innerHTML = `<div class="text-amber-700">Para ver si esta medición cambia la meta falta en el perfil: <strong>${r.faltan.join(', ')}</strong>. Complétalo en "✎ Editar" y vuelve a intentar.</div>`;
+    return;
+  }
+  const nueva = r.meta.redondeo;
+  const act = { kcal: c.meta_calorias, p: c.meta_proteina_g, ca: c.meta_carbos_g, g: c.meta_grasas_g };
+  const hayActual = !!act.kcal;
+  const dK = hayActual ? nueva.kcal - act.kcal : null;
+  const igual = hayActual && dK === 0 && nueva.proteina === act.p && nueva.carbos === act.ca && nueva.grasas === act.g;
+  window._medMetaSugerida = { meta: r.meta, objetivo: r.objetivo, peso, grasa };
+
+  const dLine = (label, nuevo, actual, color) => {
+    const d = actual != null ? nuevo - actual : null;
+    return `<div class="flex justify-between gap-2"><span style="color:${color};font-weight:600">${label}</span><span>${actual != null ? `<span class="text-slate-400">${actual}</span> → ` : ''}<strong>${nuevo}</strong>${d ? ` <span style="color:${d > 0 ? '#2563eb' : '#d97706'}">(${d > 0 ? '+' : ''}${d})</span>` : ''}</span></div>`;
+  };
+
+  box.innerHTML = `
+    <div class="font-bold text-blue-900 mb-1">🎯 ¿Cambia la meta con este peso?</div>
+    ${igual
+      ? '<div class="text-emerald-700 font-semibold">No. Con este peso la meta da exactamente lo mismo que la guardada — no hace falta tocarla.</div>'
+      : hayActual
+        ? `<div class="text-blue-900 mb-2">Sí: recalculada con <strong>${peso} kg</strong>${grasa != null ? ` y ${grasa}% grasa${grasaHeredada ? ' (de la medición anterior)' : ''}` : ''} da <strong>${dK > 0 ? '+' : ''}${dK} kcal</strong> respecto a la guardada.</div>`
+        : `<div class="text-blue-900 mb-2">Este cliente no tiene meta guardada. Con <strong>${peso} kg</strong> saldría así:</div>`}
+    <div class="space-y-0.5 bg-white/70 rounded-lg p-2">
+      ${dLine('Calorías', nueva.kcal, act.kcal, '#059669')}
+      ${dLine('Proteína (g)', nueva.proteina, act.p, '#2563eb')}
+      ${dLine('Carbos (g)', nueva.carbos, act.ca, '#d97706')}
+      ${dLine('Grasas (g)', nueva.grasas, act.g, '#dc2626')}
+    </div>
+    <div class="text-blue-700 mt-2">${r.meta.metodo} · ${escapeHtml(r.objetivo.label)} · TDEE ${r.meta.tdee} · ritmo esperado ${r.meta.cambioSemanalKg > 0 ? '+' : ''}${r.meta.cambioSemanalKg} kg/semana</div>
+    ${r.meta.avisos.map(a => `<div class="text-amber-700 bg-amber-50 rounded px-2 py-1 mt-1">⚠️ ${escapeHtml(a)}</div>`).join('')}
+    <div class="text-slate-500 mt-2">${igual ? 'Guarda solo la medición.' : 'Tú decides: "Guardar solo la medición" deja la meta como está · "Guardar y actualizar meta" la cambia en el CRM y te pregunta si la mandas al Mealtracker.'}</div>`;
+  if (!igual) btn?.classList.remove('hidden');
 };
 
 window.recalcComp = () => {
   const c = window._medCliente;
   if (!c) return;
+  renderImpactoMetaMedicion();
   const peso = Number($('#me-peso')?.value);
   const grasa = Number($('#me-grasa')?.value);
   if (!peso) { $('#me-comp-preview')?.classList.add('hidden'); return; }
@@ -5360,11 +5903,12 @@ window.recalcComp = () => {
   $('#me-comp-preview')?.classList.remove('hidden');
 };
 
-window.guardarMedicion = async (clienteId) => {
+window.guardarMedicion = async (clienteId, actualizarMeta = false) => {
   const num = (sel) => { const v = $(sel).value; return v ? Number(v) : null; };
+  const fecha = $('#me-fecha').value || fmt.hoy();
   await db.mediciones.insert({
     cliente_id: clienteId,
-    fecha: $('#me-fecha').value || fmt.hoy(),
+    fecha,
     peso: num('#me-peso'),
     grasa_pct: num('#me-grasa'),
     cintura: num('#me-cin'),
@@ -5374,8 +5918,60 @@ window.guardarMedicion = async (clienteId) => {
     pierna: num('#me-pie'),
     notas: $('#me-notas').value || null,
   });
+
+  // Actualizar la meta es SIEMPRE decisión del coach: solo pasa si pulsó el
+  // botón que lo dice, y aun así se le confirma el cambio exacto.
+  const sug = window._medMetaSugerida;
+  let metaCambiada = false;
+  if (actualizarMeta && sug) {
+    const r = sug.meta.redondeo;
+    const ok = confirm(
+      `Actualizar la meta nutricional con el peso nuevo (${sug.peso} kg)\n\n` +
+      `Meta guardada: ${window._medCliente?.meta_calorias ? `${window._medCliente.meta_calorias} kcal · P${window._medCliente.meta_proteina_g} C${window._medCliente.meta_carbos_g} G${window._medCliente.meta_grasas_g}` : 'sin meta'}\n` +
+      `Meta nueva:    ${r.kcal} kcal · P${r.proteina} C${r.carbos} G${r.grasas}\n\n` +
+      `Esto cambia la meta en el CRM. ¿Confirmas?`
+    );
+    if (ok) {
+      const { error } = await sb.from('clientes').update({
+        meta_calorias: r.kcal,
+        meta_proteina_g: r.proteina,
+        meta_grasas_g: r.grasas,
+        meta_carbos_g: r.carbos,
+        meta_metodo: sug.meta.metodo,
+        meta_argumento: sug.meta.argumento,
+        meta_calculada_en: new Date().toISOString(),
+      }).eq('id', clienteId);
+      if (error) toast(error.message);
+      else {
+        metaCambiada = true;
+        _clientesCache = null;
+        await registrarMetaHistorial(clienteId, {
+          kcal: r.kcal, proteina_g: r.proteina, carbos_g: r.carbos, grasas_g: r.grasas,
+          metodo: sug.meta.metodo,
+          argumento: sug.meta.argumento,
+          origen: 'calculo',
+          nota: `Recalculada al registrar la medición del ${fecha}`,
+          fecha,
+          peso_kg: sug.peso,
+          grasa_pct: sug.grasa ?? null,
+          objetivo: sug.objetivo.label,
+          objetivo_pct: sug.objetivo.pct,
+          proteina_g_kg: window._medCliente?.proteina_g_kg ?? null,
+          grasa_pct_kcal: sug.meta.grasa_pct_kcal ?? null,
+          pal: window._medCliente?.pal_factor ?? null,
+          bmr: sug.meta.bmr,
+          tdee: sug.meta.tdee,
+          cambio_semanal_kg: sug.meta.cambioSemanalKg,
+        });
+      }
+    }
+  }
+
   closeModal();
-  toast('Medición guardada');
+  toast(metaCambiada ? '✓ Medición guardada y meta actualizada' : 'Medición guardada');
+  // Si la meta cambió, se ofrece mandarla al cliente (con su propia
+  // confirmación mostrando la meta vieja y la nueva de su app).
+  if (metaCambiada && mtConfigured()) await enviarMetaMealtracker(clienteId);
   verCliente(clienteId);
 };
 

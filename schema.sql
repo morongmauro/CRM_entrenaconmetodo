@@ -216,3 +216,69 @@ create index if not exists idx_push_pago_log_fecha on push_pago_log (creado_en);
 alter table push_pago_log enable row level security;
 drop policy if exists "coach lee push_pago_log" on push_pago_log;
 create policy "coach lee push_pago_log" on push_pago_log for select using (auth.role() = 'authenticated');
+
+-- ================================================================
+-- HISTORIAL DE METAS NUTRICIONALES
+-- La ficha guarda SOLO la meta vigente (clientes.meta_calorias…).
+-- Al recalcularla, la anterior se perdía — y sin ella no se puede
+-- leer un resultado ("bajó 2 kg", "se estancó") contra la meta que
+-- regía cuando pasó. Cada meta fijada o enviada al Mealtracker deja
+-- aquí una fila, con el peso y el objetivo con que se calculó.
+-- El CRM funciona sin esta tabla: mientras no exista muestra solo la
+-- meta vigente y avisa que falta correr esta migración.
+-- ================================================================
+create table if not exists metas_historial (
+  id                uuid primary key default gen_random_uuid(),
+  user_id           uuid not null default auth.uid() references auth.users on delete cascade,
+  cliente_id        uuid not null references clientes(id) on delete cascade,
+
+  -- Desde cuándo rige (la anterior se considera vigente hasta que aparece esta)
+  fecha             date not null default current_date,
+
+  -- Los números que ve el cliente (redondeados: kcal a 50, macros a 5 g)
+  kcal              integer,
+  proteina_g        integer,
+  carbos_g          integer,
+  grasas_g          integer,
+
+  -- Contexto del cálculo: para releer meses después POR QUÉ fue esta meta
+  metodo            text,          -- 'Mifflin-St Jeor' | 'Katch-McArdle'
+  origen            text,          -- 'calculo' | 'envio_mt' | 'manual'
+  nota              text,
+  argumento         text,
+  peso_kg           numeric,
+  grasa_pct         numeric,
+  objetivo          text,          -- p.ej. 'Déficit -20% (moderado)'
+  objetivo_pct      numeric,
+  proteina_g_kg     numeric,
+  grasa_pct_kcal    numeric,
+  pal               numeric,
+  bmr               integer,
+  tdee              integer,
+  cambio_semanal_kg numeric,
+
+  -- Si esta meta llegó de verdad a la app del cliente y cuándo
+  enviada_mt        boolean not null default false,
+  enviada_at        timestamptz,
+
+  created_at        timestamptz not null default now()
+);
+create index if not exists idx_metas_historial_cliente on metas_historial (cliente_id, fecha desc, created_at desc);
+
+alter table metas_historial enable row level security;
+drop policy if exists "own metas_historial" on metas_historial;
+create policy "own metas_historial" on metas_historial for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- Semilla: deja la meta vigente de cada cliente como primer punto del
+-- historial, para no arrancar la trazabilidad en blanco. Segura de repetir.
+insert into metas_historial (user_id, cliente_id, fecha, kcal, proteina_g, carbos_g, grasas_g, metodo, argumento, origen, nota)
+select c.user_id,
+       c.id,
+       coalesce(c.meta_calculada_en::date, current_date),
+       c.meta_calorias, c.meta_proteina_g, c.meta_carbos_g, c.meta_grasas_g,
+       c.meta_metodo, c.meta_argumento,
+       'calculo',
+       'Meta vigente al crear el historial'
+from clientes c
+where c.meta_calorias is not null
+  and not exists (select 1 from metas_historial m where m.cliente_id = c.id);
