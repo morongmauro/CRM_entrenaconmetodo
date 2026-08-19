@@ -1,84 +1,33 @@
-SECCIÓN 🥗 NUTRICIÓN — CRM EntrenaConMétodo
-===========================================
+CRM ENTRENACONMÉTODO · trazabilidad de las cápsulas
+===================================================
 
-OJO: GitHub NO descomprime archivos .zip. Si arrastras el .zip al repo,
-se sube el .zip tal cual y no sirve de nada. Por eso primero descomprimes
-en tu computador (ya lo hiciste si estás leyendo esto) y luego subes ESTOS
-archivos.
+Parcheado sobre el commit 737f72a, que es la versión que acabas de subir
+(la de los cambios de MealTracker + CRM). No pisa nada de eso: los únicos
+tramos que cambian son los del Centro de Recursos y el Journey.
 
+Dos archivos, los dos a la RAÍZ del repo morongmauro/CRM_entrenaconmetodo:
 
-PASO 1 · SUBIR LOS ARCHIVOS (una sola vez)
-------------------------------------------
-1. Entra a github.com/morongmauro/CRM_entrenaconmetodo
-2. Botón "Add file" → "Upload files"
-3. Abre esta carpeta, selecciona TODO su contenido (Ctrl+A / Cmd+A):
-   los 5 archivos sueltos MÁS la carpeta "api"
-   -> NO arrastres esta carpeta entera, arrastra lo que hay DENTRO.
-      Si arrastras la carpeta, te crea "crm-nutricion/" en el repo.
-4. Suéltalo en la zona de GitHub. Verás que reconoce "api/coach-insight.js"
-   con la ruta completa: eso es lo correcto.
-5. Puedes borrar este LEEME de la lista antes de confirmar (no estorba,
-   pero no hace falta subirlo).
-6. Commit.
+    app.js                    (REEMPLAZA el que ya está)
+    CAPSULAS-EN-EL-CRM.md     (nuevo: qué se agregó y qué hay que mantener)
 
-Los 5 archivos de la raíz REEMPLAZAN los que ya están.
-api/coach-insight.js es NUEVO.
+NO subas este archivo (LEEME-PRIMERO.txt).
 
+Importante: si vuelves a tocar el CRM desde la otra sesión ANTES de subir
+esto, avísame y lo vuelvo a aplicar sobre la versión nueva. Si ya subiste
+esto y luego cambias otra cosa, no hay problema: son tramos distintos.
 
-PASO 2 · VARIABLE DE ENTORNO EN VERCEL
---------------------------------------
-Solo hace falta para el botón de "Oportunidades de mejora". El resto de
-la sección funciona sin esto.
-
-Vercel → proyecto del CRM → Settings → Environment Variables
-  Name:  ANTHROPIC_API_KEY
-  Value: tu key de Anthropic (la misma del Mealtracker sirve)
-  Marca los tres entornos → Save
-
-Después: Deployments → ⋯ → Redeploy
-(las variables nuevas SOLO entran con un despliegue nuevo)
-
-
-PASO 3 · TABLA EN SUPABASE (opcional)
--------------------------------------
-Supabase (proyecto del CRM) → SQL Editor → New query
-Pega el contenido de schema.sql → Run
-
-Es seguro correrlo completo: todo es "create table if not exists" y no hay
-un solo drop/delete/truncate. No toca tus datos.
-Si prefieres lo mínimo, copia solo el bloque final, desde
-"create table if not exists nutricion_insights".
-
-Sin este paso la sección funciona igual, solo que no recuerda los análisis
-ya generados: cada vez que abras una semana tendrías que regenerarlos.
-
-
-QUÉ CAMBIÓ
+Qué cambia
 ----------
-app.js       + sección Nutrición completa (~1.050 líneas nuevas al final)
-             + arreglo: ahora se fusiona goals_history del Mealtracker, así
-               cada semana se compara contra la meta que regía ESA semana
-               y no contra la de hoy
-             + botón "Ver su alimentación de la semana" en la ficha del cliente
-index.html   + pestaña 🥗 Nutrición en la barra de navegación
-styles.css   + estilos de la sección
-schema.sql   + tabla nutricion_insights (guarda las oportunidades generadas)
-README.md    + documentación de la sección
-api/coach-insight.js   NUEVO · endpoint que genera las oportunidades.
-                       El prompt de coach y la API key viven acá, en el
-                       servidor: nunca bajan al navegador.
+· Tarjeta de cada cliente: línea nueva "Cápsulas 4/10".
+· Ficha del cliente: bloque "Centro de recursos · qué ha visto" con el
+  detalle cápsula por cápsula, lo que le falta, y los podcast abiertos.
+· Journey: paso nuevo "Empezó las cápsulas informativas" (automático).
 
+No hay que tocar Supabase: los datos ya se registran desde el Centro de
+Recursos, siempre que allá esté subido el index.html.html nuevo.
 
-CÓMO SE USA
------------
-Barra de navegación → 🥗 Nutrición
-  · Elige cliente y navega semana a semana con ← →
-  · Resumen    : la semana graficada contra su meta, macros, micros, patrones
-  · Alimentos  : lo que más calorías aportó, lo que más repite, mejor y peor
-                 densidad nutricional, y la tabla completa
-  · Día a día  : cada comida con sus alimentos, tal cual la registró
-  · Oportunidades : las 3-5 palancas del coach, con el mensaje listo para
-                    copiarle al cliente por WhatsApp
-
-Costo aproximado del botón de oportunidades: ~USD 0,12 por análisis
-(~500 COP). Se guarda: reabrir una semana ya analizada no cuesta nada.
+Para mantener
+-------------
+Cuando publiques una cápsula nueva en el centro, añádela también en app.js:
+busca CENTRO_CAPSULAS y agrega su id y su título. Solo sirve para saber
+cuáles FALTAN; si se te olvida, la que vio el cliente aparece igual.

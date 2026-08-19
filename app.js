@@ -311,33 +311,240 @@ const JOURNEY_STEPS = [
   { id: 'registra',      label: 'Usó el mealtracker por primera vez', auto: true, hint: 'Primera sincronización de su app' },
   { id: 'training',      label: 'Entrenamiento en marcha', auto: true, hint: 'Se marca solo con el primer seguimiento semanal en el CRM' },
   { id: 'guia',          label: 'Leyó la guía de alimentación', auto: true, hint: 'Se marca solo cuando lee capítulos de la guía en el Centro de Recursos' },
+  { id: 'capsulas',      label: 'Empezó las cápsulas informativas', auto: true, hint: 'Se marca solo cuando abre su primera cápsula en el Centro de Recursos. El detalle de cuáles vio está más abajo, en "Centro de recursos"' },
 ];
 
 // ── Lecturas del Centro de Recursos (Supabase propio del centro) ──
-// El centro guarda qué sección leyó cada cliente en reading_state
-// (client_name, source: 'hub'|'ga', section_key). La llave es pública
-// (misma que usa la página del centro), solo lectura.
+// El centro registra qué leyó o vio cada cliente en reading_state
+// (client_name, source, section_key). Las fuentes son:
+//
+//   'hub'     → onboarding ('programa', 'app', 'meal-tracker', 'journey') y 'faq'
+//   'ga'      → capítulos de la guía de alimentación
+//   'capsula' → cápsulas informativas, con la llave 'cap:<id>'
+//   'podcast' → episodios recomendados, con la llave 'pod:<id>'
+//
+// La llave es pública (la misma que usa la página del centro) y de solo
+// lectura.
 const CENTRO_SUPA_URL = 'https://kkoayfexdhpazufmyeoj.supabase.co';
 const CENTRO_SUPA_KEY = 'sb_publishable_9UimuwTGp2aIhe-4oSwJpw_ORwmzzhn';
-let _centroLecturas = null; // cache de sesión: todas las filas
 
-async function fetchLecturasCentro(nombre) {
-  try {
-    if (!_centroLecturas) {
-      const r = await fetch(`${CENTRO_SUPA_URL}/rest/v1/reading_state?select=client_name,source,section_key`, {
-        headers: { apikey: CENTRO_SUPA_KEY, Authorization: `Bearer ${CENTRO_SUPA_KEY}` },
-      });
+// Catálogo de cápsulas publicadas en el centro. Es la copia de
+// capsulas/capsulas.js del repo del Centro de Recursos, y sirve para saber
+// cuáles FALTAN por ver, no solo cuáles vio.
+// >>> Si publicas una cápsula nueva allá, añade aquí su id y su título. <<<
+// Si se te olvida no se rompe nada: una cápsula vista que no esté en esta
+// lista igual aparece, con el título que traiga el registro.
+const CENTRO_CAPSULAS = [
+  { id: 'nutricion-proteina',   cat: 'Nutrición',     title: 'Proteína: cuánta y cuándo' },
+  { id: 'nutricion-plato',      cat: 'Nutrición',     title: 'El plato balanceado, en 3 pasos' },
+  { id: 'entreno-sobrecarga',   cat: 'Entrenamiento', title: 'Cómo elegir el peso y progresar' },
+  { id: 'entreno-orden',        cat: 'Entrenamiento', title: 'El orden de los ejercicios importa' },
+  { id: 'entreno-rpe',          cat: 'Entrenamiento', title: 'RPE: entrena con percepción' },
+  { id: 'entreno-maquinas',     cat: 'Entrenamiento', title: 'Configura la máquina antes de la serie' },
+  { id: 'entreno-herramientas', cat: 'Entrenamiento', title: 'Bandas, kettlebell y mancuernas' },
+  { id: 'movilidad-para-que',   cat: 'Movilidad',     title: 'Movilidad: para qué sirve de verdad' },
+  { id: 'habitos-sueno',        cat: 'Hábitos',       title: 'Dormir es entrenar' },
+  { id: 'habitos-pasos',        cat: 'Hábitos',       title: 'Pasos diarios: el cardio invisible' },
+];
+
+let _centroLecturas = null;   // cache de sesión: todas las filas del centro
+let _centroPendiente = null;  // la petición en curso, para no pedirla dos veces
+
+// Una sola llamada por sesión para todos los clientes. Se pide primero con
+// section_label (el título que viajó con la lectura); si la vista del centro
+// todavía no expone esa columna, se reintenta sin ella en vez de fallar.
+function cargarLecturasCentro() {
+  if (_centroLecturas) return Promise.resolve(_centroLecturas);
+  if (_centroPendiente) return _centroPendiente;
+  const headers = { apikey: CENTRO_SUPA_KEY, Authorization: `Bearer ${CENTRO_SUPA_KEY}` };
+  const pedir = (cols) => fetch(`${CENTRO_SUPA_URL}/rest/v1/reading_state?select=${cols}`, { headers });
+  _centroPendiente = (async () => {
+    try {
+      let r = await pedir('client_name,source,section_key,section_label');
+      if (!r.ok) r = await pedir('client_name,source,section_key');
       _centroLecturas = r.ok ? await r.json() : [];
+    } catch (e) {
+      _centroLecturas = null; // sin conexión al centro
     }
-    const buscado = normalizeName(nombre);
-    const filas = (_centroLecturas || []).filter(f => normalizeName(f.client_name) === buscado);
-    return {
-      onboarding: filas.some(f => f.source === 'hub' && f.section_key === 'programa'),
-      faq: filas.some(f => f.source === 'hub' && f.section_key === 'faq'),
-      guia: filas.some(f => f.source === 'ga'),
-    };
-  } catch (e) {
-    return null; // sin conexión al centro: esos pasos quedan pendientes
+    _centroPendiente = null;
+    return _centroLecturas;
+  })();
+  return _centroPendiente;
+}
+
+// Devuelve TODO lo que el centro sabe de un cliente: los hitos que usa el
+// journey y, además, el detalle de cápsulas y podcast para la trazabilidad.
+async function fetchLecturasCentro(nombre) {
+  const todas = await cargarLecturasCentro();
+  if (!todas) return null;
+  const buscado = normalizeName(nombre);
+  const filas = todas.filter(f => normalizeName(f.client_name) === buscado);
+
+  // Cápsulas: la llave viaja como 'cap:<id>'
+  const vistasCap = new Map();
+  filas.filter(f => f.source === 'capsula').forEach(f => {
+    const id = String(f.section_key || '').replace(/^cap:/, '');
+    if (id) vistasCap.set(id, f.section_label || null);
+  });
+  const capsulas = CENTRO_CAPSULAS.map(c => ({
+    id: c.id, cat: c.cat, title: c.title, vista: vistasCap.has(c.id),
+  }));
+  // Cápsulas vistas que no están en el catálogo de arriba (publicaste una
+  // nueva en el centro y no la copiaste aquí): se muestran igual.
+  vistasCap.forEach((label, id) => {
+    if (!CENTRO_CAPSULAS.some(c => c.id === id)) {
+      capsulas.push({ id, cat: 'Otras', title: label || id, vista: true });
+    }
+  });
+
+  // Podcast: llave 'pod:<id>'. No hay catálogo, así que solo se listan los
+  // que sí vio, con el título que quedó registrado.
+  const podcasts = filas.filter(f => f.source === 'podcast').map(f => {
+    const id = String(f.section_key || '').replace(/^pod:/, '');
+    return { id, title: f.section_label || id };
+  });
+
+  const capsVistas = capsulas.filter(c => c.vista).length;
+  return {
+    onboarding: filas.some(f => f.source === 'hub' && f.section_key === 'programa'),
+    faq: filas.some(f => f.source === 'hub' && f.section_key === 'faq'),
+    guia: filas.some(f => f.source === 'ga'),
+    // Detalle para el panel de trazabilidad
+    hub: filas.filter(f => f.source === 'hub').map(f => f.section_key),
+    guiaCaps: filas.filter(f => f.source === 'ga').length,
+    capsulas,
+    capsVistas,
+    capsTotal: capsulas.length,
+    podcasts,
+  };
+}
+
+// Resumen corto (vistas/total) para las tarjetas del listado de clientes.
+async function resumenCapsulas(nombre) {
+  const lec = await fetchLecturasCentro(nombre);
+  if (!lec) return null;
+  return { vistas: lec.capsVistas, total: lec.capsTotal };
+}
+
+// ── Panel "Centro de recursos" de la ficha ────────────────────────────
+// Qué material ha consumido el cliente, pieza por pieza. El avance llega
+// solo: lo registra el propio centro cuando el cliente abre cada cosa.
+const CENTRO_HUB_SECCIONES = [
+  ['programa',     'Cómo funciona el programa'],
+  ['app',          'Cómo funciona la app de entrenamiento'],
+  ['meal-tracker', 'Cómo usar el Meal Tracker'],
+  ['journey',      'Tu Journey en el programa'],
+  ['faq',          'Preguntas frecuentes'],
+];
+
+function chipCentro(label, hechas, total, titulo) {
+  const completo = total > 0 && hechas >= total;
+  const cero = !hechas;
+  const color = completo ? 'background:#d1fae5;color:#065f46'
+              : cero     ? 'background:#f1f5f9;color:#94a3b8'
+                         : 'background:#fef3c7;color:#92400e';
+  return `<span class="tag" style="${color}" title="${escapeHtml(titulo || '')}">${escapeHtml(label)} ${hechas}${total ? '/' + total : ''}</span>`;
+}
+
+function lineaMaterial(titulo, vista, extra) {
+  return `<div class="flex items-center gap-2 text-xs py-0.5">
+    <span class="flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold ${vista ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}">${vista ? '✓' : '○'}</span>
+    <span class="flex-1 min-w-0 ${vista ? 'text-slate-700' : 'text-slate-400'}">${escapeHtml(titulo)}</span>
+    ${extra ? `<span class="flex-shrink-0 text-slate-400">${extra}</span>` : ''}
+  </div>`;
+}
+
+// El cliente que está pintado ahora mismo, para poder refrescar el panel
+// sin volver a abrir la ficha.
+let _centroPanelCliente = null;
+
+// Las lecturas se piden una vez por sesión. Este botón vuelve a preguntarle
+// al centro: útil cuando acabas de pedirle a alguien que vea una cápsula.
+window.refrescarCentro = async () => {
+  _centroLecturas = null;
+  const el = $('#centro-panel');
+  if (el) el.innerHTML = '<div class="text-xs text-slate-400">Consultando el centro…</div>';
+  if (_centroPanelCliente) await cargarPanelCentro(_centroPanelCliente);
+};
+
+async function cargarPanelCentro(cliente) {
+  _centroPanelCliente = cliente;
+  const el = $('#centro-panel');
+  if (!el) return;
+  const lec = await fetchLecturasCentro(cliente.nombre);
+  const el2 = $('#centro-panel'); // la ficha pudo cerrarse mientras cargaba
+  if (!el2) return;
+  if (!lec) {
+    el2.innerHTML = '<div class="text-xs text-amber-600">No se pudo consultar el Centro de Recursos ahora mismo. Vuelve a abrir la ficha en un momento.</div>';
+    return;
+  }
+
+  const hubHechas = CENTRO_HUB_SECCIONES.filter(([k]) => lec.hub.includes(k)).length;
+  const capsPend = lec.capsulas.filter(c => !c.vista);
+
+  // Las cápsulas se agrupan por categoría, igual que en el centro
+  const porCat = [];
+  lec.capsulas.forEach(c => {
+    const g = porCat.find(x => x.cat === c.cat);
+    if (g) g.items.push(c); else porCat.push({ cat: c.cat, items: [c] });
+  });
+
+  el2.innerHTML = `
+    <div class="flex gap-1.5 flex-wrap mb-2">
+      ${chipCentro('🚀 Onboarding', hubHechas, CENTRO_HUB_SECCIONES.length, 'Secciones del onboarding y preguntas frecuentes')}
+      ${chipCentro('📖 Guía', lec.guiaCaps, 0, 'Capítulos leídos de la guía de alimentación')}
+      ${chipCentro('🖼️ Cápsulas', lec.capsVistas, lec.capsTotal, 'Infografías abiertas')}
+      ${lec.podcasts.length ? chipCentro('🎧 Podcast', lec.podcasts.length, 0, 'Episodios abiertos') : ''}
+    </div>
+
+    <div class="mb-2">
+      <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">Onboarding</div>
+      ${CENTRO_HUB_SECCIONES.map(([k, t]) => lineaMaterial(t, lec.hub.includes(k))).join('')}
+    </div>
+
+    <div class="mb-2">
+      <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">
+        Cápsulas informativas · ${lec.capsVistas} de ${lec.capsTotal}
+      </div>
+      ${porCat.map(g => `
+        <div class="text-[10px] text-slate-400 mt-1.5 mb-0.5">${escapeHtml(g.cat)}</div>
+        ${g.items.map(c => lineaMaterial(c.title, c.vista)).join('')}
+      `).join('')}
+      ${capsPend.length
+        ? `<div class="text-[11px] text-slate-500 mt-1.5">Le faltan <strong>${capsPend.length}</strong>: ${escapeHtml(capsPend.map(c => c.title).join(' · '))}</div>`
+        : `<div class="text-[11px] text-emerald-700 mt-1.5">Las vio todas ✓</div>`}
+    </div>
+
+    ${lec.podcasts.length ? `
+    <div>
+      <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">Podcast abiertos</div>
+      ${lec.podcasts.map(p => lineaMaterial(p.title, true)).join('')}
+    </div>` : ''}
+
+    <div class="flex items-center justify-between gap-2 mt-2">
+      <div class="text-[10px] text-slate-400 flex-1">Se registra solo cuando el cliente abre cada pieza en el Centro de Recursos. Si entra desde otro teléfono, el avance lo sigue igual.</div>
+      <button type="button" class="tag flex-shrink-0" style="background:#e0f2fe;color:#075985" onclick="refrescarCentro()" title="Volver a consultar el centro">↻ actualizar</button>
+    </div>
+  `;
+}
+
+// Pinta "Cápsulas x/10" en las tarjetas del listado de clientes. Una sola
+// consulta al centro para todos: las filas quedan en cache de sesión.
+async function pintarCapsulasEnCards(clientes) {
+  if (!document.querySelector('[data-caps-cell]')) return;
+  const todas = await cargarLecturasCentro();
+  if (!todas) {
+    document.querySelectorAll('[data-caps-cell]').forEach(el => { el.innerHTML = ''; });
+    return;
+  }
+  for (const c of clientes) {
+    const celda = document.querySelector(`[data-caps-cell="${c.id}"]`);
+    if (!celda) continue;
+    const r = await resumenCapsulas(c.nombre);
+    if (!r) { celda.innerHTML = ''; continue; }
+    const color = r.total && r.vistas >= r.total ? 'text-emerald-600'
+                : r.vistas ? 'text-amber-600' : 'text-slate-400';
+    celda.innerHTML = `<span class="text-slate-500">Cápsulas</span><span class="font-medium ${color}">🖼️ ${r.vistas}/${r.total}</span>`;
   }
 }
 
@@ -402,6 +609,7 @@ async function autollenarJourney(cliente, segs, meds) {
     if (lec.onboarding) marca('onboarding');
     if (lec.faq) marca('faq');
     if (lec.guia) marca('guia');
+    if (lec.capsVistas) marca('capsulas');
   }
 
   // Señales de la app del cliente (si está vinculado al Mealtracker)
@@ -4519,6 +4727,7 @@ routes.clientes = async () => {
                 const tot = JOURNEY_STEPS.length;
                 return `<div class="flex justify-between" title="Journey del cliente — abre la ficha para ver el detalle"><span class="text-slate-500">Journey</span><span class="font-medium ${n === tot ? 'text-emerald-600' : n >= tot / 2 ? 'text-amber-600' : 'text-slate-500'}">🚀 ${n}/${tot}</span></div>`;
               })()}
+              <div class="flex justify-between" data-caps-cell="${c.id}" title="Cápsulas informativas abiertas — abre la ficha para ver cuáles"></div>
             </div>
             ${(c.tags && c.tags.length) ? `<div class="mt-3 pt-3 border-t border-slate-100">${c.tags.map(t => `<span class="tag-pill">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
           </div>
@@ -4528,6 +4737,7 @@ routes.clientes = async () => {
     </div>
   `;
   cargarPanelInstalaciones(clientes);
+  pintarCapsulasEnCards(clientes);
   };
 
   if (_cliDataCache) {
@@ -5549,7 +5759,7 @@ window.verCliente = async (id) => {
   setTimeout(() => quickAdherencia3Sem(c, 'quick3-modal', segs), 60);
   // Journey: pinta lo guardado ya, y los pasos auto se completan async
   _journeyCtx = { id: c.id, journey: (c.journey && typeof c.journey === 'object') ? { ...c.journey } : {} };
-  setTimeout(() => { renderJourneyList(); autollenarJourney(c, segs, meds); }, 80);
+  setTimeout(() => { renderJourneyList(); autollenarJourney(c, segs, meds); cargarPanelCentro(c); }, 80);
   openModal(modalShell(escapeHtml(c.nombre), `
     <div class="space-y-4">
       <div class="flex gap-2 flex-wrap">
@@ -5588,6 +5798,13 @@ window.verCliente = async (id) => {
       <div class="sec sec-violet">
         <div class="sec-title flex items-center justify-between">🚀 Journey del cliente <span id="journey-prog" class="tag flex-shrink-0">…</span></div>
         <div id="journey-list" class="space-y-0.5"><div class="text-xs text-slate-400">Cargando…</div></div>
+      </div>
+
+      <!-- Centro de recursos: qué material ha consumido, pieza por pieza.
+           Se llena solo con lo que registra el propio centro. -->
+      <div class="sec sec-blue">
+        <div class="sec-title">📚 Centro de recursos · qué ha visto</div>
+        <div id="centro-panel"><div class="text-xs text-slate-400">Consultando el centro…</div></div>
       </div>
 
       <!-- 1. IDENTIDAD -->
