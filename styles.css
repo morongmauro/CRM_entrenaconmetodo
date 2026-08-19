@@ -215,3 +215,13 @@ tr:hover td { background-color: #f8fafc; }
 }
 .obj-chip span:hover { border-color: var(--brand-olive); color: var(--brand-olive); }
 .obj-chip input:checked + span { background: var(--brand-olive); border-color: var(--brand-olive); color: white; }
+
+/* ===== Sección Nutrición ===== */
+/* .sec-title vive normalmente dentro de un bloque .sec-* que le da color;
+   dentro de una .card suelta necesita el suyo. */
+.card > .sec-title { color: #64748b; }
+/* Los <details> de la vista día a día usan su propia cabecera: fuera el
+   triangulito del navegador. */
+.card > summary.list-none::-webkit-details-marker,
+summary.list-none::-webkit-details-marker { display: none; }
+summary.list-none { list-style: none; }

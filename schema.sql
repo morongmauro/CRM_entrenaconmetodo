@@ -282,3 +282,27 @@ select c.user_id,
 from clientes c
 where c.meta_calorias is not null
   and not exists (select 1 from metas_historial m where m.cliente_id = c.id);
+
+-- ================================================================
+-- OPORTUNIDADES DE MEJORA NUTRICIONAL (sección 🥗 Nutrición)
+-- Cada vez que el coach genera las oportunidades de una semana con
+-- /api/coach-insight, la respuesta queda guardada acá: así al volver
+-- a abrir esa semana se ve lo que ya se analizó (y lo que se le dijo
+-- al cliente) sin volver a pagar la generación.
+-- El CRM funciona sin esta tabla: si no existe, la sección genera
+-- igual, solo que no recuerda entre sesiones.
+-- ================================================================
+create table if not exists nutricion_insights (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null default auth.uid() references auth.users on delete cascade,
+  cliente_id  uuid not null references clientes(id) on delete cascade,
+  semana      text not null,              -- YYYY-Www
+  contenido   text not null,              -- respuesta cruda en el formato @@BLOQUE
+  modelo      text,
+  created_at  timestamptz not null default now()
+);
+create index if not exists idx_nutricion_insights on nutricion_insights (cliente_id, semana, created_at desc);
+
+alter table nutricion_insights enable row level security;
+drop policy if exists "own nutricion_insights" on nutricion_insights;
+create policy "own nutricion_insights" on nutricion_insights for all using (auth.uid() = user_id) with check (auth.uid() = user_id);

@@ -484,17 +484,25 @@ async function getMealtrackerDataMerged(cliente) {
   const datas = (await Promise.all(ids.map(id => getMealtrackerUserData(id)))).filter(Boolean);
   if (!datas.length) return null;
 
-  const history = {}, historyDetail = {};
-  let goals = null, today = null, today_totals = null, today_water = 0;
+  const history = {}, historyDetail = {}, wellbeing = {};
+  let goals = null, goals_history = null, today = null, today_totals = null, today_water = 0, today_entries = null;
   for (const d of datas) {                     // datas ya viene en orden de más reciente primero
     for (const [date, tot] of Object.entries(d.history || {})) if (!history[date]) history[date] = tot;
     for (const [date, ent] of Object.entries(d.historyDetail || {})) if (!historyDetail[date]) historyDetail[date] = ent;
+    for (const [date, wb] of Object.entries(d.wellbeing || {})) if (!wellbeing[date]) wellbeing[date] = wb;
     if (!goals && d.goals && Object.keys(d.goals).length) goals = d.goals;
+    // goals_history: sin esto goalsDeSemanaMT() nunca encontraba el historial y
+    // toda semana vieja se comparaba contra la meta de HOY.
+    if (!goals_history && Array.isArray(d.goals_history) && d.goals_history.length) goals_history = d.goals_history;
     if (d.today && d.today_totals && Number(d.today_totals.kcal) > 0 && (!today || d.today > today)) {
       today = d.today; today_totals = d.today_totals; today_water = d.today_water || 0;
+      today_entries = Array.isArray(d.today_entries) ? d.today_entries : null;
     }
   }
-  const merged = { history, historyDetail, goals: goals || (datas[0].goals || {}), today, today_totals, today_water, _cuentas: datas.length };
+  // El día en curso también debe verse en el detalle (la API en modo seguro ya
+  // lo fusiona; en modo directo el blob trae today_entries aparte).
+  if (today && today_entries && today_entries.length && !historyDetail[today]) historyDetail[today] = today_entries;
+  const merged = { history, historyDetail, wellbeing, goals: goals || (datas[0].goals || {}), goals_history, today, today_totals, today_water, _cuentas: datas.length };
   _mtMergedCache = { key: ck, at: Date.now(), data: merged };
   return merged;
 }
@@ -5718,7 +5726,8 @@ window.verCliente = async (id) => {
           ${c.meta_argumento ? `<details class="mt-2"><summary class="text-xs text-blue-700 cursor-pointer">Ver argumento del cálculo</summary><pre class="text-xs text-slate-600 mt-1 whitespace-pre-wrap">${escapeHtml(c.meta_argumento)}</pre></details>` : ''}
           <div class="flex gap-2 flex-wrap mt-2">
             ${mtConfigured() ? `<button class="btn btn-primary btn-sm" onclick="enviarMetaMealtracker('${c.id}')" title="Cambia la meta en la app Mealtracker del cliente (pide confirmación)">🎯 Enviar meta al Mealtracker</button>` : ''}
-            ${c.mealtracker_id ? `<button class="text-xs text-blue-700 font-semibold hover:underline" onclick="abrirNutricionCliente('${c.id}')">📊 Ver dashboard de alimentación</button>` : ''}
+            ${mtConfigured() ? `<button class="btn btn-secondary btn-sm" onclick="verNutricionCliente('${c.id}')" title="Semana completa: gráficas, alimentos y oportunidades de mejora">🥗 Ver su alimentación de la semana</button>` : ''}
+            ${c.mealtracker_id ? `<button class="text-xs text-blue-700 font-semibold hover:underline" onclick="abrirNutricionCliente('${c.id}')">📊 Resumen rápido</button>` : ''}
           </div>
           <details class="mt-3 bg-white/70 rounded-lg p-2" open>
             <summary class="text-xs text-blue-700 font-semibold cursor-pointer">📜 Historial de metas y macros cargadas · trazabilidad</summary>
@@ -6746,3 +6755,1060 @@ window.verClienteIA = async (nombre) => {
     btn.addEventListener('click', () => navigate('ia'));
   } catch (e) { /* si el shell cambia, no rompe nada */ }
 })();
+
+// =====================================================
+// VIEW: NUTRICIÓN — qué comió el cliente esta semana
+// =====================================================
+// Lee EN VIVO el Mealtracker del cliente (history + historyDetail fusionados
+// de todas sus cuentas) y arma, para una semana ISO:
+//   · el resumen global graficado (kcal y macros día a día vs. su meta),
+//   · el detalle de alimentos agregados de la semana,
+//   · los que más calorías aportaron y los de mejor/peor densidad nutricional,
+//   · patrones (horarios, entre semana vs. fin de semana, variabilidad),
+//   · y las OPORTUNIDADES DE MEJORA que genera Claude para que el coach se
+//     las diga al cliente (api/coach-insight.js).
+//
+// Todo el cálculo es local: acá no se inventan números, solo se agregan los
+// que el cliente registró. La IA recibe ese análisis ya hecho, nunca la data
+// cruda, y su trabajo es la LECTURA experta, no la aritmética.
+
+// ─── Micronutrientes estimados ──────────────────────────────────────────
+// Misma tabla y misma lógica que usa el Mealtracker en su panel de
+// rendimiento: si el registro ya trae fibra/omega3/azúcar (los estima el LLM
+// al registrar la comida) se usan tal cual; si es un registro viejo, se
+// estima por palabra clave sobre los gramos del item.
+// Valores por 1 g de alimento.
+const NUT_MICRO_DB = {
+  'arroz': { fiber: 0.004, omega3: 0, sugar: 0 },
+  'pollo': { fiber: 0, omega3: 0.0001, sugar: 0 },
+  'pechuga': { fiber: 0, omega3: 0.0001, sugar: 0 },
+  'pescado': { fiber: 0, omega3: 0.012, sugar: 0 },
+  'salmon': { fiber: 0, omega3: 0.022, sugar: 0 },
+  'atun': { fiber: 0, omega3: 0.013, sugar: 0 },
+  'sardina': { fiber: 0, omega3: 0.015, sugar: 0 },
+  'huevo': { fiber: 0, omega3: 0.001, sugar: 0 },
+  'avena': { fiber: 0.1, omega3: 0.0014, sugar: 0 },
+  'banana': { fiber: 0.026, omega3: 0, sugar: 0 },
+  'platano': { fiber: 0.026, omega3: 0, sugar: 0 },
+  'manzana': { fiber: 0.024, omega3: 0, sugar: 0 },
+  'palta': { fiber: 0.067, omega3: 0.0011, sugar: 0 },
+  'aguacate': { fiber: 0.067, omega3: 0.0011, sugar: 0 },
+  'arepa': { fiber: 0.03, omega3: 0, sugar: 0 },
+  'pan': { fiber: 0.07, omega3: 0, sugar: 0 },
+  'yogur': { fiber: 0, omega3: 0, sugar: 0 },
+  'leche': { fiber: 0, omega3: 0, sugar: 0 },
+  'queso': { fiber: 0, omega3: 0.001, sugar: 0 },
+  'almendra': { fiber: 0.13, omega3: 0.0001, sugar: 0 },
+  'mantequilla mani': { fiber: 0.06, omega3: 0.0001, sugar: 0 },
+  'espinaca': { fiber: 0.022, omega3: 0.0014, sugar: 0 },
+  'brocoli': { fiber: 0.026, omega3: 0.001, sugar: 0 },
+  'lenteja': { fiber: 0.079, omega3: 0.001, sugar: 0 },
+  'frijol': { fiber: 0.06, omega3: 0.001, sugar: 0 },
+  'tomate': { fiber: 0.012, omega3: 0, sugar: 0 },
+  'aceite oliva': { fiber: 0, omega3: 0.008, sugar: 0 },
+  'nuez': { fiber: 0.067, omega3: 0.09, sugar: 0 },
+  'nueces': { fiber: 0.067, omega3: 0.09, sugar: 0 },
+  'chia': { fiber: 0.34, omega3: 0.178, sugar: 0 },
+  'linaza': { fiber: 0.27, omega3: 0.228, sugar: 0 },
+  'gaseosa': { fiber: 0, omega3: 0, sugar: 0.106 },
+  'refresco': { fiber: 0, omega3: 0, sugar: 0.106 },
+  'coca': { fiber: 0, omega3: 0, sugar: 0.106 },
+  'jugo': { fiber: 0.002, omega3: 0, sugar: 0.09 },
+  'chocolate': { fiber: 0.07, omega3: 0, sugar: 0.47 },
+  'galleta': { fiber: 0.02, omega3: 0, sugar: 0.30 },
+  'helado': { fiber: 0, omega3: 0, sugar: 0.21 },
+  'postre': { fiber: 0.01, omega3: 0, sugar: 0.30 },
+  'torta': { fiber: 0.01, omega3: 0, sugar: 0.35 },
+  'pastel': { fiber: 0.01, omega3: 0, sugar: 0.35 },
+  'dulce': { fiber: 0, omega3: 0, sugar: 0.55 },
+  'miel': { fiber: 0, omega3: 0, sugar: 0.82 },
+};
+
+function nutMicroKey(name) {
+  if (!name) return null;
+  const n = String(name).toLowerCase();
+  for (const key of Object.keys(NUT_MICRO_DB)) if (n.includes(key)) return key;
+  return null;
+}
+
+// Gramos de un item a partir de su texto de cantidad ("120 g", "1 unidad (~50g)").
+// Si no hay gramos declarados, se aproxima por calorías (1,5 kcal/g de mezcla).
+function nutGramos(it) {
+  const amt = String(it.amount || '').toLowerCase();
+  const m = amt.match(/(\d+(?:[.,]\d+)?)\s*g\b/);
+  if (m) return parseFloat(m[1].replace(',', '.'));
+  const kcal = Number(it.kcal) || 0;
+  return kcal > 0 ? kcal / 1.5 : 0;
+}
+
+function nutMicrosItem(it) {
+  if (it.fiber != null || it.omega3 != null || it.sugar != null) {
+    return {
+      fiber: Number(it.fiber) > 0 ? Number(it.fiber) : 0,
+      omega3: Number(it.omega3) > 0 ? Number(it.omega3) : 0,
+      sugar: Number(it.sugar) > 0 ? Number(it.sugar) : 0,
+      estimado: false,
+    };
+  }
+  const key = nutMicroKey(it.name);
+  const grams = nutGramos(it);
+  if (!key || grams <= 0) return { fiber: 0, omega3: 0, sugar: 0, estimado: true };
+  const db = NUT_MICRO_DB[key];
+  return { fiber: db.fiber * grams, omega3: db.omega3 * grams, sugar: db.sugar * grams, estimado: true };
+}
+
+// ─── Utilidades de la semana ────────────────────────────────────────────
+const NUT_DOW = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+
+function nutFechasSemana(semanaISO) {
+  const [ini] = semanaISOToRange(semanaISO);
+  const out = [];
+  const base = new Date(ini + 'T00:00:00');
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(base);
+    d.setDate(base.getDate() + i);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+  }
+  return out;
+}
+
+const nutR0 = (n) => Math.round(Number(n) || 0);
+const nutR1 = (n) => Math.round((Number(n) || 0) * 10) / 10;
+const nutPct = (v, meta) => (meta ? Math.round((v / meta) * 100) : null);
+
+// Hora ("07:35") → número decimal, para promediar
+function nutHoraNum(t) {
+  const m = String(t || '').match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  return Number(m[1]) + Number(m[2]) / 60;
+}
+function nutHoraTxt(h) {
+  if (h == null) return '—';
+  const hh = Math.floor(h), mm = Math.round((h - hh) * 60);
+  return `${String(hh).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`;
+}
+
+// ─── EL ANÁLISIS ────────────────────────────────────────────────────────
+// Devuelve un objeto plano y autoexplicado: lo pinta la vista y lo lee la IA.
+function analizarNutricionSemana(d, semanaISO, cliente, pesoKg) {
+  const [ini, fin] = semanaISOToRange(semanaISO);
+  const goalsMT = goalsDeSemanaMT(d, semanaISO) || {};
+  const meta = {
+    kcal: Number(goalsMT.kcal ?? goalsMT.calories) || Number(cliente?.meta_calorias) || null,
+    p: Number(goalsMT.p ?? goalsMT.protein) || Number(cliente?.meta_proteina_g) || null,
+    c: Number(goalsMT.c ?? goalsMT.carbs) || Number(cliente?.meta_carbos_g) || null,
+    g: Number(goalsMT.g ?? goalsMT.fat) || Number(cliente?.meta_grasas_g) || null,
+  };
+
+  const fechas = nutFechasSemana(semanaISO);
+  const history = d.history || {};
+  const detalle = d.historyDetail || {};
+  const wellbeing = d.wellbeing || {};
+
+  // Agregado por alimento de TODA la semana
+  const foods = new Map();
+  // Agregado por tipo de comida (desayuno/almuerzo/…)
+  const comidas = new Map();
+
+  const dias = fechas.map((fecha, i) => {
+    const tot = history[fecha] || null;
+    const det = Array.isArray(detalle[fecha]) ? detalle[fecha] : [];
+    const kcal = nutR0(tot?.kcal);
+    const registrado = kcal > 0 || det.length > 0;
+    const micros = { fiber: 0, omega3: 0, sugar: 0 };
+    let nItems = 0;
+    const horas = [];
+
+    for (const e of det) {
+      const h = nutHoraNum(e.time);
+      if (h != null) horas.push(h);
+      const tipo = String(e.meal || 'sin tipo').toLowerCase();
+      const cm = comidas.get(tipo) || { tipo, veces: 0, kcal: 0 };
+      cm.veces++; cm.kcal += Number(e.kcal) || 0;
+      comidas.set(tipo, cm);
+
+      for (const it of (e.items || [])) {
+        nItems++;
+        const m = nutMicrosItem(it);
+        micros.fiber += m.fiber; micros.omega3 += m.omega3; micros.sugar += m.sugar;
+        const nombre = String(it.name || '').trim();
+        if (!nombre) continue;
+        const key = normalizeName(nombre);
+        const f = foods.get(key) || {
+          nombre, veces: 0, kcal: 0, p: 0, c: 0, g: 0, fiber: 0, sugar: 0, dias: new Set(), gramos: 0,
+        };
+        f.veces++;
+        f.kcal += Number(it.kcal) || 0;
+        f.p += Number(it.p) || 0;
+        f.c += Number(it.c) || 0;
+        f.g += Number(it.g) || 0;
+        f.fiber += m.fiber;
+        f.sugar += m.sugar;
+        f.gramos += nutGramos(it);
+        f.dias.add(fecha);
+        foods.set(key, f);
+      }
+    }
+
+    const wb = wellbeing[fecha] || null;
+    return {
+      fecha,
+      dow: NUT_DOW[i],
+      finde: i >= 5,
+      registrado,
+      kcal,
+      p: nutR0(tot?.p),
+      c: nutR0(tot?.c),
+      g: nutR0(tot?.g),
+      agua: nutR0(tot?.water),
+      comidas: det.length,
+      items: nItems,
+      primera: horas.length ? nutHoraTxt(Math.min(...horas)) : null,
+      ultima: horas.length ? nutHoraTxt(Math.max(...horas)) : null,
+      fibra: nutR1(micros.fiber),
+      omega3: nutR1(micros.omega3),
+      azucar: nutR1(micros.sugar),
+      energia: wb?.energy ?? null,
+      hambre: wb?.hunger ?? null,
+      animo: wb?.mood ?? null,
+    };
+  });
+
+  const reg = dias.filter(x => x.registrado);
+  const nReg = reg.length;
+  const prom = (k) => (nReg ? nutR0(reg.reduce((s, x) => s + (x[k] || 0), 0) / nReg) : null);
+
+  // Fibra, omega3, azúcar y número de comidas solo existen si ese día trae el
+  // DETALLE de alimentos. Promediarlos sobre todos los días registrados los
+  // diluía a la mitad y hacía leer "casi no come fibra" donde en realidad
+  // faltaba el detalle. Se promedian sobre los días que sí lo tienen.
+  const conDetalle = dias.filter(x => x.comidas > 0);
+  const nDet = conDetalle.length;
+  const promDet = (k) => (nDet ? nutR1(conDetalle.reduce((s, x) => s + (x[k] || 0), 0) / nDet) : null);
+  // Lo mismo con el agua: solo cuentan los días en que la registró.
+  const conAgua = reg.filter(x => x.agua > 0);
+
+  const promedio = {
+    kcal: prom('kcal'), p: prom('p'), c: prom('c'), g: prom('g'),
+    fibra: promDet('fibra'), omega3: promDet('omega3'), azucar: promDet('azucar'),
+    comidas: promDet('comidas'), items: promDet('items'),
+    agua: conAgua.length ? nutR0(conAgua.reduce((s, x) => s + x.agua, 0) / conAgua.length) : null,
+    dias_agua: conAgua.length,
+    base_detalle: nDet,
+  };
+
+  // Desviación estándar de kcal: mide qué tan parejo comió la semana.
+  let sd = null;
+  if (nReg >= 2) {
+    const m = promedio.kcal;
+    sd = nutR0(Math.sqrt(reg.reduce((s, x) => s + Math.pow(x.kcal - m, 2), 0) / nReg));
+  }
+
+  const laborables = reg.filter(x => !x.finde);
+  const finde = reg.filter(x => x.finde);
+  const promDe = (arr, k) => (arr.length ? nutR0(arr.reduce((s, x) => s + (x[k] || 0), 0) / arr.length) : null);
+
+  const horasPrimera = reg.map(x => nutHoraNum(x.primera)).filter(v => v != null);
+  const horasUltima = reg.map(x => nutHoraNum(x.ultima)).filter(v => v != null);
+
+  // ── Alimentos ──
+  // Denominador honesto: las calorías que vienen desglosadas en alimentos.
+  // Con el total de la semana, un día sin detalle hundía todos los porcentajes.
+  const totalKcalDetalle = [...foods.values()].reduce((s, f) => s + f.kcal, 0);
+  const alimentos = [...foods.values()].map(f => {
+    const kcal = nutR0(f.kcal);
+    // Densidad nutricional simple y honesta: qué parte de esas calorías vino
+    // acompañada de proteína y fibra. No es un "score de salud", es el dato
+    // que de verdad mueve saciedad y composición corporal.
+    const densidadProte = kcal > 0 ? Math.round((f.p * 4 / kcal) * 100) : 0;
+    const fibraPor100 = kcal > 0 ? nutR1((f.fiber / kcal) * 100) : 0;
+    return {
+      nombre: f.nombre,
+      veces: f.veces,
+      dias: f.dias.size,
+      kcal,
+      kcal_por_vez: f.veces ? nutR0(f.kcal / f.veces) : 0,
+      pct_kcal_detalle: totalKcalDetalle ? Math.round((f.kcal / totalKcalDetalle) * 100) : 0,
+      p: nutR1(f.p), c: nutR1(f.c), g: nutR1(f.g),
+      fibra: nutR1(f.fiber),
+      azucar: nutR1(f.sugar),
+      densidad_proteica_pct: densidadProte,
+      fibra_por_100kcal: fibraPor100,
+      // Calidad = proteína + fibra por caloría, penalizando azúcar añadida.
+      calidad: Math.round(densidadProte + fibraPor100 * 4 - (kcal > 0 ? (f.sugar * 4 / kcal) * 100 : 0)),
+    };
+  }).sort((a, b) => b.kcal - a.kcal);
+
+  // "Significativos": lo que de verdad pesa en la semana. Sin este filtro el
+  // top de mejores/peores se llena de una pizca de sal y un té.
+  const signif = alimentos.filter(a => a.kcal >= 150);
+
+  const resultado = {
+    cliente: {
+      nombre: cliente?.nombre || '',
+      objetivo: cliente?.objetivo || cliente?.meta_especifica || null,
+      peso_kg: pesoKg || null,
+      restricciones: cliente?.restricciones_lesiones || null,
+      patologias: cliente?.patologias || null,
+      preferencias: cliente?.preferencias_dieteticas || null,
+    },
+    semana: semanaISO,
+    rango: [ini, fin],
+    meta,
+    registro: {
+      dias_registrados: nReg,
+      de: 7,
+      pct: Math.round((nReg / 7) * 100),
+      dias_sin_registro: dias.filter(x => !x.registrado).map(x => x.dow),
+      // Días con el desglose de alimentos (no solo los totales del día): es la
+      // base real de todo lo que se dice sobre ALIMENTOS y micros.
+      dias_con_detalle: nDet,
+      kcal_con_detalle: nutR0(totalKcalDetalle),
+    },
+    promedio,
+    cumplimiento: {
+      kcal_pct: nutPct(promedio.kcal, meta.kcal),
+      prote_pct: nutPct(promedio.p, meta.p),
+      carbos_pct: nutPct(promedio.c, meta.c),
+      grasas_pct: nutPct(promedio.g, meta.g),
+      // Balance semanal: lo que de verdad manda en un déficit/superávit.
+      balance_kcal_semana: (meta.kcal && nReg) ? nutR0(reg.reduce((s, x) => s + (x.kcal - meta.kcal), 0)) : null,
+      dias_en_rango_kcal: meta.kcal ? reg.filter(x => Math.abs(x.kcal - meta.kcal) <= meta.kcal * 0.1).length : null,
+      dias_sobre_meta: meta.kcal ? reg.filter(x => x.kcal > meta.kcal * 1.1).length : null,
+      dias_bajo_meta: meta.kcal ? reg.filter(x => x.kcal < meta.kcal * 0.9).length : null,
+      prote_g_por_kg: (pesoKg && promedio.p) ? nutR1(promedio.p / pesoKg) : null,
+    },
+    consistencia: {
+      desviacion_kcal: sd,
+      dia_mas_alto: reg.length ? reg.reduce((a, b) => (b.kcal > a.kcal ? b : a)) : null,
+      dia_mas_bajo: reg.length ? reg.reduce((a, b) => (b.kcal < a.kcal ? b : a)) : null,
+      entre_semana_kcal: promDe(laborables, 'kcal'),
+      fin_de_semana_kcal: promDe(finde, 'kcal'),
+      entre_semana_prote: promDe(laborables, 'p'),
+      fin_de_semana_prote: promDe(finde, 'p'),
+      primera_comida_prom: horasPrimera.length ? nutHoraTxt(horasPrimera.reduce((a, b) => a + b, 0) / horasPrimera.length) : null,
+      ultima_comida_prom: horasUltima.length ? nutHoraTxt(horasUltima.reduce((a, b) => a + b, 0) / horasUltima.length) : null,
+    },
+    dias,
+    comidas_por_tipo: [...comidas.values()].sort((a, b) => b.veces - a.veces).map(c => ({ ...c, kcal: nutR0(c.kcal), kcal_prom: nutR0(c.kcal / c.veces) })),
+    alimentos,
+    top_calorias: alimentos.slice(0, 8),
+    top_frecuentes: [...alimentos].sort((a, b) => b.veces - a.veces).slice(0, 8),
+    mas_nutritivos: [...signif].sort((a, b) => b.calidad - a.calidad).slice(0, 5),
+    menos_nutritivos: [...signif].sort((a, b) => a.calidad - b.calidad).slice(0, 5),
+    bienestar: {
+      energia: nReg ? nutR1(reg.filter(x => x.energia != null).reduce((s, x, _, arr) => s + x.energia / arr.length, 0)) || null : null,
+      hambre: nReg ? nutR1(reg.filter(x => x.hambre != null).reduce((s, x, _, arr) => s + x.hambre / arr.length, 0)) || null : null,
+      animo: nReg ? nutR1(reg.filter(x => x.animo != null).reduce((s, x, _, arr) => s + x.animo / arr.length, 0)) || null : null,
+    },
+  };
+  return resultado;
+}
+
+// ─── Gráficas de la sección ─────────────────────────────────────────────
+// SVG inline, sin librerías (el CRM es estático y así se mantiene).
+
+// Barras por día contra la meta. Verde = dentro de ±10% de la meta,
+// ámbar = por encima, azul = por debajo, gris = sin registro.
+function nutBarras(dias, key, meta, colorBajo, unidad = '') {
+  const w = 640, h = 190, pad = { t: 22, r: 10, b: 30, l: 40 };
+  const iw = w - pad.l - pad.r, ih = h - pad.t - pad.b;
+  const valores = dias.map(d => d[key] || 0);
+  const maxV = Math.max(meta || 0, ...valores, 1);
+  const top = maxV * 1.18;
+  const y = (v) => pad.t + ih - (v / top) * ih;
+  const bw = iw / dias.length;
+
+  let svg = `<svg viewBox="0 0 ${w} ${h}" class="w-full h-auto" preserveAspectRatio="xMidYMid meet">`;
+  for (let i = 0; i <= 3; i++) {
+    const v = (top / 3) * i, yy = y(v);
+    svg += `<line x1="${pad.l}" y1="${yy}" x2="${w - pad.r}" y2="${yy}" stroke="#e2e8f0" stroke-width="1"/>`;
+    svg += `<text x="${pad.l - 5}" y="${yy + 3}" text-anchor="end" font-size="9" fill="#94a3b8">${Math.round(v)}</text>`;
+  }
+  dias.forEach((d, i) => {
+    const v = d[key] || 0;
+    const x = pad.l + i * bw + bw * 0.18;
+    const bwidth = bw * 0.64;
+    let color = '#cbd5e1';
+    if (d.registrado && v > 0) {
+      if (!meta) color = colorBajo;
+      else if (v >= meta * 0.9 && v <= meta * 1.1) color = '#10b981';
+      else if (v > meta * 1.1) color = '#f59e0b';
+      else color = colorBajo;
+    }
+    const alto = v > 0 ? Math.max(3, ih - (y(v) - pad.t)) : 3;
+    const yy = v > 0 ? y(v) : pad.t + ih - 3;
+    svg += `<rect x="${x}" y="${yy}" width="${bwidth}" height="${alto}" rx="3" fill="${color}"/>`;
+    if (v > 0) svg += `<text x="${x + bwidth / 2}" y="${yy - 5}" text-anchor="middle" font-size="9" font-weight="600" fill="${color}">${Math.round(v)}</text>`;
+    svg += `<text x="${x + bwidth / 2}" y="${h - 12}" text-anchor="middle" font-size="10" fill="${d.registrado ? '#475569' : '#cbd5e1'}">${d.dow}</text>`;
+    if (!d.registrado) svg += `<text x="${x + bwidth / 2}" y="${h - 2}" text-anchor="middle" font-size="8" fill="#cbd5e1">sin dato</text>`;
+  });
+  if (meta) {
+    const ym = y(meta);
+    svg += `<line x1="${pad.l}" y1="${ym}" x2="${w - pad.r}" y2="${ym}" stroke="#0f766e" stroke-width="1.5" stroke-dasharray="5 4"/>`;
+    svg += `<text x="${w - pad.r}" y="${ym - 5}" text-anchor="end" font-size="9" font-weight="700" fill="#0f766e">meta ${meta}${unidad}</text>`;
+  }
+  svg += '</svg>';
+  return svg;
+}
+
+// Anillo de distribución de macros (% de las calorías). Real vs. meta.
+function nutAnillo(p, c, g, titulo) {
+  const kp = p * 4, kc = c * 4, kg = g * 9;
+  const tot = kp + kc + kg;
+  if (!tot) return `<div class="text-xs text-slate-400 text-center py-6">Sin datos</div>`;
+  const segs = [
+    { v: kp / tot, color: '#3b82f6', label: 'Proteína', g: Math.round(p) },
+    { v: kc / tot, color: '#f59e0b', label: 'Carbos', g: Math.round(c) },
+    { v: kg / tot, color: '#8b5cf6', label: 'Grasas', g: Math.round(g) },
+  ];
+  const r = 42, cx = 60, cy = 60, circ = 2 * Math.PI * r;
+  let off = 0;
+  let svg = `<svg viewBox="0 0 120 120" class="w-28 h-28"><g transform="rotate(-90 60 60)">`;
+  for (const s of segs) {
+    const len = s.v * circ;
+    svg += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="16" stroke-dasharray="${len} ${circ - len}" stroke-dashoffset="${-off}"/>`;
+    off += len;
+  }
+  svg += `</g><text x="60" y="58" text-anchor="middle" font-size="15" font-weight="700" fill="#0f172a">${Math.round(tot)}</text>`;
+  svg += `<text x="60" y="72" text-anchor="middle" font-size="9" fill="#94a3b8">kcal</text></svg>`;
+  return `<div class="flex flex-col items-center gap-1">
+    <div class="text-[10px] uppercase font-bold tracking-wider text-slate-400">${titulo}</div>
+    ${svg}
+    <div class="text-[11px] space-y-0.5 mt-1">
+      ${segs.map(s => `<div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full" style="background:${s.color}"></span><span class="text-slate-500">${s.label}</span> <span class="font-bold text-slate-700">${Math.round(s.v * 100)}%</span> <span class="text-slate-400">· ${s.g}g</span></div>`).join('')}
+    </div>
+  </div>`;
+}
+
+// Barra de progreso contra la meta (verde en rango, ámbar arriba, rojo lejos)
+function nutBarraMeta(label, valor, meta, unidad) {
+  const pct = meta ? Math.round((valor / meta) * 100) : null;
+  const ancho = pct == null ? 0 : Math.min(140, pct);
+  const color = pct == null ? 'bg-slate-300'
+    : pct >= 90 && pct <= 110 ? 'bg-emerald-500'
+    : pct > 110 ? 'bg-amber-500'
+    : pct >= 75 ? 'bg-sky-500' : 'bg-red-500';
+  return `<div>
+    <div class="flex justify-between items-baseline text-xs mb-1">
+      <span class="text-slate-600 font-semibold">${label}</span>
+      <span class="text-slate-500"><span class="font-bold text-slate-800">${valor ?? '—'}${unidad}</span>${meta ? ` / ${meta}${unidad}` : ''}${pct != null ? ` · <span class="font-bold">${pct}%</span>` : ''}</span>
+    </div>
+    <div class="h-2 bg-slate-100 rounded-full overflow-hidden relative">
+      ${meta ? '<div class="absolute inset-y-0" style="left:71.4%;width:1px;background:#94a3b8"></div>' : ''}
+      <div class="h-full rounded-full ${color}" style="width:${(ancho / 140) * 100}%"></div>
+    </div>
+  </div>`;
+}
+
+function nutKpi(label, valor, sub, color = 'text-slate-900') {
+  return `<div class="bg-white rounded-xl border border-slate-200 p-3">
+    <div class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">${label}</div>
+    <div class="text-xl font-bold ${color} leading-tight mt-0.5">${valor}</div>
+    ${sub ? `<div class="text-[11px] text-slate-500 mt-0.5">${sub}</div>` : ''}
+  </div>`;
+}
+
+function nutColorPct(p, ideal = 100) {
+  if (p == null) return 'text-slate-400';
+  const dif = Math.abs(p - ideal);
+  return dif <= 10 ? 'text-emerald-600' : dif <= 25 ? 'text-amber-600' : 'text-red-600';
+}
+
+// ─── Estado de la vista ─────────────────────────────────────────────────
+let _nut = {
+  clienteId: null,
+  semana: null,
+  cliente: null,
+  data: null,        // blob del Mealtracker fusionado
+  analisis: null,
+  ia: null,          // { texto, at, modelo } — oportunidades generadas
+  cargando: false,
+  error: null,
+  tab: 'resumen',    // resumen | alimentos | detalle | ia
+};
+
+// Historial de la IA en Supabase. La tabla es opcional: si el coach todavía no
+// corrió la migración, la sección funciona igual, solo que no recuerda.
+async function nutCargarIaGuardada(clienteId, semana) {
+  try {
+    const { data, error } = await sb.from('nutricion_insights')
+      .select('contenido, modelo, created_at')
+      .eq('cliente_id', clienteId).eq('semana', semana)
+      .order('created_at', { ascending: false }).limit(1);
+    if (error || !data || !data.length) return null;
+    return { texto: data[0].contenido, at: data[0].created_at, modelo: data[0].modelo };
+  } catch (e) { return null; }
+}
+
+async function nutGuardarIa(clienteId, semana, texto, modelo) {
+  try {
+    await sb.from('nutricion_insights').insert({ cliente_id: clienteId, semana, contenido: texto, modelo });
+  } catch (e) { /* sin tabla: no pasa nada */ }
+}
+
+// ─── Carga de una semana ────────────────────────────────────────────────
+async function nutCargar(clienteId, semana, { forzar = false } = {}) {
+  _nut.cargando = true; _nut.error = null;
+  _nut.clienteId = clienteId; _nut.semana = semana;
+  rerenderView();
+  try {
+    const cliente = await db.clientes.get(clienteId);
+    if (!cliente) throw new Error('Cliente no encontrado');
+    _nut.cliente = cliente;
+
+    if (!mtConfigured()) throw new Error('No hay conexión al Mealtracker. Configúrala en config.js o en Ajustes.');
+
+    if (forzar) _mtMergedCache = { key: null, at: 0, data: null };
+    const d = await getMealtrackerDataMerged(cliente);
+    if (!d) {
+      const causa = await mtDiagnostico(cliente.mealtracker_id || await resolverMealtrackerId(cliente));
+      throw new Error(causa);
+    }
+    _nut.data = d;
+
+    // Peso más reciente, para poder leer la proteína en g/kg
+    let peso = null;
+    try {
+      const meds = await db.mediciones.listCliente(clienteId);
+      const conPeso = (meds || []).filter(m => m.peso != null);
+      if (conPeso.length) peso = Number(conPeso[conPeso.length - 1].peso);
+    } catch (e) { /* sin mediciones */ }
+
+    _nut.analisis = analizarNutricionSemana(d, semana, cliente, peso);
+    _nut.ia = await nutCargarIaGuardada(clienteId, semana);
+  } catch (e) {
+    _nut.error = e.message || String(e);
+    _nut.analisis = null;
+    _nut.ia = null;
+  }
+  _nut.cargando = false;
+  rerenderView();
+}
+
+window.nutElegirCliente = (id) => { _nut.ia = null; nutCargar(id, _nut.semana || fmt.semanaISO()); };
+window.nutSemana = (dir) => {
+  const s = dir < 0 ? fmt.semanaPrev(_nut.semana) : fmt.semanaNext(_nut.semana);
+  if (dir > 0 && s > fmt.semanaISO()) { toast('Esa semana todavía no empieza'); return; }
+  nutCargar(_nut.clienteId, s);
+};
+window.nutRefrescar = () => nutCargar(_nut.clienteId, _nut.semana, { forzar: true });
+window.nutTab = (t) => { _nut.tab = t; rerenderView(); };
+
+// ─── Vista ──────────────────────────────────────────────────────────────
+routes.nutricion = async () => {
+  const clientes = (await db.clientes.list()).filter(c => c.estado !== 'finalizado');
+
+  if (!_nut.semana) _nut.semana = fmt.semanaISO();
+  if (!_nut.clienteId && clientes.length) {
+    // Arranca en el primero que ya esté vinculado al Mealtracker
+    const pref = clientes.find(c => c.mealtracker_id) || clientes[0];
+    _nut.clienteId = pref.id;
+    nutCargar(pref.id, _nut.semana);
+    view.innerHTML = '<div class="card">Cargando alimentación…</div>';
+    return;
+  }
+
+  const selector = `
+    <div class="flex flex-wrap items-center gap-2">
+      <select class="text-sm !w-auto min-w-[200px]" onchange="nutElegirCliente(this.value)">
+        ${clientes.map(c => `<option value="${c.id}" ${c.id === _nut.clienteId ? 'selected' : ''}>${escapeHtml(c.nombre)}${c.mealtracker_id ? '' : ' (sin vincular)'}</option>`).join('')}
+      </select>
+      <div class="flex items-center gap-1 bg-slate-100 rounded-xl p-1">
+        <button class="btn btn-secondary btn-sm !py-1" onclick="nutSemana(-1)" title="Semana anterior">←</button>
+        <span class="text-sm font-bold text-slate-700 px-2 whitespace-nowrap">${fmt.labelSemana(_nut.semana)}</span>
+        <button class="btn btn-secondary btn-sm !py-1" onclick="nutSemana(1)" title="Semana siguiente">→</button>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="nutRefrescar()" title="Volver a leer el Mealtracker">🔄 Actualizar</button>
+    </div>`;
+
+  const cabecera = `
+    <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+      <div>
+        <h2 class="text-lg font-bold text-slate-900">🥗 Alimentación por cliente</h2>
+        <p class="text-xs text-slate-500">Lo que registró en su app, semana a semana · datos en vivo</p>
+      </div>
+      ${selector}
+    </div>`;
+
+  if (_nut.cargando) { view.innerHTML = `${cabecera}<div class="card">Leyendo el Mealtracker…</div>`; return; }
+  if (_nut.error) {
+    view.innerHTML = `${cabecera}<div class="card border-l-4 border-amber-400"><div class="font-bold text-slate-800 mb-1">No pude leer la alimentación</div><p class="text-sm text-slate-600">${escapeHtml(_nut.error)}</p></div>`;
+    return;
+  }
+  const a = _nut.analisis;
+  if (!a) { view.innerHTML = `${cabecera}<div class="card">Sin datos.</div>`; return; }
+
+  const tabs = [
+    ['resumen', '📊 Resumen'],
+    ['alimentos', '🍽 Alimentos'],
+    ['detalle', '📅 Día a día'],
+    ['ia', '🧠 Oportunidades'],
+  ].map(([k, l]) => `<button class="px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap ${_nut.tab === k ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}" onclick="nutTab('${k}')">${l}</button>`).join('');
+
+  view.innerHTML = `${cabecera}
+    <div class="bg-slate-100 rounded-xl p-1 flex gap-1 mb-4 overflow-x-auto">${tabs}</div>
+    ${_nut.tab === 'resumen' ? nutVistaResumen(a)
+      : _nut.tab === 'alimentos' ? nutVistaAlimentos(a)
+      : _nut.tab === 'detalle' ? nutVistaDetalle(a, _nut.data)
+      : nutVistaIA(a)}`;
+};
+
+// ── Pestaña: resumen global graficado ──
+function nutVistaResumen(a) {
+  const c = a.cumplimiento, m = a.meta, p = a.promedio;
+  const balance = c.balance_kcal_semana;
+  const balanceTxt = balance == null ? '—' : `${balance > 0 ? '+' : ''}${balance.toLocaleString('es-CO')} kcal`;
+  const promP = a.promedio.p, promC = a.promedio.c, promG = a.promedio.g;
+
+  return `
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+    ${nutKpi('Días registrados', `${a.registro.dias_registrados}/7`,
+      a.registro.dias_sin_registro.length ? `Faltó: ${a.registro.dias_sin_registro.join(', ')}` : 'Semana completa',
+      a.registro.pct >= 85 ? 'text-emerald-600' : a.registro.pct >= 57 ? 'text-amber-600' : 'text-red-600')}
+    ${nutKpi('Kcal promedio', p.kcal ?? '—', m.kcal ? `meta ${m.kcal} · ${c.kcal_pct}%` : 'sin meta', nutColorPct(c.kcal_pct))}
+    ${nutKpi('Proteína promedio', p.p != null ? `${p.p} g` : '—',
+      c.prote_g_por_kg ? `${c.prote_g_por_kg} g/kg${m.p ? ` · ${c.prote_pct}% de meta` : ''}` : (m.p ? `meta ${m.p} g · ${c.prote_pct}%` : 'sin meta'),
+      nutColorPct(c.prote_pct))}
+    ${nutKpi('Balance de la semana', balanceTxt,
+      balance == null ? 'sin meta' : (balance > 0 ? 'por encima de su meta' : 'por debajo de su meta'),
+      balance == null ? 'text-slate-400' : Math.abs(balance) < (m.kcal || 2000) * 0.5 ? 'text-emerald-600' : 'text-amber-600')}
+  </div>
+
+  ${a.registro.dias_registrados < 4 ? `
+  <div class="card border-l-4 border-amber-400 mb-4">
+    <div class="font-bold text-slate-800 text-sm">⚠️ Solo ${a.registro.dias_registrados} día(s) registrados</div>
+    <p class="text-xs text-slate-600 mt-1">Con menos de 4 días, los promedios de esta semana no representan cómo come. Antes de ajustarle macros, el trabajo es que registre.</p>
+  </div>` : ''}
+
+  ${a.registro.dias_con_detalle < a.registro.dias_registrados ? `
+  <div class="card border-l-4 border-slate-300 mb-4">
+    <div class="text-xs text-slate-600">De los ${a.registro.dias_registrados} días registrados, <strong>${a.registro.dias_con_detalle}</strong> traen el desglose de alimentos. Las calorías y macros de arriba salen de los ${a.registro.dias_registrados}; los alimentos, la fibra y el azúcar solo de esos ${a.registro.dias_con_detalle}.</div>
+  </div>` : ''}
+
+  <div class="card mb-4">
+    <div class="sec-title">Calorías día a día</div>
+    ${nutBarras(a.dias, 'kcal', m.kcal, '#3b82f6', ' kcal')}
+    <div class="text-[11px] text-slate-400 mt-1">Verde = dentro de ±10% de su meta · ámbar = por encima · azul = por debajo · gris = sin registro</div>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-4 mb-4">
+    <div class="card">
+      <div class="sec-title">Proteína día a día</div>
+      ${nutBarras(a.dias, 'p', m.p, '#3b82f6', ' g')}
+    </div>
+    <div class="card">
+      <div class="sec-title">Promedio vs. meta</div>
+      <div class="space-y-3 mt-2">
+        ${nutBarraMeta('Calorías', p.kcal, m.kcal, ' kcal')}
+        ${nutBarraMeta('Proteína', p.p, m.p, ' g')}
+        ${nutBarraMeta('Carbohidratos', p.c, m.c, ' g')}
+        ${nutBarraMeta('Grasas', p.g, m.g, ' g')}
+      </div>
+      <div class="text-[11px] text-slate-400 mt-3">La marca gris es el 100% de la meta.</div>
+    </div>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-4 mb-4">
+    <div class="card">
+      <div class="sec-title">Reparto de macros</div>
+      <div class="flex items-center justify-around gap-4 mt-2">
+        ${nutAnillo(promP || 0, promC || 0, promG || 0, 'Lo que comió')}
+        ${m.p && m.c && m.g ? nutAnillo(m.p, m.c, m.g, 'Su meta') : '<div class="text-xs text-slate-400 self-center">Sin meta configurada</div>'}
+      </div>
+    </div>
+    <div class="card">
+      <div class="sec-title">Calidad estimada (por día con detalle)</div>
+      <div class="grid grid-cols-3 gap-2 mt-2 text-center">
+        <div class="bg-slate-50 rounded-xl p-3">
+          <div class="text-[10px] uppercase text-slate-400 font-bold">Fibra</div>
+          <div class="text-lg font-bold ${p.fibra >= 25 ? 'text-emerald-600' : p.fibra >= 15 ? 'text-amber-600' : 'text-red-500'}">${p.fibra ?? '—'} g</div>
+          <div class="text-[10px] text-slate-400">referencia 25-35</div>
+        </div>
+        <div class="bg-slate-50 rounded-xl p-3">
+          <div class="text-[10px] uppercase text-slate-400 font-bold">Omega 3</div>
+          <div class="text-lg font-bold ${p.omega3 >= 1.5 ? 'text-emerald-600' : 'text-amber-600'}">${p.omega3 ?? '—'} g</div>
+          <div class="text-[10px] text-slate-400">referencia 1,5-3</div>
+        </div>
+        <div class="bg-slate-50 rounded-xl p-3">
+          <div class="text-[10px] uppercase text-slate-400 font-bold">Azúcar añadida</div>
+          <div class="text-lg font-bold ${p.azucar <= 25 ? 'text-emerald-600' : p.azucar <= 50 ? 'text-amber-600' : 'text-red-500'}">${p.azucar ?? '—'} g</div>
+          <div class="text-[10px] text-slate-400">referencia &lt;25</div>
+        </div>
+      </div>
+      <div class="text-[11px] text-slate-400 mt-2">Promedio de los <strong>${a.registro.dias_con_detalle}</strong> día(s) que traen el desglose de alimentos. Estimado a partir de lo que registró: exacto cuando la app calculó los micros del alimento, aproximado en registros viejos.</div>
+      ${p.agua ? `<div class="text-xs text-slate-600 mt-2">💧 Agua: <strong>${p.agua}</strong> ml/día promedio (${p.dias_agua} día(s) con registro de agua)</div>` : ''}
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="sec-title">Patrones de la semana</div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2 text-sm">
+      <div><div class="text-[10px] uppercase text-slate-400 font-bold">Entre semana</div><div class="font-bold text-slate-800">${a.consistencia.entre_semana_kcal ?? '—'} kcal</div><div class="text-[11px] text-slate-500">${a.consistencia.entre_semana_prote ?? '—'} g prote</div></div>
+      <div><div class="text-[10px] uppercase text-slate-400 font-bold">Fin de semana</div><div class="font-bold ${a.consistencia.fin_de_semana_kcal && a.consistencia.entre_semana_kcal && a.consistencia.fin_de_semana_kcal > a.consistencia.entre_semana_kcal * 1.15 ? 'text-amber-600' : 'text-slate-800'}">${a.consistencia.fin_de_semana_kcal ?? '—'} kcal</div><div class="text-[11px] text-slate-500">${a.consistencia.fin_de_semana_prote ?? '—'} g prote</div></div>
+      <div><div class="text-[10px] uppercase text-slate-400 font-bold">Variabilidad</div><div class="font-bold text-slate-800">±${a.consistencia.desviacion_kcal ?? '—'} kcal</div><div class="text-[11px] text-slate-500">entre sus días</div></div>
+      <div><div class="text-[10px] uppercase text-slate-400 font-bold">Ventana de comida</div><div class="font-bold text-slate-800">${a.consistencia.primera_comida_prom ?? '—'} → ${a.consistencia.ultima_comida_prom ?? '—'}</div><div class="text-[11px] text-slate-500">primera y última</div></div>
+    </div>
+    ${a.comidas_por_tipo.length ? `
+    <div class="mt-4 pt-3 border-t border-slate-100">
+      <div class="text-[10px] uppercase text-slate-400 font-bold mb-2">Comidas registradas por tipo</div>
+      <div class="flex flex-wrap gap-2">
+        ${a.comidas_por_tipo.map(t => `<span class="text-xs bg-slate-100 rounded-lg px-2.5 py-1"><strong class="text-slate-700">${escapeHtml(t.tipo)}</strong> · ${t.veces}× · ${t.kcal_prom} kcal prom</span>`).join('')}
+      </div>
+    </div>` : ''}
+  </div>
+
+  ${nutTarjetaMetas(a)}`;
+}
+
+function nutTarjetaMetas(a) {
+  const c = _nut.cliente || {};
+  return `<div class="grid md:grid-cols-2 gap-4">
+    <div class="card bg-violet-50 border-violet-100">
+      <div class="text-xs font-bold text-violet-800 uppercase mb-1">🎯 Meta vigente en su app esta semana</div>
+      <div class="text-violet-900 font-semibold text-sm">${a.meta.kcal ?? '—'} kcal · ${a.meta.p ?? '—'} g prote · ${a.meta.c ?? '—'} g carbos · ${a.meta.g ?? '—'} g grasas</div>
+      <div class="text-[11px] text-violet-700/70 mt-1">Se compara cada semana contra la meta que regía ESA semana, no contra la de hoy.</div>
+    </div>
+    <div class="card bg-blue-50 border-blue-100">
+      <div class="text-xs font-bold text-blue-800 uppercase mb-1">🥗 Meta calculada en el CRM</div>
+      <div class="text-blue-900 font-semibold text-sm">${c.meta_calorias ? `${c.meta_calorias} kcal · ${c.meta_proteina_g} g prote · ${c.meta_carbos_g} g carbos · ${c.meta_grasas_g} g grasas` : 'Sin calcular — hazlo en la ficha del cliente (sección 5).'}</div>
+      ${c.meta_calorias ? `<button class="btn btn-primary btn-sm mt-2" onclick="enviarMetaMealtracker('${c.id}')">🎯 Enviar meta al Mealtracker</button>` : ''}
+    </div>
+  </div>`;
+}
+
+// ── Pestaña: alimentos ──
+function nutVistaAlimentos(a) {
+  if (!a.alimentos.length) {
+    return '<div class="card">Esta semana no hay comidas registradas con detalle de alimentos.</div>';
+  }
+  const fila = (f, extra = '') => `
+    <tr class="border-b border-slate-50">
+      <td class="py-2 pr-2"><div class="font-semibold text-slate-800 text-sm">${escapeHtml(f.nombre)}</div><div class="text-[11px] text-slate-400">${f.veces}× en ${f.dias} día(s)</div></td>
+      <td class="text-right whitespace-nowrap"><span class="font-bold text-slate-800">${f.kcal.toLocaleString('es-CO')}</span><div class="text-[11px] text-slate-400">${f.pct_kcal_detalle}% del detalle</div></td>
+      <td class="text-right text-xs text-slate-600 whitespace-nowrap">${f.p} / ${f.c} / ${f.g}</td>
+      <td class="text-right whitespace-nowrap"><span class="font-bold ${f.densidad_proteica_pct >= 30 ? 'text-emerald-600' : f.densidad_proteica_pct >= 15 ? 'text-amber-600' : 'text-slate-400'}">${f.densidad_proteica_pct}%</span><div class="text-[11px] text-slate-400">${f.fibra} g fibra</div></td>
+      ${extra}
+    </tr>`;
+
+  const mini = (titulo, lista, nota, color) => `
+    <div class="card">
+      <div class="sec-title">${titulo}</div>
+      <div class="text-[11px] text-slate-400 mb-2 -mt-1">${nota}</div>
+      ${lista.length ? lista.map(f => `
+        <div class="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
+          <div class="min-w-0">
+            <div class="font-semibold text-slate-800 text-sm truncate">${escapeHtml(f.nombre)}</div>
+            <div class="text-[11px] text-slate-400">${f.veces}× · ${f.kcal.toLocaleString('es-CO')} kcal · ${f.p} g prote${f.azucar > 1 ? ` · ${f.azucar} g azúcar` : ''}</div>
+          </div>
+          <div class="text-right pl-2 whitespace-nowrap">
+            <div class="text-sm font-bold ${color}">${f.densidad_proteica_pct}%</div>
+            <div class="text-[10px] text-slate-400">prote/kcal</div>
+          </div>
+        </div>`).join('') : '<div class="text-xs text-slate-400 py-2">Sin alimentos con peso suficiente esta semana.</div>'}
+    </div>`;
+
+  return `
+  <div class="grid md:grid-cols-2 gap-4 mb-4">
+    <div class="card">
+      <div class="sec-title">Los que más calorías aportaron</div>
+      <div class="text-[11px] text-slate-400 mb-2 -mt-1">Dónde está de verdad su semana. El top 3 suele explicar más que toda la lista.</div>
+      ${a.top_calorias.map(f => `
+        <div class="py-1.5 border-b border-slate-50 last:border-0">
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-semibold text-slate-800 text-sm truncate">${escapeHtml(f.nombre)}</span>
+            <span class="text-sm font-bold text-slate-800 whitespace-nowrap">${f.kcal.toLocaleString('es-CO')} kcal</span>
+          </div>
+          <div class="h-1.5 bg-slate-100 rounded-full mt-1 overflow-hidden"><div class="h-full rounded-full bg-blue-500" style="width:${Math.min(100, f.pct_kcal_detalle * 3)}%"></div></div>
+          <div class="text-[11px] text-slate-400 mt-0.5">${f.pct_kcal_detalle}% de las calorías desglosadas · ${f.veces}× · ${f.kcal_por_vez} kcal por vez</div>
+        </div>`).join('')}
+    </div>
+    <div class="card">
+      <div class="sec-title">Los que más repite</div>
+      <div class="text-[11px] text-slate-400 mb-2 -mt-1">Su dieta real. Un cambio acá pesa más que cualquier alimento nuevo.</div>
+      ${a.top_frecuentes.map(f => `
+        <div class="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
+          <span class="font-semibold text-slate-800 text-sm truncate">${escapeHtml(f.nombre)}</span>
+          <span class="text-xs text-slate-500 whitespace-nowrap"><strong class="text-slate-700">${f.veces}×</strong> · ${f.dias} día(s)</span>
+        </div>`).join('')}
+    </div>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-4 mb-4">
+    ${mini('Mejor densidad nutricional', a.mas_nutritivos, 'Más proteína y fibra por caloría: lo que conviene proteger y repetir.', 'text-emerald-600')}
+    ${mini('Menor densidad nutricional', a.menos_nutritivos, 'Muchas calorías con poca proteína o fibra (o con azúcar añadida): el terreno donde hay margen.', 'text-amber-600')}
+  </div>
+
+  <div class="card">
+    <div class="sec-title">Todo lo que comió esta semana (${a.alimentos.length} alimentos)</div>
+    <div class="overflow-x-auto -mx-1 mt-2">
+      <table class="w-full text-sm">
+        <thead><tr class="text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-200">
+          <th class="text-left pb-2">Alimento</th><th class="text-right pb-2">Calorías</th>
+          <th class="text-right pb-2">P / C / G</th><th class="text-right pb-2">Prote/kcal</th>
+        </tr></thead>
+        <tbody>${a.alimentos.map(f => fila(f)).join('')}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+// ── Pestaña: día a día, con las comidas tal cual las registró ──
+function nutVistaDetalle(a, d) {
+  const detalle = d?.historyDetail || {};
+  return `<div class="space-y-3">
+    ${a.dias.map(dia => {
+      const entradas = Array.isArray(detalle[dia.fecha]) ? detalle[dia.fecha] : [];
+      const pct = a.meta.kcal ? Math.round((dia.kcal / a.meta.kcal) * 100) : null;
+      return `<details class="card" ${dia.registrado && entradas.length ? '' : ''}>
+        <summary class="cursor-pointer list-none">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span class="font-bold text-slate-800">${dia.dow}</span>
+              <span class="text-xs text-slate-400 ml-1">${fmt.fechaCorta(dia.fecha)}</span>
+              ${dia.primera ? `<span class="text-[11px] text-slate-400 ml-2">${dia.primera} → ${dia.ultima}</span>` : ''}
+            </div>
+            ${dia.registrado ? `
+            <div class="flex items-center gap-3 text-xs">
+              <span class="font-bold ${nutColorPct(pct)}">${dia.kcal.toLocaleString('es-CO')} kcal${pct != null ? ` (${pct}%)` : ''}</span>
+              <span class="text-slate-500">P ${dia.p} · C ${dia.c} · G ${dia.g}</span>
+              <span class="text-slate-400">${dia.comidas} comida(s)</span>
+            </div>` : '<span class="text-xs text-slate-400">Sin registro</span>'}
+          </div>
+        </summary>
+        ${entradas.length ? `
+        <div class="mt-3 pt-3 border-t border-slate-100 space-y-2">
+          ${entradas.map(e => `
+            <div class="bg-slate-50 rounded-xl p-3">
+              <div class="flex items-center justify-between text-xs mb-1.5">
+                <span class="font-bold text-slate-700 uppercase tracking-wide">${escapeHtml(String(e.meal || 'comida'))}${e.time ? ` · ${escapeHtml(e.time)}` : ''}</span>
+                <span class="text-slate-500 font-semibold">${nutR0(e.kcal)} kcal · P ${nutR1(e.p)} · C ${nutR1(e.c)} · G ${nutR1(e.g)}</span>
+              </div>
+              ${(e.items || []).length ? `<div class="space-y-0.5">${e.items.map(it => `
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-slate-700">${escapeHtml(String(it.name || ''))}${it.amount ? ` <span class="text-slate-400">(${escapeHtml(String(it.amount))})</span>` : ''}</span>
+                  <span class="text-slate-500 whitespace-nowrap pl-2">${nutR0(it.kcal)} kcal${it.p ? ` · ${nutR1(it.p)} g P` : ''}</span>
+                </div>`).join('')}</div>` : ''}
+              ${e.rawInput ? `<div class="text-[11px] text-slate-400 mt-1.5 italic">“${escapeHtml(String(e.rawInput).slice(0, 160))}”</div>` : ''}
+            </div>`).join('')}
+          ${(dia.energia != null || dia.hambre != null || dia.animo != null) ? `
+          <div class="text-[11px] text-slate-500 pt-1">Ese día reportó: ${[dia.energia != null ? `energía ${dia.energia}/5` : '', dia.hambre != null ? `hambre ${dia.hambre}/5` : '', dia.animo != null ? `ánimo ${dia.animo}/5` : ''].filter(Boolean).join(' · ')}</div>` : ''}
+        </div>` : (dia.registrado ? '<div class="mt-2 text-xs text-slate-400">Registró totales pero sin el detalle de alimentos.</div>' : '')}
+      </details>`;
+    }).join('')}
+  </div>`;
+}
+
+// ─── Oportunidades de mejora (Claude) ───────────────────────────────────
+// El navegador manda SOLO el análisis ya calculado; el prompt de coach y la
+// API key viven en /api/coach-insight.js. La respuesta llega por streaming y
+// se pinta a medida que se genera.
+
+// Parser del formato @@BLOQUE. Tolera respuestas a medio llegar: lo que ya
+// está completo se pinta, lo que falta simplemente todavía no aparece.
+function nutParseIa(txt) {
+  const out = { diagnostico: '', oportunidades: [], noTocar: '', preguntas: [], alerta: '' };
+  if (!txt) return out;
+  const partes = String(txt).split(/\n?@@/g).filter(s => s.trim());
+  for (const parte of partes) {
+    const nl = parte.indexOf('\n');
+    const head = (nl === -1 ? parte : parte.slice(0, nl)).trim().toUpperCase();
+    const body = (nl === -1 ? '' : parte.slice(nl + 1)).trim();
+    if (head === 'DIAGNOSTICO' || head === 'DIAGNÓSTICO') out.diagnostico = body;
+    else if (head === 'OPORTUNIDAD') {
+      const o = { titulo: '', impacto: '', dato: '', porque: '', accion: '', mensaje: '' };
+      let campo = null;
+      for (const linea of body.split('\n')) {
+        const m = linea.match(/^\s*(titulo|título|impacto|dato|porque|por qué|porqué|accion|acción|mensaje)\s*:\s*(.*)$/i);
+        if (m) {
+          const k = m[1].toLowerCase();
+          campo = k.startsWith('tit') ? 'titulo'
+            : k.startsWith('imp') ? 'impacto'
+            : k.startsWith('dat') ? 'dato'
+            : k.startsWith('por') ? 'porque'
+            : k.startsWith('acc') ? 'accion' : 'mensaje';
+          o[campo] = m[2].trim();
+        } else if (campo) {
+          o[campo] += (o[campo] ? '\n' : '') + linea.trim();
+        }
+      }
+      if (o.titulo || o.accion || o.mensaje) out.oportunidades.push(o);
+    }
+    else if (head === 'NO_TOCAR') out.noTocar = body;
+    else if (head === 'PREGUNTAS') out.preguntas = body.split('\n').map(s => s.replace(/^[-•*]\s*/, '').trim()).filter(Boolean);
+    else if (head === 'ALERTA') out.alerta = /^ningun/i.test(body) ? '' : body;
+  }
+  return out;
+}
+
+const NUT_IMPACTO = {
+  alto: ['bg-red-50', 'text-red-700', 'border-red-200'],
+  medio: ['bg-amber-50', 'text-amber-700', 'border-amber-200'],
+  bajo: ['bg-slate-50', 'text-slate-600', 'border-slate-200'],
+};
+
+function nutRenderIa(txt) {
+  const r = nutParseIa(txt);
+  if (!r.diagnostico && !r.oportunidades.length) {
+    return `<div class="text-sm text-slate-500 whitespace-pre-wrap">${escapeHtml(txt || '')}</div>`;
+  }
+  return `
+    ${r.diagnostico ? `<div class="card bg-slate-900 text-white border-0 mb-4">
+      <div class="text-[10px] uppercase tracking-wider text-slate-400 font-bold mb-1">Diagnóstico de la semana</div>
+      <div class="text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(r.diagnostico)}</div>
+    </div>` : ''}
+
+    ${r.oportunidades.map((o, i) => {
+      const imp = NUT_IMPACTO[(o.impacto || 'medio').toLowerCase()] || NUT_IMPACTO.medio;
+      return `<div class="card mb-3 border-l-4 ${imp[2].replace('border-', 'border-l-')}">
+        <div class="flex items-start justify-between gap-3 mb-2">
+          <div class="font-bold text-slate-900">${i + 1}. ${escapeHtml(o.titulo || 'Oportunidad')}</div>
+          ${o.impacto ? `<span class="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${imp[0]} ${imp[1]} whitespace-nowrap">impacto ${escapeHtml(o.impacto)}</span>` : ''}
+        </div>
+        ${o.dato ? `<div class="text-xs bg-slate-50 rounded-lg px-3 py-2 mb-2 font-mono text-slate-700">📊 ${escapeHtml(o.dato)}</div>` : ''}
+        ${o.porque ? `<div class="text-sm text-slate-600 mb-2"><span class="font-semibold text-slate-700">Por qué importa:</span> ${escapeHtml(o.porque)}</div>` : ''}
+        ${o.accion ? `<div class="text-sm text-slate-800 mb-2"><span class="font-semibold">Qué hacer:</span> ${escapeHtml(o.accion)}</div>` : ''}
+        ${o.mensaje ? `<div class="bg-emerald-50 border border-emerald-100 rounded-xl p-3 mt-2">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-[10px] uppercase tracking-wider font-bold text-emerald-800">Para copiarle al cliente</span>
+            <button class="text-[11px] font-semibold text-emerald-700 hover:underline" onclick="nutCopiar(${i})">📋 Copiar</button>
+          </div>
+          <div class="text-sm text-emerald-900 whitespace-pre-wrap" id="nut-msg-${i}">${escapeHtml(o.mensaje)}</div>
+        </div>` : ''}
+      </div>`;
+    }).join('')}
+
+    ${r.noTocar ? `<div class="card bg-emerald-50 border-emerald-100 mb-3">
+      <div class="text-[10px] uppercase tracking-wider font-bold text-emerald-800 mb-1">✅ Esto NO se toca esta semana</div>
+      <div class="text-sm text-emerald-900 whitespace-pre-wrap">${escapeHtml(r.noTocar)}</div>
+    </div>` : ''}
+
+    ${r.preguntas.length ? `<div class="card mb-3">
+      <div class="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-2">❓ Pregúntale antes de ajustar</div>
+      <ul class="text-sm text-slate-700 space-y-1 list-disc pl-5">${r.preguntas.map(q => `<li>${escapeHtml(q)}</li>`).join('')}</ul>
+    </div>` : ''}
+
+    ${r.alerta ? `<div class="card bg-amber-50 border-amber-200">
+      <div class="text-[10px] uppercase tracking-wider font-bold text-amber-800 mb-1">⚠️ Para vigilar o derivar</div>
+      <div class="text-sm text-amber-900">${escapeHtml(r.alerta)}</div>
+    </div>` : ''}`;
+}
+
+window.nutCopiar = (i) => {
+  const el = document.getElementById(`nut-msg-${i}`);
+  if (!el) return;
+  navigator.clipboard.writeText(el.textContent.trim())
+    .then(() => toast('✓ Mensaje copiado'))
+    .catch(() => toast('No pude copiar'));
+};
+
+function nutVistaIA(a) {
+  const yaHay = !!_nut.ia?.texto;
+  return `
+  <div class="card mb-4">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div class="max-w-xl">
+        <h3 class="font-bold text-slate-900">🧠 Oportunidades de mejora</h3>
+        <p class="text-xs text-slate-500 mt-1">Claude lee el análisis completo de esta semana (registro, macros, alimentos, patrones, su objetivo y sus restricciones) y te devuelve las 3-5 palancas que de verdad mueven la aguja, con el mensaje listo para enviarle.</p>
+        ${yaHay ? `<p class="text-[11px] text-slate-400 mt-1">Última generación: ${_fmtDateTime(_nut.ia.at)}</p>` : ''}
+      </div>
+      <button class="btn btn-primary" id="nut-ia-btn" onclick="nutGenerarIA()">${yaHay ? '🔄 Volver a generar' : '✨ Generar oportunidades'}</button>
+    </div>
+    <details class="mt-3">
+      <summary class="cursor-pointer text-xs font-semibold text-slate-500">➕ Agregar contexto que la data no ve (opcional)</summary>
+      <textarea id="nut-ia-nota" rows="2" class="text-sm mt-2" placeholder="Ej: viajó jueves y viernes · está con gastritis · dijo que el gym le queda lejos esta semana"></textarea>
+    </details>
+    ${a.registro.dias_registrados < 3 ? '<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mt-3">Con menos de 3 días registrados, lo único que la IA puede recomendar honestamente es que registre. Igual puedes generarlo.</div>' : ''}
+  </div>
+  <div id="nut-ia-out">${yaHay ? nutRenderIa(_nut.ia.texto) : '<div class="card text-sm text-slate-400">Todavía no has generado las oportunidades de esta semana.</div>'}</div>`;
+}
+
+window.nutGenerarIA = async () => {
+  const a = _nut.analisis;
+  if (!a) { toast('Primero carga una semana'); return; }
+  const btn = document.getElementById('nut-ia-btn');
+  const out = document.getElementById('nut-ia-out');
+  const nota = (document.getElementById('nut-ia-nota')?.value || '').trim();
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Analizando…'; }
+  if (out) out.innerHTML = '<div class="card text-sm text-slate-500">Leyendo la semana y buscando las palancas…</div>';
+
+  let texto = '';
+  try {
+    const r = await fetch('/api/coach-insight', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ analisis: a, extra: nota }),
+    });
+    if (!r.ok || !r.body) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.code === 'no_api_key'
+        ? 'Falta la variable ANTHROPIC_API_KEY en el proyecto del CRM en Vercel (Settings → Environment Variables) y volver a desplegar.'
+        : (err.error || `El servidor respondió ${r.status}`));
+    }
+    // SSE de Anthropic: solo nos interesan los text_delta del bloque de texto.
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    let ultimoPintado = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lineas = buf.split('\n');
+      buf = lineas.pop() || '';
+      for (const linea of lineas) {
+        if (!linea.startsWith('data:')) continue;
+        const raw = linea.slice(5).trim();
+        if (!raw || raw === '[DONE]') continue;
+        let ev; try { ev = JSON.parse(raw); } catch (e) { continue; }
+        if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') texto += ev.delta.text;
+        if (ev.type === 'error') throw new Error(ev.error?.message || 'Error de la API');
+      }
+      // Repintar como mucho 4 veces por segundo: el parser corre sobre todo
+      // el texto y no vale la pena hacerlo en cada chunk.
+      if (out && Date.now() - ultimoPintado > 250) {
+        ultimoPintado = Date.now();
+        out.innerHTML = nutRenderIa(texto) + '<div class="text-xs text-slate-400 mt-2">✍️ escribiendo…</div>';
+      }
+    }
+    if (!texto.trim()) throw new Error('La respuesta llegó vacía. Intenta de nuevo.');
+    _nut.ia = { texto, at: new Date().toISOString(), modelo: 'claude-opus-5' };
+    if (out) out.innerHTML = nutRenderIa(texto);
+    await nutGuardarIa(_nut.clienteId, _nut.semana, texto, 'claude-opus-5');
+    toast('✓ Oportunidades listas');
+  } catch (e) {
+    if (out) out.innerHTML = `<div class="card border-l-4 border-red-400">
+      <div class="font-bold text-slate-800 mb-1">No pude generar las oportunidades</div>
+      <p class="text-sm text-slate-600">${escapeHtml(e.message || String(e))}</p>
+      ${texto ? `<div class="mt-3 pt-3 border-t border-slate-100">${nutRenderIa(texto)}</div>` : ''}
+    </div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = _nut.ia?.texto ? '🔄 Volver a generar' : '✨ Generar oportunidades'; }
+  }
+};
+
+// Botón "Nutrición" en la barra de navegación (mismo truco que el de IA:
+// se clona un botón existente para no depender del HTML del shell).
+(function addNutricionNav() {
+  try {
+    const anchor = document.querySelector('.nav-item');
+    if (!anchor || document.querySelector('.nav-item[data-view="nutricion"]')) return;
+    const btn = anchor.cloneNode(true);
+    btn.dataset.view = 'nutricion';
+    btn.classList.remove('active');
+    btn.textContent = '🥗 Nutrición';
+    const negocio = document.querySelector('.nav-item[data-view="negocio"]');
+    anchor.parentNode.insertBefore(btn, negocio || null);
+    btn.addEventListener('click', () => navigate('nutricion'));
+  } catch (e) { /* si el shell cambia, no rompe nada */ }
+})();
+
+// Atajo desde la ficha del cliente: abre la sección ya parada en ese cliente.
+window.verNutricionCliente = (clienteId) => {
+  _nut.clienteId = clienteId;
+  _nut.semana = _nut.semana || fmt.semanaISO();
+  _nut.ia = null;
+  closeModal();
+  navigate('nutricion');
+  nutCargar(clienteId, _nut.semana);
+};

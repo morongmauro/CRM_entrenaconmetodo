@@ -26,6 +26,18 @@ KPIs del día, **bandeja semanal** con clientes que faltan por seguimiento, aler
 - Promoción: un pendiente semanal que se vuelve recurrente lo conviertes a **General** con un clic.
 - Checkboxes para marcar como hecho.
 
+### 🥗 Nutrición (por cliente, semana a semana)
+Lee **en vivo** el Mealtracker del cliente (fusionando sus cuentas duplicadas) y arma cuatro pestañas para la semana que elijas:
+
+- **Resumen** — días registrados, kcal y proteína promedio vs. su meta, **balance calórico de la semana**, barras día a día de calorías y proteína contra la meta, reparto de macros (lo que comió vs. su meta), fibra / omega 3 / azúcar añadida estimados, agua, y patrones: entre semana vs. fin de semana, variabilidad entre días y ventana de comida.
+- **Alimentos** — los que **más calorías aportaron** (con su % del total desglosado), los que **más repite**, los de **mejor y peor densidad nutricional** (proteína y fibra por caloría, penalizando azúcar añadida) y la tabla completa de todo lo que comió.
+- **Día a día** — cada día desplegable con sus comidas, los alimentos de cada una y lo que escribió al registrarlas.
+- **🧠 Oportunidades** — Claude lee el análisis completo y devuelve 3-5 oportunidades priorizadas por impacto, cada una con el dato que la sustenta, por qué importa, la acción concreta y el **mensaje listo para copiarle al cliente**. Más lo que NO hay que tocar y las preguntas que la data no responde.
+
+Cada semana se compara contra la meta que estaba **vigente esa semana**, no contra la de hoy. Las oportunidades generadas quedan guardadas por cliente y semana.
+
+> Requiere `ANTHROPIC_API_KEY` en las variables de entorno del proyecto en Vercel (solo la pestaña de oportunidades; el resto funciona sin ella) y correr la migración de `nutricion_insights` de `schema.sql` para que recuerde lo generado.
+
 ### 👥 Clientes
 Cards con datos clave + ficha completa con identidad, datos de coaching (objetivo, meta, lesiones, lugar de entreno), comercial (monto, día de pago, canal, método preferido) y tags libres.
 
@@ -50,7 +62,15 @@ Tasa USD→COP y tu nombre.
 ### 4) Configurar
 Abre `config.js` y reemplaza los dos valores.
 
-### 5) Deploy en Vercel
+### 5) Variables de entorno (solo para la pestaña de oportunidades)
+En Vercel → Settings → Environment Variables del proyecto del CRM:
+
+| Variable | Para qué |
+|---|---|
+| `ANTHROPIC_API_KEY` | Generar las oportunidades de mejora de la sección Nutrición. Sin ella, esa pestaña avisa y el resto del CRM funciona igual. |
+| `ALLOWED_ORIGINS` | Opcional. Dominios extra autorizados a llamar a `/api/*`, separados por coma. Por defecto solo el propio dominio del CRM. |
+
+### 6) Deploy en Vercel
 1. Sube los archivos a GitHub.
 2. https://vercel.com → "Add New Project" → importa el repo.
 3. Framework Preset: **Other**. Deploy.
@@ -64,12 +84,14 @@ Abre `config.js` y reemplaza los dos valores.
 ├── app.js           Toda la lógica
 ├── styles.css       Estilos
 ├── config.js        URL y anon key de Supabase ← TÚ LO EDITAS
+├── api/
+│   └── coach-insight.js  Proxy de Anthropic para las oportunidades de mejora
 ├── schema.sql       Esquema de la base ← pegar en Supabase
 ├── README.md
 └── .gitignore
 ```
 
-Sin servidor Node.js, sin `npm install`. Solo HTML + JS estático.
+HTML + JS estático, sin `npm install`. La única función de servidor es `api/coach-insight.js` (la despliega Vercel sola) y existe para que la API key de Anthropic nunca baje al navegador.
 
 ## Costo
 
