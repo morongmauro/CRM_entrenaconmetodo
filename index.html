@@ -16,6 +16,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css" />
+  <!-- Ajustes para el teléfono. DESPUÉS de styles.css: anula reglas suyas,
+       y todo va dentro de media queries, así que en escritorio no cambia nada. -->
+  <link rel="stylesheet" href="/movil.css" />
   <script>
     tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter','system-ui','sans-serif'] } } } }
   </script>
@@ -92,5 +95,8 @@
 
   <script src="/config.js"></script>
   <script src="/app.js"></script>
+  <!-- Sección Entrenamiento. DESPUÉS de app.js: usa sus funciones y se
+       registra sola en el router y en la barra de navegación. -->
+  <script src="/entrenamiento.js"></script>
 </body>
 </html>

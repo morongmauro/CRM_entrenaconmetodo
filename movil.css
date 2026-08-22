@@ -1,0 +1,143 @@
+/* =====================================================
+   CRM EntrenaConMétodo · MÓVIL
+   =====================================================
+   Hoja aparte, cargada DESPUÉS de styles.css. No toca ni app.js ni
+   styles.css: todo son anulaciones dentro de media queries, así que en
+   escritorio el CRM queda exactamente igual que hoy.
+
+   En index.html, después de la hoja de estilos actual:
+       <link rel="stylesheet" href="/styles.css">
+       <link rel="stylesheet" href="/movil.css">     ← agregar
+
+   Lo que arregla, en orden de cuánto molesta:
+
+   1. El zoom de iOS. Safari hace zoom automático al enfocar cualquier
+      campo con letra de menos de 16px, y los del CRM están a 14px. Cada
+      vez que tocabas un input, la página saltaba y quedabas editando de
+      lado. Es LA razón por la que el CRM se siente inusable en iPhone.
+   2. Tablas que se desbordan y empujan la página a lo ancho.
+      Ahora hacen scroll dentro de su propia caja.
+   3. Rejillas fijas de 4 y 12 columnas, ilegibles en 375px.
+   4. Objetivos táctiles pequeños y márgenes de escritorio.
+   ===================================================== */
+
+/* ─── Teléfonos (hasta 640px) ─────────────────────────────────── */
+@media (max-width: 640px) {
+
+  /* 1 · EL ZOOM DE iOS.
+     16px es el umbral exacto de Safari: un pelo menos y hace zoom. */
+  input, textarea, select {
+    font-size: 16px !important;
+    padding: 0.6rem 0.7rem !important;
+  }
+  /* Las casillas no cuentan para el zoom, y agrandarlas descuadra las
+     listas de músculos y días. */
+  input[type="checkbox"], input[type="radio"] {
+    font-size: inherit !important;
+    padding: 0 !important;
+    min-width: 0 !important;
+  }
+
+  /* 2 · TABLAS. `display:block` + overflow deja que la tabla haga scroll
+     dentro de su caja en vez de estirar el body. Se pierde el ancho
+     automático de columnas, así que se compensa con nowrap. */
+  table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+    white-space: nowrap;
+  }
+  table th, table td { white-space: nowrap; }
+
+  /* 3 · REJILLAS. Las de 2 columnas se dejan: en un formulario, dos
+     campos cortos lado a lado siguen siendo legibles y ahorran scroll. */
+  .grid-cols-3, .grid-cols-4, .grid-cols-5, .grid-cols-6,
+  .grid-cols-12, .md\:grid-cols-4, .md\:grid-cols-5, .xl\:grid-cols-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  /* Las que llevan texto largo sí bajan a una sola columna. */
+  .lg\:grid-cols-2, .md\:grid-cols-2 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .grid { gap: 0.55rem !important; }
+
+  /* 4 · MÁRGENES. px-6 son 24px por lado: en 375px se come el 13% del ancho. */
+  main.max-w-7xl, .max-w-7xl { padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
+  main { padding-top: 0.85rem !important; padding-bottom: 1rem !important; }
+  .card { padding: 0.85rem !important; border-radius: 0.85rem !important; }
+
+  /* Cabecera compacta: en el teléfono la marca puede achicarse, la
+     navegación no. */
+  header .max-w-7xl { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; }
+  header .brand-badge { width: 2rem !important; height: 2rem !important; font-size: 0.75rem; }
+  header h1 { font-size: 0.9rem !important; }
+  header p { display: none; }
+  #logout-btn { order: 2; }
+
+  /* La barra de navegación ya hace scroll horizontal; solo hay que darle
+     el ancho completo y objetivos que se puedan tocar sin apuntar. */
+  header nav {
+    order: 3; width: 100%; margin-top: 0.4rem;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  header nav::-webkit-scrollbar { display: none; }
+  header nav .nav-item { padding: 0.5rem 0.75rem !important; font-size: 0.8rem; }
+
+  /* 5 · TOCAR. 40px es el mínimo cómodo con el pulgar; los botones del
+     CRM están en 32. `btn-sm` se deja pequeño a propósito donde va
+     apretado (filas de rutina), pero con área de toque suficiente. */
+  .btn { padding: 0.65rem 1rem !important; min-height: 42px; }
+  .btn-sm { padding: 0.45rem 0.7rem !important; min-height: 36px; font-size: 0.78rem !important; }
+  .btn-ghost { min-height: 36px; }
+  .chip { padding: 0.5rem 0.9rem !important; min-height: 38px; display: inline-flex; align-items: center; }
+
+  /* 6 · MODALES a pantalla casi completa: en móvil un cuadro centrado con
+     márgenes desperdicia la mitad del alto, y los formularios del CRM son
+     largos. */
+  #modal { padding: 0 !important; align-items: flex-end !important; }
+  #modal-box {
+    max-width: 100% !important; width: 100% !important;
+    max-height: 94vh !important;
+    border-radius: 1.1rem 1.1rem 0 0 !important;
+  }
+  #modal-content .px-6 { padding-left: 1rem !important; padding-right: 1rem !important; }
+  #modal-content .p-6 { padding: 1rem !important; }
+  /* El pie del modal, pegado abajo y por encima del área del gesto de iOS. */
+  #modal-content .sticky.bottom-0 { padding-bottom: calc(0.9rem + env(safe-area-inset-bottom, 0px)) !important; }
+
+  /* El toast tapaba el botón de guardar en la esquina. */
+  #toast {
+    left: 0.75rem; right: 0.75rem; bottom: auto; top: 0.75rem;
+    text-align: center;
+  }
+
+  /* Nada debe empujar la página a lo ancho. */
+  body { overflow-x: hidden; }
+  pre, code { overflow-x: auto; max-width: 100%; }
+  img, svg, video { max-width: 100%; height: auto; }
+
+  /* 7 · SECCIÓN ENTRENAMIENTO.
+     La galería y la rutina se apilan; la galería deja de tener alto fijo
+     porque dos zonas de scroll anidadas en un teléfono son una trampa:
+     intentas mover la página y mueves la lista de adentro. */
+  .max-h-\[70vh\] { max-height: none !important; overflow-y: visible !important; }
+  .series .celda { width: 100% !important; min-width: 54px; }
+  .series td, .series th { padding-left: 0.15rem; padding-right: 0.15rem; }
+}
+
+/* ─── Tabletas y teléfonos apaisados (641-900px) ──────────────── */
+@media (min-width: 641px) and (max-width: 900px) {
+  .max-w-7xl { padding-left: 1rem !important; padding-right: 1rem !important; }
+  .xl\:grid-cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  input, textarea, select { font-size: 16px !important; }
+  table { display: block; overflow-x: auto; max-width: 100%; }
+}
+
+/* ─── Cualquier pantalla táctil ───────────────────────────────── */
+@media (hover: none) {
+  /* Sin cursor no hay hover: los efectos se quedan "pegados" tras tocar,
+     y un botón que parece activo cuando no lo está confunde. */
+  .card-hover:hover { transform: none; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+  .btn:hover { filter: none; }
+}

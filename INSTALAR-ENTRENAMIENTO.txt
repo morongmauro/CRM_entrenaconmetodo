@@ -1,0 +1,111 @@
+SECCIÓN ENTRENAMIENTO + MÓVIL · CRM EntrenaConMétodo
+=====================================================
+
+No hay que editar código. Los tres archivos van tal cual, en la RAÍZ del
+repo CRM_entrenaconmetodo, al lado de app.js y styles.css:
+
+    entrenamiento.js     nuevo
+    movil.css            nuevo
+    index.html           REEMPLAZA al tuyo (ya trae las dos líneas puestas)
+
+Sin carpetas. Si los metes en src/ o js/, el navegador no los encuentra y
+no pasa nada: ni error, simplemente el botón no aparece.
+
+Al subirlos por la web de GitHub (Add file → Upload files), arrastra los
+ARCHIVOS, no la carpeta que trae el zip. Si arrastras la carpeta, quedarían
+en crm-entrenamiento/entrenamiento.js, que es la ruta equivocada.
+
+index.html se sobrescribe encima del que ya tienes: es tu mismo archivo con
+dos líneas añadidas y nada más. Si prefieres verlas, están en la línea 21
+(movil.css, después de styles.css) y al final (entrenamiento.js, después de
+app.js). El orden importa en las dos: movil.css anula reglas de styles.css,
+y entrenamiento.js usa funciones de app.js.
+
+No se toca app.js ni styles.css.
+
+
+ANTES DE SUBIR: LA BASE DE DATOS
+--------------------------------
+1. Supabase del CRM → SQL Editor → pega el schema.sql (viene en el zip del
+   repo entrenamientoecm) → Run.
+   Es idempotente: si ya lo corriste, vuelve a correrlo. Esta versión agrega
+   columnas y funciones nuevas sin tocar lo que ya existe.
+
+2. Solo si vas a subir videos tuyos (los de YouTube no lo necesitan):
+   Supabase → Storage → New bucket → nombre: ejercicios · público: NO
+
+
+CÓMO SABES QUE FUNCIONÓ
+-----------------------
+· En el computador: aparece el botón "🏋️ Entrenamiento" en la barra, justo
+  después de Nutrición.
+· En el teléfono: entra al CRM y toca cualquier campo de texto. Si la página
+  NO salta ni hace zoom, movil.css quedó bien.
+
+
+QUÉ CAMBIA
+----------
+
+EN EL TELÉFONO — afecta a TODO el CRM, no solo a Entrenamiento
+  · Los campos suben a 16px. Safari hace zoom automático en cualquier campo
+    de menos de 16px y los del CRM estaban en 14: por eso la página saltaba
+    cada vez que tocabas un input. Es el arreglo que más se nota.
+  · Las tablas hacen scroll dentro de su caja en vez de estirar la página.
+  · Las rejillas de 4 y 12 columnas bajan a 2.
+  · Los modales suben desde abajo, a pantalla casi completa.
+  · Botones y chips con área de toque de 36-42px.
+  En escritorio no cambia nada: todo va dentro de media queries.
+
+  Las vistas viejas (Pagos, Seguimiento) nunca se diseñaron para móvil, así
+  que alguna puede seguir apretada. Si te estorba una en concreto, se ajusta.
+
+LA SECCIÓN ENTRENAMIENTO — tres pestañas
+  Ejercicios · la galería, con filtros por tipo, segmento, patrón, músculo y
+    equipo, y búsqueda por nombre o alias.
+  Rutinas · el constructor. Galería a un lado, rutina al otro.
+  Clientes · las fases, con su duración en semanas y sus días. Aquí vive el
+    copiar e importar entre clientes.
+
+CIRCUITOS Y DESCANSOS
+  Botón "+ Bloque" en el constructor: superserie, circuito, EMOM o AMRAP,
+  con tres tiempos distintos:
+      Vueltas
+      Entre ejercicios (s)  el descanso corto, de estación a estación
+      Entre vueltas (s)     el largo, al cerrar el recorrido
+  Lo que añadas desde la galería entra al bloque que elijas arriba. Cada
+  ejercicio tiene además su propio descanso entre series.
+  Deshacer un bloque NO borra sus ejercicios: quedan sueltos en la rutina.
+
+PREVIEW DEL VIDEO
+  La miniatura sale del video que tenga el ejercicio: la imagen de YouTube
+  si pegaste un link, o un fotograma capturado del archivo si lo subiste. La
+  captura ocurre en tu navegador, así que el video no viaja dos veces.
+
+
+SI ALGO FALLA
+-------------
+· No aparece el botón "Entrenamiento"
+  → abre la consola (F12). Lo más probable es que entrenamiento.js quedara
+    en una carpeta en vez de la raíz.
+
+· "column poster_path does not exist" / "function ultimas_series..."
+  → falta volver a correr el schema.sql.
+
+· El teléfono sigue haciendo zoom al tocar un campo
+  → movil.css no se subió, o quedó en una carpeta.
+
+· Al subir un video: "Falta crear el bucket ejercicios"
+  → falta crear el bucket.
+
+· El video sube pero no genera miniatura
+  → no es un error: hay formatos que el navegador no puede decodificar. El
+    ejercicio queda con ícono genérico y todo lo demás funciona igual.
+
+
+POR DÓNDE EMPEZAR
+-----------------
+1. Crea 5-10 ejercicios en la galería, con sus músculos y su video.
+2. En Rutinas, arma una plantilla con esos ejercicios.
+3. En Clientes, elige a alguien, créale una fase y trae la plantilla.
+
+Desde la segunda fase ya casi no armas nada desde cero: copias e importas.
