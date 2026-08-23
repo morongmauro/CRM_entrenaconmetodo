@@ -64,6 +64,7 @@ const ENT_TIPOS = [
 const ENT_EQUIPO = [
   ['peso_corporal', 'Peso corporal'], ['barra', 'Barra'], ['mancuerna', 'Mancuernas'],
   ['kettlebell', 'Kettlebell'], ['polea', 'Polea'], ['maquina', 'Máquina'],
+  ['smith', 'Máquina Smith'],
   ['banda', 'Banda'], ['trx', 'TRX / anillas'], ['balon', 'Balón medicinal'],
   ['banco', 'Banco'], ['caja', 'Cajón'], ['cuerda', 'Cuerda'],
 ];
@@ -590,7 +591,16 @@ function entPintarPanelVideo() {
 
   if (v.fuente === 'youtube') {
     const ref = v.ref || entYoutubeId(v.url);
+    // Buscar el ejercicio en YouTube sin teclear el nombre otra vez. Con una
+    // galería de 290 fichas, escribir cada búsqueda es el trabajo que de
+    // verdad cansa — y el nombre ya lo tenemos aquí al lado.
+    const nom = ($('#ej-nombre')?.value || '').trim();
+    const busq = encodeURIComponent(nom ? nom + ' ejercicio técnica' : 'ejercicio técnica');
     panel.innerHTML = `
+      ${nom ? `<a href="https://www.youtube.com/results?search_query=${busq}"
+           target="_blank" rel="noopener noreferrer"
+           class="btn btn-secondary btn-sm" style="margin-bottom:0.5rem">
+           🔎 Buscar “${escapeHtml(nom)}” en YouTube</a>` : ''}
       <label>Pega el link de YouTube</label>
       <input id="ej-video-url" value="${escapeHtml(v.url)}"
              placeholder="https://youtu.be/… o https://www.youtube.com/watch?v=…"
