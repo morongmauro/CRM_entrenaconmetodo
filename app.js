@@ -692,27 +692,161 @@ async function getMealtrackerDataMerged(cliente) {
   const datas = (await Promise.all(ids.map(id => getMealtrackerUserData(id)))).filter(Boolean);
   if (!datas.length) return null;
 
+  // REGLA DE FUSIÓN — idéntica a mergeClientRows() del CoachDashboard del
+  // Mealtracker: las cuentas van de más reciente a más vieja y, para CADA
+  // fecha, gana la primera cuenta que tenga datos de esa fecha. Nada se suma
+  // entre cuentas (sumar duplicaba los días en que el cliente registró desde
+  // dos dispositivos).
   const history = {}, historyDetail = {}, wellbeing = {};
-  let goals = null, goals_history = null, today = null, today_totals = null, today_water = 0, today_entries = null;
+  let goals = null, goals_history = null, today = null, today_totals = null, today_water = 0;
+  const favMap = new Map();
+  const favIngSet = new Set();
   for (const d of datas) {                     // datas ya viene en orden de más reciente primero
-    for (const [date, tot] of Object.entries(d.history || {})) if (!history[date]) history[date] = tot;
-    for (const [date, ent] of Object.entries(d.historyDetail || {})) if (!historyDetail[date]) historyDetail[date] = ent;
+    // El DÍA EN CURSO se pliega a history/historyDetail ANTES de fusionar. En
+    // modo seguro la API ya lo hace en el servidor; en modo directo el blob lo
+    // trae aparte (today_totals / today_entries) y sin esto el día de hoy
+    // desaparecía del análisis. Se pliega SIEMPRE, aunque las kcal sean 0:
+    // "registró el día" y "comió 0 kcal" no son lo mismo.
+    const dHist = { ...(d.history || {}) };
+    const dDet = { ...(d.historyDetail || {}) };
+    if (d.today && d.today_totals && !dHist[d.today]) {
+      dHist[d.today] = {
+        kcal: d.today_totals.kcal || 0, p: d.today_totals.p || 0,
+        c: d.today_totals.c || 0, g: d.today_totals.g || 0, water: d.today_water || 0,
+      };
+    }
+    if (d.today && Array.isArray(d.today_entries) && d.today_entries.length && !dDet[d.today]) {
+      dDet[d.today] = d.today_entries;
+    }
+    for (const [date, tot] of Object.entries(dHist)) if (!history[date]) history[date] = tot;
+    for (const [date, ent] of Object.entries(dDet)) if (!historyDetail[date]) historyDetail[date] = ent;
     for (const [date, wb] of Object.entries(d.wellbeing || {})) if (!wellbeing[date]) wellbeing[date] = wb;
-    if (!goals && d.goals && Object.keys(d.goals).length) goals = d.goals;
-    // goals_history: sin esto goalsDeSemanaMT() nunca encontraba el historial y
-    // toda semana vieja se comparaba contra la meta de HOY.
-    if (!goals_history && Array.isArray(d.goals_history) && d.goals_history.length) goals_history = d.goals_history;
-    if (d.today && d.today_totals && Number(d.today_totals.kcal) > 0 && (!today || d.today > today)) {
-      today = d.today; today_totals = d.today_totals; today_water = d.today_water || 0;
-      today_entries = Array.isArray(d.today_entries) ? d.today_entries : null;
+
+    // METAS — goals y goals_history se toman de la MISMA cuenta (la primera
+    // que tenga meta). Antes se tomaban por separado y podían salir de cuentas
+    // distintas: la meta vigente de un teléfono y el historial del otro, con
+    // lo que una semana vieja se comparaba contra una meta que nunca rigió.
+    if (!goals && d.goals && Object.keys(d.goals).length) {
+      goals = d.goals;
+      goals_history = Array.isArray(d.goals_history) && d.goals_history.length ? d.goals_history : null;
+    }
+    if (d.today && (!today || d.today > today)) {
+      today = d.today;
+      today_totals = d.today_totals || null;
+      today_water = d.today_water || 0;
+    }
+
+    // Favoritos e ingredientes favoritos: unión por nombre entre cuentas
+    // (mismo criterio del CoachDashboard). Los usa la pestaña "Su despensa".
+    for (const f of (Array.isArray(d.favorites) ? d.favorites : [])) {
+      const k = normalizeName(f && (f.name || f.id) || '');
+      if (k && !favMap.has(k)) favMap.set(k, f);
+    }
+    for (const ing of (Array.isArray(d.favoriteIngredients) ? d.favoriteIngredients : [])) {
+      const k = normalizeName(typeof ing === 'string' ? ing : (ing && ing.name) || '');
+      if (k) favIngSet.add(k);
     }
   }
-  // El día en curso también debe verse en el detalle (la API en modo seguro ya
-  // lo fusiona; en modo directo el blob trae today_entries aparte).
-  if (today && today_entries && today_entries.length && !historyDetail[today]) historyDetail[today] = today_entries;
-  const merged = { history, historyDetail, wellbeing, goals: goals || (datas[0].goals || {}), goals_history, today, today_totals, today_water, _cuentas: datas.length };
+  // Si ninguna cuenta tenía goals_history, se busca en cualquiera antes de
+  // rendirse (mejor un historial de otra cuenta que ninguno).
+  if (!goals_history) {
+    const conHist = datas.find(d => Array.isArray(d.goals_history) && d.goals_history.length);
+    if (conHist) goals_history = conHist.goals_history;
+  }
+  // Menús armados en el Recetario: los sincroniza la app del cliente
+  // (data.recetario_menus). Se toma la lista de la primera cuenta que la
+  // traiga; si ninguna la trae, queda null y la vista lo dice en vez de
+  // mostrar una lista vacía como si el cliente no hubiera guardado nada.
+  // ── BORRADOS DEL CLIENTE ──────────────────────────────────────────────
+  // Si el cliente borra un día (o una comida) en su app, esa cuenta deja de
+  // tener la fecha y guarda una LÁPIDA. Pero cuando el cliente tiene VARIAS
+  // cuentas (pasa solo con entrar desde otro teléfono), la cuenta vieja aún
+  // trae el día — y como acá gana "la primera cuenta que tenga esa fecha",
+  // el día borrado RESUCITABA en el CRM. Es el peor error posible: le muestras
+  // al cliente una semana con una comida que él ya borró.
+  //
+  // Se aplican las lápidas de TODAS las cuentas con la misma regla que usa la
+  // app del cliente al sincronizar (bitácora historyDayOps sobre lápidas
+  // historyDeleted: entre "borrado" y "re-registrado" gana la acción más
+  // reciente).
+  aplicarBorradosMT(datas, history, historyDetail);
+
+  const conMenus = datas.find(d => Array.isArray(d.recetario_menus) && d.recetario_menus.length);
+  const merged = {
+    history, historyDetail, wellbeing,
+    goals: goals || (datas[0].goals || {}), goals_history,
+    today, today_totals, today_water,
+    favorites: [...favMap.values()],
+    favoriteIngredients: [...favIngSet],
+    recetario_menus: conMenus ? conMenus.recetario_menus : (datas.some(d => 'recetario_menus' in d) ? [] : null),
+    _cuentas: datas.length,
+  };
   _mtMergedCache = { key: ck, at: Date.now(), data: merged };
   return merged;
+}
+
+// Quita del historial fusionado lo que el cliente borró en su app. Espejo
+// exacto de la fusión que hace src/MealTracker.jsx al sincronizar: si cambias
+// una, cambia la otra.
+//
+//   · historyDayOps = { 'YYYY-MM-DD': { op:'del'|'add', at:ISO } } — la
+//     bitácora. Manda sobre las lápidas: un día borrado y luego re-registrado
+//     sigue vivo.
+//   · historyDeleted = ['YYYY-MM-DD', 'YYYY-MM-DD#idComida', …] — las lápidas.
+//     Las de día completo se descartan si la última acción de ese día fue
+//     'add'; las de comida suelta siempre valen.
+//
+// Muta history/historyDetail en sitio (los acaba de construir el llamador).
+function aplicarBorradosMT(datas, history, historyDetail) {
+  // Bitácora: por día, gana la marca con fecha más reciente entre cuentas.
+  const ops = {};
+  for (const d of datas) {
+    const o = (d.historyDayOps && typeof d.historyDayOps === 'object') ? d.historyDayOps : {};
+    for (const [dia, op] of Object.entries(o)) {
+      if (!op || !op.at) continue;
+      if (!ops[dia] || String(op.at) > String(ops[dia].at || '')) ops[dia] = op;
+    }
+  }
+
+  const crudas = new Set();
+  for (const d of datas) {
+    for (const t of (Array.isArray(d.historyDeleted) ? d.historyDeleted : [])) crudas.add(t);
+  }
+
+  const muertas = new Set();
+  for (const t of crudas) {
+    if (String(t).includes('#')) { muertas.add(t); continue; }   // comida suelta: siempre vale
+    if (!(ops[t] && ops[t].op === 'add')) muertas.add(t);        // día: vale si no fue re-registrado
+  }
+  for (const [dia, op] of Object.entries(ops)) {
+    if (op && op.op === 'del') muertas.add(dia);
+  }
+  if (!muertas.size) return;
+
+  const diasMuertos = new Set([...muertas].filter(t => !String(t).includes('#')));
+  for (const dia of diasMuertos) { delete history[dia]; delete historyDetail[dia]; }
+
+  // Comidas sueltas borradas. Si se cae una comida, los totales del día se
+  // recalculan desde las que quedan — con la MISMA fórmula de la app del
+  // cliente (kcal al entero, macros a un decimal). Si no, el día seguiría
+  // sumando calorías de una comida que ya no está en el detalle: los dos
+  // números en la misma pantalla, y sin cuadrar.
+  const r1 = (n) => Math.round((Number(n) || 0) * 10) / 10;
+  for (const [dia, arr] of Object.entries(historyDetail)) {
+    if (!Array.isArray(arr) || !arr.length) continue;
+    const quedan = arr.filter(e => !muertas.has(`${dia}#${e && e.id}`));
+    if (quedan.length === arr.length) continue;
+    if (!quedan.length) { delete history[dia]; delete historyDetail[dia]; continue; }
+    historyDetail[dia] = quedan;
+    const t = quedan.reduce((a, e) => ({
+      kcal: a.kcal + (Number(e.kcal) || 0), p: a.p + (Number(e.p) || 0),
+      c: a.c + (Number(e.c) || 0), g: a.g + (Number(e.g) || 0),
+    }), { kcal: 0, p: 0, c: 0, g: 0 });
+    history[dia] = {
+      kcal: Math.round(t.kcal), p: r1(t.p), c: r1(t.c), g: r1(t.g),
+      water: (history[dia] && history[dia].water) || 0,
+    };
+  }
 }
 
 // Cuando la lectura falla, prueba la conexión paso a paso y devuelve la causa
@@ -754,23 +888,37 @@ async function getMealtrackerWeek(cliente, semanaISO) {
   return resumenSemanaDeData(d, semanaISO);
 }
 
+// ─── REGLA ÚNICA DE "DÍA REGISTRADO" ────────────────────────────────────
+// Toda la app cuenta un día como registrado con ESTE criterio y con ningún
+// otro. Antes convivían dos: la sección Nutrición contaba kcal>0 O detalle,
+// y la adherencia rápida contaba solo kcal>0 — con lo que el mismo cliente
+// salía con 5/7 en un tablero y 4/7 en el otro. El criterio bueno es el del
+// Mealtracker: si la fecha existe en history, el cliente abrió y registró ese
+// día (aunque el total quede en 0 tras borrar una comida) o hay detalle.
+function diaRegistradoMT(tot, det) {
+  if (Array.isArray(det) && det.length > 0) return true;
+  return !!tot && typeof tot === 'object';
+}
+
 // Cuenta los días de una semana a partir de un blob de datos ya fusionado.
+// El día en curso ya viene plegado dentro de history por
+// getMealtrackerDataMerged(): acá no se vuelve a inyectar (hacerlo dos veces
+// con reglas distintas era otra fuente de descuadre).
 function resumenSemanaDeData(d, semanaISO) {
   const goals = d.goals || {};
   const history = d.history || {};
+  const detalle = d.historyDetail || {};
   const [ini, fin] = semanaISOToRange(semanaISO);
 
   const dias = [];
-  for (const [fecha, tot] of Object.entries(history)) {
-    if (fecha >= ini && fecha <= fin && tot && Number(tot.kcal) > 0) {
-      dias.push({ fecha, kcal: Number(tot.kcal), p: Number(tot.p || 0), c: Number(tot.c || 0), g: Number(tot.g || 0) });
-    }
-  }
-  if (d.today && d.today >= ini && d.today <= fin && d.today_totals && Number(d.today_totals.kcal) > 0) {
-    if (!dias.find(x => x.fecha === d.today)) {
-      const t = d.today_totals;
-      dias.push({ fecha: d.today, kcal: Number(t.kcal), p: Number(t.p || 0), c: Number(t.c || 0), g: Number(t.g || 0) });
-    }
+  for (const fecha of nutFechasSemana(semanaISO)) {
+    const tot = history[fecha];
+    if (!diaRegistradoMT(tot, detalle[fecha])) continue;
+    dias.push({
+      fecha,
+      kcal: Number(tot?.kcal || 0), p: Number(tot?.p || 0),
+      c: Number(tot?.c || 0), g: Number(tot?.g || 0),
+    });
   }
 
   if (dias.length === 0) {
@@ -792,11 +940,34 @@ function resumenSemanaDeData(d, semanaISO) {
 // cliente lo tiene — trazabilidad: la semana vieja se compara con SU meta).
 function goalsDeSemanaMT(d, semanaISO) {
   const [, fin] = semanaISOToRange(semanaISO);
+  return goalsMTEnFecha(d, fin);
+}
+
+// Meta VIGENTE en UNA fecha. Es la misma función goalsEnFecha() del
+// CoachDashboard del Mealtracker: cada día del histórico se juzga contra la
+// meta que regía ESE día, así cambiar la meta hoy no reescribe el pasado.
+// Normaliza además el formato viejo ({calories, protein, carbs, fat}) al
+// nuevo ({kcal,p,c,g}) — sin esto, un cliente antiguo salía "sin meta" en el
+// CRM y con meta en el Mealtracker.
+function goalsMTEnFecha(d, fecha) {
   const hist = Array.isArray(d.goals_history) ? d.goals_history : null;
-  if (!hist || !hist.length) return d.goals || {};
   let g = null;
-  for (const h of hist) { if (h.since <= fin) g = h; else break; }
-  return g || hist[0] || d.goals || {};
+  if (hist && hist.length) {
+    for (const h of hist) { if (h.since <= fecha) g = h; else break; }
+    g = g || hist[0];
+  }
+  return normalizarGoalsMT(g || d.goals || {});
+}
+
+function normalizarGoalsMT(g) {
+  const n = (v) => { const x = Number(v); return Number.isFinite(x) && x > 0 ? x : null; };
+  const o = g || {};
+  return {
+    kcal: n(o.kcal ?? o.calories),
+    p: n(o.p ?? o.protein),
+    c: n(o.c ?? o.carbs),
+    g: n(o.g ?? o.fat),
+  };
 }
 
 // ─── Quick view: adherencia últimas 3 semanas (Seguimiento y ficha) ──────
@@ -7111,10 +7282,13 @@ function analizarNutricionSemana(d, semanaISO, cliente, pesoKg) {
   const [ini, fin] = semanaISOToRange(semanaISO);
   const goalsMT = goalsDeSemanaMT(d, semanaISO) || {};
   const meta = {
-    kcal: Number(goalsMT.kcal ?? goalsMT.calories) || Number(cliente?.meta_calorias) || null,
-    p: Number(goalsMT.p ?? goalsMT.protein) || Number(cliente?.meta_proteina_g) || null,
-    c: Number(goalsMT.c ?? goalsMT.carbs) || Number(cliente?.meta_carbos_g) || null,
-    g: Number(goalsMT.g ?? goalsMT.fat) || Number(cliente?.meta_grasas_g) || null,
+    kcal: goalsMT.kcal || Number(cliente?.meta_calorias) || null,
+    p: goalsMT.p || Number(cliente?.meta_proteina_g) || null,
+    c: goalsMT.c || Number(cliente?.meta_carbos_g) || null,
+    g: goalsMT.g || Number(cliente?.meta_grasas_g) || null,
+    // De dónde salió: la del Mealtracker manda (es la que ve el cliente en su
+    // app); la de la ficha del CRM solo se usa si allá no hay ninguna.
+    origen: goalsMT.kcal ? 'mealtracker' : (cliente?.meta_calorias ? 'crm' : null),
   };
 
   const fechas = nutFechasSemana(semanaISO);
@@ -7131,7 +7305,8 @@ function analizarNutricionSemana(d, semanaISO, cliente, pesoKg) {
     const tot = history[fecha] || null;
     const det = Array.isArray(detalle[fecha]) ? detalle[fecha] : [];
     const kcal = nutR0(tot?.kcal);
-    const registrado = kcal > 0 || det.length > 0;
+    // Mismo criterio que resumenSemanaDeData() y que el Mealtracker.
+    const registrado = diaRegistradoMT(tot, det);
     const micros = { fiber: 0, omega3: 0, sugar: 0 };
     let nItems = 0;
     const horas = [];
@@ -7168,11 +7343,15 @@ function analizarNutricionSemana(d, semanaISO, cliente, pesoKg) {
     }
 
     const wb = wellbeing[fecha] || null;
+    // La meta que regía ESE día (no la de hoy): es contra la que se pinta el
+    // calendario y las barras, igual que en el Mealtracker.
+    const metaDia = goalsMTEnFecha(d, fecha);
     return {
       fecha,
       dow: NUT_DOW[i],
       finde: i >= 5,
       registrado,
+      meta_dia: (metaDia.kcal || metaDia.p || metaDia.c || metaDia.g) ? metaDia : null,
       kcal,
       p: nutR0(tot?.p),
       c: nutR0(tot?.c),

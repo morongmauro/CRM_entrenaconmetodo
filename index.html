@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>EntrenaConMétodo · CRM</title>
   <link rel="manifest" href="/manifest.json" />
-  <meta name="theme-color" content="#606c38" />
+  <meta name="theme-color" content="#8A9558" />
   <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
   <link rel="apple-touch-icon" href="/icons/icon.svg" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -14,11 +14,15 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css" />
   <!-- Ajustes para el teléfono. DESPUÉS de styles.css: anula reglas suyas,
        y todo va dentro de media queries, así que en escritorio no cambia nada. -->
   <link rel="stylesheet" href="/movil.css" />
+  <!-- Capa de marca. SIEMPRE la última: solo redefine color, tipografía,
+       radios y sombras para que el CRM se vea como el Meal Tracker y el
+       Centro de Recursos. No cambia ninguna clase que use el JS. -->
+  <link rel="stylesheet" href="/marca.css" />
   <script>
     tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter','system-ui','sans-serif'] } } } }
   </script>
@@ -78,6 +82,11 @@
     <main class="max-w-7xl mx-auto px-6 py-6">
       <div id="view"></div>
     </main>
+    <footer class="em-footer">
+      <div class="em-footer-brand">ENTRENA CON MÉTODO</div>
+      <div class="em-footer-tagline">Centro de control del coach</div>
+      <div class="em-footer-rights">Datos de clientes · <strong>uso interno</strong>. No compartas esta pantalla.</div>
+    </footer>
   </div>
 
   <!-- Loader inicial -->
@@ -98,5 +107,11 @@
   <!-- Sección Entrenamiento. DESPUÉS de app.js: usa sus funciones y se
        registra sola en el router y en la barra de navegación. -->
   <script src="/entrenamiento.js"></script>
+  <!-- Nutrición del cliente, centralizada. DESPUÉS de app.js: reemplaza
+       routes.nutricion y engancha el análisis enriquecido. -->
+  <script src="/nutricion-plus.js"></script>
+  <!-- Composición del cliente (peso, medidas, metas, actividad y la
+       calculadora). Se auto-registra en el router y en la barra. -->
+  <script src="/composicion.js"></script>
 </body>
 </html>

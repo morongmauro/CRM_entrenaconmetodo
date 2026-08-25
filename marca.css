@@ -1,0 +1,375 @@
+/* =====================================================
+   CRM EntrenaConMétodo · CAPA DE MARCA
+   =====================================================
+   SOLO VISUAL. Este archivo no cambia una sola función, ni un id, ni una
+   clase que el JS busque: únicamente redefine color, tipografía, radios y
+   sombras para que el CRM se vea de la misma familia que el Meal Tracker y
+   el Centro de Recursos.
+
+   Se carga DESPUÉS de styles.css y movil.css, así que gana por cascada sin
+   tener que editarlos.
+
+   ─── LO QUE SÍ CAMBIA ───────────────────────────────────────────────────
+   · Tipografía: Bebas Neue para títulos de marca, Inter para todo lo demás.
+   · Fondo: el crema cálido de la marca (#F7F4ED) con las manchas orgánicas
+     del Meal Tracker, en una capa fija detrás de todo.
+   · Header y footer: vidrio esmerilado cálido, con la firma de marca.
+   · Tarjetas, inputs y botones: radios de 22px/14px/píldora y las sombras
+     suaves de la marca, en vez del gris pizarra de Tailwind.
+   · Los grises fríos de Tailwind (slate-50/100/200) pasan a sus equivalentes
+     cálidos, para que nada se vea azulado sobre el crema.
+
+   ─── LO QUE NO SE TOCA (a propósito) ────────────────────────────────────
+   Los colores de ICONOS, BARRAS, GRÁFICAS Y ETIQUETAS se quedan exactamente
+   como están hoy: .tag-*, .sec-*, .ring-good/mid/bad, .pay-*, .status-*,
+   .seg-pillar-*, los colores inline de los SVG y las barras de progreso, y
+   los emojis. Esa capa de significado ya funciona y cambiarla haría perder
+   la lectura rápida de los tableros.
+   ===================================================== */
+
+:root {
+  /* Marca (tokens del Meal Tracker / Centro de Recursos) */
+  --em-olive:       #8A9558;
+  --em-olive-light: #A9B478;
+  --em-olive-dark:  #4A5238;
+  --em-olive-soft:  #F1F3E5;
+  --em-olive-chip:  #D4DAB8;
+
+  --em-graphite:    #1F1F1F;
+  --em-ink:         #181818;
+
+  --em-bg:          #F7F4ED;
+  --em-surface:     #FFFFFF;
+  --em-surface-2:   #FBF9F3;
+  --em-surface-3:   #EFEBE0;
+
+  --em-border:      rgba(0,0,0,0.06);
+  --em-border-soft: rgba(0,0,0,0.04);
+
+  --em-text:        #181818;
+  --em-text-soft:   #5A5A5A;
+  --em-text-mute:   #9A9A9A;
+
+  --em-radius-card:  22px;
+  --em-radius-input: 14px;
+  --em-radius-pill:  100px;
+
+  --em-shadow:     0 1px 2px rgba(0,0,0,.03), 0 2px 8px rgba(0,0,0,.02);
+  --em-shadow-md:  0 1px 3px rgba(0,0,0,.04), 0 6px 18px rgba(0,0,0,.03);
+  --em-shadow-lg:  0 2px 8px rgba(0,0,0,.05), 0 12px 32px rgba(0,0,0,.04);
+  --em-shadow-card:0 1px 0 rgba(255,255,255,.7) inset, 0 8px 30px rgba(60,70,50,.08), 0 2px 8px rgba(60,70,50,.04);
+
+  /* Se reasignan los tokens que ya usaba styles.css: así los focos, los
+     day-chip y los obj-chip heredan el oliva de marca sin tocar sus reglas. */
+  --brand-olive:      #8A9558;
+  --brand-olive-dark: #4A5238;
+  --brand-black:      #1F1F1F;
+}
+
+/* ─── Tipografía ──────────────────────────────────────────────────────── */
+body,
+input, textarea, select, button {
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Bebas solo donde es identidad de marca: nombre de la marca y títulos de
+   pantalla. En tablas y datos manda Inter — Bebas no tiene números tabulares
+   y arruinaría la lectura de cifras. */
+.em-display,
+#app-screen > header h1,
+#login-screen h1 {
+  font-family: 'Bebas Neue', 'Inter', sans-serif !important;
+  font-weight: 400 !important;
+  letter-spacing: 1.6px;
+  font-size: 1.35rem;
+  line-height: 1.05;
+  color: var(--em-text);
+}
+
+/* ─── Fondo: crema de marca + manchas orgánicas ───────────────────────── */
+/* El color base va en <html> y el <body> queda transparente. Es a propósito:
+   si el color viviera en el body, su fondo se propaga al lienzo del navegador
+   y la capa de manchas (un ::before con z-index negativo) quedaría tapada o
+   visible según el navegador. Con el color en <html> el resultado es el mismo
+   en todos. */
+html { background-color: var(--em-bg); }
+body {
+  background-color: transparent !important;
+  color: var(--em-text);
+}
+/* Capa fija de manchas: las mismas del Meal Tracker, al 55% para que debajo
+   de tablas densas no moleste la lectura. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: .55;
+  background:
+    radial-gradient(48% 34% at 90% 0%,   rgba(126,188,168,0.50), transparent 70%),
+    radial-gradient(42% 30% at -4% 14%,  rgba(238,168,138,0.42), transparent 70%),
+    radial-gradient(40% 30% at 34% 10%,  rgba(246,218,156,0.30), transparent 70%),
+    radial-gradient(50% 36% at 55% 36%,  rgba(255,255,255,0.85), transparent 70%),
+    radial-gradient(44% 32% at 0% 66%,   rgba(146,151,144,0.42), transparent 72%),
+    radial-gradient(48% 36% at 103% 54%, rgba(126,188,168,0.36), transparent 70%),
+    radial-gradient(42% 30% at 100% 84%, rgba(246,218,156,0.26), transparent 72%),
+    radial-gradient(44% 32% at 26% 100%, rgba(238,168,138,0.36), transparent 72%),
+    radial-gradient(42% 32% at 74% 96%,  rgba(255,255,255,0.75), transparent 72%),
+    radial-gradient(38% 28% at 100% 26%, rgba(146,151,144,0.30), transparent 72%);
+}
+
+/* ─── Grises fríos de Tailwind → cálidos ──────────────────────────────── */
+/* Solo superficies y bordes neutros. Los colores con significado (verde,
+   ámbar, rojo, azul, violeta) no se tocan. */
+.bg-slate-100 { background-color: var(--em-surface-3) !important; }
+.bg-slate-50  { background-color: var(--em-surface-2) !important; }
+.bg-white     { background-color: var(--em-surface) !important; }
+.border-slate-200 { border-color: var(--em-border) !important; }
+.border-slate-100 { border-color: var(--em-border-soft) !important; }
+.border-slate-50  { border-color: var(--em-border-soft) !important; }
+.ring-slate-100   { --tw-ring-color: var(--em-border-soft) !important; }
+.bg-slate-900 { background-color: var(--em-graphite) !important; }
+.text-slate-900 { color: var(--em-text) !important; }
+.text-slate-800 { color: #2A2A2A !important; }
+.text-slate-700 { color: #3D3D3D !important; }
+.text-slate-600 { color: #545454 !important; }
+.text-slate-500 { color: var(--em-text-soft) !important; }
+.text-slate-400 { color: var(--em-text-mute) !important; }
+.text-slate-300 { color: #C4C0B6 !important; }
+
+/* ─── Header ──────────────────────────────────────────────────────────── */
+#app-screen > header {
+  background: rgba(247,244,237,.82) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  border-bottom: 1px solid var(--em-border-soft) !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,.6) inset;
+}
+#app-screen > header p { color: var(--em-text-mute) !important; }
+
+/* Sello EM: el oliva de marca, no el verde viejo */
+.brand-badge {
+  background: linear-gradient(135deg, var(--em-olive) 0%, var(--em-olive-dark) 100%) !important;
+  box-shadow: 0 4px 12px rgba(74,82,56,.22);
+  letter-spacing: .5px;
+}
+
+/* ─── Navegación: píldoras de vidrio ──────────────────────────────────── */
+#app-screen > header nav {
+  background: rgba(255,255,255,.55) !important;
+  border: 1px solid var(--em-border-soft);
+  border-radius: var(--em-radius-pill) !important;
+  padding: .28rem !important;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+#app-screen > header nav .nav-item {
+  border-radius: var(--em-radius-pill) !important;
+  color: var(--em-text-soft) !important;
+  transition: background .18s, color .18s, box-shadow .18s;
+  letter-spacing: .1px;
+}
+#app-screen > header nav .nav-item:hover { color: var(--em-olive-dark) !important; }
+#app-screen > header nav .nav-item.active {
+  background: var(--em-graphite) !important;
+  color: #fff !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,.16);
+}
+
+#logout-btn {
+  border-radius: var(--em-radius-pill);
+  padding: .3rem .8rem;
+  border: 1px solid var(--em-border);
+  background: rgba(255,255,255,.6);
+  color: var(--em-text-soft) !important;
+}
+#logout-btn:hover { color: var(--em-text) !important; background: #fff; }
+
+/* ─── Tarjetas de vidrio ──────────────────────────────────────────────── */
+.card {
+  background: var(--em-surface) !important;
+  border-radius: var(--em-radius-card) !important;
+  border: 1px solid rgba(255,255,255,.75) !important;
+  box-shadow: var(--em-shadow-card) !important;
+  padding: 1.15rem 1.25rem;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 8px rgba(0,0,0,.05), 0 16px 38px rgba(60,70,50,.10) !important;
+}
+
+/* Los bloques con Tailwind (rounded-xl / rounded-2xl sobre bg-white) también
+   se suavizan, para que no convivan dos lenguajes de radio. */
+.rounded-2xl { border-radius: var(--em-radius-card) !important; }
+.rounded-xl  { border-radius: 16px !important; }
+.rounded-lg  { border-radius: 11px !important; }
+
+/* El glass del header del shell */
+.glass {
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  background-color: rgba(247,244,237,.82) !important;
+}
+
+/* ─── Formularios ─────────────────────────────────────────────────────── */
+input, textarea, select {
+  background-color: var(--em-surface-2) !important;
+  border: 1px solid var(--em-border) !important;
+  border-radius: var(--em-radius-input) !important;
+  color: var(--em-text) !important;
+  padding: .6rem .85rem;
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--em-olive) !important;
+  box-shadow: 0 0 0 3px rgba(138,149,88,.16) !important;
+  background: #fff !important;
+}
+input::placeholder, textarea::placeholder { color: var(--em-text-mute); }
+label {
+  color: var(--em-text-mute) !important;
+  letter-spacing: .06em;
+  font-size: .68rem;
+}
+input[type="checkbox"], input[type="radio"] {
+  accent-color: var(--em-olive) !important;
+  border-radius: 5px !important;
+}
+
+/* ─── Botones: píldora ────────────────────────────────────────────────── */
+.btn {
+  border-radius: var(--em-radius-pill) !important;
+  letter-spacing: .1px;
+  transition: transform .12s, background .2s, box-shadow .2s;
+}
+.btn:active { transform: scale(.97); }
+.btn-primary {
+  background-color: var(--em-olive) !important;
+  color: #fff !important;
+  box-shadow: 0 4px 14px rgba(138,149,88,.30) !important;
+}
+.btn-primary:hover { background-color: var(--em-olive-dark) !important; }
+.btn-dark {
+  background-color: var(--em-graphite) !important;
+  box-shadow: 0 4px 14px rgba(0,0,0,.18) !important;
+}
+.btn-dark:hover { background-color: #000 !important; }
+.btn-secondary {
+  background-color: rgba(255,255,255,.85) !important;
+  color: var(--em-text-soft) !important;
+  border: 1px solid var(--em-border) !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,.03);
+}
+.btn-secondary:hover { background-color: #fff !important; color: var(--em-text) !important; }
+.btn-ghost { border-radius: var(--em-radius-pill) !important; color: var(--em-text-soft) !important; }
+.btn-ghost:hover { background-color: var(--em-olive-soft) !important; color: var(--em-olive-dark) !important; }
+
+/* Chips y toggles: misma píldora */
+.chip {
+  border-radius: var(--em-radius-pill) !important;
+  background: rgba(255,255,255,.75) !important;
+  border-color: var(--em-border) !important;
+  color: var(--em-text-soft) !important;
+}
+.chip:hover { background: #fff !important; border-color: var(--em-olive-chip) !important; }
+.chip.active {
+  background: var(--em-graphite) !important;
+  border-color: var(--em-graphite) !important;
+  color: #fff !important;
+}
+.toggle-btn { border-radius: var(--em-radius-pill) !important; color: var(--em-text-soft) !important; }
+.toggle-btn.active { background: #fff !important; color: var(--em-text) !important; box-shadow: 0 2px 8px rgba(0,0,0,.08) !important; }
+.nav-item.active { background: #fff; color: var(--em-text); }
+
+/* ─── Tablas ──────────────────────────────────────────────────────────── */
+th {
+  color: var(--em-text-mute) !important;
+  border-bottom-color: var(--em-border) !important;
+  letter-spacing: .06em;
+}
+td { border-bottom-color: var(--em-border-soft) !important; }
+tr:hover td { background-color: rgba(241,243,229,.45) !important; }
+.name-cell { color: var(--em-text) !important; }
+.total-cell { background: var(--em-graphite) !important; }
+
+/* ─── Modal y toast ───────────────────────────────────────────────────── */
+#modal { background: rgba(24,24,24,.45) !important; }
+#modal-box {
+  border-radius: var(--em-radius-card) !important;
+  box-shadow: 0 24px 60px rgba(0,0,0,.22) !important;
+  border: 1px solid rgba(255,255,255,.8);
+}
+#toast {
+  background: var(--em-graphite) !important;
+  border-radius: var(--em-radius-pill) !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,.24) !important;
+  padding: .6rem 1.1rem;
+}
+
+/* ─── Login ───────────────────────────────────────────────────────────── */
+#login-screen {
+  background-image: linear-gradient(180deg, #F7F4ED 0%, #EFEBE0 100%);
+}
+#login-screen > div {
+  border-radius: var(--em-radius-card) !important;
+  box-shadow: var(--em-shadow-lg) !important;
+  border: 1px solid rgba(255,255,255,.8);
+}
+#boot-screen { background: var(--em-bg); }
+
+/* ─── Footer de marca ─────────────────────────────────────────────────── */
+/* Minimalista, como el del Centro de Recursos: una línea oliva, la firma en
+   Bebas y el aviso. Sin caja oscura. */
+.em-footer {
+  text-align: center;
+  padding: 3rem 1rem 2rem;
+  margin-top: 1rem;
+  position: relative;
+}
+.em-footer::before {
+  content: '';
+  display: block;
+  width: 32px; height: 1px;
+  background: var(--em-olive);
+  margin: 0 auto 1.5rem;
+}
+.em-footer-brand {
+  font-family: 'Bebas Neue', 'Inter', sans-serif;
+  font-size: 18px;
+  letter-spacing: 2px;
+  color: var(--em-text);
+  margin-bottom: .4rem;
+}
+.em-footer-tagline {
+  font-size: 11px;
+  letter-spacing: .5px;
+  color: var(--em-text-mute);
+  margin-bottom: .8rem;
+}
+.em-footer-rights {
+  font-size: 10px;
+  letter-spacing: .3px;
+  color: var(--em-text-mute);
+  opacity: .75;
+}
+.em-footer-rights strong { color: var(--em-text-soft); font-weight: 500; }
+
+/* ─── Scrollbars discretas ────────────────────────────────────────────── */
+.scrollbar-thin::-webkit-scrollbar-thumb { background: var(--em-olive-chip); }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,.10); border-radius: 100px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,.18); }
+
+/* ─── Móvil: el fondo fijo pesa en gama baja, se apaga ────────────────── */
+@media (max-width: 640px) {
+  body::before { opacity: .35; }
+  .card { padding: 1rem; border-radius: 18px !important; }
+  #app-screen > header nav { border-radius: 16px !important; }
+  #app-screen > header nav .nav-item { border-radius: 12px !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn, .chip, .card-hover { transition: none !important; }
+}

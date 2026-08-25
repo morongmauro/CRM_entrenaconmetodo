@@ -18,7 +18,8 @@ export const config = { supportsResponseStreaming: true, maxDuration: 60 };
 
 const MODEL = 'claude-opus-5';
 const MAX_TOKENS = 12000;
-const MAX_BODY_CHARS = 60000;   // el análisis de una semana pesa ~3-8 KB
+const MAX_BODY_CHARS = 120000;  // el análisis de una semana pesa ~8-25 KB desde
+                                // que incluye rankings, despensa y comparativa
 
 // El formato de salida es a propósito plano y delimitado por @@: se puede
 // parsear a medida que llega (streaming) sin esperar a que cierre un JSON.
@@ -65,7 +66,37 @@ REGLAS DURAS — el valor está acá:
    número de comidas salen SOLO de los días que traen desglose
    (registro.dias_con_detalle). Si dias_con_detalle es mucho menor, no concluyas
    sobre lo que come — di que falta el desglose.
-9. Cero relleno, cero introducciones, cero "¡excelente trabajo!". El coach lee esto
+9. QUÉ ES DATO MEDIDO Y QUÉ ES ESTIMACIÓN. Kcal, proteína, carbos y grasa TOTAL
+   vienen del registro del cliente: son el dato duro. La fibra, el omega-3 y el
+   azúcar AÑADIDA los estima el modelo al registrar la comida. El desglose de
+   grasa saturada / monoinsaturada / poliinsaturada (campos sat, mono, poli de
+   cada alimento y el bloque grasas_perfil) NO se mide: reparte la grasa medida
+   según el perfil lipídico típico de cada alimento, y grasas_perfil.confianza_pct
+   dice qué parte de los alimentos tenía perfil conocido. Úsalo para señalar de
+   DÓNDE viene la grasa saturada del cliente (qué alimentos suyos la traen), nunca
+   para dar una cifra como si fuera un laboratorio. Si confianza_pct es baja
+   (<60), dilo antes de concluir sobre saturadas.
+10. CAMPOS NUEVOS QUE SÍ DEBES USAR:
+   · rankings: mas_caloricos, mas_densos (más kcal por porción), mas_grasas,
+     mas_saturadas, mas_monoinsaturadas, mas_poliinsaturadas, mas_azucar_anadida,
+     mas_proteina, mas_fibra, mas_eficientes y menos_eficientes. La "eficiencia"
+     es proteína y fibra por caloría penalizando azúcar añadida y saturada: sirve
+     para decir qué proteger y qué porcionar.
+   · despensa: lo que el cliente guardó por su cuenta (comidas_favoritas,
+     menus_creados, ingredientes). CUALQUIER propuesta debe salir de ahí o de lo
+     que ya aparece en su registro. Si la despensa está vacía, proponer que la
+     llene puede ser la mejor oportunidad de la semana: sin ella su app no le
+     puede sugerir nada concreto.
+   · recetas_usadas: recetas del recetario que registró. Si no usa ninguna y le
+     cuesta improvisar, mandarlo al recetario resuelve más que un consejo.
+   · comparativa.resumen_anterior: la semana previa. Léela CONTRA la actual —
+     una semana sola no dice nada; el cambio sí.
+   · Si el coach dejó una nota con "FOCO PEDIDO POR EL COACH", ese foco manda:
+     dedícale al menos dos de las oportunidades.
+11. PORCIONAR, NO PROHIBIR. Cuando un alimento del cliente sea el problema, la
+   acción es ajustar cantidad, frecuencia o acompañamiento — no eliminarlo. Quitar
+   platos que le gustan es la vía más rápida a que abandone el registro.
+12. Cero relleno, cero introducciones, cero "¡excelente trabajo!". El coach lee esto
    con 10 clientes en fila.
 
 FORMATO DE SALIDA — exactamente estos bloques, sin markdown, sin viñetas fuera de
