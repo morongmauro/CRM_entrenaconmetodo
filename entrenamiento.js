@@ -288,7 +288,7 @@ const entDb = {
 // VISTA PRINCIPAL
 // =====================================================
 routes.entrenamiento = async () => {
-  view.innerHTML = '<div class="card">Cargando entrenamiento…</div>';
+  cargando('Cargando entrenamiento…');
   await entDb.musculos();
 
   const tabs = [

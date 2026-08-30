@@ -2,14 +2,22 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EntrenaConMétodo · CRM</title>
+  <!-- viewport-fit=cover: en iPhone con notch el contenido llega hasta el
+       borde y las barras usan env(safe-area-inset-*). Sin maximum-scale:
+       bloquear el zoom rompe la accesibilidad; el zoom automático al enfocar
+       inputs ya lo evita movil.css poniéndolos en 16px. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Entrena con Método · CRM</title>
   <link rel="manifest" href="/manifest.json" />
-  <meta name="theme-color" content="#8A9558" />
-  <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
-  <link rel="apple-touch-icon" href="/icons/icon.svg" />
+  <meta name="theme-color" content="#F7F4ED" />
+  <!-- Logo de marca (la M dentro del anillo). El SVG manda en navegadores
+       modernos; el PNG es el respaldo y el ícono de iOS al "Agregar a inicio". -->
+  <link rel="icon" type="image/svg+xml" href="/icons/logo.svg" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/logo-192.png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-title" content="EM CRM" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Entrena con Método" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -33,20 +41,20 @@
   <div id="login-screen" class="hidden min-h-screen flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl shadow-lg max-w-sm w-full p-7">
       <div class="text-center mb-5">
-        <div class="w-12 h-12 mx-auto rounded-xl brand-badge flex items-center justify-center font-bold text-white text-lg shadow-sm">EM</div>
-        <h1 class="text-xl font-bold mt-3 text-slate-900">EntrenaConMétodo</h1>
+        <img src="/icons/logo.svg" alt="Entrena con Método" class="em-logo em-logo-lg mx-auto" width="56" height="56">
+        <h1 class="text-xl font-bold mt-3 text-slate-900">Entrena con Método</h1>
         <p class="text-sm text-slate-500">Centro de control</p>
       </div>
       <form id="login-form" class="space-y-3">
         <div>
-          <label>Email</label>
-          <input id="login-email" type="email" required autocomplete="username">
+          <label for="login-email">Email</label>
+          <input id="login-email" type="email" required autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false">
         </div>
         <div>
-          <label>Contraseña</label>
+          <label for="login-pass">Contraseña</label>
           <input id="login-pass" type="password" required autocomplete="current-password">
         </div>
-        <button class="btn btn-primary w-full" type="submit">Entrar</button>
+        <button id="login-btn" class="btn btn-primary w-full justify-center" type="submit">Entrar</button>
         <p id="login-error" class="text-red-600 text-xs text-center hidden"></p>
       </form>
       <p class="text-xs text-slate-400 text-center mt-4">
@@ -57,31 +65,41 @@
 
   <!-- App -->
   <div id="app-screen" class="hidden">
-    <header class="bg-white border-b border-slate-200 sticky top-0 z-30 glass">
-      <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between gap-4 flex-wrap">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl brand-badge flex items-center justify-center text-white font-bold shadow-sm">EM</div>
-          <div>
-            <h1 class="text-base font-bold text-slate-900 leading-tight">EntrenaConMétodo</h1>
-            <p class="text-xs text-slate-500">Centro de control</p>
+    <header class="glass">
+      <div class="em-topbar">
+        <div class="em-brand">
+          <img src="/icons/logo.svg" alt="Entrena con Método" class="em-logo" width="40" height="40">
+          <div class="em-brand-text">
+            <h1>Entrena con Método</h1>
+            <p>Centro de control</p>
           </div>
         </div>
-        <nav class="bg-slate-100 rounded-xl p-1 flex gap-1 text-sm overflow-x-auto">
-          <button data-view="dashboard"   class="nav-item active px-3 py-1.5 rounded-lg font-medium text-slate-600 whitespace-nowrap">Inicio</button>
-          <button data-view="seguimiento" class="nav-item px-3 py-1.5 rounded-lg font-medium text-slate-600 whitespace-nowrap">Seguimiento</button>
-          <button data-view="pagos"       class="nav-item px-3 py-1.5 rounded-lg font-medium text-slate-600 whitespace-nowrap">Pagos</button>
-          <button data-view="pendientes"  class="nav-item px-3 py-1.5 rounded-lg font-medium text-slate-600 whitespace-nowrap">Actividades</button>
-          <button data-view="clientes"    class="nav-item px-3 py-1.5 rounded-lg font-medium text-slate-600 whitespace-nowrap">Clientes</button>
-          <button data-view="nutricion"   class="nav-item px-3 py-1.5 rounded-lg font-medium text-slate-600 whitespace-nowrap">🥗 Nutrición</button>
-          <button data-view="negocio"     class="nav-item px-3 py-1.5 rounded-lg font-medium text-slate-600 whitespace-nowrap">Mi negocio</button>
-          <button data-view="ajustes"     class="nav-item px-3 py-1.5 rounded-lg font-medium text-slate-600">⚙</button>
-        </nav>
         <button id="logout-btn" class="text-xs text-slate-500 hover:text-slate-800">Salir</button>
       </div>
     </header>
-    <main class="max-w-7xl mx-auto px-6 py-6">
-      <div id="view"></div>
-    </main>
+
+    <!-- Cuerpo: menú de secciones + contenido.
+         En escritorio el menú es una columna a la izquierda (once secciones no
+         caben en una fila sin desbordarse); en el teléfono vuelve a ser una
+         tira horizontal que se desliza, pegada bajo la cabecera. -->
+    <div class="em-shell">
+      <aside class="em-side">
+        <nav id="main-nav" class="em-nav" aria-label="Secciones">
+          <button data-view="dashboard"   class="nav-item active">Inicio</button>
+          <button data-view="seguimiento" class="nav-item">Seguimiento</button>
+          <button data-view="pagos"       class="nav-item">Pagos</button>
+          <button data-view="pendientes"  class="nav-item">Actividades</button>
+          <button data-view="clientes"    class="nav-item">Clientes</button>
+          <button data-view="nutricion"   class="nav-item">🥗 Nutrición</button>
+          <button data-view="negocio"     class="nav-item">Mi negocio</button>
+          <button data-view="ajustes"     class="nav-item">⚙ Ajustes</button>
+        </nav>
+      </aside>
+      <main>
+        <div id="view"></div>
+      </main>
+    </div>
+
     <footer class="em-footer">
       <div class="em-footer-brand">ENTRENA CON MÉTODO</div>
       <div class="em-footer-tagline">Centro de control del coach</div>
@@ -90,7 +108,8 @@
   </div>
 
   <!-- Loader inicial -->
-  <div id="boot-screen" class="min-h-screen flex items-center justify-center">
+  <div id="boot-screen" class="min-h-screen flex flex-col items-center justify-center gap-3">
+    <img src="/icons/logo.svg" alt="" class="em-logo em-logo-lg" width="56" height="56">
     <div class="text-slate-400 text-sm">Cargando…</div>
   </div>
 
@@ -113,5 +132,9 @@
   <!-- Composición del cliente (peso, medidas, metas, actividad y la
        calculadora). Se auto-registra en el router y en la barra. -->
   <script src="/composicion.js"></script>
+  <!-- Asistente: responde preguntas leyendo tus propios datos. Va al final
+       porque usa la capa db de app.js y los lectores del Mealtracker y del
+       Centro de Recursos. -->
+  <script src="/asistente.js"></script>
 </body>
 </html>

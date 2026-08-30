@@ -150,33 +150,53 @@ body::before {
 }
 #app-screen > header p { color: var(--em-text-mute) !important; }
 
-/* Sello EM: el oliva de marca, no el verde viejo */
-.brand-badge {
-  background: linear-gradient(135deg, var(--em-olive) 0%, var(--em-olive-dark) 100%) !important;
-  box-shadow: 0 4px 12px rgba(74,82,56,.22);
-  letter-spacing: .5px;
+/* Logo de marca: la M dentro del anillo. La sombra suave lo despega del
+   crema sin ponerle un borde encima. */
+.em-logo {
+  box-shadow: 0 4px 14px rgba(31,31,31,.18);
+  background: #0B0B0A;
 }
+.em-brand-text h1 {
+  font-family: 'Bebas Neue', 'Inter', sans-serif !important;
+  font-weight: 400 !important;
+  letter-spacing: 1.4px;
+  font-size: 1.25rem !important;
+  color: var(--em-text) !important;
+}
+.em-brand-text p { color: var(--em-text-mute) !important; }
 
 /* ─── Navegación: píldoras de vidrio ──────────────────────────────────── */
-#app-screen > header nav {
-  background: rgba(255,255,255,.55) !important;
-  border: 1px solid var(--em-border-soft);
-  border-radius: var(--em-radius-pill) !important;
-  padding: .28rem !important;
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-}
-#app-screen > header nav .nav-item {
+.em-nav .nav-item {
   border-radius: var(--em-radius-pill) !important;
   color: var(--em-text-soft) !important;
   transition: background .18s, color .18s, box-shadow .18s;
   letter-spacing: .1px;
 }
-#app-screen > header nav .nav-item:hover { color: var(--em-olive-dark) !important; }
-#app-screen > header nav .nav-item.active {
+.em-nav .nav-item:hover { background: rgba(138,149,88,.12) !important; color: var(--em-olive-dark) !important; }
+.em-nav .nav-item.active {
   background: var(--em-graphite) !important;
   color: #fff !important;
   box-shadow: 0 4px 12px rgba(0,0,0,.16);
+}
+
+/* En escritorio la columna se apoya en una tarjeta de vidrio; en el teléfono
+   la tira va suelta sobre el fondo crema para no robar altura. */
+@media (min-width: 1024px) {
+  .em-side {
+    background: rgba(255,255,255,.55);
+    border: 1px solid var(--em-border-soft);
+    border-radius: var(--em-radius-card);
+    padding: .45rem;
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    box-shadow: var(--em-shadow);
+  }
+}
+@media (max-width: 1023px) {
+  .em-side {
+    background: rgba(247,244,237,.92) !important;
+    border-bottom: 1px solid var(--em-border-soft) !important;
+  }
 }
 
 #logout-btn {
@@ -367,9 +387,24 @@ tr:hover td { background-color: rgba(241,243,229,.45) !important; }
 @media (max-width: 640px) {
   body::before { opacity: .35; }
   .card { padding: 1rem; border-radius: 18px !important; }
-  #app-screen > header nav { border-radius: 16px !important; }
-  #app-screen > header nav .nav-item { border-radius: 12px !important; }
+  .em-nav .nav-item { border-radius: 12px !important; }
 }
 @media (prefers-reduced-motion: reduce) {
   .btn, .chip, .card-hover { transition: none !important; }
 }
+
+/* ─── Gráficas ────────────────────────────────────────────────────────── */
+.graf-caja {
+  background: var(--em-surface-2) !important;
+  border: 1px solid var(--em-border-soft);
+  border-radius: 18px !important;
+}
+.graf-rangos { background: rgba(0,0,0,.05); }
+.graf-rango.active { background: var(--em-surface) !important; color: var(--em-text) !important; }
+
+/* ─── Asistente ───────────────────────────────────────────────────────── */
+.asis-coach { background: var(--em-graphite) !important; color: #fff !important; }
+.asis-ia { background: var(--em-surface-2) !important; border: 1px solid var(--em-border-soft); color: var(--em-text) !important; }
+.asis-ejemplo { background: var(--em-surface) !important; border-color: var(--em-border) !important; border-radius: var(--em-radius-input) !important; }
+.asis-ejemplo:hover { border-color: var(--em-olive) !important; color: var(--em-olive-dark) !important; }
+.asis-latido { background: var(--em-olive); }

@@ -63,26 +63,24 @@
   .grid { gap: 0.55rem !important; }
 
   /* 4 · MÁRGENES. px-6 son 24px por lado: en 375px se come el 13% del ancho. */
-  main.max-w-7xl, .max-w-7xl { padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
-  main { padding-top: 0.85rem !important; padding-bottom: 1rem !important; }
+  .em-shell, main.max-w-7xl, .max-w-7xl { padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
+  .em-shell { padding-top: 0.75rem !important; padding-bottom: 1rem !important; }
   .card { padding: 0.85rem !important; border-radius: 0.85rem !important; }
 
   /* Cabecera compacta: en el teléfono la marca puede achicarse, la
      navegación no. */
-  header .max-w-7xl { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; }
-  header .brand-badge { width: 2rem !important; height: 2rem !important; font-size: 0.75rem; }
-  header h1 { font-size: 0.9rem !important; }
-  header p { display: none; }
-  #logout-btn { order: 2; }
+  .em-topbar { padding: 0.45rem 0.75rem !important; }
+  .em-logo { width: 2rem !important; height: 2rem !important; border-radius: 0.6rem !important; }
+  .em-brand-text h1 { font-size: 1rem !important; }
+  .em-brand-text p { display: none; }
 
-  /* La barra de navegación ya hace scroll horizontal; solo hay que darle
-     el ancho completo y objetivos que se puedan tocar sin apuntar. */
-  header nav {
-    order: 3; width: 100%; margin-top: 0.4rem;
-    scrollbar-width: none; -webkit-overflow-scrolling: touch;
-  }
-  header nav::-webkit-scrollbar { display: none; }
-  header nav .nav-item { padding: 0.5rem 0.75rem !important; font-size: 0.8rem; }
+  /* La tira de secciones: ancho completo, sin barra de scroll a la vista y
+     objetivos que se puedan tocar sin apuntar. */
+  .em-side { margin-left: -0.75rem !important; margin-right: -0.75rem !important; padding: 0.4rem 0.75rem !important; }
+  .em-nav .nav-item { padding: 0.5rem 0.8rem !important; font-size: 0.8rem; min-height: 38px; }
+
+  /* El pie no debe quedar bajo la barra de gestos de iOS. */
+  .em-footer { padding-bottom: calc(2rem + env(safe-area-inset-bottom, 0px)) !important; }
 
   /* 5 · TOCAR. 40px es el mínimo cómodo con el pulgar; los botones del
      CRM están en 32. `btn-sm` se deja pequeño a propósito donde va
@@ -128,7 +126,7 @@
 
 /* ─── Tabletas y teléfonos apaisados (641-900px) ──────────────── */
 @media (min-width: 641px) and (max-width: 900px) {
-  .max-w-7xl { padding-left: 1rem !important; padding-right: 1rem !important; }
+  .em-shell, .max-w-7xl { padding-left: 1rem !important; padding-right: 1rem !important; }
   .xl\:grid-cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
   input, textarea, select { font-size: 16px !important; }
   table { display: block; overflow-x: auto; max-width: 100%; }

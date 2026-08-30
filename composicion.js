@@ -260,7 +260,7 @@ function compActividadHTML(cliente, metas, segs) {
       <div class="text-xs font-bold text-slate-700 mb-2">Nivel de actividad asumido en cada cálculo de meta (PAL)</div>
       ${lineChart([{ label: 'PAL', color: '#8b5cf6', points: conPal.map(m => m.pal) }],
         conPal.map(m => m.fecha ? fmt.fechaCorta(m.fecha) : '—'),
-        { yMin: 1.1, yMax: 2.0, height: 140 })}
+        { escalaFija: true, yMin: 1.1, yMax: 2.0, height: 200, unidad: 'PAL', decimales: 2 })}
       <div class="text-[10px] text-slate-500 mt-1">1.2 sedentario · 1.375 ligero · 1.55 moderado · 1.725 activo · 1.9 muy activo (factores FAO/OMS). Un PAL que sube sin que suba la asistencia real es una meta inflada.</div>
     </div>` : '';
 
@@ -280,7 +280,7 @@ function compActividadHTML(cliente, metas, segs) {
         ${lineChart([
           { label: 'Asistidos', color: '#10b981', points: ult12.map(s => s.dias_asistidos ?? null) },
           { label: 'Planeados', color: '#94a3b8', points: ult12.map(s => s.dias_planeados ?? null) },
-        ], ult12.map(s => fmt.labelSemana(s.semana)), { yMin: 0, yMax: Math.max(7, ...ult12.map(s => s.dias_planeados || 0)) + 1, height: 150 })}
+        ], ult12.map(s => fmt.labelSemana(s.semana)), { escalaFija: true, yMin: 0, yMax: Math.max(7, ...ult12.map(s => s.dias_planeados || 0)) + 1, height: 210, unidad: 'días', decimales: 0, area: false })}
         <div class="mt-1">${legendDot('#10b981', 'Días asistidos')}${legendDot('#94a3b8', 'Días planeados')}</div>` : ''}
       <div class="grid grid-cols-12 gap-1 mt-3">
         ${ult12.map(s => {
@@ -485,7 +485,7 @@ window.compFijarMeta = async () => {
     ...(st.meta.grasa_pct_kcal ? { grasa_pct_kcal: Number(st.meta.grasa_pct_kcal) } : {}),
   }).eq('id', c.id);
   if (error) { toast(error.message); return; }
-  _clientesCache = null;
+  invalidarCache('clientes');
 
   await registrarMetaHistorial(c.id, {
     kcal: r.kcal, proteina_g: r.proteina, carbos_g: r.carbos, grasas_g: r.grasas,
@@ -624,10 +624,16 @@ function compCalculadoraHTML(cliente, meds, av) {
 // CARGA Y VISTA
 // =====================================================
 async function compCargar(clienteId, { forzar = false } = {}) {
+  const otroCliente = _comp.clienteId !== clienteId;
   _comp.cargando = true; _comp.error = null; _comp.clienteId = clienteId;
-  rerenderView();
+  // Si es el MISMO cliente (un 🔄 Actualizar, o volver de guardar una
+  // medición) no se borra la pantalla: se deja lo que hay y se cambia por
+  // debajo cuando llegan los datos. Vaciar para volver a llenar en 200 ms es
+  // justo lo que hacía sentir lento el CRM.
+  if (otroCliente) { _comp.cliente = null; _comp.meds = []; _comp.metas = null; _comp.segs = []; rerenderView(); }
   try {
-    if (forzar) _clientesCache = null;
+    // 🔄 Actualizar tiene que traer datos frescos de verdad, no lo cacheado.
+    if (forzar) invalidarCache('clientes', 'mediciones', 'metas', 'seguimientos');
     const [cliente, meds, metas, segs] = await Promise.all([
       db.clientes.get(clienteId),
       db.mediciones.listCliente(clienteId),
@@ -665,7 +671,7 @@ routes.composicion = async () => {
   if (!_comp.clienteId && clientes.length) {
     _comp.clienteId = clientes[0].id;
     compCargar(clientes[0].id);
-    view.innerHTML = '<div class="card">Cargando composición…</div>';
+    cargando('Cargando composición…');
     return;
   }
   if (!clientes.length) { view.innerHTML = '<div class="card">Todavía no hay clientes activos.</div>'; return; }
@@ -686,7 +692,10 @@ routes.composicion = async () => {
       </div>
     </div>`;
 
-  if (_comp.cargando) { view.innerHTML = `${cabecera(_comp.cliente?.nombre)}<div class="card">Cargando…</div>`; return; }
+  if (_comp.cargando && !_comp.cliente) {
+    view.innerHTML = `${cabecera('')}<div class="card"><div class="sk sk-line" style="width:40%"></div><div class="sk sk-card" style="margin:.9rem 0"></div><div class="sk sk-line" style="width:65%"></div></div>`;
+    return;
+  }
   if (_comp.error) {
     view.innerHTML = `${cabecera('')}<div class="card border-l-4 border-red-400"><div class="font-bold text-slate-800 mb-1">No pude cargar</div><p class="text-sm text-slate-600">${escapeHtml(_comp.error)}</p></div>`;
     return;

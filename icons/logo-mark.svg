@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Entrena con Método">
+  <!-- Variante sin fondo: el anillo y la M en tinta, para usar sobre el crema
+       de la marca (cabecera clara, documentos, impresos). -->
+  <defs>
+    <linearGradient id="emm-ring" x1="140" y1="60" x2="420" y2="452" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4A5238"/>
+      <stop offset="0.55" stop-color="#8A9558"/>
+      <stop offset="1" stop-color="#A9B478"/>
+    </linearGradient>
+  </defs>
+  <circle cx="256" cy="256" r="180" fill="none" stroke="rgba(0,0,0,.10)" stroke-width="16"/>
+  <circle cx="256" cy="256" r="180" fill="none" stroke="url(#emm-ring)" stroke-width="16"
+          stroke-linecap="round" stroke-dasharray="1040 1131" transform="rotate(-90 256 256)"/>
+  <circle cx="256" cy="76" r="17" fill="#4A5238"/>
+  <polyline points="185,313 185,186 270,286 325,194" fill="none" stroke="#1F1F1F"
+            stroke-width="24" stroke-linecap="square" stroke-linejoin="miter"/>
+</svg>

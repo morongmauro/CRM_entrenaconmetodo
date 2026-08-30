@@ -1,14 +1,17 @@
 {
-  "name": "EntrenaConMétodo · CRM",
-  "short_name": "EM CRM",
-  "description": "Centro de control del coaching EntrenaConMétodo",
+  "name": "Entrena con Método · CRM",
+  "short_name": "ECM CRM",
+  "description": "Centro de control del coaching Entrena con Método",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#f1f5f9",
-  "theme_color": "#606c38",
+  "background_color": "#F7F4ED",
+  "theme_color": "#F7F4ED",
   "lang": "es",
   "icons": [
-    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
-    { "src": "/icons/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+    { "src": "/icons/logo-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/logo-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/logo-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ]
 }

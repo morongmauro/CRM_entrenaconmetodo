@@ -2,7 +2,69 @@
 // CRM EntrenaConMétodo · App principal
 // =====================================================
 
-const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+// ── Red de seguridad del arranque ───────────────────────────────────────
+// Si algo revienta antes de pintar (la librería de Supabase que no bajó
+// porque el CDN está bloqueado en esa red de datos, un error de sintaxis tras
+// un deploy), la pantalla se quedaba en "Cargando…" para siempre y no había
+// forma de saber por qué. Ahora el fallo se ve, con su motivo y un botón de
+// reintentar.
+function pantallaArranqueRota(titulo, detalle) {
+  const boot = document.getElementById('boot-screen');
+  if (!boot) return;
+  boot.classList.remove('hidden');
+  boot.innerHTML = `
+    <div class="card max-w-md text-center">
+      <h2 class="font-bold text-lg mb-2">${titulo}</h2>
+      <p class="text-sm text-slate-600 mb-3">${detalle}</p>
+      <button class="btn btn-primary" onclick="location.reload()">Reintentar</button>
+    </div>`;
+}
+window.addEventListener('error', (e) => {
+  const boot = document.getElementById('boot-screen');
+  if (boot && !boot.classList.contains('hidden') && boot.textContent.includes('Cargando')) {
+    pantallaArranqueRota('No pude arrancar el CRM',
+      'Error: ' + ((e.error && e.error.message) || e.message || 'desconocido'));
+  }
+});
+
+if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+  pantallaArranqueRota('Falta cargar una librería',
+    'No se pudo descargar Supabase. Suele ser la red (wifi con portal cautivo, datos móviles con bloqueo o modo ahorro de datos). Conéctate a otra red y reintenta.');
+  throw new Error('supabase-js no disponible');
+}
+
+// ── Cliente de Supabase ─────────────────────────────────────────────────
+// El `lock` propio no es un capricho. Por defecto supabase-js usa
+// navigator.locks para que dos pestañas no refresquen el token a la vez; en
+// Safari de iOS (y en la app instalada en el inicio) ese candado se queda
+// tomado cuando una pestaña se congela al pasar a segundo plano, y entonces
+// signInWithPassword NO responde nunca: es exactamente el "loading y de ahí
+// no pasa" del teléfono. Aquí solo hay un coach en una pestaña, así que
+// serializar con una promesa en memoria es suficiente y no se puede colgar.
+let _authLock = Promise.resolve();
+const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: false,
+    lock: (_nombre, _espera, fn) => {
+      const siguiente = _authLock.then(fn, fn);
+      _authLock = siguiente.then(() => {}, () => {});
+      return siguiente;
+    },
+  },
+});
+
+// Cualquier llamada de red puede quedarse colgada en un celular con mala
+// señal: sin tope, la pantalla se queda en "Cargando…" para siempre. Con tope
+// falla, se ve el error y se puede reintentar.
+function conTiempoLimite(promesa, ms, queEs = 'La conexión') {
+  return Promise.race([
+    promesa,
+    new Promise((_, rechazar) =>
+      setTimeout(() => rechazar(new Error(`${queEs} tardó demasiado. Revisa tu conexión e inténtalo otra vez.`)), ms)),
+  ]);
+}
 
 // ===== Cliente Supabase secundario: Mealtracker externo =====
 // Las credenciales pueden venir de config.js (window.MEALTRACKER_URL/KEY)
@@ -578,7 +640,7 @@ async function persistJourney() {
   renderJourneyList();
   const { error } = await sb.from('clientes').update({ journey: _journeyCtx.journey }).eq('id', _journeyCtx.id);
   if (error) toast('⚠️ No se pudo guardar el journey. ¿Corriste el SQL de la columna `journey`?');
-  _clientesCache = null;
+  invalidarCache('clientes');
 }
 
 window.toggleJourney = async (stepId) => {
@@ -1041,7 +1103,7 @@ window.vincularMealtrackerMenu = async (clienteId) => {
 window.confirmarVinculoMealtracker = async (clienteId, mtId) => {
   const { error } = await sb.from('clientes').update({ mealtracker_id: mtId }).eq('id', clienteId);
   if (error) { toast('✗ ' + error.message); return; }
-  _clientesCache = null;
+  invalidarCache('clientes');
   closeModal();
   toast('✓ Vinculado. Ya puedes enviarle la meta nutricional y ver su adherencia.');
 };
@@ -1120,7 +1182,7 @@ async function resolverMealtrackerId(cliente) {
   if (mejor && mejor.score >= 85) {
     // Guardar el vínculo en el cliente
     await sb.from('clientes').update({ mealtracker_id: mejor.user_id }).eq('id', cliente.id);
-    _clientesCache = null;
+    invalidarCache('clientes');
     return mejor.user_id;
   }
   return null;
@@ -1748,49 +1810,231 @@ function borradorWhatsApp(cliente, seg, scores, pendientes, streaks) {
   return partes.join('\n');
 }
 
-// ===== Gráfica SVG simple =====
-// series = [{ label, color, points: number[] }]  · xLabels = string[]
+// ===== Gráfica SVG =====
+// series  = [{ label, color, points: (number|null)[] }]   · xLabels = string[]
+//
+// POR QUÉ SE VEÍAN PLANAS
+// La versión anterior recibía la escala ya hecha desde fuera, casi siempre
+// "del mínimo menos 3 al máximo más 3". Con eso, un cliente que baja de 78,4 a
+// 77,6 kg (progreso real de 800 g) se dibujaba dentro de un eje de 7 kg: la
+// línea ocupaba un 11% del alto y parecía una raya horizontal.
+// Ahora el eje se calcula CON los datos: se ajusta a lo que de verdad pasó,
+// con un recorrido mínimo (spanMin) para que el ruido de una báscula no se
+// disfrace de montaña, y se redondea a marcas legibles (77 · 78 · 79 · 80).
+// Además el eje lleva su unidad (kg, %, kcal, g) y cada punto su valor, que
+// es lo que hace que se pueda "leer" la gráfica sin cruzarla con la tabla.
+//
+// opts:
+//   height     alto del lienzo (250 por defecto; antes 160-180, de ahí lo apaisado)
+//   unidad     'kg' | '%' | 'kcal' | 'g' | 'g/kg'… se pinta en el eje y en los valores
+//   spanMin    recorrido MÍNIMO del eje. Peso ~2 kg, % grasa ~2, kcal ~200, macros ~30
+//   decimales  decimales de las etiquetas (por defecto 1, o 0 para kcal/g)
+//   escalaFija + yMin/yMax  para escalas con significado propio (0-10, 0-100%)
+//   desdeCero  fuerza el eje a arrancar en 0
+//   area       relleno degradado bajo la primera serie (por defecto, si hay una sola)
+let _chartSeq = 0;
+
+function _pasoBonito(rango, objetivo = 4) {
+  if (!(rango > 0)) return 1;
+  const bruto = rango / objetivo;
+  const mag = Math.pow(10, Math.floor(Math.log10(bruto)));
+  const norm = bruto / mag;
+  const paso = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10;
+  return paso * mag;
+}
+
 function lineChart(series, xLabels = [], opts = {}) {
-  const w = opts.width || 600;
-  const h = opts.height || 180;
-  const pad = { top: 14, right: 14, bottom: 28, left: 32 };
+  const uid = `c${++_chartSeq}`;
+  // En el teléfono el lienzo se estrecha a propósito. El SVG se escala al
+  // ancho del contenedor, así que un viewBox de 640 dentro de una tarjeta de
+  // 340 px encoge la letra casi a la mitad: los números del eje quedaban
+  // ilegibles. Con un viewBox de 380 la escala es casi 1:1 y se lee igual que
+  // en el computador.
+  const estrecho = typeof window !== 'undefined' && window.innerWidth && window.innerWidth < 700;
+  const w = opts.width || (estrecho ? 380 : 640);
+  const h = opts.height || 250;
+  const unidad = opts.unidad || '';
+  const dec = opts.decimales ?? (['kcal', 'g', 'ml'].includes(unidad) ? 0 : 1);
+  const num = (v) => Number(v).toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: dec });
+  const conUnidad = (v) => `${num(v)}${unidad ? (unidad === '%' ? '%' : ' ' + unidad) : ''}`;
+
+  const limpias = (series || []).filter(s => s && Array.isArray(s.points));
+  const todos = limpias.flatMap(s => s.points).filter(v => v !== null && v !== undefined && isFinite(v));
+  if (!todos.length) return '<p class="text-xs text-slate-400">Todavía no hay datos suficientes para dibujar la evolución.</p>';
+
+  // ── Escala vertical ───────────────────────────────────────────────────
+  // Ojo con el detalle que lo cambia todo: el dominio NO se redondea hacia
+  // fuera. Redondear [77,1 – 78,9] a [76 – 80] para tener marcas bonitas
+  // duplicaba el eje y volvía a aplastar la línea, que es justo el problema
+  // que veníamos a resolver. El dominio se queda ceñido a los datos y las
+  // marcas bonitas se dibujan DENTRO de él.
+  let lo, hi;
+  if (opts.escalaFija) {
+    lo = opts.yMin ?? 0; hi = opts.yMax ?? 10;
+  } else {
+    const min = Math.min(...todos), max = Math.max(...todos);
+    const spanMin = opts.spanMin ?? Math.max(Math.abs(max) * 0.06, 0.5);
+    const span = Math.max(max - min, spanMin) * 1.25;   // 25% de aire, repartido arriba y abajo
+    const centro = (max + min) / 2;
+    lo = centro - span / 2;
+    hi = centro + span / 2;
+    if (opts.desdeCero || (min >= 0 && lo < 0)) lo = 0;
+    if (hi <= lo) hi = lo + 1;
+  }
+  const paso = _pasoBonito(hi - lo, 4);
+  // Marcas bonitas que caen dentro del dominio. Si el recorrido es tan corto
+  // que no cabe ninguna, se rotulan los extremos y el centro.
+  let marcas = [];
+  for (let v = Math.ceil(lo / paso) * paso; v <= hi + paso / 1000; v += paso) marcas.push(+v.toFixed(6));
+  if (marcas.length < 3) marcas = [lo, (lo + hi) / 2, hi];
+
+  // El margen izquierdo depende de cuánto ocupa la etiqueta más larga: con
+  // "1.850" fijo en 32px los números se salían del lienzo.
+  const anchoEtiqueta = Math.max(...marcas.map(v => num(v).length)) * 6.2 + 12;
+  const pad = { top: 20, right: 18, bottom: 34, left: Math.max(34, Math.min(70, anchoEtiqueta)) };
   const iw = w - pad.left - pad.right;
   const ih = h - pad.top - pad.bottom;
-  const yMax = opts.yMax ?? 10;
-  const yMin = opts.yMin ?? 0;
-  const n = Math.max(...series.map(s => s.points.length), 1);
+  const n = Math.max(...limpias.map(s => s.points.length), 1);
   const sx = (i) => pad.left + (n === 1 ? iw / 2 : (i / (n - 1)) * iw);
-  const sy = (y) => pad.top + ih - ((y - yMin) / (yMax - yMin)) * ih;
+  const sy = (y) => pad.top + ih - ((y - lo) / (hi - lo)) * ih;
 
-  let svg = `<svg viewBox="0 0 ${w} ${h}" class="w-full h-auto" preserveAspectRatio="xMidYMid meet">`;
-  // Grid Y
-  for (let g = 0; g <= 4; g++) {
-    const yv = yMin + (yMax - yMin) * (g / 4);
-    const yy = sy(yv);
-    svg += `<line x1="${pad.left}" y1="${yy}" x2="${w - pad.right}" y2="${yy}" stroke="#e2e8f0" stroke-width="1"/>`;
-    svg += `<text x="${pad.left - 6}" y="${yy + 3}" text-anchor="end" font-size="10" fill="#94a3b8">${yv.toFixed(0)}</text>`;
+  let svg = `<svg viewBox="0 0 ${w} ${h}" class="w-full h-auto" preserveAspectRatio="xMidYMid meet" role="img">`;
+  svg += `<defs><linearGradient id="${uid}-area" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${limpias[0]?.color || '#8A9558'}" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="${limpias[0]?.color || '#8A9558'}" stop-opacity="0"/>
+    </linearGradient></defs>`;
+
+  // ── Rejilla + eje Y con unidad ────────────────────────────────────────
+  for (const v of marcas) {
+    const yy = sy(v);
+    svg += `<line x1="${pad.left}" y1="${yy.toFixed(1)}" x2="${w - pad.right}" y2="${yy.toFixed(1)}" stroke="#e6e2d8" stroke-width="1"/>`;
+    svg += `<text x="${pad.left - 8}" y="${(yy + 3.5).toFixed(1)}" text-anchor="end" font-size="10.5" fill="#9A9A9A">${num(v)}</text>`;
   }
-  // Series: línea continua (une puntos aunque haya semanas sin dato) + puntos discretos
-  for (const s of series) {
+  if (unidad) {
+    svg += `<text x="${w - pad.right}" y="${pad.top - 7}" text-anchor="end" font-size="9.5" font-weight="700" fill="#9A9A9A" letter-spacing="0.5">${escapeHtml(unidad.toUpperCase())}</text>`;
+  }
+
+  // ── Área bajo la primera serie ────────────────────────────────────────
+  const conArea = opts.area ?? (limpias.length === 1);
+  if (conArea && limpias[0]) {
+    const pts = limpias[0].points
+      .map((y, i) => (y === null || y === undefined || !isFinite(y)) ? null : [sx(i), sy(y)])
+      .filter(Boolean);
+    if (pts.length >= 2) {
+      const d = `M ${pts[0][0]},${pad.top + ih} L ` + pts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' L ') + ` L ${pts[pts.length - 1][0]},${pad.top + ih} Z`;
+      svg += `<path d="${d}" fill="url(#${uid}-area)"/>`;
+    }
+  }
+
+  // ── Series ────────────────────────────────────────────────────────────
+  const pocosPuntos = n <= 10;
+  limpias.forEach((s, si) => {
     const pts = s.points
-      .map((y, i) => y === null || y === undefined ? null : `${sx(i)},${sy(y)}`)
+      .map((y, i) => (y === null || y === undefined || !isFinite(y)) ? null : `${sx(i).toFixed(1)},${sy(y).toFixed(1)}`)
       .filter(Boolean).join(' ');
-    if (pts) svg += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+    if (pts) svg += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>`;
+
+    const idxValidos = s.points.map((y, i) => (y === null || y === undefined || !isFinite(y)) ? null : i).filter(i => i !== null);
+    const ultimo = idxValidos[idxValidos.length - 1];
+
     s.points.forEach((y, i) => {
-      if (y !== null && y !== undefined) {
-        svg += `<circle cx="${sx(i)}" cy="${sy(y)}" r="2.5" fill="${s.color}" stroke="white" stroke-width="1"/>`;
+      if (y === null || y === undefined || !isFinite(y)) return;
+      const esUltimo = i === ultimo;
+      const x = sx(i), yy = sy(y);
+      svg += `<circle cx="${x.toFixed(1)}" cy="${yy.toFixed(1)}" r="${esUltimo ? 5 : 3.5}" fill="${s.color}" stroke="#fff" stroke-width="${esUltimo ? 2.5 : 1.5}">`;
+      svg += `<title>${escapeHtml(s.label || '')}${s.label ? ' · ' : ''}${escapeHtml(xLabels[i] || '')}: ${conUnidad(y)}</title></circle>`;
+      // El valor sobre el punto: con pocas mediciones se ponen todos (que es
+      // el caso real de un cliente); con muchas, solo el último para no
+      // convertir la gráfica en una sopa de números.
+      if (pocosPuntos || esUltimo) {
+        const arriba = yy > pad.top + 16;
+        svg += `<text x="${x.toFixed(1)}" y="${(arriba ? yy - 9 : yy + 15).toFixed(1)}" text-anchor="middle" font-size="${esUltimo ? 11 : 10}" font-weight="${esUltimo ? 700 : 600}" fill="${esUltimo ? s.color : '#5A5A5A'}" paint-order="stroke" stroke="#fff" stroke-width="3.5">${num(y)}</text>`;
       }
     });
-  }
-  // X labels
-  xLabels.forEach((lbl, i) => {
-    if (i % Math.max(1, Math.floor(xLabels.length / 8)) === 0 || i === xLabels.length - 1) {
-      svg += `<text x="${sx(i)}" y="${h - 10}" text-anchor="middle" font-size="10" fill="#94a3b8">${lbl}</text>`;
-    }
   });
+
+  // ── Eje X: como mucho 6 marcas, y la última siempre ───────────────────
+  const salto = Math.max(1, Math.ceil(xLabels.length / 6));
+  xLabels.forEach((lbl, i) => {
+    if (i % salto !== 0 && i !== xLabels.length - 1) return;
+    // La primera y la última se anclan por su borde: centradas se salían del
+    // lienzo y el navegador las recortaba a media palabra.
+    const anclaje = i === 0 ? 'start' : i === xLabels.length - 1 ? 'end' : 'middle';
+    const x = i === 0 ? Math.max(sx(i), 2) : i === xLabels.length - 1 ? Math.min(sx(i), w - 2) : sx(i);
+    svg += `<text x="${x.toFixed(1)}" y="${h - 11}" text-anchor="${anclaje}" font-size="10.5" fill="#9A9A9A">${escapeHtml(String(lbl))}</text>`;
+  });
+
   svg += '</svg>';
   return svg;
 }
+
+// ── Gráfica con selector de periodo ─────────────────────────────────────
+// El eje del tiempo es la otra mitad del problema de "se ve muy horizontal":
+// con año y medio de mediciones en el mismo lienzo, los últimos 30 días son
+// cuatro píxeles y no se distingue nada. Aquí se dibujan los cinco periodos de
+// una sola vez y el botón solo enseña/esconde el que toca: cambiar de 1 mes a
+// 3 meses es instantáneo, sin volver a pedir datos ni repintar la vista.
+//
+// La ventana se cuenta desde la ÚLTIMA MEDICIÓN, no desde hoy: si el cliente
+// lleva seis semanas sin pesarse, "último mes" contado desde hoy saldría vacío.
+const RANGOS_GRAFICA = [
+  ['30',  '1 mes',   30],
+  ['60',  '2 meses', 60],
+  ['90',  '3 meses', 90],
+  ['180', '6 meses', 180],
+  ['all', 'Todo',    null],
+];
+let _grafSeq = 0;
+
+function graficaRangos({ titulo, nota, fechas, series, leyenda = '', opts = {} }) {
+  const validas = (fechas || []).filter(Boolean);
+  const limpias = (series || []).filter(s => s && Array.isArray(s.points));
+  if (!validas.length || !limpias.length) return '';
+  const id = `gr${++_grafSeq}`;
+  const ms = (f) => new Date(String(f).slice(0, 10) + 'T00:00:00').getTime();
+  const finMs = ms(validas[validas.length - 1]);
+  const mascara = (dias) => fechas.map(f => !f || dias == null || (finMs - ms(f)) <= dias * 86400000);
+  const cuenta = (m) => Math.max(...limpias.map(s =>
+    s.points.filter((v, i) => m[i] && v !== null && v !== undefined && isFinite(v)).length));
+
+  const disponibles = RANGOS_GRAFICA.filter(([, , d]) => cuenta(mascara(d)) >= 2);
+  if (!disponibles.length) return '';
+  // Se abre en el periodo más corto que ya cuente algo (3+ mediciones); si
+  // ninguno llega, en todo el historial.
+  const porDefecto = (disponibles.find(([, , d]) => cuenta(mascara(d)) >= 3) || disponibles[disponibles.length - 1])[0];
+
+  const paneles = disponibles.map(([k, , d]) => {
+    const m = mascara(d);
+    const idx = fechas.map((_, i) => i).filter(i => m[i]);
+    const lbls = idx.map(i => fmt.fechaCorta(fechas[i]));
+    const ss = limpias.map(s => ({ ...s, points: idx.map(i => s.points[i] ?? null) }));
+    return `<div id="${id}-${k}"${k === porDefecto ? '' : ' hidden'}>${lineChart(ss, lbls, opts)}</div>`;
+  }).join('');
+
+  const botones = disponibles.map(([k, etiqueta]) =>
+    `<button type="button" class="graf-rango${k === porDefecto ? ' active' : ''}" data-graf="${id}" data-rango="${k}" onclick="cambiarRangoGrafica('${id}','${k}')">${etiqueta}</button>`).join('');
+
+  return `
+    <div class="graf-caja">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <div class="min-w-0">
+          <div class="text-xs font-bold text-slate-700">${titulo}</div>
+          ${nota ? `<div class="text-[10px] text-slate-400">${nota}</div>` : ''}
+        </div>
+        ${disponibles.length > 1 ? `<div class="graf-rangos">${botones}</div>` : ''}
+      </div>
+      ${paneles}
+      ${leyenda ? `<div class="mt-1">${leyenda}</div>` : ''}
+    </div>`;
+}
+
+window.cambiarRangoGrafica = (id, k) => {
+  RANGOS_GRAFICA.forEach(([r]) => {
+    const el = document.getElementById(`${id}-${r}`);
+    if (el) el.hidden = (r !== k);
+  });
+  document.querySelectorAll(`[data-graf="${id}"]`).forEach(b => b.classList.toggle('active', b.dataset.rango === k));
+};
 
 function legendDot(color, label) {
   return `<span class="inline-flex items-center gap-1.5 text-xs text-slate-600 mr-3"><span class="w-2.5 h-2.5 rounded-full" style="background:${color}"></span>${label}</span>`;
@@ -1956,7 +2200,7 @@ window.toggleChecklistSemana = async (segId, idx) => {
   const { error } = await sb.from('seguimientos').update({ pendientes_semana: serializeChecklist(items) }).eq('id', segId);
   if (error) { toast(error.message); return; }
   toast(items[idx].done ? '✓ Completado' : 'Reabierto');
-  rerenderView();
+  refrescarVista('seguimientos');
 };
 
 const PLANTILLAS = {
@@ -2041,7 +2285,29 @@ function openModal(html, opts = {}) {
   modalBox.style.maxWidth = opts.wide ? '64rem' : '42rem';
   modal.classList.remove('hidden');
 }
-function closeModal() { modal.classList.add('hidden'); modalContent.innerHTML = ''; }
+function closeModal() { modal.classList.add('hidden'); modalContent.innerHTML = ''; _modalSeq++; }
+
+// ── Abrir el modal SIN esperar a la red ─────────────────────────────────
+// Antes, tocar la tarjeta de un cliente disparaba 6 consultas y no aparecía
+// nada hasta que volvían todas: medio segundo largo en el que parecía que el
+// click no había funcionado. Ahora el cuadro se abre en el mismo frame con su
+// título y un esqueleto, y el contenido entra cuando llega.
+// _modalSeq evita la carrera clásica: si tocas dos clientes seguidos, la
+// respuesta lenta del primero ya no puede pisar la del segundo.
+let _modalSeq = 0;
+function abrirModalCargando(titulo, opts = {}) {
+  _modalSeq++;
+  openModal(modalShell(escapeHtml(titulo), `
+    <div class="space-y-3">
+      <div class="sk sk-line" style="width:45%"></div>
+      <div class="sk sk-card"></div>
+      <div class="sk sk-line" style="width:80%"></div>
+      <div class="sk sk-line" style="width:60%"></div>
+    </div>`), opts);
+  return _modalSeq;
+}
+// true si este modal sigue siendo el vigente (nadie abrió otro entre medias).
+function modalVigente(token) { return token === _modalSeq && !modal.classList.contains('hidden'); }
 // OJO: NO se cierra al hacer clic fuera del cuadro. Un clic accidental en el
 // fondo botaba el formulario a medio llenar (seguimiento, ficha del cliente…)
 // y se perdía todo lo escrito. Salir es SIEMPRE explícito: Cancelar o la X.
@@ -2061,34 +2327,82 @@ function modalShell(title, body, footer = '') {
 // =====================================================
 // AUTH
 // =====================================================
-async function checkSession() {
-  const { data: { session } } = await sb.auth.getSession();
+function mostrarLogin(mensaje) {
   bootScreen.classList.add('hidden');
-  if (session) {
-    await loadSettings();
-    loginScreen.classList.add('hidden');
-    appScreen.classList.remove('hidden');
-    navigate('dashboard');
-  } else {
-    appScreen.classList.add('hidden');
-    loginScreen.classList.remove('hidden');
+  appScreen.classList.add('hidden');
+  loginScreen.classList.remove('hidden');
+  if (mensaje) errorLogin(mensaje);
+}
+
+function errorLogin(mensaje) {
+  const err = $('#login-error');
+  if (!err) return;
+  err.textContent = mensaje;
+  err.classList.toggle('hidden', !mensaje);
+}
+
+async function checkSession() {
+  let session = null;
+  try {
+    // 12 s de tope: si getSession se cuelga (pasa en iOS al reabrir la app
+    // desde el inicio), se cae al login en vez de dejar "Cargando…" eterno.
+    const r = await conTiempoLimite(sb.auth.getSession(), 12000, 'La sesión');
+    session = r?.data?.session || null;
+  } catch (e) {
+    mostrarLogin(e.message || 'No pude verificar la sesión. Entra otra vez.');
+    return;
   }
+  bootScreen.classList.add('hidden');
+  if (!session) { mostrarLogin(); return; }
+
+  // Los ajustes son opcionales para poder entrar: si esa consulta falla o
+  // tarda, se entra igual con los valores por defecto y se avisa por toast.
+  // Antes bastaba con que se colgara para dejarte fuera del CRM.
+  try { await conTiempoLimite(loadSettings(), 8000, 'Tus ajustes'); }
+  catch (e) { toast('Entraste, pero no pude leer tus ajustes: ' + e.message, 4000); }
+
+  errorLogin('');
+  loginScreen.classList.add('hidden');
+  appScreen.classList.remove('hidden');
+  navigate('dashboard');
 }
 
 $('#login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const email = $('#login-email').value.trim();
   const password = $('#login-pass').value;
-  const err = $('#login-error');
-  err.classList.add('hidden');
-  const { error } = await sb.auth.signInWithPassword({ email, password });
-  if (error) { err.textContent = error.message; err.classList.remove('hidden'); return; }
-  checkSession();
+  const btn = $('#login-btn');
+  errorLogin('');
+  // Estado visible del botón: sin esto no se distingue "está entrando" de
+  // "el toque no registró", y uno acaba pulsando tres veces.
+  const textoOriginal = btn.textContent;
+  btn.disabled = true;
+  btn.setAttribute('aria-busy', 'true');
+  btn.textContent = 'Entrando…';
+  try {
+    const { error } = await conTiempoLimite(
+      sb.auth.signInWithPassword({ email, password }), 20000, 'El inicio de sesión');
+    if (error) throw error;
+    await checkSession();
+  } catch (err) {
+    errorLogin(err.message || 'No pude iniciar sesión.');
+  } finally {
+    btn.disabled = false;
+    btn.removeAttribute('aria-busy');
+    btn.textContent = textoOriginal;
+  }
 });
 
 $('#logout-btn').addEventListener('click', async () => {
-  await sb.auth.signOut();
+  invalidarCache();
+  try { await conTiempoLimite(sb.auth.signOut(), 6000, 'El cierre de sesión'); } catch (e) { /* igual se recarga */ }
   location.reload();
+});
+
+// Si el token caduca o la sesión se cierra en otra pestaña, se vuelve al
+// login en vez de dejar la pantalla con datos que ya no se pueden refrescar.
+sb.auth.onAuthStateChange((evento) => {
+  if (evento === 'SIGNED_OUT') { invalidarCache(); mostrarLogin(); }
 });
 
 async function loadSettings() {
@@ -2104,6 +2418,51 @@ async function loadSettings() {
 }
 
 // =====================================================
+// CACHÉ DE DATOS · por qué el CRM se sentía lento
+// =====================================================
+// Cada click en una sección volvía a pedirle TODO a Supabase y hasta que no
+// llegaba la respuesta la pantalla decía "Cargando…". Con red de celular eso
+// son 400-900 ms por click, y como el CRM abre 3-6 consultas por vista, se
+// notaba en cada botón.
+//
+// Ahora cada consulta se guarda en memoria con su hora. Si la vuelves a pedir
+// dentro del TTL se devuelve al instante (sin red) y, si ya está a mitad de
+// vida, se refresca CALLADA por detrás: la próxima vez ya está fresca. Al
+// guardar algo se invalida lo que ese guardado afecta, así que nunca ves un
+// dato viejo después de escribirlo.
+const _cache = new Map();          // clave -> { t, data, revalidando }
+const CACHE_TTL = 60000;           // 1 minuto: el CRM lo usa un solo coach
+
+async function cacheDatos(clave, cargar, ttl = CACHE_TTL) {
+  const hit = _cache.get(clave);
+  const ahora = Date.now();
+  if (hit && ahora - hit.t < ttl) {
+    if (ahora - hit.t > ttl / 2 && !hit.revalidando) {
+      hit.revalidando = true;
+      Promise.resolve()
+        .then(cargar)
+        .then(d => { _cache.set(clave, { t: Date.now(), data: d }); })
+        .catch(() => { hit.revalidando = false; });
+    }
+    return hit.data;
+  }
+  const data = await cargar();
+  _cache.set(clave, { t: Date.now(), data });
+  return data;
+}
+
+// invalidarCache('seguimientos') borra todo lo que empiece por ahí.
+// Sin argumentos, borra todo (se usa al entrar y al salir de la sesión).
+function invalidarCache(...prefijos) {
+  if (!prefijos.length) { _cache.clear(); _clientesCache = null; return; }
+  for (const pre of prefijos) {
+    if (pre === 'clientes') _clientesCache = null;
+    for (const k of Array.from(_cache.keys())) if (k.startsWith(pre)) _cache.delete(k);
+  }
+}
+window.invalidarCache = invalidarCache;
+
+// =====================================================
 // DATA LAYER
 // =====================================================
 const db = {
@@ -2114,41 +2473,57 @@ const db = {
       _clientesCache = data || [];
       return _clientesCache;
     },
-    async refresh() { _clientesCache = null; return db.clientes.list(); },
-    async get(id) { const { data } = await sb.from('clientes').select('*').eq('id', id).single(); return data; },
-    async insert(row) { const { data, error } = await sb.from('clientes').insert(row).select().single(); if (error) toast(error.message); _clientesCache = null; return data; },
-    async update(id, row) { const { error } = await sb.from('clientes').update(row).eq('id', id); if (error) toast(error.message); _clientesCache = null; },
-    async remove(id) { await sb.from('clientes').delete().eq('id', id); _clientesCache = null; },
+    async refresh() { invalidarCache('clientes'); return db.clientes.list(); },
+    async get(id) {
+      return cacheDatos(`clientes:get:${id}`, async () => {
+        const { data } = await sb.from('clientes').select('*').eq('id', id).single();
+        return data;
+      });
+    },
+    async insert(row) { const { data, error } = await sb.from('clientes').insert(row).select().single(); if (error) toast(error.message); invalidarCache('clientes'); return data; },
+    async update(id, row) { const { error } = await sb.from('clientes').update(row).eq('id', id); if (error) toast(error.message); invalidarCache('clientes'); },
+    async remove(id) { await sb.from('clientes').delete().eq('id', id); invalidarCache('clientes', 'seguimientos', 'pagos', 'pendientes', 'mediciones', 'metas'); },
   },
   pagos: {
     async listAnio(anio) {
-      const { data } = await sb.from('pagos').select('*').gte('mes', `${anio}-01`).lte('mes', `${anio}-12`);
-      return data || [];
+      return cacheDatos(`pagos:anio:${anio}`, async () => {
+        const { data } = await sb.from('pagos').select('*').gte('mes', `${anio}-01`).lte('mes', `${anio}-12`);
+        return data || [];
+      });
     },
     async listMes(mes) {
-      const { data } = await sb.from('pagos').select('*, clientes(nombre, moneda)').eq('mes', mes);
-      return data || [];
+      return cacheDatos(`pagos:mes:${mes}`, async () => {
+        const { data } = await sb.from('pagos').select('*, clientes(nombre, moneda)').eq('mes', mes);
+        return data || [];
+      });
     },
     async upsert(row) {
       const { data, error } = await sb.from('pagos').upsert(row, { onConflict: 'user_id,cliente_id,mes' }).select().single();
       if (error) toast(error.message);
+      invalidarCache('pagos');
       return data;
     },
-    async update(id, row) { await sb.from('pagos').update(row).eq('id', id); },
-    async remove(id) { await sb.from('pagos').delete().eq('id', id); },
+    async update(id, row) { await sb.from('pagos').update(row).eq('id', id); invalidarCache('pagos'); },
+    async remove(id) { await sb.from('pagos').delete().eq('id', id); invalidarCache('pagos'); },
   },
   seguimientos: {
     async listCliente(cliente_id) {
-      const { data } = await sb.from('seguimientos').select('*').eq('cliente_id', cliente_id).order('semana', { ascending: false });
-      return data || [];
+      return cacheDatos(`seguimientos:cliente:${cliente_id}`, async () => {
+        const { data } = await sb.from('seguimientos').select('*').eq('cliente_id', cliente_id).order('semana', { ascending: false });
+        return data || [];
+      });
     },
     async listSemana(semana) {
-      const { data } = await sb.from('seguimientos').select('*, clientes(nombre)').eq('semana', semana);
-      return data || [];
+      return cacheDatos(`seguimientos:semana:${semana}`, async () => {
+        const { data } = await sb.from('seguimientos').select('*, clientes(nombre)').eq('semana', semana);
+        return data || [];
+      });
     },
     async listAll() {
-      const { data } = await sb.from('seguimientos').select('*');
-      return data || [];
+      return cacheDatos('seguimientos:all', async () => {
+        const { data } = await sb.from('seguimientos').select('*');
+        return data || [];
+      });
     },
     async get(id) { const { data } = await sb.from('seguimientos').select('*').eq('id', id).single(); return data; },
     async getByClienteSemana(cliente_id, semana) {
@@ -2158,36 +2533,56 @@ const db = {
     async upsert(row) {
       const { data, error } = await sb.from('seguimientos').upsert(row, { onConflict: 'user_id,cliente_id,semana' }).select().single();
       if (error) toast(error.message);
+      invalidarCache('seguimientos');
       return data;
     },
-    async remove(id) { await sb.from('seguimientos').delete().eq('id', id); },
+    async remove(id) { await sb.from('seguimientos').delete().eq('id', id); invalidarCache('seguimientos'); },
   },
   pendientes: {
-    async list() { const { data } = await sb.from('pendientes').select('*, clientes(nombre)').order('estado').order('fecha_limite', { nullsFirst: false }); return data || []; },
-    async listCliente(cliente_id) { const { data } = await sb.from('pendientes').select('*').eq('cliente_id', cliente_id).order('estado').order('fecha_limite'); return data || []; },
-    async listAbiertos() { const { data } = await sb.from('pendientes').select('*, clientes(nombre)').eq('estado', 'abierto').order('fecha_limite'); return data || []; },
-    async insert(row) { const { data, error } = await sb.from('pendientes').insert(row).select().single(); if (error) toast(error.message); return data; },
-    async update(id, row) { await sb.from('pendientes').update(row).eq('id', id); },
+    async list() {
+      return cacheDatos('pendientes:all', async () => {
+        const { data } = await sb.from('pendientes').select('*, clientes(nombre)').order('estado').order('fecha_limite', { nullsFirst: false });
+        return data || [];
+      });
+    },
+    async listCliente(cliente_id) {
+      return cacheDatos(`pendientes:cliente:${cliente_id}`, async () => {
+        const { data } = await sb.from('pendientes').select('*').eq('cliente_id', cliente_id).order('estado').order('fecha_limite');
+        return data || [];
+      });
+    },
+    async listAbiertos() {
+      return cacheDatos('pendientes:abiertos', async () => {
+        const { data } = await sb.from('pendientes').select('*, clientes(nombre)').eq('estado', 'abierto').order('fecha_limite');
+        return data || [];
+      });
+    },
+    async insert(row) { const { data, error } = await sb.from('pendientes').insert(row).select().single(); if (error) toast(error.message); invalidarCache('pendientes'); return data; },
+    async update(id, row) { await sb.from('pendientes').update(row).eq('id', id); invalidarCache('pendientes'); },
     async toggle(id, estadoActual) {
       const nuevo = estadoActual === 'completado' ? 'abierto' : 'completado';
       await sb.from('pendientes').update({ estado: nuevo, completado_en: nuevo === 'completado' ? fmt.hoy() : null }).eq('id', id);
+      invalidarCache('pendientes');
       return nuevo;
     },
-    async hacerGeneral(id) { await sb.from('pendientes').update({ scope: 'general', seguimiento_id: null }).eq('id', id); },
-    async remove(id) { await sb.from('pendientes').delete().eq('id', id); },
+    async hacerGeneral(id) { await sb.from('pendientes').update({ scope: 'general', seguimiento_id: null }).eq('id', id); invalidarCache('pendientes'); },
+    async remove(id) { await sb.from('pendientes').delete().eq('id', id); invalidarCache('pendientes'); },
   },
   mediciones: {
     async listCliente(cliente_id) {
-      const { data } = await sb.from('mediciones_corporales').select('*').eq('cliente_id', cliente_id).order('fecha', { ascending: true });
-      return data || [];
+      return cacheDatos(`mediciones:cliente:${cliente_id}`, async () => {
+        const { data } = await sb.from('mediciones_corporales').select('*').eq('cliente_id', cliente_id).order('fecha', { ascending: true });
+        return data || [];
+      });
     },
     async insert(row) {
       const { data, error } = await sb.from('mediciones_corporales').insert(row).select().single();
       if (error) toast(error.message);
+      invalidarCache('mediciones');
       return data;
     },
-    async update(id, row) { await sb.from('mediciones_corporales').update(row).eq('id', id); },
-    async remove(id) { await sb.from('mediciones_corporales').delete().eq('id', id); },
+    async update(id, row) { await sb.from('mediciones_corporales').update(row).eq('id', id); invalidarCache('mediciones'); },
+    async remove(id) { await sb.from('mediciones_corporales').delete().eq('id', id); invalidarCache('mediciones'); },
   },
   // Historial de metas nutricionales. Cada meta que se fija o se envía al
   // Mealtracker deja una fila, para poder leer cualquier resultado contra la
@@ -2197,20 +2592,23 @@ const db = {
   // rompe una ficha por una tabla que no se ha creado.
   metas: {
     async listCliente(cliente_id) {
-      const { data, error } = await sb.from('metas_historial').select('*')
-        .eq('cliente_id', cliente_id)
-        .order('fecha', { ascending: false })
-        .order('created_at', { ascending: false });
-      if (error) return null;
-      return data || [];
+      return cacheDatos(`metas:cliente:${cliente_id}`, async () => {
+        const { data, error } = await sb.from('metas_historial').select('*')
+          .eq('cliente_id', cliente_id)
+          .order('fecha', { ascending: false })
+          .order('created_at', { ascending: false });
+        if (error) return null;
+        return data || [];
+      });
     },
     async insert(row) {
       const { data, error } = await sb.from('metas_historial').insert(row).select().single();
+      invalidarCache('metas');
       if (error) return null;
       return data;
     },
-    async update(id, row) { await sb.from('metas_historial').update(row).eq('id', id); },
-    async remove(id) { await sb.from('metas_historial').delete().eq('id', id); },
+    async update(id, row) { await sb.from('metas_historial').update(row).eq('id', id); invalidarCache('metas'); },
+    async remove(id) { await sb.from('metas_historial').delete().eq('id', id); invalidarCache('metas'); },
   },
   settings: {
     async save(s) {
@@ -2231,21 +2629,123 @@ function copConv(monto, moneda) {
 // =====================================================
 const routes = {};
 let _currentView = 'dashboard';
-function navigate(name) {
-  _currentView = routes[name] ? name : 'dashboard';
-  $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === name));
-  (routes[name] || routes.dashboard)();
-  window.scrollTo({ top: 0, behavior: 'instant' });
+
+// ── El "Cargando…" ahora se aplaza ──────────────────────────────────────
+// Antes cada vista borraba la pantalla y escribía "Cargando…" ANTES de pedir
+// los datos. Con la caché la mayoría de re-pintados tardan 2-5 ms, así que
+// ese cartel solo producía un parpadeo blanco que hacía sentir lento algo
+// que ya era instantáneo. Ahora solo aparece si de verdad se pasa de 160 ms,
+// y mientras tanto se queda lo que había (que es lo que hace una app nativa).
+let _tCargando = null;
+function cargando(msg = 'Cargando…') {
+  const vista = _currentView;
+  clearTimeout(_tCargando);
+  _tCargando = setTimeout(() => {
+    if (_currentView !== vista) return;
+    view.innerHTML = `<div class="card">
+      <div class="sk sk-line" style="width:38%"></div>
+      <div class="sk sk-card" style="margin:.9rem 0"></div>
+      <div class="sk sk-line" style="width:72%"></div>
+      <div class="sk sk-line" style="width:55%"></div>
+      <div class="text-xs text-slate-400 mt-3">${escapeHtml(msg)}</div>
+    </div>`;
+  }, 160);
 }
+function finCargando() { clearTimeout(_tCargando); _tCargando = null; }
+
+// Si una consulta se cuelga o revienta, la pantalla no puede quedarse muerta:
+// se ve qué pasó y hay un botón para reintentar. Antes el error se iba a la
+// consola y la vista se quedaba con el esqueleto puesto para siempre — que es
+// justo el "aprieto un botón y no pasa nada".
+function pintarErrorVista(e) {
+  const msg = (e && e.message) || String(e || 'Error desconocido');
+  view.innerHTML = `
+    <div class="card border-l-4 border-red-400">
+      <div class="font-bold text-slate-800 mb-1">No pude cargar esta sección</div>
+      <p class="text-sm text-slate-600 mb-3">${escapeHtml(msg)}</p>
+      <div class="flex gap-2 flex-wrap">
+        <button class="btn btn-primary btn-sm" onclick="refrescarVista()">Reintentar</button>
+        <button class="btn btn-secondary btn-sm" onclick="location.reload()">Recargar el CRM</button>
+      </div>
+    </div>`;
+}
+
+async function correrVista() {
+  try {
+    // Tope global: una consulta a Supabase que no vuelve (proyecto dormido,
+    // red de datos con paquetes perdidos) dejaba la vista colgada sin fin.
+    await conTiempoLimite(
+      Promise.resolve((routes[_currentView] || routes.dashboard)()),
+      25000, 'Esta sección');
+  } catch (e) {
+    pintarErrorVista(e);
+  } finally {
+    finCargando();
+  }
+}
+
+async function navigate(name) {
+  _currentView = routes[name] ? name : 'dashboard';
+  $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === _currentView));
+  // En el teléfono la tira de secciones se desliza: si la sección activa
+  // queda fuera de la vista no sabes dónde estás parado.
+  const activo = $(`.nav-item[data-view="${_currentView}"]`);
+  if (activo && activo.scrollIntoView) {
+    try { activo.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' }); } catch (e) {}
+  }
+  window.scrollTo({ top: 0, behavior: 'instant' });
+  await correrVista();
+}
+
 // Re-renderiza la vista actual sin saltar el scroll (para toggles de checkboxes)
-function rerenderView() { (routes[_currentView] || routes.dashboard)(); }
+async function rerenderView() { await correrVista(); }
+
+// ── Volver de un guardado SIN cambiar de pantalla ───────────────────────
+// Antes, guardar un cliente hacía navigate('clientes'), guardar una semana
+// hacía navigate('seguimiento')… y te sacaba de donde estabas (de Composición,
+// de la ficha, del filtro que tenías puesto) y te mandaba al principio de otra
+// sección con el scroll arriba. Ahora se refresca LA MISMA pantalla, con su
+// cliente, su pestaña y su scroll intactos.
+async function refrescarVista(...tablas) {
+  if (tablas.length) invalidarCache(...tablas);
+  const y = window.scrollY;
+  await rerenderView();
+  // Doble restauración: la vista puede crecer un frame después (listas que se
+  // rellenan solas), y sin el segundo salto el scroll queda corto.
+  window.scrollTo({ top: y, behavior: 'instant' });
+  requestAnimationFrame(() => window.scrollTo({ top: y, behavior: 'instant' }));
+}
+window.refrescarVista = refrescarVista;
+
+// Guardar algo de un cliente (una medición, un pendiente) tiene dos vueltas
+// legítimas según de dónde saliste:
+//  · desde la ficha (Clientes / Inicio) → se reabre la ficha, que es lo que
+//    estabas leyendo;
+//  · desde Composición, Nutrición, Entrenamiento o Seguimiento → te quedas en
+//    esa sección, con tu cliente y tu pestaña, y solo se refrescan los datos.
+// Antes siempre se hacía lo primero: registrabas una medición desde
+// Composición y te escupía a la ficha del cliente.
+async function volverTrasGuardarCliente(clienteId, ...tablas) {
+  invalidarCache('clientes', ...tablas);
+  if (_currentView === 'composicion' && typeof compCargar === 'function') {
+    await compCargar(clienteId, { forzar: true });
+    return;
+  }
+  if (['nutricion', 'entrenamiento', 'seguimiento'].includes(_currentView)) {
+    await refrescarVista();
+    return;
+  }
+  verCliente(clienteId);
+}
+window.volverTrasGuardarCliente = volverTrasGuardarCliente;
+
 $$('.nav-item').forEach(b => b.addEventListener('click', () => navigate(b.dataset.view)));
 
 // =====================================================
 // VIEW: DASHBOARD
 // =====================================================
 routes.dashboard = async () => {
-  view.innerHTML = '<div class="card">Cargando…</div>';
+  cargando();
   const hoy = fmt.hoy();
   const mes = fmt.mesActual();
   const semana = fmt.semanaISO();
@@ -2574,7 +3074,7 @@ routes.seguimiento = async () => {
   if (_segDataCache) {
     renderSeguimiento(_segDataCache.clientes, _segDataCache.allSegs);
   } else {
-    view.innerHTML = '<div class="card">Cargando…</div>';
+    cargando();
   }
   const [clientes, allSegs] = await Promise.all([db.clientes.list(), db.seguimientos.listAll()]);
   // Re-pintar solo si la data cambió respecto a lo ya pintado (evita el
@@ -2804,7 +3304,7 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
           { label: 'Entreno', color: '#10b981', points: ptsEnt },
           { label: 'Alimentación', color: '#3b82f6', points: ptsAli },
           { label: 'Global', color: '#0f172a', points: ptsGlob },
-        ], labels, { height: 170, yMax: 100 })}
+        ], labels, { height: 200, escalaFija: true, yMin: 0, yMax: 100, unidad: '%', decimales: 0, area: false })}
       </div>` : ''}
 
       <div class="mt-4 pt-4 border-t border-slate-100">
@@ -3096,29 +3596,31 @@ function historialMetasHTML(cliente, rows, opts = {}) {
   const asc = filas.slice().filter(m => m.kcal).reverse();
 
   // Gráficas: kcal por un lado (escala de miles) y macros por otro (gramos).
-  const labels = asc.map(m => m.fecha ? fmt.fechaCorta(m.fecha) : 'hoy');
   let graficas = '';
   if (asc.length >= 2) {
-    const kcals = asc.map(m => m.kcal);
+    const fechasMetas = asc.map(m => m.fecha || fmt.hoy());
     const macros = asc.flatMap(m => [m.proteina_g, m.carbos_g, m.grasas_g]).filter(v => v != null);
-    const minK = Math.min(...kcals), maxK = Math.max(...kcals);
     graficas = `
       <div class="grid grid-cols-1 ${opts.compacto ? '' : 'md:grid-cols-2'} gap-3 mb-3">
-        <div class="bg-slate-50 rounded-xl p-3">
-          <div class="text-xs font-bold text-slate-700 mb-1">Meta de calorías</div>
-          ${lineChart([{ label: 'kcal', color: '#059669', points: kcals }], labels,
-            { yMin: Math.max(0, Math.floor((minK - 200) / 100) * 100), yMax: Math.ceil((maxK + 200) / 100) * 100, height: 150 })}
-        </div>
-        <div class="bg-slate-50 rounded-xl p-3">
-          <div class="text-xs font-bold text-slate-700 mb-1">Macros (g/día)</div>
-          ${macros.length ? lineChart([
+        ${graficaRangos({
+          titulo: '🔥 Meta de calorías',
+          nota: 'kcal/día · cada punto es una meta que fijaste',
+          fechas: fechasMetas,
+          series: [{ label: 'kcal', color: '#059669', points: asc.map(m => m.kcal ?? null) }],
+          opts: { unidad: 'kcal', spanMin: 250, height: 240 },
+        })}
+        ${macros.length ? graficaRangos({
+          titulo: '🍗 Macros de la meta',
+          nota: 'gramos/día',
+          fechas: fechasMetas,
+          series: [
             { label: 'Proteína', color: '#2563eb', points: asc.map(m => m.proteina_g ?? null) },
             { label: 'Carbos', color: '#d97706', points: asc.map(m => m.carbos_g ?? null) },
             { label: 'Grasas', color: '#dc2626', points: asc.map(m => m.grasas_g ?? null) },
-          ], labels, { yMin: 0, yMax: Math.ceil((Math.max(...macros) + 30) / 25) * 25, height: 150 })
-            : '<p class="text-xs text-slate-400">Sin macros registrados</p>'}
-          <div class="mt-1">${legendDot('#2563eb', 'Proteína')}${legendDot('#d97706', 'Carbos')}${legendDot('#dc2626', 'Grasas')}</div>
-        </div>
+          ],
+          leyenda: `${legendDot('#2563eb', 'Proteína')}${legendDot('#d97706', 'Carbos')}${legendDot('#dc2626', 'Grasas')}`,
+          opts: { unidad: 'g', spanMin: 60, area: false, height: 240 },
+        }) : ''}
       </div>`;
   }
 
@@ -3237,19 +3739,41 @@ function historialCorporalHTML(cliente, meds, opts = {}) {
       ${dTotal != null ? `<span style="color:${colD(dTotal)}"><strong>vs inicio:</strong> ${flecha(dTotal)} ${dTotal > 0 ? '+' : ''}${dTotal} kg <span class="text-xs text-teal-700/70">(desde ${fmt.fechaCorta(primera.fecha)})</span></span>` : ''}
     </div>` : '';
 
-  const labels = asc.map(m => fmt.fechaCorta(m.fecha));
+  const fechas = asc.map(m => m.fecha);
   const pesos = asc.map(m => m.peso ?? null).filter(v => v !== null);
   const grasasPct = asc.map(m => m.grasa_pct ?? null).filter(v => v !== null);
+  const cinturas = asc.map(m => m.cintura ?? null).filter(v => v !== null);
   let graficas = '';
+
+  // Peso y % de grasa van en gráficas SEPARADAS. Antes compartían eje: 78 kg y
+  // 18% en la misma escala dejaban la línea del % pegada al suelo, plana, sin
+  // poder leer sus cambios. Cada magnitud con su eje y su unidad.
   if (pesos.length >= 2) {
-    const series = [{ label: 'Peso', color: '#10b981', points: asc.map(m => m.peso ?? null) }];
-    if (grasasPct.length >= 2) series.push({ label: '% grasa', color: '#f59e0b', points: asc.map(m => m.grasa_pct ?? null) });
-    graficas += `
-      <div class="bg-slate-50 rounded-xl p-3 mb-2">
-        <div class="text-xs font-bold text-slate-700 mb-2">Evolución peso ${grasasPct.length >= 2 ? '· % grasa' : ''}</div>
-        ${lineChart(series, labels, { yMin: Math.floor(Math.min(...pesos) - 3), yMax: Math.ceil(Math.max(...pesos) + 3), height: 160 })}
-        <div class="mt-1">${legendDot('#10b981', 'Peso (kg)')}${grasasPct.length >= 2 ? legendDot('#f59e0b', '% grasa') : ''}</div>
-      </div>`;
+    graficas += graficaRangos({
+      titulo: '⚖️ Peso',
+      nota: 'kg · el eje se ajusta a lo que de verdad se movió',
+      fechas,
+      series: [{ label: 'Peso', color: '#10b981', points: asc.map(m => m.peso ?? null) }],
+      opts: { unidad: 'kg', spanMin: 1.5, height: opts.compacto ? 220 : 260, decimales: 1 },
+    });
+  }
+  if (grasasPct.length >= 2) {
+    graficas += graficaRangos({
+      titulo: '🔥 % de grasa corporal',
+      nota: 'porcentaje · escala propia, no comparte eje con el peso',
+      fechas,
+      series: [{ label: '% grasa', color: '#f59e0b', points: asc.map(m => m.grasa_pct ?? null) }],
+      opts: { unidad: '%', spanMin: 1.5, height: opts.compacto ? 220 : 260, decimales: 1 },
+    });
+  }
+  if (cinturas.length >= 2) {
+    graficas += graficaRangos({
+      titulo: '📏 Cintura',
+      nota: 'cm · la medida que mejor sigue la grasa visceral',
+      fechas,
+      series: [{ label: 'Cintura', color: '#8b5cf6', points: asc.map(m => m.cintura ?? null) }],
+      opts: { unidad: 'cm', spanMin: 2, height: opts.compacto ? 200 : 240, decimales: 1 },
+    });
   }
   const conComp = comps.filter(Boolean);
   if (conComp.length >= 2 && conComp.some(x => x.masa_muscular_smm_kg)) {
@@ -3258,16 +3782,24 @@ function historialCorporalHTML(cliente, meds, opts = {}) {
     const smm = comps.map(x => x?.masa_muscular_smm_kg ?? null);
     const todos = [...magras, ...grasasKg, ...smm].filter(v => v !== null);
     if (todos.length) {
+      // Tres gráficas pequeñas, no tres líneas en una. Masa magra ronda los
+      // 58 kg, el músculo esquelético los 10 y la grasa los 20: en un solo eje
+      // las tres salen planas, que es exactamente lo que no se podía leer.
+      // Cada una con su escala muestra su propio movimiento.
       graficas += `
-        <div class="bg-slate-50 rounded-xl p-3 mb-2">
-          <div class="text-xs font-bold text-slate-700 mb-2">Evolución composición corporal (estimada)</div>
-          ${lineChart([
-            { label: 'Masa magra', color: '#10b981', points: magras },
-            { label: 'Músculo esquel.', color: '#3b82f6', points: smm },
-            { label: 'Masa grasa', color: '#f59e0b', points: grasasKg },
-          ], labels, { yMin: Math.max(0, Math.floor(Math.min(...todos) - 3)), yMax: Math.ceil(Math.max(...todos) + 3), height: 160 })}
-          <div class="mt-1">${legendDot('#10b981', 'Masa magra')}${legendDot('#3b82f6', 'Músculo esquel.')}${legendDot('#f59e0b', 'Masa grasa')}</div>
-          <div class="text-[10px] text-slate-500 mt-1">Fórmulas: Lee 2000 (SMM) · peso × (1 − %grasa) (magra). Estimaciones, no DEXA.</div>
+        <div class="text-xs font-bold text-slate-700 mt-3 mb-1">🧬 Composición corporal (estimada)</div>
+        <div class="text-[10px] text-slate-400 mb-2">kg · Lee 2000 para músculo esquelético, peso × (1 − %grasa) para magra. Cada una con su propia escala. Estimaciones, no DEXA.</div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+          ${[
+            ['Masa magra', '#10b981', magras],
+            ['Músculo esquelético', '#3b82f6', smm],
+            ['Masa grasa', '#f59e0b', grasasKg],
+          ].map(([etiqueta, color, puntos]) => graficaRangos({
+            titulo: etiqueta,
+            fechas,
+            series: [{ label: etiqueta, color, points: puntos }],
+            opts: { unidad: 'kg', spanMin: 1.5, height: 210, decimales: 1 },
+          })).join('')}
         </div>`;
     }
   }
@@ -3407,6 +3939,7 @@ window.traerPendientesPrevios = (semana) => {
 // MODAL: SEGUIMIENTO con panel contexto
 // =====================================================
 async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
+  const _tok = abrirModalCargando('Semana ' + (semana || ''), { wide: true });
   const [cliente, segsCliente, pendsCliente, medsCliente, metasCliente] = await Promise.all([
     db.clientes.get(clienteId),
     db.seguimientos.listCliente(clienteId),
@@ -3415,6 +3948,7 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
     db.metas.listCliente(clienteId),
   ]);
 
+  if (!modalVigente(_tok)) return;
   const semanaPrev = segsCliente.find(s => s.semana < semana);
   let s = segExistente || {};
   if (!segExistente) {
@@ -3435,7 +3969,7 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
         chartSerie('score_entreno', '#10b981', 'Entreno'),
         chartSerie('score_alim_metas', '#3b82f6', 'Alim · metas'),
         chartSerie('score_alim_registro', '#8b5cf6', 'Alim · registro'),
-      ], chartLabels, { yMin: 0, yMax: 100, height: 150 })
+      ], chartLabels, { escalaFija: true, yMin: 0, yMax: 100, unidad: '%', decimales: 0, height: 190, area: false })
     : '<p class="text-xs text-slate-400 text-center py-4">Necesitas 2+ semanas registradas para ver la tendencia.</p>';
 
   // Semanas ya registradas (sin contar la que se está editando) + las tareas
@@ -3766,7 +4300,7 @@ window.guardarSeguimiento = async (cliente_id, semana, id) => {
   // metas y el coach decide si actualiza la meta y la envía al Mealtracker.
   toast('Semana guardada');
   closeModal();
-  navigate('seguimiento');
+  refrescarVista('seguimientos', 'pendientes');
 };
 
 window.editarSeguimiento = async (id) => {
@@ -3945,7 +4479,7 @@ window.abrirNutricionCliente = async (clienteId) => {
           ${lineChart([
             { label: 'Kcal', color: '#3b82f6', points: ultimos14.map(d => d.kcal) },
             ...(metaKcal ? [{ label: 'Meta', color: '#94a3b8', points: ultimos14.map(() => metaKcal) }] : []),
-          ], ultimos14.map(d => d.fecha.slice(5)), { height: 160, yMin: 0 })}
+          ], ultimos14.map(d => d.fecha.slice(5)), { height: 230, unidad: 'kcal', spanMin: 400, area: false })}
         </div>
       </div>` : ''}
 
@@ -4014,6 +4548,7 @@ window.enviarMetaMealtracker = async (clienteId, metaOverride = null) => {
     // fue la última meta que el cliente efectivamente recibió en su app.
     const registro = { kcal: meta.kcal, p: meta.p, c: meta.c, g: meta.g, at: new Date().toISOString() };
     const { error: eReg } = await sb.from('clientes').update({ meta_enviada_mt: registro }).eq('id', clienteId);
+    invalidarCache('clientes');
     // Y queda también en el historial de metas: así la trazabilidad muestra
     // no solo qué se calculó, sino qué recibió de verdad el cliente en su app.
     await registrarMetaHistorial(clienteId, {
@@ -4077,7 +4612,7 @@ window.eliminarSeguimiento = async (id, clienteId) => {
   if (!confirm('¿Eliminar esta semana?')) return;
   await db.seguimientos.remove(id);
   closeModal();
-  navigate('seguimiento');
+  refrescarVista('seguimientos', 'pendientes');
 };
 
 window.togglePendienteCtx = async (id, estado, clienteId, semana) => {
@@ -4089,7 +4624,7 @@ window.togglePendienteCtx = async (id, estado, clienteId, semana) => {
 // VIEW: PAGOS
 // =====================================================
 routes.pagos = async () => {
-  view.innerHTML = '<div class="card">Cargando…</div>';
+  cargando();
   const [clientes, pagos] = await Promise.all([db.clientes.list(), db.pagos.listAnio(_pagosYear)]);
   const meses = Array.from({ length: 12 }, (_, i) => `${_pagosYear}-${String(i + 1).padStart(2, '0')}`);
   const mesActual = fmt.mesActual();
@@ -4201,7 +4736,7 @@ window.generarMesActual = async () => {
     creados++;
   }
   toast(`✓ ${creados} pago(s) creado(s) · ${omitidos} ya tenían`, 3500);
-  navigate('pagos');
+  refrescarVista('pagos');
 };
 
 const ORDEN_ESTADO = { activo: 0, pausa: 1, finalizado: 2 };
@@ -4425,21 +4960,21 @@ window.guardarPago = async (cliente_id, mes) => {
   });
   closeModal();
   toast('Guardado');
-  navigate('pagos');
+  refrescarVista('pagos');
 };
 
 window.eliminarPago = async (id) => {
   if (!confirm('¿Eliminar este registro?')) return;
   await db.pagos.remove(id);
   closeModal();
-  navigate('pagos');
+  refrescarVista('pagos');
 };
 
 // =====================================================
 // VIEW: ACTIVIDADES (agenda del coach + pendientes de clientes y del coach)
 // =====================================================
 routes.pendientes = async () => {
-  view.innerHTML = '<div class="card">Cargando…</div>';
+  cargando();
   const mes = fmt.mesActual();
   const semana = fmt.semanaISO();
   const hoy = fmt.hoy();
@@ -4733,7 +5268,7 @@ window.guardarPendiente = async () => {
   await db.pendientes.insert({ ...row, estado: 'abierto' });
   closeModal();
   toast('Guardado');
-  navigate('pendientes');
+  refrescarVista('pendientes');
 };
 
 window.editarPendiente = async (id) => {
@@ -4914,7 +5449,7 @@ routes.clientes = async () => {
   if (_cliDataCache) {
     renderClientes(_cliDataCache.clientes, _cliDataCache.allSegs);
   } else {
-    view.innerHTML = '<div class="card">Cargando…</div>';
+    cargando();
   }
   const [clientes, allSegs] = await Promise.all([db.clientes.list(), db.seguimientos.listAll()]);
   const firma = JSON.stringify([clientes, allSegs]);
@@ -5210,7 +5745,9 @@ window.nuevoCliente = () => {
 };
 
 window.editarCliente = async (id) => {
+  const _tok = abrirModalCargando('Editar cliente');
   const c = await db.clientes.get(id);
+  if (!modalVigente(_tok)) return;
   window._editingClienteId = id;
   window._pendingEncuesta = c.nivel_actividad ? { nivel: c.nivel_actividad, pal: c.pal_factor || PAL_MAP[c.nivel_actividad], respuestas: c.nivel_actividad_encuesta } : null;
   window._pendingMeta = null;
@@ -5328,7 +5865,7 @@ window.guardarCliente = async (id = null) => {
   window._pendingMetaCtx = null;
   closeModal();
   toast(r.sinColumnas ? '⚠️ Guardado, pero sin los campos nuevos: corre la migración de schema.sql en Supabase' : 'Guardado');
-  navigate('clientes');
+  refrescarVista('clientes');
 };
 
 // Guarda un cliente tolerando que la BD aún no tenga las columnas nuevas
@@ -5349,7 +5886,7 @@ async function guardarClienteSeguro(id, row) {
     ({ data, error } = Object.keys(r2).length ? await q(r2) : { data: null, error: null });
   }
   if (error) { toast(error.message); return { ok: false, sinColumnas }; }
-  _clientesCache = null;
+  invalidarCache('clientes');
   return { ok: true, sinColumnas, id: id || data?.id || null };
 }
 
@@ -5609,7 +6146,7 @@ window.aplicarEntrevistas = async () => {
   window._entrevistaProps = null;
   closeModal();
   toast(`✓ ${ok}/${updates.length} fichas actualizadas${sinCols ? ' · correo/teléfono requieren la migración de schema.sql' : ''}`);
-  navigate('clientes');
+  refrescarVista('clientes');
 };
 
 // ===== Encuesta nivel de actividad =====
@@ -5889,10 +6426,11 @@ window.eliminarCliente = async (id) => {
   await db.clientes.remove(id);
   closeModal();
   toast('Cliente eliminado');
-  navigate('clientes');
+  refrescarVista('clientes');
 };
 
 window.verCliente = async (id) => {
+  const _tok = abrirModalCargando('Cliente');
   const [c, segs, pends, pagos, meds, metas] = await Promise.all([
     db.clientes.get(id),
     db.seguimientos.listCliente(id),
@@ -5901,6 +6439,7 @@ window.verCliente = async (id) => {
     db.mediciones.listCliente(id),
     db.metas.listCliente(id),
   ]);
+  if (!modalVigente(_tok)) return;
   const edad = helpers.edadDe(c.fecha_nacimiento);
 
   // Adherencia promedio en escala 0-10: score_global (0-100) ÷ 10, fallback a promedioAdh
@@ -6192,7 +6731,9 @@ function metaSugeridaDesdeMedicion(c, peso, grasaPct) {
 }
 
 window.nuevaMedicion = async (clienteId) => {
+  const _tok = abrirModalCargando('Nueva medición corporal');
   const [c, meds] = await Promise.all([db.clientes.get(clienteId), db.mediciones.listCliente(clienteId)]);
+  if (!modalVigente(_tok)) return;
   const ult = meds.length ? meds[meds.length - 1] : null;
   window._medCliente = c;
   window._medUltima = ult;
@@ -6341,7 +6882,7 @@ window.guardarMedicion = async (clienteId, actualizarMeta = false) => {
       if (error) toast(error.message);
       else {
         metaCambiada = true;
-        _clientesCache = null;
+        invalidarCache('clientes');
         await registrarMetaHistorial(clienteId, {
           kcal: r.kcal, proteina_g: r.proteina, carbos_g: r.carbos, grasas_g: r.grasas,
           metodo: sug.meta.metodo,
@@ -6369,25 +6910,25 @@ window.guardarMedicion = async (clienteId, actualizarMeta = false) => {
   // Si la meta cambió, se ofrece mandarla al cliente (con su propia
   // confirmación mostrando la meta vieja y la nueva de su app).
   if (metaCambiada && mtConfigured()) await enviarMetaMealtracker(clienteId);
-  verCliente(clienteId);
+  await volverTrasGuardarCliente(clienteId, 'mediciones', 'metas');
 };
 
 window.eliminarMedicion = async (id, clienteId) => {
   if (!confirm('¿Eliminar esta medición?')) return;
   await db.mediciones.remove(id);
-  verCliente(clienteId);
+  await volverTrasGuardarCliente(clienteId, 'mediciones');
 };
 
 window.togglePendienteFicha = async (id, estado, clienteId) => {
   await db.pendientes.toggle(id, estado);
-  verCliente(clienteId);
+  await volverTrasGuardarCliente(clienteId, 'pendientes');
 };
 
 // =====================================================
 // VIEW: MI NEGOCIO
 // =====================================================
 routes.negocio = async () => {
-  view.innerHTML = '<div class="card">Cargando…</div>';
+  cargando();
   const [clientes, allSegs, pagosAnio, pagadosHist] = await Promise.all([
     db.clientes.list(),
     db.seguimientos.listAll(),
@@ -6545,7 +7086,7 @@ routes.negocio = async () => {
         ${lineChart([
           { label: 'Entreno', color: '#10b981', points: promPorSem('score_entreno', 'adherencia_entreno') },
           { label: 'Alimentación', color: '#3b82f6', points: promPorSem('score_alim_metas', 'adherencia_alimentacion') },
-        ], labelsSem, { height: 200, yMax: 100 })}
+        ], labelsSem, { height: 220, escalaFija: true, yMin: 0, yMax: 100, unidad: '%', decimales: 0, area: false })}
       </div>
 
       <div class="card mb-6">
@@ -6555,7 +7096,7 @@ routes.negocio = async () => {
         </div>
         ${lineChart([
           { label: 'Cumplimiento', color: '#f59e0b', points: pctCumplimiento },
-        ], labelsSem, { height: 180, yMax: 100 })}
+        ], labelsSem, { height: 210, escalaFija: true, yMin: 0, yMax: 100, unidad: '%', decimales: 0 })}
       </div>
       `;
     })()}
@@ -6779,7 +7320,7 @@ window.guardarSyncMealtracker = async () => {
       else desvinculados++;
     }
   }
-  _clientesCache = null;
+  invalidarCache('clientes');
   closeModal();
   toast(`✓ ${vinculados} vinculado(s) · ${desvinculados} desvinculado(s)`);
   routes.ajustes();
@@ -6859,7 +7400,7 @@ const _cop = (n) => `COP ${Math.round((Number(n) || 0) * (Number(_settings.usd_c
 const _fmtDateTime = (s) => { try { return new Date(s).toLocaleString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch (e) { return s; } };
 
 routes.ia = async () => {
-  view.innerHTML = '<div class="card">Cargando consumo…</div>';
+  cargando('Cargando consumo…');
   const desde = _iaDesde(_iaPeriod);
   const { data, error } = await sb.from('ia_uso')
     .select('cliente_nombre,modelo,accion,input_tokens,output_tokens,cache_read,cache_write,costo_usd,creado_en,mensaje')
@@ -7701,7 +8242,7 @@ routes.nutricion = async () => {
     const pref = clientes.find(c => c.mealtracker_id) || clientes[0];
     _nut.clienteId = pref.id;
     nutCargar(pref.id, _nut.semana);
-    view.innerHTML = '<div class="card">Cargando alimentación…</div>';
+    cargando('Cargando alimentación…');
     return;
   }
 

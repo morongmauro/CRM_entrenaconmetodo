@@ -698,7 +698,7 @@ function npVistaSemanas(a, d) {
         ${lineChart([
           { label: 'kcal/día', color: '#059669', points: kcalPts },
           { label: 'meta', color: '#94a3b8', points: metaPts },
-        ], labels, { yMin: Math.max(0, Math.floor((Math.min(...todos) - 300) / 100) * 100), yMax: Math.ceil((Math.max(...todos) + 300) / 100) * 100, height: 170 })}
+        ], labels, { height: 240, unidad: 'kcal', spanMin: 400, area: false })}
         <div class="mt-1">${legendDot('#059669', 'kcal registradas/día')}${legendDot('#94a3b8', 'meta vigente')}</div>
       ` : '<div class="text-xs text-slate-400">Aún no hay suficientes semanas con registro para dibujar la tendencia.</div>'}
       <div class="grid grid-cols-6 gap-1.5 mt-3">
@@ -1161,7 +1161,7 @@ routes.nutricion = async () => {
     const pref = clientes.find(c => c.mealtracker_id) || clientes[0];
     _nut.clienteId = pref.id;
     nutCargar(pref.id, _nut.semana);
-    view.innerHTML = '<div class="card">Cargando alimentación…</div>';
+    cargando('Cargando alimentación…');
     return;
   }
 
