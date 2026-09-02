@@ -73,6 +73,7 @@ let _mtClient = null;
 let _mtClientKey = null;
 let _mtUsersCache = null;
 let _mtUsersCacheTime = 0;
+let _mtLecturaBloqueada = false;   // el camino directo no devolvió nada (ver mtMotivoSinDatos)
 
 // --- Modo seguro (recomendado): API de coach del Mealtracker ---
 // El CRM se autentica con la contraseña del dashboard de coach
@@ -1153,8 +1154,35 @@ async function listarClientesMealtracker(force = false) {
   const { data } = await mt.from('user_data').select('user_id, name, updated_at').order('updated_at', { ascending: false });
   _mtUsersCache = data || [];
   _mtUsersCacheTime = ahora;
+  // Lista vacía por el camino directo = casi siempre RLS, no "no hay clientes".
+  // Con RLS encendida y sin políticas, Supabase devuelve [] SIN error: el CRM
+  // no falla, simplemente muestra "no registró nada" para todo el mundo, que
+  // es indistinguible de la verdad. Un coach con el Mealtracker conectado
+  // siempre tiene al menos una cuenta, así que cero es la señal.
+  if (!_mtUsersCache.length) {
+    _mtLecturaBloqueada = true;
+    console.warn('[Mealtracker] Lectura directa devolvió 0 cuentas. Suele ser RLS activada en user_data sin políticas: configura la API de coach en Ajustes (URL de la app + contraseña de coach).');
+  } else {
+    _mtLecturaBloqueada = false;
+  }
   return _mtUsersCache;
 }
+
+// Por qué no hay datos del Mealtracker: null = no lo sabemos / todo bien.
+// Lo consultan la vista de Nutrición y la herramienta del asistente para no
+// afirmar "no registró nada" cuando en realidad no pudieron leer.
+function mtMotivoSinDatos() {
+  if (mtApiBase()) return null;              // el camino seguro sí lee
+  if (!mtClient()) return 'El Mealtracker no está conectado en el CRM.';
+  if (_mtLecturaBloqueada) {
+    return 'No pude LEER el Mealtracker: la lectura directa con la llave pública devuelve cero cuentas, '
+         + 'que es lo que pasa cuando user_data tiene RLS activada sin políticas. '
+         + 'Configura la API de coach en Ajustes (URL de la app + contraseña de coach). '
+         + 'OJO: esto NO significa que el cliente no haya registrado nada.';
+  }
+  return null;
+}
+window.mtMotivoSinDatos = mtMotivoSinDatos;
 
 // Auto-match transparente por nombre. Devuelve el mealtracker_id resuelto (usando
 // el guardado si existe, o buscando por nombre y guardándolo si hay match ≥85%).

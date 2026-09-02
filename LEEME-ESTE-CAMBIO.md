@@ -1,74 +1,53 @@
-# CRM Entrena con Método · qué subir al repo
+# CRM Entrena con Método · qué subir
 
-Copia estos archivos sobre los del repo respetando las carpetas
-(`icons/` dentro de `icons/`, `api/` dentro de `api/`).
+Copia estos archivos sobre los del repo respetando las carpetas.
+**Reemplaza cualquier zip anterior.**
 
-> ⚠️ Este paquete **reemplaza** a los dos anteriores. Trae un arreglo
-> importante que los otros no tenían (ver "Arreglos" abajo).
+## Qué trae
 
-## 1 · Los cinco arreglos originales
+**Los cinco arreglos originales** — velocidad, logo de marca, login y móvil,
+gráficas legibles, menú lateral.
 
-| Archivo | Qué cambia |
+**Entrenamiento** — al entrar a un cliente: calendario de la semana, rutinas
+que se despliegan con todos sus ejercicios, y el agente de rutinas.
+
+**Los dos agentes** — `asistente.js` (💬 Asistente) y `asistente-rutinas.js`
+(dentro de Entrenamiento). Los cambios que propone el de rutinas NO se
+guardan hasta que pulses "Aplicar todo".
+
+**Aviso de lectura del Mealtracker** (nuevo) — ver abajo.
+
+## Configuración
+
+| Variable en Vercel | ¿Necesaria? |
 |---|---|
-| `index.html` | Logo de marca, menú lateral, viewport de iPhone, login con estado |
-| `app.js` | Caché de datos, router, login, gráficas, retorno tras guardar |
-| `composicion.js` | Recarga sin parpadeo, gráficas con unidades |
-| `nutricion-plus.js` | Placeholder diferido, gráfica de kcal con eje ajustado |
-| `styles.css` `movil.css` `marca.css` | Menú lateral, esqueletos, gráficas, calendario, agentes |
-| `manifest.json` | Iconos y colores de la marca |
-| `sw.js` | Service worker con tope de 3,5 s a la red |
-| `icons/*` | El logo real (M + anillo) en todos sus tamaños |
+| `ANTHROPIC_API_KEY` | **Sí**, para los agentes y para las sugerencias de alimentación. Es UNA sola para las tres cosas. |
+| `CRM_ASK_MODEL` | No. Modo rápido, por defecto `claude-sonnet-5`. |
+| `CRM_ASK_MODEL_FONDO` | No. Modo "a fondo", por defecto `claude-opus-5`. |
 
-## 2 · Entrenamiento: vista nueva + agente
+Para saber si ya tienes la primera: entra a Nutrición → un cliente →
+pestaña Oportunidades. Si genera el análisis, ya la tienes.
 
-| Archivo | Qué es |
-|---|---|
-| `entrenamiento.js` | Calendario de la fase, rutinas desplegables con sus ejercicios, lectura del historial de entreno |
-| `asistente-rutinas.js` | **NUEVO** · el agente de la sección, con sus 11 herramientas |
-| `asistente.js` | El asistente general + el motor que ahora comparten los dos |
-| `api/coach-ask.js` | El puente con Claude, ahora con dos perfiles (general y rutinas) |
+## Sobre el Mealtracker
 
-### Al entrar a un cliente ahora ves
+La tabla `user_data` tiene RLS activada y sin políticas. Eso significa que
+la lectura directa con la llave pública **devuelve cero filas sin dar
+error**: el CRM no falla, muestra "no registró nada" para todos.
 
-- **📅 Calendario** — la semana con qué rutina cae qué día, en qué semana de
-  la fase vas, y aviso si hay más rutinas que días declarados.
-- **📋 Rutinas** — cada una se despliega con todos sus ejercicios (series,
-  reps, peso, descanso, patrón) sin entrar al constructor.
-- **🗂️ Fases** — lo de antes, intacto.
+Este paquete lo detecta y lo dice, en vez de dejarte creer que tus clientes
+no registran. Si ves el aviso en Nutrición, la solución es configurar la API
+de coach en **Ajustes**:
 
-### El agente
+- URL de la app del Mealtracker
+- Contraseña de coach (la `COACH_PASSWORD` del proyecto del Mealtracker)
 
-Botón "💬 Preguntarle al agente sobre este plan" al final de la sección.
+Con eso el CRM lee por el servidor, con permisos completos, y la RLS deja de
+estorbar. Además la llave pública de `config.js` deja de usarse.
 
-**Lee:** el plan y su calendario, cada rutina, la galería de ejercicios, la
-cobertura por patrón y músculo, y los pesos que el cliente ha registrado en
-su app (serie a serie, con su récord).
+Si Nutrición ya te muestra datos hoy, no tienes que hacer nada: ya estás por
+ese camino.
 
-**Escribe: nada, sin tu permiso.** Cuando le pides un cambio te lo deja
-*propuesto* en una tarjeta amarilla con "Aplicar todo" y "Descartar". Nada
-toca la base de datos hasta que pulses Aplicar.
+## Después de subirlo
 
-## 3 · Variables de entorno en Vercel
-
-| Variable | Necesaria | Para qué |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | **Sí** | La misma que ya usa Nutrición → Oportunidades |
-| `CRM_ASK_MODEL` | No | Modo rápido. Por defecto `claude-sonnet-5` |
-| `CRM_ASK_MODEL_FONDO` | No | Modo "a fondo". Por defecto `claude-opus-5` |
-
-## 4 · Arreglos que venían con bug en los zips anteriores
-
-- **El esqueleto de carga borraba la pantalla.** Las pestañas internas de
-  Entrenamiento, Pagos, Pendientes, Seguimiento e IA llaman a su vista sin
-  pasar por el router, y nadie cancelaba el temporizador del "Cargando…": la
-  pantalla se pintaba bien y 160 ms después se quedaba en blanco. Si ya
-  subiste alguno de los zips anteriores, **sube este**.
-
-## 5 · Después de subirlo
-
-El service worker cambió de nombre de caché (`ecm-crm-v1` → `ecm-crm-v2`),
-así que se limpia sola la caché vieja al entrar.
-
-**No hay migraciones de Supabase.** El agente lee `sesiones` y `series_log`,
-que ya existen si corriste el schema del módulo de entrenamiento. Si no lo
-corriste, la herramienta de pesos avisa en vez de romperse.
+El service worker cambió de nombre de caché, así que se limpia sola la vieja.
+**No hay migraciones de Supabase.**

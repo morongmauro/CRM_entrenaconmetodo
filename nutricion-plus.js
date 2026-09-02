@@ -1191,6 +1191,22 @@ routes.nutricion = async () => {
     </div>`;
 
   if (_nut.cargando) { view.innerHTML = `${cabecera}<div class="card">Leyendo el Mealtracker…</div>`; return; }
+
+  // Aviso de lectura bloqueada. Va ANTES que "sin datos" porque las dos
+  // pantallas se ven igual y solo una es culpa del cliente: con RLS activada
+  // sin políticas, Supabase devuelve cero filas sin error, y el CRM diría
+  // "no registró nada" de todos por igual.
+  const npBloqueo = typeof mtMotivoSinDatos === 'function' ? mtMotivoSinDatos() : null;
+  if (npBloqueo) {
+    view.innerHTML = `${cabecera}
+      <div class="card border-l-4 border-amber-400">
+        <div class="font-bold text-slate-800 mb-1">⚠️ No estoy leyendo el Mealtracker</div>
+        <p class="text-sm text-slate-600 mb-2">${escapeHtml(npBloqueo)}</p>
+        <button class="btn btn-primary btn-sm" onclick="navigate('ajustes')">Ir a Ajustes</button>
+      </div>`;
+    return;
+  }
+
   if (_nut.error) {
     view.innerHTML = `${cabecera}<div class="card border-l-4 border-amber-400"><div class="font-bold text-slate-800 mb-1">No pude leer la alimentación</div><p class="text-sm text-slate-600">${escapeHtml(_nut.error)}</p></div>`;
     return;

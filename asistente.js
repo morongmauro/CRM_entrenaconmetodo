@@ -393,6 +393,12 @@ const ASIS_HERRAMIENTAS = {
     if (!c) return asisNoEncontrado(nombre, await db.clientes.list());
     const sem = /^\d{4}-W\d{2}$/.test(String(semana || '')) ? semana : fmt.semanaISO();
 
+    // Si la lectura del Mealtracker está bloqueada, hay que decirlo ANTES de
+    // mirar los datos: "no registró nada" y "no pude leer" se ven igual desde
+    // aquí, y el asistente daría el primero por bueno.
+    const bloqueo = typeof mtMotivoSinDatos === 'function' ? mtMotivoSinDatos() : null;
+    if (bloqueo) return { cliente: c.nombre, error: bloqueo };
+
     const d = await getMealtrackerDataMerged(c);
     if (!d) {
       return {
