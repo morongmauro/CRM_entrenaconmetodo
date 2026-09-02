@@ -39,6 +39,9 @@ const _ent = {
   // Clientes
   clienteId: null,
   fases: null,
+  subtab: 'calendario',    // calendario | rutinas  (dentro de un cliente)
+  faseId: null,            // qué fase se está mirando
+  rutinaAbierta: null,     // qué rutina está desplegada en la lista
 };
 
 // ---------- Taxonomía ----------
@@ -281,6 +284,65 @@ const entDb = {
     const { data, error } = await sb.rpc('duplicar_rutina', { p_rutina_id: rutinaId });
     if (error) { toast(error.message); return null; }
     return data;
+  },
+
+  // ---- Los ejercicios de TODAS las rutinas de una fase, de un viaje ----
+  // Pedirlos rutina por rutina son N peticiones encadenadas; con 5 rutinas la
+  // vista tarda medio segundo largo en armarse. Devuelve { rutinaId: [re, …] }.
+  async ejerciciosDeRutinas(rutinaIds) {
+    if (!rutinaIds || !rutinaIds.length) return {};
+    const { data, error } = await sb.from('rutina_ejercicios')
+      .select('*, ejercicios(id, nombre, patron, segmento, tipo, equipo, musculos_primarios, musculos_secundarios, unilateral)')
+      .in('rutina_id', rutinaIds).order('orden');
+    if (error) { toast(error.message); return {}; }
+    const porRutina = {};
+    rutinaIds.forEach(id => { porRutina[id] = []; });
+    (data || []).forEach(re => { (porRutina[re.rutina_id] ||= []).push(re); });
+    return porRutina;
+  },
+
+  // ---- Historial de entreno: lo que el cliente marcó en su app ----
+  // Vive en `sesiones` + `series_log` (esquema del módulo de entrenamiento).
+  // El peso se guarda por SERIE, no por ejercicio: "60×10, 60×10, 57.5×8" es
+  // el dato real, y promediarlo antes de tiempo borra justo la progresión.
+  async sesiones(clienteId, { desde = null, limite = 60 } = {}) {
+    let q = sb.from('sesiones')
+      .select('id, fecha, semana_iso, semana_num, estado, rpe, notas_cliente, duracion_seg, rutina_id, rutinas(nombre)')
+      .eq('cliente_id', clienteId)
+      .order('fecha', { ascending: false })
+      .limit(limite);
+    if (desde) q = q.gte('fecha', desde);
+    const { data, error } = await q;
+    // Si el esquema de entrenamiento no está corrido todavía, no se rompe la
+    // vista: se devuelve null y quien llama decide qué decir.
+    if (error) return null;
+    return data || [];
+  },
+
+  async seriesDeSesiones(sesionIds) {
+    if (!sesionIds || !sesionIds.length) return [];
+    const { data, error } = await sb.from('series_log')
+      .select('sesion_id, ejercicio_id, serie_num, reps, peso, unidad, lado, rir, completada, notas, ejercicios(nombre)')
+      .in('sesion_id', sesionIds)
+      .order('serie_num');
+    if (error) return [];
+    return data || [];
+  },
+
+  // Las dos funciones del servidor: la última vez que lo hizo, y su récord.
+  async ultimasSeries(clienteId, ejercicioId) {
+    const { data, error } = await sb.rpc('ultimas_series', {
+      p_cliente_id: clienteId, p_ejercicio_id: ejercicioId,
+    });
+    if (error) return null;
+    return data || [];
+  },
+  async recordEjercicio(clienteId, ejercicioId) {
+    const { data, error } = await sb.rpc('record_ejercicio', {
+      p_cliente_id: clienteId, p_ejercicio_id: ejercicioId,
+    });
+    if (error) return null;
+    return (data && data[0]) || null;
   },
 };
 
@@ -1283,28 +1345,285 @@ async function entVistaClientes() {
   const rutinasPorFase = {};
   await Promise.all(fases.map(async f => { rutinasPorFase[f.id] = await entDb.rutinasDeFase(f.id); }));
 
-  body.innerHTML = `
+  // Qué fase se está mirando: la que eligió el coach, o la activa, o la última.
+  if (!fases.some(f => f.id === _ent.faseId)) {
+    _ent.faseId = (fases.find(f => f.estado === 'activa') || fases[fases.length - 1])?.id || null;
+  }
+  const fase = fases.find(f => f.id === _ent.faseId) || null;
+  const rutinas = fase ? (rutinasPorFase[fase.id] || []) : [];
+
+  // Los ejercicios de todas las rutinas de la fase, de un solo viaje: son los
+  // que se despliegan al abrir cada rutina, y contarlos en la tarjeta.
+  const ejerciciosPorRutina = await entDb.ejerciciosDeRutinas(rutinas.map(r => r.id));
+
+  const cabecera = `
     <div class="flex justify-between items-start mb-4 gap-2 flex-wrap">
       <div>
         <button class="btn btn-ghost btn-sm mb-1" onclick="entVerCliente(null)">← Todos los clientes</button>
         <div class="font-bold text-lg text-slate-900">${escapeHtml(cliente?.nombre || 'Cliente')}</div>
         <div class="text-xs text-slate-500">
-          ${(cliente?.dias_entreno || []).length ? `Entrena: ${cliente.dias_entreno.join(' · ')}` : 'Sin días de entreno definidos en su ficha'}
+          ${(cliente?.dias_entreno || []).length ? `Su ficha dice que entrena: ${cliente.dias_entreno.join(' · ')}` : 'Sin días de entreno definidos en su ficha'}
         </div>
       </div>
       <div class="flex gap-1 flex-wrap">
-        <button class="btn btn-secondary btn-sm" onclick="entImportarFase()">⇄ Importar fase de otro cliente</button>
+        <button class="btn btn-secondary btn-sm" onclick="entImportarFase()">⇄ Importar fase</button>
         <button class="btn btn-primary btn-sm" onclick="entNuevaFase()">+ Nueva fase</button>
       </div>
-    </div>
+    </div>`;
 
-    ${fases.length === 0 ? `
+  if (fases.length === 0) {
+    body.innerHTML = cabecera + `
       <div class="card text-center text-slate-500 py-8">
         Este cliente no tiene fases todavía. Crea una, o importa una fase que ya
         armaste para otro cliente.
-      </div>
-    ` : fases.map(f => entTarjetaFase(f, rutinasPorFase[f.id] || [])).join('')}
+      </div>`;
+    return;
+  }
+
+  // Selector de fase: solo si hay más de una. Con una sola, un desplegable de
+  // un elemento es ruido.
+  const selectorFase = fases.length > 1 ? `
+    <div class="flex items-center gap-2 mb-3 flex-wrap">
+      <label class="!mb-0 !normal-case !text-xs">Fase</label>
+      <select class="!w-auto min-w-[220px] text-sm" onchange="entVerFase(this.value)">
+        ${fases.map(f => `<option value="${f.id}" ${f.id === _ent.faseId ? 'selected' : ''}>
+          ${escapeHtml(f.nombre)}${f.estado === 'activa' ? ' · activa' : ''}
+        </option>`).join('')}
+      </select>
+    </div>` : '';
+
+  const subtabs = [
+    ['calendario', '📅 Calendario'],
+    ['rutinas', `📋 Rutinas${rutinas.length ? ` (${rutinas.length})` : ''}`],
+    ['fases', '🗂️ Fases'],
+  ];
+
+  body.innerHTML = cabecera + selectorFase + `
+    <div class="bg-slate-100 rounded-xl p-1 flex gap-1 mb-4 overflow-x-auto">
+      ${subtabs.map(([id, lab]) => `
+        <button class="px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap ${_ent.subtab === id ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}"
+                onclick="entSubtab('${id}')">${lab}</button>`).join('')}
+    </div>
+    ${_ent.subtab === 'calendario' ? entCalendarioHTML(cliente, fase, rutinas, ejerciciosPorRutina)
+      : _ent.subtab === 'rutinas'  ? entListaRutinasHTML(fase, rutinas, ejerciciosPorRutina)
+      : fases.map(f => entTarjetaFase(f, rutinasPorFase[f.id] || [])).join('')}
+
+    <!-- El agente de rutinas se monta aquí si asistente-rutinas.js está
+         cargado. Si no lo está, este hueco se queda vacío y no pasa nada. -->
+    <div id="rut-panel" class="mt-4"></div>
   `;
+
+  if (typeof rutMontarPanel === 'function') rutMontarPanel();
+}
+
+window.entSubtab = (t) => { _ent.subtab = t; entVistaClientes(); };
+window.entVerFase = (id) => { _ent.faseId = id; _ent.rutinaAbierta = null; entVistaClientes(); };
+window.entToggleRutina = (id) => {
+  _ent.rutinaAbierta = _ent.rutinaAbierta === id ? null : id;
+  entVistaClientes();
+};
+
+// =====================================================
+// CALENDARIO DE LA FASE
+// =====================================================
+// Reparte las rutinas sobre los días de la semana. Dos reglas, en este orden:
+//   1. La rutina que tiene `dia_semana` fijado manda: va a ese día.
+//   2. Las que no lo tienen se reparten, por `dia_orden`, sobre los días que
+//      la fase declaró (dias_semana), saltándose los ya ocupados.
+// Así el coach ve la semana real aunque no haya fijado día por día.
+function entRepartirRutinas(fase, rutinas) {
+  const porDia = {};
+  ENT_DIAS.forEach(([d]) => { porDia[d] = null; });
+
+  const fijadas = rutinas.filter(r => r.dia_semana);
+  const libres = rutinas.filter(r => !r.dia_semana)
+    .slice().sort((a, b) => (a.dia_orden || 0) - (b.dia_orden || 0));
+
+  fijadas.forEach(r => { if (porDia[r.dia_semana] === null) porDia[r.dia_semana] = { r, fijada: true }; });
+
+  const diasFase = (fase?.dias_semana || []).filter(d => porDia[d] === null);
+  libres.forEach((r, i) => {
+    const d = diasFase[i];
+    if (d) porDia[d] = { r, fijada: false };
+  });
+
+  // Rutinas que no cupieron: más rutinas que días declarados en la fase.
+  const colocadas = new Set(Object.values(porDia).filter(Boolean).map(x => x.r.id));
+  const sinDia = rutinas.filter(r => !colocadas.has(r.id));
+  return { porDia, sinDia };
+}
+
+// En qué semana de la fase estamos hoy (1..semanas), o null si no arrancó.
+function entSemanaActual(fase) {
+  if (!fase?.fecha_inicio || !fase?.semanas) return null;
+  const ini = new Date(fase.fecha_inicio + 'T00:00:00');
+  const hoy = new Date(fmt.hoy() + 'T00:00:00');
+  const dias = Math.floor((hoy - ini) / 86400000);
+  if (dias < 0) return null;
+  const semana = Math.floor(dias / 7) + 1;
+  return semana > fase.semanas ? null : semana;
+}
+
+function entCalendarioHTML(cliente, fase, rutinas, ejerciciosPorRutina) {
+  if (!fase) return '<div class="card text-center text-slate-500 py-8">Elige una fase.</div>';
+  const { porDia, sinDia } = entRepartirRutinas(fase, rutinas);
+  const semana = entSemanaActual(fase);
+  const fin = entFechaFin(fase);
+  const hoyLetra = ENT_DIAS[(new Date().getDay() + 6) % 7][0];   // getDay: 0=domingo
+
+  const cabeceraFase = `
+    <div class="card mb-3">
+      <div class="flex flex-wrap items-start justify-between gap-2">
+        <div class="min-w-0">
+          <div class="font-bold text-slate-900">${escapeHtml(fase.nombre)}</div>
+          <div class="text-xs text-slate-500 mt-0.5">
+            ${fase.semanas || '?'} semana${fase.semanas === 1 ? '' : 's'}
+            ${fase.fecha_inicio ? ` · ${fmt.fechaCorta(fase.fecha_inicio)}${fin ? ` → ${fmt.fechaCorta(fin)}` : ''}` : ' · sin fecha de inicio'}
+            ${semana ? ` · <strong class="text-emerald-700">vas en la semana ${semana} de ${fase.semanas}</strong>` : ''}
+          </div>
+          ${fase.objetivo ? `<div class="text-xs text-slate-600 mt-1">🎯 ${escapeHtml(fase.objetivo)}</div>` : ''}
+        </div>
+        <button class="btn btn-secondary btn-sm flex-shrink-0" onclick="entEditarFase('${fase.id}')">Editar fase</button>
+      </div>
+      ${semana ? `
+        <div class="mt-2">
+          <div class="ent-progreso"><div class="ent-progreso-relleno" style="width:${Math.round(semana / fase.semanas * 100)}%"></div></div>
+        </div>` : ''}
+    </div>`;
+
+  const tarjetas = ENT_DIAS.map(([d, lab]) => {
+    const slot = porDia[d];
+    const esHoy = d === hoyLetra;
+    const declarado = (fase.dias_semana || []).includes(d);
+    if (!slot) {
+      return `
+        <div class="ent-dia ent-dia-descanso ${esHoy ? 'ent-dia-hoy' : ''}">
+          <div class="ent-dia-nombre">${lab}${esHoy ? ' · hoy' : ''}</div>
+          <div class="ent-dia-vacio">${declarado ? 'Día de entreno sin rutina' : 'Descanso'}</div>
+        </div>`;
+    }
+    const r = slot.r;
+    const n = (ejerciciosPorRutina[r.id] || []).length;
+    return `
+      <div class="ent-dia ${esHoy ? 'ent-dia-hoy' : ''}" onclick="entAbrirRutinaDesdeCalendario('${r.id}')" role="button" tabindex="0">
+        <div class="ent-dia-nombre">${lab}${esHoy ? ' · hoy' : ''}</div>
+        <div class="ent-dia-rutina">${escapeHtml(r.nombre)}</div>
+        <div class="ent-dia-meta">
+          ${n} ejercicio${n === 1 ? '' : 's'}
+          ${r.duracion_estimada_min ? ` · ${r.duracion_estimada_min} min` : ''}
+        </div>
+        ${!slot.fijada ? '<div class="ent-dia-auto" title="Este día no está fijado en la rutina: sale del reparto por orden sobre los días de la fase">sugerido</div>' : ''}
+      </div>`;
+  }).join('');
+
+  return cabeceraFase + `
+    <div class="ent-semana">${tarjetas}</div>
+    ${sinDia.length ? `
+      <div class="card mt-3 border-l-4 border-amber-400">
+        <div class="font-bold text-sm text-slate-800 mb-1">⚠️ ${sinDia.length} rutina(s) sin día en la semana</div>
+        <p class="text-xs text-slate-600 mb-2">
+          La fase declara ${(fase.dias_semana || []).length || 0} día(s) de entreno y hay ${rutinas.length} rutinas.
+          Añade días a la fase o fíjale el día a cada rutina.
+        </p>
+        <div class="flex flex-wrap gap-1">
+          ${sinDia.map(r => `<button class="chip" onclick="entAbrirRutinaDesdeCalendario('${r.id}')">${escapeHtml(r.nombre)}</button>`).join('')}
+        </div>
+      </div>` : ''}
+    <div class="text-[11px] text-slate-400 mt-2">
+      Los días marcados como <strong>sugerido</strong> no están fijados en la rutina: se reparten por orden
+      sobre los días que declaraste en la fase. Para fijarlos, entra a la rutina y elige su día.
+    </div>`;
+}
+
+window.entAbrirRutinaDesdeCalendario = (rutinaId) => {
+  _ent.subtab = 'rutinas';
+  _ent.rutinaAbierta = rutinaId;
+  entVistaClientes();
+};
+
+// =====================================================
+// LISTA DE RUTINAS · se despliegan con sus ejercicios
+// =====================================================
+// Antes, para ver qué tenía la rutina "Push" había que entrar al constructor,
+// que es una pantalla de EDICIÓN completa. Aquí se ve de un clic, en modo
+// lectura, y el constructor queda a un botón de distancia.
+function entListaRutinasHTML(fase, rutinas, ejerciciosPorRutina) {
+  if (!fase) return '<div class="card text-center text-slate-500 py-8">Elige una fase.</div>';
+  if (!rutinas.length) {
+    return `
+      <div class="card text-center text-slate-500 py-8">
+        <div class="mb-3">Esta fase no tiene rutinas todavía.</div>
+        <div class="flex gap-2 justify-center flex-wrap">
+          <button class="btn btn-primary btn-sm" onclick="entNuevaRutina('${fase.id}', '${_ent.clienteId}')">+ Rutina nueva</button>
+          <button class="btn btn-secondary btn-sm" onclick="entAsignarPlantilla('${fase.id}')">↓ Traer de la biblioteca</button>
+        </div>
+      </div>`;
+  }
+
+  return rutinas.map(r => {
+    const ejs = ejerciciosPorRutina[r.id] || [];
+    const abierta = _ent.rutinaAbierta === r.id;
+    const series = ejs.reduce((a, e) => a + (e.series || 0), 0);
+    return `
+      <div class="card mb-2">
+        <div class="flex items-center justify-between gap-2 flex-wrap cursor-pointer" onclick="entToggleRutina('${r.id}')">
+          <div class="min-w-0 flex items-center gap-2">
+            <span class="ent-flecha ${abierta ? 'ent-flecha-abierta' : ''}">▶</span>
+            <div class="min-w-0">
+              <div class="font-bold text-slate-900">${escapeHtml(r.nombre)}</div>
+              <div class="text-xs text-slate-500">
+                Día ${r.dia_orden}${r.dia_semana ? ` · ${entLabel(ENT_DIAS, r.dia_semana)}` : ''}
+                · ${ejs.length} ejercicio${ejs.length === 1 ? '' : 's'}
+                ${series ? ` · ${series} series` : ''}
+                ${r.duracion_estimada_min ? ` · ${r.duracion_estimada_min} min` : ''}
+              </div>
+            </div>
+          </div>
+          <div class="flex gap-1 flex-shrink-0" onclick="event.stopPropagation()">
+            <button class="btn btn-secondary btn-sm" onclick="entAbrirConstructor('${r.id}')">Construir</button>
+            <button class="btn btn-ghost btn-sm" onclick="entCopiarRutinaA('${r.id}')" title="Copiar a otro cliente o fase">⇄</button>
+            <button class="btn btn-ghost btn-sm" onclick="entBorrarRutina('${r.id}')">✕</button>
+          </div>
+        </div>
+        ${abierta ? `<div class="mt-3 pt-3 border-t border-slate-100">${entResumenEjerciciosHTML(ejs, r)}</div>` : ''}
+      </div>`;
+  }).join('') + `
+    <div class="flex gap-2 flex-wrap mt-3">
+      <button class="btn btn-dark btn-sm" onclick="entNuevaRutina('${fase.id}', '${_ent.clienteId}')">+ Rutina nueva</button>
+      <button class="btn btn-secondary btn-sm" onclick="entAsignarPlantilla('${fase.id}')">↓ Traer de la biblioteca</button>
+    </div>`;
+}
+
+// Los ejercicios en modo lectura: la prescripción tal como la verá el cliente.
+function entResumenEjerciciosHTML(ejs, rutina) {
+  if (!ejs.length) {
+    return `<div class="text-xs text-slate-400">Rutina vacía.
+      <button class="btn btn-ghost btn-sm" onclick="entAbrirConstructor('${rutina.id}')">Añadir ejercicios →</button></div>`;
+  }
+  return `
+    <div class="overflow-x-auto">
+      <table class="ent-tabla-ejs">
+        <thead><tr>
+          <th>#</th><th>Ejercicio</th><th>Series</th><th>Reps</th><th>Peso</th><th>Desc.</th><th>Patrón</th>
+        </tr></thead>
+        <tbody>
+          ${ejs.map((re, i) => {
+            const e = re.ejercicios || {};
+            return `
+              <tr>
+                <td class="text-slate-400">${i + 1}</td>
+                <td class="font-medium text-slate-800">${escapeHtml(e.nombre || 'Ejercicio')}
+                  ${re.notas ? `<div class="text-[11px] text-slate-500">${escapeHtml(re.notas)}</div>` : ''}</td>
+                <td>${re.series ?? '—'}</td>
+                <td>${escapeHtml(re.reps || '—')}</td>
+                <td>${escapeHtml(re.peso_objetivo || '—')}</td>
+                <td>${re.descanso_seg != null ? `${re.descanso_seg}s` : '—'}</td>
+                <td><span class="tag tag-gray">${escapeHtml(entLabel(ENT_PATRONES, e.patron))}</span></td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
 }
 
 window.entVerCliente = (id) => { _ent.clienteId = id; entVistaClientes(); };

@@ -408,3 +408,13 @@ tr:hover td { background-color: rgba(241,243,229,.45) !important; }
 .asis-ejemplo { background: var(--em-surface) !important; border-color: var(--em-border) !important; border-radius: var(--em-radius-input) !important; }
 .asis-ejemplo:hover { border-color: var(--em-olive) !important; color: var(--em-olive-dark) !important; }
 .asis-latido { background: var(--em-olive); }
+
+/* ─── Entrenamiento · calendario ──────────────────────────────────────── */
+.ent-dia { background: var(--em-surface) !important; border-color: var(--em-border) !important; border-radius: 16px !important; }
+.ent-dia-descanso { background: var(--em-surface-2) !important; }
+.ent-dia-hoy { border-color: var(--em-olive) !important; box-shadow: inset 3px 0 0 var(--em-olive) !important; }
+.ent-progreso-relleno { background: var(--em-olive); }
+
+/* ─── Agente de rutinas ───────────────────────────────────────────────── */
+.rut-abrir { background: var(--em-surface) !important; border-color: var(--em-border) !important; border-radius: var(--em-radius-input) !important; }
+.rut-abrir:hover { border-color: var(--em-olive) !important; color: var(--em-olive-dark) !important; }

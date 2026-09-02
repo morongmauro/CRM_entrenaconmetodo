@@ -453,14 +453,15 @@ const ASIS_HERRAMIENTAS = {
 // =====================================================
 // EL BUCLE: pregunta → herramientas → respuesta
 // =====================================================
-async function asisLlamar(mensajes) {
+async function asisLlamar(mensajes, { perfil = 'general', aFondo = false } = {}) {
   const r = await fetch('/api/coach-ask', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       messages: mensajes,
       contexto: { hoy: fmt.hoy(), semana: fmt.semanaISO(), coach: _settings.nombre_coach },
-      modo: _asis.aFondo ? 'a_fondo' : 'rapido',
+      modo: aFondo ? 'a_fondo' : 'rapido',
+      perfil,
     }),
   });
   const data = await r.json().catch(() => ({}));
@@ -471,8 +472,8 @@ async function asisLlamar(mensajes) {
 // Cada herramienta se protege por separado: si una falla (el Centro caído, la
 // app del cliente sin responder), el modelo recibe el error de ESA y sigue
 // con las demás en vez de que se caiga la pregunta entera.
-async function asisEjecutar(bloque) {
-  const fn = ASIS_HERRAMIENTAS[bloque.name];
+async function asisEjecutar(bloque, herramientas) {
+  const fn = herramientas[bloque.name];
   if (!fn) return { type: 'tool_result', tool_use_id: bloque.id, is_error: true, content: `No existe la herramienta ${bloque.name}` };
   try {
     const salida = await fn(bloque.input || {});
@@ -481,6 +482,60 @@ async function asisEjecutar(bloque) {
     return { type: 'tool_result', tool_use_id: bloque.id, is_error: true, content: String(e?.message || e) };
   }
 }
+
+// ── El motor, compartido ────────────────────────────────────────────────
+// Lo usan el asistente general y el de rutinas. Lo único que cambia entre
+// ellos es qué herramientas hay, cómo se llaman en pantalla y qué perfil pide
+// al servidor; el bucle de "pregunta → herramientas → respuesta" es el mismo,
+// y duplicarlo sería duplicar también cada arreglo que le hagamos.
+async function asisMotor(estado, { perfil, herramientas, etiquetas, alRepintar }) {
+  const pintar = () => { try { alRepintar(); } catch (e) {} };
+  const turno = estado.visible[estado.visible.length - 1];
+
+  for (let vuelta = 0; vuelta < ASIS_MAX_VUELTAS; vuelta++) {
+    const resp = await asisLlamar(estado.mensajes, { perfil, aFondo: estado.aFondo });
+    estado.gasto.vueltas++;
+    estado.gasto.entrada += resp.usage?.input_tokens || 0;
+    estado.gasto.salida += resp.usage?.output_tokens || 0;
+    estado.gasto.cache += resp.usage?.cache_read_input_tokens || 0;
+    if (resp.model) estado.gasto.modelo = resp.model;
+
+    estado.mensajes.push({ role: 'assistant', content: resp.content });
+
+    const texto = (resp.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+    if (texto) turno.texto = turno.texto ? `${turno.texto}\n\n${texto}` : texto;
+
+    const llamadas = (resp.content || []).filter(b => b.type === 'tool_use');
+    if (resp.stop_reason !== 'tool_use' || !llamadas.length) return;
+
+    llamadas.forEach(l => turno.herramientas.push(etiquetas[l.name] || l.name));
+    estado.paso = etiquetas[llamadas[0].name] || 'Buscando en tus datos';
+    pintar();
+
+    // En paralelo: si pide tres cosas, se buscan las tres a la vez. Y TODOS
+    // los resultados van en UN solo mensaje — mandarlos por separado le
+    // enseña al modelo a dejar de pedir cosas en paralelo.
+    const resultados = await Promise.all(llamadas.map(l => asisEjecutar(l, herramientas)));
+    estado.mensajes.push({ role: 'user', content: resultados });
+    estado.paso = 'Armando la respuesta';
+    pintar();
+  }
+  if (!turno.texto) turno.texto = 'Me quedé sin vueltas antes de poder responder. Prueba a preguntarlo más concreto.';
+}
+
+// Estado inicial de una conversación, para no repetirlo en cada panel.
+function asisEstadoNuevo() {
+  return {
+    mensajes: [], visible: [], trabajando: false, paso: '', error: null,
+    aFondo: false, gasto: { entrada: 0, salida: 0, cache: 0, vueltas: 0, modelo: null },
+  };
+}
+window.asisMotor = asisMotor;
+window.asisEstadoNuevo = asisEstadoNuevo;
+// asisFormato y asisGastoHTML son declaraciones de función en un script
+// clásico, así que ya son globales: el panel de rutinas las llama directo.
+// Envolverlas en window.asisFormato = (t) => asisFormato(t) sobrescribía la
+// global con la envoltura y se llamaba a sí misma hasta reventar la pila.
 
 const ASIS_ETIQUETAS = {
   listar_clientes: 'Revisando tus clientes',
@@ -510,35 +565,12 @@ window.asisPreguntar = async (textoDirecto) => {
   const turno = _asis.visible[_asis.visible.length - 1];
 
   try {
-    for (let vuelta = 0; vuelta < ASIS_MAX_VUELTAS; vuelta++) {
-      const resp = await asisLlamar(_asis.mensajes);
-      _asis.gasto.vueltas++;
-      _asis.gasto.entrada += resp.usage?.input_tokens || 0;
-      _asis.gasto.salida += resp.usage?.output_tokens || 0;
-      _asis.gasto.cache += resp.usage?.cache_read_input_tokens || 0;
-      if (resp.model) _asis.gasto.modelo = resp.model;
-
-      _asis.mensajes.push({ role: 'assistant', content: resp.content });
-
-      const texto = (resp.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
-      if (texto) turno.texto = turno.texto ? `${turno.texto}\n\n${texto}` : texto;
-
-      const llamadas = (resp.content || []).filter(b => b.type === 'tool_use');
-      if (resp.stop_reason !== 'tool_use' || !llamadas.length) break;
-
-      llamadas.forEach(l => turno.herramientas.push(ASIS_ETIQUETAS[l.name] || l.name));
-      _asis.paso = ASIS_ETIQUETAS[llamadas[0].name] || 'Buscando en tus datos';
-      asisPintar();
-
-      // En paralelo: si pide tres cosas, se buscan las tres a la vez. Y TODOS
-      // los resultados van en UN solo mensaje — mandarlos por separado le
-      // enseña al modelo a dejar de pedir cosas en paralelo.
-      const resultados = await Promise.all(llamadas.map(asisEjecutar));
-      _asis.mensajes.push({ role: 'user', content: resultados });
-      _asis.paso = 'Armando la respuesta';
-      asisPintar();
-    }
-    if (!turno.texto) turno.texto = 'Me quedé sin vueltas antes de poder responder. Prueba a preguntarlo más concreto.';
+    await asisMotor(_asis, {
+      perfil: 'general',
+      herramientas: ASIS_HERRAMIENTAS,
+      etiquetas: ASIS_ETIQUETAS,
+      alRepintar: asisPintar,
+    });
   } catch (e) {
     _asis.error = e?.message || String(e);
     turno.texto = turno.texto || '';
@@ -641,8 +673,8 @@ function asisHiloHTML() {
     </div>` : '');
 }
 
-function asisGastoHTML() {
-  const g = _asis.gasto;
+function asisGastoHTML(estado = _asis) {
+  const g = estado.gasto;
   if (!g.vueltas) return '';
   // Lo cacheado (las instrucciones y la lista de herramientas, que se repiten
   // en cada vuelta) se cobra a una décima parte.

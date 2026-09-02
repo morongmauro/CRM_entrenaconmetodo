@@ -3,55 +3,72 @@
 Copia estos archivos sobre los del repo respetando las carpetas
 (`icons/` dentro de `icons/`, `api/` dentro de `api/`).
 
-## 1 · Los cinco arreglos
+> ⚠️ Este paquete **reemplaza** a los dos anteriores. Trae un arreglo
+> importante que los otros no tenían (ver "Arreglos" abajo).
+
+## 1 · Los cinco arreglos originales
 
 | Archivo | Qué cambia |
 |---|---|
-| `index.html` | Logo de marca, menú lateral, viewport de iPhone, botón de login con estado |
+| `index.html` | Logo de marca, menú lateral, viewport de iPhone, login con estado |
 | `app.js` | Caché de datos, router, login, gráficas, retorno tras guardar |
 | `composicion.js` | Recarga sin parpadeo, gráficas con unidades |
 | `nutricion-plus.js` | Placeholder diferido, gráfica de kcal con eje ajustado |
-| `entrenamiento.js` | Placeholder diferido |
-| `styles.css` | Menú lateral, esqueletos, selector de periodo, asistente |
-| `movil.css` | Ajustes del nuevo shell en el teléfono |
-| `marca.css` | Estilo de marca del menú, las gráficas y el asistente |
+| `styles.css` `movil.css` `marca.css` | Menú lateral, esqueletos, gráficas, calendario, agentes |
 | `manifest.json` | Iconos y colores de la marca |
 | `sw.js` | Service worker con tope de 3,5 s a la red |
-| `icons/logo.svg` | **NUEVO** · logo de marca (cabecera, login, favicon) |
-| `icons/logo-mark.svg` | **NUEVO** · variante sin fondo, para sobre crema |
-| `icons/logo-192.png` `logo-512.png` `logo-maskable.png` | **NUEVO** · iconos PWA |
-| `icons/apple-touch-icon.png` | **NUEVO** · "Agregar a inicio" en iPhone |
-| `icons/icon.svg` `icon-maskable.svg` | Reemplazan el sello "EM" por el logo real |
+| `icons/*` | El logo real (M + anillo) en todos sus tamaños |
 
-## 2 · El asistente
+## 2 · Entrenamiento: vista nueva + agente
 
 | Archivo | Qué es |
 |---|---|
-| `asistente.js` | **NUEVO** · la sección "💬 Asistente" y las ocho herramientas que leen tus datos |
-| `api/coach-ask.js` | **NUEVO** · el puente con la API de Claude (guarda la clave, no toca Supabase) |
+| `entrenamiento.js` | Calendario de la fase, rutinas desplegables con sus ejercicios, lectura del historial de entreno |
+| `asistente-rutinas.js` | **NUEVO** · el agente de la sección, con sus 11 herramientas |
+| `asistente.js` | El asistente general + el motor que ahora comparten los dos |
+| `api/coach-ask.js` | El puente con Claude, ahora con dos perfiles (general y rutinas) |
 
-### Variables de entorno en Vercel
+### Al entrar a un cliente ahora ves
+
+- **📅 Calendario** — la semana con qué rutina cae qué día, en qué semana de
+  la fase vas, y aviso si hay más rutinas que días declarados.
+- **📋 Rutinas** — cada una se despliega con todos sus ejercicios (series,
+  reps, peso, descanso, patrón) sin entrar al constructor.
+- **🗂️ Fases** — lo de antes, intacto.
+
+### El agente
+
+Botón "💬 Preguntarle al agente sobre este plan" al final de la sección.
+
+**Lee:** el plan y su calendario, cada rutina, la galería de ejercicios, la
+cobertura por patrón y músculo, y los pesos que el cliente ha registrado en
+su app (serie a serie, con su récord).
+
+**Escribe: nada, sin tu permiso.** Cuando le pides un cambio te lo deja
+*propuesto* en una tarjeta amarilla con "Aplicar todo" y "Descartar". Nada
+toca la base de datos hasta que pulses Aplicar.
+
+## 3 · Variables de entorno en Vercel
 
 | Variable | Necesaria | Para qué |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | **Sí** | La misma que ya usa la pestaña de oportunidades de Nutrición. Si esa funciona, el asistente funciona sin tocar nada. |
-| `CRM_ASK_MODEL` | No | Modo rápido. Por defecto `claude-sonnet-5`. |
-| `CRM_ASK_MODEL_FONDO` | No | Modo "a fondo". Por defecto `claude-opus-5`. |
+| `ANTHROPIC_API_KEY` | **Sí** | La misma que ya usa Nutrición → Oportunidades |
+| `CRM_ASK_MODEL` | No | Modo rápido. Por defecto `claude-sonnet-5` |
+| `CRM_ASK_MODEL_FONDO` | No | Modo "a fondo". Por defecto `claude-opus-5` |
 
-### Los dos modos
+## 4 · Arreglos que venían con bug en los zips anteriores
 
-- **⚡ Rápido** (por defecto) — Sonnet 5, esfuerzo bajo. Para consultar:
-  "¿cuántos días entrena Amali?", "¿cuál fue su última tarea?", "¿quién debe
-  pagar?". Unos **30-60 pesos** por pregunta.
-- **🧠 A fondo** — Opus 5, esfuerzo alto. Para pedir criterio: adaptar una
-  rutina, comparar clientes, decidir qué cambiar. Unos **150-250 pesos**.
+- **El esqueleto de carga borraba la pantalla.** Las pestañas internas de
+  Entrenamiento, Pagos, Pendientes, Seguimiento e IA llaman a su vista sin
+  pasar por el router, y nadie cancelaba el temporizador del "Cargando…": la
+  pantalla se pintaba bien y 160 ms después se quedaba en blanco. Si ya
+  subiste alguno de los zips anteriores, **sube este**.
 
-El costo real de cada conversación se muestra bajo la caja de texto.
+## 5 · Después de subirlo
 
-## 3 · Después de subirlo
+El service worker cambió de nombre de caché (`ecm-crm-v1` → `ecm-crm-v2`),
+así que se limpia sola la caché vieja al entrar.
 
-El service worker cambió de nombre de caché (`ecm-crm-v1` → `ecm-crm-v2`), así
-que al entrar se limpia sola la caché vieja. Si el teléfono te sigue mostrando
-lo anterior, cierra la app y vuelve a abrirla.
-
-**No hay migraciones de Supabase.** Nada que correr en la base de datos.
+**No hay migraciones de Supabase.** El agente lee `sesiones` y `series_log`,
+que ya existen si corriste el schema del módulo de entrenamiento. Si no lo
+corriste, la herramienta de pesos avisa en vez de romperse.

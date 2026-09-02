@@ -2639,9 +2639,18 @@ let _currentView = 'dashboard';
 let _tCargando = null;
 function cargando(msg = 'Cargando…') {
   const vista = _currentView;
+  // Testigo de si la vista ya se repintó. Asignar innerHTML crea nodos
+  // nuevos, así que basta con comparar la identidad del primer hijo — es O(1)
+  // y no obliga a serializar el HTML entero.
+  //
+  // Sin esto había un fallo real: las pestañas internas (Entrenamiento,
+  // Pagos, Pendientes, Seguimiento, IA) llaman a su ruta DIRECTAMENTE, sin
+  // pasar por el router, así que nadie cancelaba el temporizador. La vista se
+  // pintaba bien y 160 ms después el esqueleto la borraba.
+  const testigo = view.firstElementChild;
   clearTimeout(_tCargando);
   _tCargando = setTimeout(() => {
-    if (_currentView !== vista) return;
+    if (_currentView !== vista || view.firstElementChild !== testigo) return;
     view.innerHTML = `<div class="card">
       <div class="sk sk-line" style="width:38%"></div>
       <div class="sk sk-card" style="margin:.9rem 0"></div>
