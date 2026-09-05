@@ -29,7 +29,7 @@ const _asis = {
   paso: '',            // qué está haciendo ahora mismo, para el indicador
   error: null,
   gasto: { entrada: 0, salida: 0, cache: 0, vueltas: 0, modelo: null },
-  aFondo: false,       // el interruptor de "analizar a fondo"
+  nivel: null,         // rapido | profundo | muy_profundo (se rellena al pintar)
 };
 
 // Precios por millón de tokens (USD), para poder decirte cuánto costó la
@@ -459,14 +459,14 @@ const ASIS_HERRAMIENTAS = {
 // =====================================================
 // EL BUCLE: pregunta → herramientas → respuesta
 // =====================================================
-async function asisLlamar(mensajes, { perfil = 'general', aFondo = false } = {}) {
+async function asisLlamar(mensajes, { perfil = 'general', nivel = 'rapido' } = {}) {
   const r = await fetch('/api/coach-ask', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       messages: mensajes,
       contexto: { hoy: fmt.hoy(), semana: fmt.semanaISO(), coach: _settings.nombre_coach },
-      modo: aFondo ? 'a_fondo' : 'rapido',
+      nivel,
       perfil,
     }),
   });
@@ -497,9 +497,13 @@ async function asisEjecutar(bloque, herramientas) {
 async function asisMotor(estado, { perfil, herramientas, etiquetas, alRepintar }) {
   const pintar = () => { try { alRepintar(); } catch (e) {} };
   const turno = estado.visible[estado.visible.length - 1];
+  // Mientras el agente trabaja, el auto-actualizador del CRM no debe recargar
+  // la página: se perdería la respuesta a mitad y se pagaría igual.
+  if (typeof marcarTrabajo === 'function') marcarTrabajo(true);
+  try {
 
   for (let vuelta = 0; vuelta < ASIS_MAX_VUELTAS; vuelta++) {
-    const resp = await asisLlamar(estado.mensajes, { perfil, aFondo: estado.aFondo });
+    const resp = await asisLlamar(estado.mensajes, { perfil, nivel: estado.nivel });
     estado.gasto.vueltas++;
     estado.gasto.entrada += resp.usage?.input_tokens || 0;
     estado.gasto.salida += resp.usage?.output_tokens || 0;
@@ -527,13 +531,18 @@ async function asisMotor(estado, { perfil, herramientas, etiquetas, alRepintar }
     pintar();
   }
   if (!turno.texto) turno.texto = 'Me quedé sin vueltas antes de poder responder. Prueba a preguntarlo más concreto.';
+
+  } finally {
+    if (typeof marcarTrabajo === 'function') marcarTrabajo(false);
+  }
 }
 
 // Estado inicial de una conversación, para no repetirlo en cada panel.
-function asisEstadoNuevo() {
+function asisEstadoNuevo(donde = 'chat') {
   return {
     mensajes: [], visible: [], trabajando: false, paso: '', error: null,
-    aFondo: false, gasto: { entrada: 0, salida: 0, cache: 0, vueltas: 0, modelo: null },
+    nivel: nivelIaGuardado(donde),
+    gasto: { entrada: 0, salida: 0, cache: 0, vueltas: 0, modelo: null },
   };
 }
 window.asisMotor = asisMotor;
@@ -588,18 +597,18 @@ window.asisPreguntar = async (textoDirecto) => {
 };
 
 window.asisLimpiar = () => {
-  _asis.mensajes = [];
-  _asis.visible = [];
-  _asis.error = null;
-  _asis.gasto = { entrada: 0, salida: 0, cache: 0, vueltas: 0, modelo: null };
+  const nivel = _asis.nivel;
+  Object.assign(_asis, asisEstadoNuevo('chat'), { nivel });
   asisPintar();
 };
 
-// "Analizar a fondo": sube a Opus 5 con esfuerzo alto. Vale la pena cuando le
-// pides criterio (adaptar una rutina, comparar clientes, decidir qué cambiar);
-// para "cuántos días entrena Fulano" es pagar de más.
-window.asisModo = (aFondo) => {
-  _asis.aFondo = !!aFondo;
+// El nivel se elige por pregunta y se recuerda entre sesiones. Para "cuántos
+// días entrena Fulano", 'rapido' sobra; los niveles altos valen cuando le
+// pides criterio.
+window.asisNivel = (nivel) => {
+  if (!NIVELES_IA[nivel]) return;
+  _asis.nivel = nivel;
+  guardarNivelIa('chat', nivel);
   asisPintar();
 };
 
@@ -625,8 +634,8 @@ function asisPintar() {
   }
   const gasto = $('#asis-gasto');
   if (gasto) gasto.innerHTML = asisGastoHTML();
-  $('#asis-modo-rapido')?.classList.toggle('active', !_asis.aFondo);
-  $('#asis-modo-fondo')?.classList.toggle('active', _asis.aFondo);
+  const niveles = $('#asis-niveles');
+  if (niveles) niveles.innerHTML = selectorNivelHTML('chat', _asis.nivel, 'asisNivel');
 }
 
 // Markdown mínimo: negritas, listas y saltos. Nada de innerHTML crudo — el
@@ -687,14 +696,15 @@ function asisGastoHTML(estado = _asis) {
   const p = ASIS_PRECIOS[g.modelo] || ASIS_PRECIO_POR_DEFECTO;
   const usd = ((g.entrada - g.cache) * p.entrada + g.cache * (p.entrada / 10) + g.salida * p.salida) / 1e6;
   const cop = Math.round(usd * (Number(_settings.usd_cop_rate) || 4000));
-  const nombre = (g.modelo || '').includes('opus') ? 'a fondo' : 'rápido';
-  return `Esta conversación · modo ${nombre} · ${g.vueltas} consulta(s) · `
+  const nombre = (NIVELES_IA[estado.nivel]?.etiqueta || '').replace(/^\S+\s/, '') || '—';
+  return `Esta conversación · ${nombre} · ${g.vueltas} consulta(s) · `
     + `${(g.entrada + g.salida).toLocaleString('es-CO')} tokens`
     + (g.cache ? ` (${g.cache.toLocaleString('es-CO')} reusados de caché)` : '')
     + ` · ≈ ${cop.toLocaleString('es-CO')} COP (USD ${usd.toFixed(4)})`;
 }
 
 routes.asistente = async () => {
+  if (!NIVELES_IA[_asis.nivel]) _asis.nivel = nivelIaGuardado('chat');
   view.innerHTML = `
     <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
       <div>
@@ -711,14 +721,9 @@ routes.asistente = async () => {
                   onkeydown="asisTeclado(event)" class="resize-none"></textarea>
         <button id="asis-enviar" class="btn btn-primary flex-shrink-0" onclick="asisPreguntar()">Preguntar</button>
       </div>
-      <div class="flex flex-wrap items-center justify-between gap-2 mt-2">
-        <div class="asis-modos">
-          <button id="asis-modo-rapido" class="graf-rango active" onclick="asisModo(false)"
-                  title="Para consultar datos: cuántos días entrena, cuál fue su última tarea, quién debe pagar">⚡ Rápido</button>
-          <button id="asis-modo-fondo" class="graf-rango" onclick="asisModo(true)"
-                  title="Para pedir criterio: adaptar una rutina, comparar clientes, decidir qué cambiar. Cuesta unas 4 veces más">🧠 A fondo</button>
-        </div>
-        <div id="asis-gasto" class="text-[11px] text-slate-400"></div>
+      <div class="mt-3">
+        <div id="asis-niveles"></div>
+        <div id="asis-gasto" class="text-[11px] text-slate-400 mt-1.5 text-right"></div>
       </div>
     </div>
 

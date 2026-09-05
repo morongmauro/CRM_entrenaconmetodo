@@ -13,11 +13,22 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { guard } from './_guard.js';
+import { resolverNivel } from './_niveles.js';
 
 export const config = { supportsResponseStreaming: true, maxDuration: 60 };
 
-const MODEL = 'claude-opus-5';
-const MAX_TOKENS = 12000;
+// ── Nivel de análisis ───────────────────────────────────────────────────
+// Esta es la llamada más cara del CRM, y con razón: buscar las 3-5 palancas de
+// una semana es criterio, no extracción. Pero el precio se paga en tokens de
+// SALIDA y el pensamiento del modelo cuenta como salida, así que el nivel se
+// nota en la factura de verdad.
+//
+// El coach lo elige en la pantalla (rapido | profundo | muy_profundo); las
+// tres definiciones están en _niveles.js, compartidas con el asistente y el
+// agente de rutinas. CRM_INSIGHT_NIVEL sirve para forzar uno desde Vercel.
+//
+// Además de costar menos, los niveles bajos reducen el riesgo de chocar con
+// el límite de 60 s de la función: menos pensamiento, menos tiempo.
 const MAX_BODY_CHARS = 120000;  // el análisis de una semana pesa ~8-25 KB desde
                                 // que incluye rankings, despensa y comparativa
 
@@ -146,7 +157,8 @@ export default async function handler(req, res) {
   if (!guard(req, res, { key: 'coach-insight', limit: 12 })) return;
 
   try {
-    const { analisis, extra } = req.body || {};
+    const { analisis, extra, nivel } = req.body || {};
+    const N = resolverNivel(nivel, process.env.CRM_INSIGHT_NIVEL);
     if (!analisis || typeof analisis !== 'object') {
       return res.status(400).json({ error: 'Falta el análisis de la semana' });
     }
@@ -172,12 +184,12 @@ export default async function handler(req, res) {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: MODEL,
-        max_tokens: MAX_TOKENS,
+        model: N.modelo,
+        max_tokens: N.max_tokens_insight,
         // Pensamiento adaptativo + esfuerzo alto: es un análisis de criterio,
         // no una extracción. Acá SÍ queremos que el modelo piense antes.
         thinking: { type: 'adaptive' },
-        output_config: { effort: 'high' },
+        output_config: { effort: N.effort },
         system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: userMsg }],
         stream: true,
@@ -193,6 +205,11 @@ export default async function handler(req, res) {
     }
 
     res.status(200);
+    // El navegador necesita el modelo real para calcular lo que costó: va en
+    // una cabecera propia porque el cuerpo es un stream que empieza enseguida.
+    res.setHeader('X-Nivel', N.clave);
+    res.setHeader('X-Modelo', N.modelo);
+    res.setHeader('Access-Control-Expose-Headers', 'X-Nivel, X-Modelo');
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');

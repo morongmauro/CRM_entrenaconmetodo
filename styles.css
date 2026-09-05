@@ -472,3 +472,41 @@ summary.list-none { list-style: none; }
   background: white; border: 1px solid #fde68a; border-radius: 0.6rem;
   padding: 0.45rem 0.65rem;
 }
+
+/* ===== Selector de nivel de análisis ============================= */
+/* Tres botones con su costo estimado a la vista. El costo no es adorno:
+   es lo que separa "elegir a ciegas" de elegir. */
+.nivel-sel { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.nivel-btn {
+  flex: 1 1 8.5rem; min-width: 8.5rem;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 0.1rem;
+  padding: 0.5rem 0.7rem;
+  border: 1.5px solid #e2e8f0; border-radius: 0.7rem;
+  background: white; cursor: pointer; text-align: left;
+  transition: border-color 0.14s, background 0.14s;
+}
+.nivel-btn:hover { border-color: #cbd5e1; }
+.nivel-btn.active { border-color: var(--brand-olive); background: rgba(138,149,88,0.07); }
+.nivel-nombre { font-size: 0.78rem; font-weight: 700; color: #334155; }
+.nivel-btn.active .nivel-nombre { color: var(--brand-olive-dark); }
+.nivel-costo { font-size: 0.66rem; color: #94a3b8; font-weight: 600; }
+.nivel-btn.active .nivel-costo { color: var(--brand-olive); }
+
+@media (max-width: 640px) {
+  .nivel-btn { flex: 1 1 100%; flex-direction: row; align-items: center; justify-content: space-between; min-height: 42px; }
+}
+
+/* Las cuatro barras de la semana (calorías, proteína, carbos, grasas).
+   Va en CSS propio y no en clases de Tailwind: el CDN no siempre genera el
+   flex-wrap del encabezado y el "meta 2100 kcal" de una columna se montaba
+   encima del título de la siguiente. */
+.nut-macros { display: grid; grid-template-columns: 1fr; gap: 1.25rem 2rem; margin-top: 0.75rem; }
+@media (min-width: 768px) { .nut-macros { grid-template-columns: 1fr 1fr; } }
+.nut-macro { min-width: 0; }
+.nut-macro svg { display: block; width: 100%; height: auto; }
+.nut-macro-head {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  justify-content: space-between; gap: 0 0.75rem; margin-bottom: 0.25rem; min-width: 0;
+}
+.nut-macro-tit { font-size: 0.875rem; font-weight: 700; color: #1e293b; }
+.nut-macro-sub { font-size: 11px; color: #64748b; min-width: 0; }

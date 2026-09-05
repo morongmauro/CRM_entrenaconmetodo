@@ -1140,7 +1140,7 @@ window.npPropuestaSobre = (key) => {
 // Mismas cabecera y carga de datos que antes (nutCargar sigue siendo el único
 // que habla con el Mealtracker); lo que cambia es que ahora las pestañas
 // cubren TODO lo que el dashboard de coach mostraba, y algunas cosas que no.
-window.nutTab = (t) => { _np.tab = t; rerenderView(); };
+window.nutTab = (t) => { _np.tab = t; _nut.diaAbierto = null; rerenderView(); };
 
 const NP_TABS = [
   ['resumen',   '📊 Resumen'],

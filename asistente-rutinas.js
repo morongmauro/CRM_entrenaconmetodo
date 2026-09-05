@@ -602,7 +602,7 @@ const RUT_ETIQUETAS = {
 window.rutPreguntar = async (textoDirecto) => {
   const input = $('#rut-input');
   const pregunta = (textoDirecto ?? input?.value ?? '').trim();
-  if (!_rut.chat) _rut.chat = asisEstadoNuevo();
+  if (!_rut.chat) _rut.chat = asisEstadoNuevo('rutinas');
   if (!pregunta || _rut.chat.trabajando) return;
   if (input) input.value = '';
 
@@ -633,20 +633,22 @@ window.rutPreguntar = async (textoDirecto) => {
 };
 
 window.rutLimpiar = () => {
-  _rut.chat = asisEstadoNuevo();
+  _rut.chat = asisEstadoNuevo('rutinas');
   _rut.propuestas = [];
   rutPintar();
 };
 
-window.rutModo = (aFondo) => {
-  if (!_rut.chat) _rut.chat = asisEstadoNuevo();
-  _rut.chat.aFondo = !!aFondo;
+window.rutNivel = (nivel) => {
+  if (!NIVELES_IA[nivel]) return;
+  if (!_rut.chat) _rut.chat = asisEstadoNuevo('rutinas');
+  _rut.chat.nivel = nivel;
+  guardarNivelIa('rutinas', nivel);
   rutPintar();
 };
 
 window.rutToggle = () => {
   _rut.abierto = !_rut.abierto;
-  if (!_rut.chat) _rut.chat = asisEstadoNuevo();
+  if (!_rut.chat) _rut.chat = asisEstadoNuevo('rutinas');
   rutPintar();
   if (_rut.abierto) setTimeout(() => $('#rut-input')?.focus(), 80);
 };
@@ -763,14 +765,9 @@ function rutPanelHTML() {
           ${ch?.trabajando ? '…' : 'Preguntar'}
         </button>
       </div>
-      <div class="flex flex-wrap items-center justify-between gap-2 mt-2">
-        <div class="asis-modos">
-          <button class="graf-rango ${ch?.aFondo ? '' : 'active'}" onclick="rutModo(false)"
-                  title="Consultar y cambios sencillos">⚡ Rápido</button>
-          <button class="graf-rango ${ch?.aFondo ? 'active' : ''}" onclick="rutModo(true)"
-                  title="Para pedirle criterio: qué falta en el plan, cómo adaptar por una lesión">🧠 A fondo</button>
-        </div>
-        <div class="text-[11px] text-slate-400">${ch ? asisGastoHTML(ch) : ''}</div>
+      <div class="mt-3">
+        ${selectorNivelHTML('chat', ch?.nivel || nivelIaGuardado('rutinas'), 'rutNivel')}
+        <div class="text-[11px] text-slate-400 mt-1.5 text-right">${ch ? asisGastoHTML(ch) : ''}</div>
       </div>
     </div>`;
 }

@@ -7381,6 +7381,89 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
+// =====================================================
+// NIVELES DE ANÁLISIS · los mismos en todo el CRM
+// =====================================================
+// Espejo de api/_niveles.js. Está duplicado porque el CRM es un script plano
+// y no puede importar del lado del servidor; si cambias uno, cambia el otro.
+//
+// El costo estimado NO es adorno: es lo que separa "elegir a ciegas" de
+// "elegir". Son rangos medidos sobre el gasto real de cada llamada, no
+// promesas — el número exacto sale después de generar, en el contador.
+const NIVELES_IA = {
+  rapido: {
+    etiqueta: '⚡ Rápido',
+    modelo: 'claude-sonnet-5',
+    ayuda: 'Consultar datos y cambios sencillos. Responde en segundos.',
+    // [insight, chat] en pesos colombianos
+    costo: { insight: [250, 400], chat: [30, 60] },
+  },
+  profundo: {
+    etiqueta: '🧠 Profundo',
+    modelo: 'claude-opus-5',
+    ayuda: 'Le pides criterio: qué ajustar, qué falta, cómo adaptar.',
+    costo: { insight: [400, 700], chat: [90, 160] },
+  },
+  muy_profundo: {
+    etiqueta: '🔬 Muy profundo',
+    modelo: 'claude-opus-5',
+    ayuda: 'Lo máximo. Piensa largo antes de responder; también tarda más.',
+    costo: { insight: [600, 1250], chat: [150, 300] },
+  },
+};
+const NIVEL_IA_DEFECTO = 'profundo';
+
+// La elección se recuerda por pantalla: el nivel que quieres para las
+// oportunidades no tiene por qué ser el que quieres para preguntar "cuántos
+// días entrena Fulano".
+function nivelIaGuardado(donde) {
+  try {
+    const v = localStorage.getItem(`crm_nivel_${donde}`);
+    if (NIVELES_IA[v]) return v;
+  } catch (e) { /* navegador sin storage: se usa el de por defecto */ }
+  return donde === 'chat' ? 'rapido' : NIVEL_IA_DEFECTO;
+}
+function guardarNivelIa(donde, nivel) {
+  if (!NIVELES_IA[nivel]) return;
+  try { localStorage.setItem(`crm_nivel_${donde}`, nivel); } catch (e) {}
+}
+
+// El selector de tres botones. `donde` decide qué rango de costo se muestra
+// ('insight' o 'chat') y bajo qué llave se recuerda la elección.
+function selectorNivelHTML(donde, nivelActual, alCambiar) {
+  return `
+    <div class="nivel-sel">
+      ${Object.entries(NIVELES_IA).map(([k, n]) => {
+        const [min, max] = n.costo[donde === 'chat' ? 'chat' : 'insight'];
+        return `
+          <button type="button" class="nivel-btn ${k === nivelActual ? 'active' : ''}"
+                  onclick="${alCambiar}('${k}')"
+                  title="${escapeHtml(n.ayuda)}">
+            <span class="nivel-nombre">${n.etiqueta}</span>
+            <span class="nivel-costo">${min}-${max} COP</span>
+          </button>`;
+      }).join('')}
+    </div>`;
+}
+window.selectorNivelHTML = selectorNivelHTML;
+window.nivelIaGuardado = nivelIaGuardado;
+window.guardarNivelIa = guardarNivelIa;
+
+// ── Trabajo largo en curso ──────────────────────────────────────────────
+// Lo consultan el auto-actualizador (para no recargar encima) y cualquier
+// otra cosa que no deba interrumpir una generación de varios segundos.
+// Es un CONTADOR, no un booleano: si dos cosas corren a la vez, la primera en
+// terminar no debe desbloquear a la otra.
+let _trabajosEnCurso = 0;
+window.marcarTrabajo = (activo) => {
+  _trabajosEnCurso = Math.max(0, _trabajosEnCurso + (activo ? 1 : -1));
+};
+window.hayTrabajoEnCurso = () => _trabajosEnCurso > 0;
+// Aviso del navegador si intentas cerrar la pestaña a media generación.
+window.addEventListener('beforeunload', (e) => {
+  if (_trabajosEnCurso > 0) { e.preventDefault(); e.returnValue = ''; }
+});
+
 // ── Auto-actualización del CRM ──────────────────────────────────────────
 // El CRM es una SPA que el coach deja abierta días: sin esto, subir un
 // app.js nuevo NO se reflejaba hasta un refresh manual, y daba la impresión
@@ -7402,6 +7485,12 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
   const chequear = async () => {
     if (recargado || !firma) return;
     if (modal && !modal.classList.contains('hidden')) return; // formulario abierto: no molestar
+    // Ni encima de una generación en curso. Sin esto pasaba lo peor: subes un
+    // app.js nuevo, el coach le da a "Generar oportunidades", y a mitad de la
+    // respuesta el vigilante recarga la página. Se pierde el análisis, se paga
+    // igual, y en pantalla queda el estado vacío — como si nunca hubiera
+    // pasado nada. Un fallo invisible que parece "no funciona".
+    if (typeof hayTrabajoEnCurso === 'function' && hayTrabajoEnCurso()) return;
     const f = await leerFirma();
     if (f && f !== firma) {
       recargado = true;
@@ -8084,14 +8173,20 @@ function analizarNutricionSemana(d, semanaISO, cliente, pesoKg) {
 
 // Barras por día contra la meta. Verde = dentro de ±10% de la meta,
 // ámbar = por encima, azul = por debajo, gris = sin registro.
-function nutBarras(dias, key, meta, colorBajo, unidad = '') {
-  const w = 640, h = 190, pad = { t: 22, r: 10, b: 30, l: 40 };
+// Barras día a día contra la meta. El semáforo se evalúa contra la meta que
+// regía ESE día (meta_dia), no la de hoy: si le cambiaste los macros el
+// miércoles, el lunes no se pinta en rojo por una meta que aún no existía.
+// Es el mismo criterio del panel del coach en el Mealtracker.
+function nutBarras(dias, key, meta, colorBajo, unidad = '', opts = {}) {
+  const alto = opts.compacta ? 150 : 190;
+  const w = 640, h = alto, pad = { t: 22, r: 10, b: 30, l: 40 };
   const iw = w - pad.l - pad.r, ih = h - pad.t - pad.b;
   const valores = dias.map(d => d[key] || 0);
   const maxV = Math.max(meta || 0, ...valores, 1);
   const top = maxV * 1.18;
   const y = (v) => pad.t + ih - (v / top) * ih;
   const bw = iw / dias.length;
+  const metaDe = (d) => (d.meta_dia && d.meta_dia[key]) || meta || 0;
 
   let svg = `<svg viewBox="0 0 ${w} ${h}" class="w-full h-auto" preserveAspectRatio="xMidYMid meet">`;
   for (let i = 0; i <= 3; i++) {
@@ -8101,21 +8196,31 @@ function nutBarras(dias, key, meta, colorBajo, unidad = '') {
   }
   dias.forEach((d, i) => {
     const v = d[key] || 0;
+    const md = metaDe(d);
     const x = pad.l + i * bw + bw * 0.18;
     const bwidth = bw * 0.64;
     let color = '#cbd5e1';
     if (d.registrado && v > 0) {
-      if (!meta) color = colorBajo;
-      else if (v >= meta * 0.9 && v <= meta * 1.1) color = '#10b981';
-      else if (v > meta * 1.1) color = '#f59e0b';
+      if (!md) color = colorBajo;
+      else if (v >= md * 0.9 && v <= md * 1.1) color = '#10b981';
+      else if (v > md * 1.1) color = '#f59e0b';
       else color = colorBajo;
     }
-    const alto = v > 0 ? Math.max(3, ih - (y(v) - pad.t)) : 3;
+    const altoB = v > 0 ? Math.max(3, ih - (y(v) - pad.t)) : 3;
     const yy = v > 0 ? y(v) : pad.t + ih - 3;
-    svg += `<rect x="${x}" y="${yy}" width="${bwidth}" height="${alto}" rx="3" fill="${color}"/>`;
+    const pct = md ? Math.round((v / md) * 100) : null;
+    const tip = `${d.dow} · ${Math.round(v)}${unidad}${pct != null ? ` (${pct}% de la meta de ese día)` : ''}`;
+    const clic = opts.clic && d.registrado
+      ? ` style="cursor:pointer" onclick="nutAbrirDia('${d.fecha}')"` : '';
+    svg += `<g${clic}><title>${tip}</title>`;
+    // Zona de toque de toda la columna: en el teléfono la barra sola es
+    // demasiado delgada para acertarle con el dedo.
+    if (clic) svg += `<rect x="${pad.l + i * bw}" y="${pad.t}" width="${bw}" height="${ih}" fill="transparent"/>`;
+    svg += `<rect x="${x}" y="${yy}" width="${bwidth}" height="${altoB}" rx="3" fill="${color}"/>`;
     if (v > 0) svg += `<text x="${x + bwidth / 2}" y="${yy - 5}" text-anchor="middle" font-size="9" font-weight="600" fill="${color}">${Math.round(v)}</text>`;
     svg += `<text x="${x + bwidth / 2}" y="${h - 12}" text-anchor="middle" font-size="10" fill="${d.registrado ? '#475569' : '#cbd5e1'}">${d.dow}</text>`;
     if (!d.registrado) svg += `<text x="${x + bwidth / 2}" y="${h - 2}" text-anchor="middle" font-size="8" fill="#cbd5e1">sin dato</text>`;
+    svg += `</g>`;
   });
   if (meta) {
     const ym = y(meta);
@@ -8125,6 +8230,58 @@ function nutBarras(dias, key, meta, colorBajo, unidad = '') {
   svg += '</svg>';
   return svg;
 }
+
+// Las cuatro barras de la semana —calorías, proteína, carbohidratos y
+// grasas— igual que en el panel del coach del Mealtracker, para que los dos
+// tableros cuenten lo mismo. Toca una barra y se abre ese día en "Día a día".
+const NUT_MACROS = [
+  { key: 'kcal', label: 'Calorías',      color: '#3b82f6', unidad: ' kcal' },
+  { key: 'p',    label: 'Proteína',      color: '#3b82f6', unidad: ' g' },
+  { key: 'c',    label: 'Carbohidratos', color: '#3b82f6', unidad: ' g' },
+  { key: 'g',    label: 'Grasas',        color: '#3b82f6', unidad: ' g' },
+];
+
+function nutBarrasMacros(a) {
+  const m = a.meta || {}, p = a.promedio || {};
+  const bloques = NUT_MACROS.map(x => {
+    const meta = m[x.key];
+    const prom = p[x.key];
+    return `
+    <div class="nut-macro">
+      <div class="nut-macro-head">
+        <div class="nut-macro-tit">${x.label}</div>
+        <div class="nut-macro-sub">
+          ${prom != null ? `prom <strong class="text-slate-700">${prom}${x.unidad}</strong>` : 'sin registro'}
+          ${meta ? ` · meta ${meta}${x.unidad}` : ' · sin meta'}
+        </div>
+      </div>
+      ${nutBarras(a.dias, x.key, meta, x.color, x.unidad, { clic: true, compacta: true })}
+    </div>`;
+  }).join('');
+
+  return `<div class="card mb-4">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <div class="sec-title mb-0">Día por día vs. meta</div>
+      <div class="text-[11px] text-slate-400">Toca una barra para ver ese día</div>
+    </div>
+    <div class="nut-macros">${bloques}</div>
+    <div class="text-[11px] text-slate-400 mt-3">Verde = dentro de ±10% de su meta · ámbar = por encima · azul = por debajo · gris = sin registro. El semáforo usa la meta que tenía ese día, no la de hoy.</div>
+  </div>`;
+}
+
+// Salta a "Día a día" y despliega el día que tocó en la gráfica.
+window.nutAbrirDia = async (fecha) => {
+  _nut.tab = 'detalle';
+  // La sección Nutrición la pinta nutricion-plus.js, que lleva SU propio
+  // estado de pestañas. Sin esto el click en la barra no abría nada.
+  try { if (_np) _np.tab = 'detalle'; } catch (e) { /* aún no cargó */ }
+  _nut.diaAbierto = fecha;
+  // rerenderView es asíncrono: hay que esperarlo o se busca el día antes de
+  // que la pestaña exista y el scroll no hace nada.
+  await rerenderView();
+  const el = document.getElementById('nut-dia-' + fecha);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+};
 
 // Anillo de distribución de macros (% de las calorías). Real vs. meta.
 function nutAnillo(p, c, g, titulo) {
@@ -8191,6 +8348,7 @@ function nutColorPct(p, ideal = 100) {
 
 // ─── Estado de la vista ─────────────────────────────────────────────────
 let _nut = {
+  nivel: null,          // nivel de análisis elegido (se rellena al pintar)
   clienteId: null,
   semana: null,
   cliente: null,
@@ -8200,6 +8358,7 @@ let _nut = {
   cargando: false,
   error: null,
   tab: 'resumen',    // resumen | alimentos | detalle | ia
+  diaAbierto: null,  // día señalado desde las barras, para abrirlo en "Día a día"
 };
 
 // Historial de la IA en Supabase. La tabla es opcional: si el coach todavía no
@@ -8224,7 +8383,7 @@ async function nutGuardarIa(clienteId, semana, texto, modelo) {
 // ─── Carga de una semana ────────────────────────────────────────────────
 async function nutCargar(clienteId, semana, { forzar = false } = {}) {
   _nut.cargando = true; _nut.error = null;
-  _nut.clienteId = clienteId; _nut.semana = semana;
+  _nut.clienteId = clienteId; _nut.semana = semana; _nut.diaAbierto = null;
   rerenderView();
   try {
     const cliente = await db.clientes.get(clienteId);
@@ -8267,7 +8426,7 @@ window.nutSemana = (dir) => {
   nutCargar(_nut.clienteId, s);
 };
 window.nutRefrescar = () => nutCargar(_nut.clienteId, _nut.semana, { forzar: true });
-window.nutTab = (t) => { _nut.tab = t; rerenderView(); };
+window.nutTab = (t) => { _nut.tab = t; _nut.diaAbierto = null; rerenderView(); };
 
 // ─── Vista ──────────────────────────────────────────────────────────────
 routes.nutricion = async () => {
@@ -8360,17 +8519,9 @@ function nutVistaResumen(a) {
     <div class="text-xs text-slate-600">De los ${a.registro.dias_registrados} días registrados, <strong>${a.registro.dias_con_detalle}</strong> traen el desglose de alimentos. Las calorías y macros de arriba salen de los ${a.registro.dias_registrados}; los alimentos, la fibra y el azúcar solo de esos ${a.registro.dias_con_detalle}.</div>
   </div>` : ''}
 
-  <div class="card mb-4">
-    <div class="sec-title">Calorías día a día</div>
-    ${nutBarras(a.dias, 'kcal', m.kcal, '#3b82f6', ' kcal')}
-    <div class="text-[11px] text-slate-400 mt-1">Verde = dentro de ±10% de su meta · ámbar = por encima · azul = por debajo · gris = sin registro</div>
-  </div>
+  ${nutBarrasMacros(a)}
 
   <div class="grid md:grid-cols-2 gap-4 mb-4">
-    <div class="card">
-      <div class="sec-title">Proteína día a día</div>
-      ${nutBarras(a.dias, 'p', m.p, '#3b82f6', ' g')}
-    </div>
     <div class="card">
       <div class="sec-title">Promedio vs. meta</div>
       <div class="space-y-3 mt-2">
@@ -8381,9 +8532,6 @@ function nutVistaResumen(a) {
       </div>
       <div class="text-[11px] text-slate-400 mt-3">La marca gris es el 100% de la meta.</div>
     </div>
-  </div>
-
-  <div class="grid md:grid-cols-2 gap-4 mb-4">
     <div class="card">
       <div class="sec-title">Reparto de macros</div>
       <div class="flex items-center justify-around gap-4 mt-2">
@@ -8391,6 +8539,9 @@ function nutVistaResumen(a) {
         ${m.p && m.c && m.g ? nutAnillo(m.p, m.c, m.g, 'Su meta') : '<div class="text-xs text-slate-400 self-center">Sin meta configurada</div>'}
       </div>
     </div>
+  </div>
+
+  <div class="grid gap-4 mb-4">
     <div class="card">
       <div class="sec-title">Calidad estimada (por día con detalle)</div>
       <div class="grid grid-cols-3 gap-2 mt-2 text-center">
@@ -8534,7 +8685,8 @@ function nutVistaDetalle(a, d) {
     ${a.dias.map(dia => {
       const entradas = Array.isArray(detalle[dia.fecha]) ? detalle[dia.fecha] : [];
       const pct = a.meta.kcal ? Math.round((dia.kcal / a.meta.kcal) * 100) : null;
-      return `<details class="card" ${dia.registrado && entradas.length ? '' : ''}>
+      const abierto = _nut.diaAbierto === dia.fecha;
+      return `<details class="card" id="nut-dia-${dia.fecha}" ${abierto ? 'open' : ''}>
         <summary class="cursor-pointer list-none">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -8668,6 +8820,21 @@ function nutRenderIa(txt) {
     </div>` : ''}`;
 }
 
+// Lo que costó DE VERDAD esta generación. El selector da un rango; esto da
+// el número. Sin esto el coach solo se entera a fin de mes.
+function nutCostoHTML(uso, modelo, nivel, segundos) {
+  const p = ASIS_PRECIOS?.[modelo] || { entrada: 5, salida: 25 };
+  const usd = ((uso.entrada - uso.cache) * p.entrada + uso.cache * (p.entrada / 10) + uso.salida * p.salida) / 1e6;
+  const cop = Math.round(usd * (Number(_settings.usd_cop_rate) || 4000));
+  const etq = NIVELES_IA[nivel]?.etiqueta || nivel;
+  return `
+    <div class="text-[11px] text-slate-400 mt-2 text-right">
+      ${escapeHtml(etq)} · ${(uso.entrada + uso.salida).toLocaleString('es-CO')} tokens
+      ${uso.cache ? `(${uso.cache.toLocaleString('es-CO')} reusados)` : ''}
+      · ${segundos} s · <strong>≈ ${cop.toLocaleString('es-CO')} COP</strong>
+    </div>`;
+}
+
 window.nutCopiar = (i) => {
   const el = document.getElementById(`nut-msg-${i}`);
   if (!el) return;
@@ -8678,6 +8845,7 @@ window.nutCopiar = (i) => {
 
 function nutVistaIA(a) {
   const yaHay = !!_nut.ia?.texto;
+  if (!NIVELES_IA[_nut.nivel]) _nut.nivel = nivelIaGuardado('insight');
   return `
   <div class="card mb-4">
     <div class="flex flex-wrap items-start justify-between gap-3">
@@ -8688,6 +8856,13 @@ function nutVistaIA(a) {
       </div>
       <button class="btn btn-primary" id="nut-ia-btn" onclick="nutGenerarIA()">${yaHay ? '🔄 Volver a generar' : '✨ Generar oportunidades'}</button>
     </div>
+
+    <div class="mt-3" id="nut-nivel-caja">
+      <div class="text-[11px] font-semibold text-slate-500 mb-1.5">¿Qué tan a fondo quieres que lo analice?</div>
+      ${selectorNivelHTML('insight', _nut.nivel, 'nutNivel')}
+      <div class="text-[11px] text-slate-400 mt-1.5">${escapeHtml(NIVELES_IA[_nut.nivel].ayuda)}</div>
+    </div>
+
     <details class="mt-3">
       <summary class="cursor-pointer text-xs font-semibold text-slate-500">➕ Agregar contexto que la data no ve (opcional)</summary>
       <textarea id="nut-ia-nota" rows="2" class="text-sm mt-2" placeholder="Ej: viajó jueves y viernes · está con gastritis · dijo que el gym le queda lejos esta semana"></textarea>
@@ -8696,6 +8871,21 @@ function nutVistaIA(a) {
   </div>
   <div id="nut-ia-out">${yaHay ? nutRenderIa(_nut.ia.texto) : '<div class="card text-sm text-slate-400">Todavía no has generado las oportunidades de esta semana.</div>'}</div>`;
 }
+
+// Cambiar de nivel repinta SOLO la caja del selector: repintar la vista
+// entera borraría lo que hayas escrito en "contexto que la data no ve".
+window.nutNivel = (nivel) => {
+  if (!NIVELES_IA[nivel]) return;
+  _nut.nivel = nivel;
+  guardarNivelIa('insight', nivel);
+  const caja = document.getElementById('nut-nivel-caja');
+  if (caja) {
+    caja.innerHTML = `
+      <div class="text-[11px] font-semibold text-slate-500 mb-1.5">¿Qué tan a fondo quieres que lo analice?</div>
+      ${selectorNivelHTML('insight', nivel, 'nutNivel')}
+      <div class="text-[11px] text-slate-400 mt-1.5">${escapeHtml(NIVELES_IA[nivel].ayuda)}</div>`;
+  }
+};
 
 window.nutGenerarIA = async () => {
   const a = _nut.analisis;
@@ -8707,11 +8897,15 @@ window.nutGenerarIA = async () => {
   if (out) out.innerHTML = '<div class="card text-sm text-slate-500">Leyendo la semana y buscando las palancas…</div>';
 
   let texto = '';
+  const uso = { entrada: 0, salida: 0, cache: 0 };
+  const modeloUsado = NIVELES_IA[_nut.nivel]?.modelo || 'claude-opus-5';
+  const arranque = Date.now();
+  marcarTrabajo(true);
   try {
     const r = await fetch('/api/coach-insight', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ analisis: a, extra: nota }),
+      body: JSON.stringify({ analisis: a, extra: nota, nivel: _nut.nivel }),
     });
     if (!r.ok || !r.body) {
       const err = await r.json().catch(() => ({}));
@@ -8737,6 +8931,14 @@ window.nutGenerarIA = async () => {
         let ev; try { ev = JSON.parse(raw); } catch (e) { continue; }
         if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') texto += ev.delta.text;
         if (ev.type === 'error') throw new Error(ev.error?.message || 'Error de la API');
+        // El gasto real llega en el propio stream: message_start trae la
+        // entrada, message_delta la salida acumulada. Así el costo que se
+        // muestra es el de verdad, no la estimación del selector.
+        if (ev.type === 'message_start' && ev.message?.usage) {
+          uso.entrada = ev.message.usage.input_tokens || 0;
+          uso.cache = ev.message.usage.cache_read_input_tokens || 0;
+        }
+        if (ev.type === 'message_delta' && ev.usage) uso.salida = ev.usage.output_tokens || 0;
       }
       // Repintar como mucho 4 veces por segundo: el parser corre sobre todo
       // el texto y no vale la pena hacerlo en cada chunk.
@@ -8745,10 +8947,22 @@ window.nutGenerarIA = async () => {
         out.innerHTML = nutRenderIa(texto) + '<div class="text-xs text-slate-400 mt-2">✍️ escribiendo…</div>';
       }
     }
-    if (!texto.trim()) throw new Error('La respuesta llegó vacía. Intenta de nuevo.');
-    _nut.ia = { texto, at: new Date().toISOString(), modelo: 'claude-opus-5' };
-    if (out) out.innerHTML = nutRenderIa(texto);
-    await nutGuardarIa(_nut.clienteId, _nut.semana, texto, 'claude-opus-5');
+    // El corte por tiempo de la función de Vercel se ve exactamente igual que
+    // un final normal: el stream termina y ya. Si acabó sospechosamente cerca
+    // del límite y sin cerrar el análisis, se dice — callarlo deja al coach
+    // pensando que la IA "no tiene nada que decir".
+    const segundos = Math.round((Date.now() - arranque) / 1000);
+    if (!texto.trim()) {
+      throw new Error(segundos >= 55
+        ? `Se cortó a los ${segundos} s sin devolver nada. Es el límite de tiempo de la función en Vercel: el análisis tardó más de 60 s. Vuelve a intentarlo, o baja el esfuerzo del modelo (CRM_INSIGHT_EFFORT=medium en Vercel).`
+        : 'La respuesta llegó vacía. Intenta de nuevo.');
+    }
+    if (segundos >= 55 && !/@@FIN|@@ALERTA|@@PREGUNTAS/.test(texto)) {
+      texto += `\n\n_(⚠️ El análisis se cortó a los ${segundos} s por el límite de tiempo de Vercel. Lo de arriba está completo hasta donde alcanzó.)_`;
+    }
+    _nut.ia = { texto, at: new Date().toISOString(), modelo: modeloUsado, nivel: _nut.nivel, uso };
+    if (out) out.innerHTML = nutRenderIa(texto) + nutCostoHTML(uso, modeloUsado, _nut.nivel, segundos);
+    await nutGuardarIa(_nut.clienteId, _nut.semana, texto, modeloUsado);
     toast('✓ Oportunidades listas');
   } catch (e) {
     if (out) out.innerHTML = `<div class="card border-l-4 border-red-400">
@@ -8757,6 +8971,7 @@ window.nutGenerarIA = async () => {
       ${texto ? `<div class="mt-3 pt-3 border-t border-slate-100">${nutRenderIa(texto)}</div>` : ''}
     </div>`;
   } finally {
+    marcarTrabajo(false);
     if (btn) { btn.disabled = false; btn.textContent = _nut.ia?.texto ? '🔄 Volver a generar' : '✨ Generar oportunidades'; }
   }
 };

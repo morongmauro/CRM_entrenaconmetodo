@@ -31,28 +31,18 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { guard } from './_guard.js';
+import { NIVELES, resolverNivel } from './_niveles.js';
 
 export const config = { maxDuration: 60 };
 
-// ── Qué modelo y con cuánto esfuerzo ────────────────────────────────────
-// Este asistente hace, casi siempre, LECTURA: elegir la herramienta correcta y
-// leer un campo del JSON que devuelve. Eso no es un problema de razonamiento
-// difícil, y pagar un modelo de razonamiento profundo para leer "4 días a la
-// semana" es tirar plata. Por eso:
+// ── Nivel de análisis ───────────────────────────────────────────────────
+// El navegador manda `nivel`: rapido | profundo | muy_profundo. Las tres
+// definiciones viven en _niveles.js, compartidas con las oportunidades de
+// alimentación, para que "profundo" signifique lo mismo en todo el CRM.
 //
-//   · Modelo por defecto: Sonnet 5 (2 USD por millón de tokens de entrada,
-//     10 de salida; Opus 5 va a 5 y 25). Para elegir entre ocho herramientas
-//     y leer un campo, rinde igual.
-//   · Esfuerzo 'low' en las preguntas normales: menos rodeos, menos llamadas
-//     de más, respuestas más cortas. En una lectura no hay nada que pensar.
-//
-// El navegador puede pedir 'a_fondo' para una pregunta concreta (el botón
-// "Analizar a fondo"): ahí sube a Opus 5 con esfuerzo alto, que es lo que
-// vale la pena cuando le pides criterio — adaptar una rutina, comparar
-// clientes, decidir qué cambiar. Se paga solo cuando lo pides.
-const MODEL_RAPIDO = process.env.CRM_ASK_MODEL || 'claude-sonnet-5';
-const MODEL_FONDO  = process.env.CRM_ASK_MODEL_FONDO || 'claude-opus-5';
-const MAX_TOKENS = 8000;
+// Para la mayoría de preguntas del asistente, 'rapido' basta y sobra: elegir
+// entre once herramientas y leer un campo del JSON no es un problema de
+// razonamiento. Los niveles altos valen cuando le pides criterio.
 const MAX_BODY_CHARS = 260000;   // ~65k tokens: tope duro para que una
                                  // pregunta suelta no se coma la cuenta
 const MAX_MENSAJES = 40;         // vueltas de la conversación que se aceptan
@@ -508,9 +498,11 @@ export default async function handler(req, res) {
   if (!guard(req, res, { key: 'coach-ask', limit: 60 })) return;
 
   try {
-    const { messages, contexto, modo, perfil } = req.body || {};
-    const aFondo = modo === 'a_fondo';
-    const model = aFondo ? MODEL_FONDO : MODEL_RAPIDO;
+    const { messages, contexto, nivel, modo, perfil } = req.body || {};
+    // `modo` es la forma vieja de pedirlo (rápido / a fondo). Se sigue
+    // aceptando para que una pestaña abierta con el código anterior no falle.
+    const nivelPedido = nivel || (modo === 'a_fondo' ? 'muy_profundo' : 'rapido');
+    const N = resolverNivel(nivelPedido, process.env.CRM_ASK_NIVEL);
     // El perfil decide el juego de herramientas Y el prompt. Cada uno tiene su
     // propio prefijo de caché, así que cambiar de panel no invalida el otro.
     const cfg = PERFILES[perfil] || PERFILES.general;
@@ -546,14 +538,14 @@ export default async function handler(req, res) {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model,
-        max_tokens: MAX_TOKENS,
+        model: N.modelo,
+        max_tokens: N.max_tokens_chat,
         // El pensamiento adaptativo se queda encendido en los dos modos: con
         // esfuerzo bajo apenas piensa, y apagarlo del todo en Opus 5 tiene
         // efectos raros (llega a escribir la llamada a la herramienta como
         // texto en vez de ejecutarla). Lo que se regula es el esfuerzo.
         thinking: { type: 'adaptive' },
-        output_config: { effort: aFondo ? 'high' : 'low' },
+        output_config: { effort: N.effort },
         // Las herramientas se renderizan ANTES del system, así que el punto de
         // caché en el system cubre todo el prefijo estable (herramientas +
         // instrucciones): a partir de la segunda pregunta ese tramo cuesta una
@@ -580,7 +572,7 @@ export default async function handler(req, res) {
       stop_reason: msg.stop_reason,
       stop_details: msg.stop_details || null,
       model: msg.model,
-      modo: aFondo ? 'a_fondo' : 'rapido',
+      nivel: N.clave,
       perfil: PERFILES[perfil] ? perfil : 'general',
       usage: msg.usage,
     });
