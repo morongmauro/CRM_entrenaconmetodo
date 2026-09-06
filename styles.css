@@ -524,3 +524,45 @@ summary.list-none { list-style: none; }
 .sg-act-pts { font-size: 0.62rem; font-weight: 800; color: #8b5cf6; flex: none; }
 .sg-act input { width: 42px !important; padding: 3px 4px !important; text-align: center;
   font-size: 0.8rem !important; margin: 0 !important; }
+
+/* ── Doble pantalla del Seguimiento ─────────────────────────────────────
+   Bitácora a la izquierda, la sección que elijas a la derecha, cada una con
+   su propio scroll para que mirar el entrenamiento no te haga perder el
+   renglón del seguimiento. Debajo de 1280 px no hay ancho para dos columnas
+   de verdad: se apilan (sigue sirviendo, solo que una debajo de la otra). */
+.split { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+.split-col { min-width: 0; }
+.split-col-b {
+  border: 1px solid #e2e8f0; border-radius: 1rem; background: #f8fafc;
+  padding: 0.75rem;
+}
+.split-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+.split-tabs { display: flex; gap: 0.4rem; overflow-x: auto; padding-bottom: 2px; }
+.split-x {
+  flex: none; width: 1.9rem; height: 1.9rem; border-radius: 0.6rem;
+  border: 1px solid #e2e8f0; background: white; color: #64748b;
+  font-size: 0.85rem; cursor: pointer; line-height: 1;
+}
+.split-x:hover { background: #f1f5f9; color: #0f172a; }
+.split-quien { font-size: 0.7rem; color: #64748b; margin: 0 0 0.6rem 0.15rem; }
+.split-quien b { color: #0f172a; }
+
+@media (min-width: 1280px) {
+  body.split-on .em-shell { max-width: 118rem; }
+  .split { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 1.1rem; align-items: start; }
+  .split-col { max-height: calc(100vh - 7.5rem); overflow-y: auto; overscroll-behavior: contain; }
+  .split-col-b { position: sticky; top: 0; }
+  /* Dentro de una columna, la rejilla 4/8 del seguimiento queda apretada:
+     la lista de clientes pasa arriba, compacta, y la bitácora debajo usa
+     todo el ancho de la columna. */
+  #split-a .grid.grid-cols-12 > aside,
+  #split-a .grid.grid-cols-12 > aside + div { grid-column: span 12 / span 12; }
+  #split-a #seg-list { max-height: 210px; }
+}
+
+/* La doble pantalla es de escritorio: en una pantalla angosta las columnas se
+   apilan y el panel queda a mil píxeles de scroll, así que ni se ofrece. */
+@media (max-width: 1279px) { .btn-split { display: none; } }

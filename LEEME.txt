@@ -1,0 +1,34 @@
+CRM · Doble pantalla en Seguimiento
+====================================
+
+Sube estos 2 archivos a la raíz del repo morongmauro/CRM_entrenaconmetodo
+(reemplazando los que están):
+
+  app.js
+  styles.css
+
+Nada más. No borres ningún archivo.
+
+QUÉ TRAE
+--------
+· Botón "Doble pantalla" en Seguimiento (arriba, junto a "+ Nueva semana").
+  Lo aprietas y la bitácora se va a la izquierda; a la derecha eliges
+  Entrenamiento, Alimentación o Composición, con el mismo cliente ya cargado.
+  Son las secciones de verdad, completas: puedes editar desde ahí.
+  Si cambias de cliente en la lista de la izquierda, el panel lo sigue.
+  El botón se acuerda de tu preferencia para la próxima vez.
+  Solo aparece en pantalla ancha (de 1280 px para arriba): en el teléfono no
+  hay ancho para dos columnas.
+
+· De paso, dos arreglos de fondo que hacían falta igual: los repintados de
+  pantalla ahora van en fila (antes dos podían pisarse a medio pintar) y el
+  cartel de "Cargando…" ya no puede borrar la pantalla equivocada.
+
+TODAVÍA PENDIENTE DE TU LADO (de antes, no de este cambio)
+---------------------------------------------------------
+1. En Supabase del CRM, correr una vez:
+     alter table seguimientos add column if not exists actividad_extra jsonb;
+   Sin esto, los días por tipo de actividad (running, caminata, ciclismo…)
+   no se guardan.
+2. En Vercel del CRM, variable de entorno ANTHROPIC_API_KEY (para el
+   asistente y el agente de rutinas).

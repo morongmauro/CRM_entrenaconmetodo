@@ -1239,7 +1239,25 @@ function similitudNombre(a, b) {
 
 const $  = (s, c = document) => c.querySelector(s);
 const $$ = (s, c = document) => Array.from(c.querySelectorAll(s));
-const view = $('#view');
+// `view` es el destino de escritura de la vista actual. Es `let` a propósito:
+// la doble pantalla de Seguimiento redirige temporalmente las secciones
+// (Entrenamiento, Nutrición, Composición) a la columna derecha en vez del
+// contenedor principal, sin tener que tocar ni una línea de esas secciones —
+// todas escriben en `view` y `view` es lo que se mueve.
+const VIEW_ROOT = $('#view');
+let view = VIEW_ROOT;
+// Ejecuta `fn` escribiendo en `destino`. Restaura siempre, aunque `fn` falle.
+// Al salir del todo se vuelve al contenedor principal a la fuerza: si alguna
+// sección quedó a medio camino, el siguiente repintado no hereda un destino
+// que ya no existe.
+let _vistaProf = 0;
+async function conVista(destino, fn) {
+  const antes = view;
+  _vistaProf++;
+  view = destino;
+  try { return await fn(); }
+  finally { _vistaProf--; view = _vistaProf > 0 ? antes : VIEW_ROOT; }
+}
 const modal = $('#modal');
 const modalContent = $('#modal-content');
 const modalBox = $('#modal-box');
@@ -2728,6 +2746,11 @@ let _currentView = 'dashboard';
 let _tCargando = null;
 function cargando(msg = 'Cargando…') {
   const vista = _currentView;
+  // A dónde escribe la vista AHORA. Hay que capturarlo: con la doble pantalla
+  // `view` puede haber vuelto a su sitio cuando el temporizador dispare, y el
+  // esqueleto borraría la pantalla entera en vez del panel que estaba
+  // cargando.
+  const destino = view;
   // Testigo de si la vista ya se repintó. Asignar innerHTML crea nodos
   // nuevos, así que basta con comparar la identidad del primer hijo — es O(1)
   // y no obliga a serializar el HTML entero.
@@ -2736,11 +2759,12 @@ function cargando(msg = 'Cargando…') {
   // Pagos, Pendientes, Seguimiento, IA) llaman a su ruta DIRECTAMENTE, sin
   // pasar por el router, así que nadie cancelaba el temporizador. La vista se
   // pintaba bien y 160 ms después el esqueleto la borraba.
-  const testigo = view.firstElementChild;
+  const testigo = destino.firstElementChild;
   clearTimeout(_tCargando);
   _tCargando = setTimeout(() => {
-    if (_currentView !== vista || view.firstElementChild !== testigo) return;
-    view.innerHTML = `<div class="card">
+    if (_currentView !== vista || destino.firstElementChild !== testigo) return;
+    if (!destino.isConnected) return;
+    destino.innerHTML = `<div class="card">
       <div class="sk sk-line" style="width:38%"></div>
       <div class="sk sk-card" style="margin:.9rem 0"></div>
       <div class="sk sk-line" style="width:72%"></div>
@@ -2769,6 +2793,10 @@ function pintarErrorVista(e) {
 }
 
 async function correrVista() {
+  // Red de seguridad de la doble pantalla: cada repintado arranca escribiendo
+  // en el contenedor principal. Si algo dejó `view` apuntando a una columna
+  // que ya no existe, aquí se endereza solo en vez de pintar en el vacío.
+  view = VIEW_ROOT;
   try {
     // Tope global: una consulta a Supabase que no vuelve (proyecto dormido,
     // red de datos con paquetes perdidos) dejaba la vista colgada sin fin.
@@ -2784,6 +2812,8 @@ async function correrVista() {
 
 async function navigate(name) {
   _currentView = routes[name] ? name : 'dashboard';
+  // La doble pantalla ensancha el marco: fuera de Seguimiento se quita.
+  document.body.classList.toggle('split-on', _split.on && _currentView === 'seguimiento');
   $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === _currentView));
   // En el teléfono la tira de secciones se desliza: si la sección activa
   // queda fuera de la vista no sabes dónde estás parado.
@@ -2792,11 +2822,28 @@ async function navigate(name) {
     try { activo.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' }); } catch (e) {}
   }
   window.scrollTo({ top: 0, behavior: 'instant' });
-  await correrVista();
+  await rerenderView();
 }
 
 // Re-renderiza la vista actual sin saltar el scroll (para toggles de checkboxes)
-async function rerenderView() { await correrVista(); }
+//
+// Los repintados se hacen EN FILA, nunca a la vez. Varias cargas terminan
+// juntas (compCargar, nutCargar, la data fresca del seguimiento) y cada una
+// pide su repintado; si dos corren solapados se pisan el DOM a medio pintar —
+// y con la doble pantalla, además, se pisan el destino de escritura y la
+// sección termina pintándose en una columna que ya se reemplazó. Con la fila,
+// el segundo espera al primero y, si llegaron varios, se hace uno solo al
+// final (que es el que tiene los datos buenos).
+let _renderEnCurso = null;
+let _renderPendiente = false;
+async function rerenderView() {
+  if (_renderEnCurso) { _renderPendiente = true; return _renderEnCurso; }
+  _renderEnCurso = (async () => {
+    try { await correrVista(); } finally { _renderEnCurso = null; }
+    if (_renderPendiente) { _renderPendiente = false; await rerenderView(); }
+  })();
+  return _renderEnCurso;
+}
 
 // ── Volver de un guardado SIN cambiar de pantalla ───────────────────────
 // Antes, guardar un cliente hacía navigate('clientes'), guardar una semana
@@ -3219,6 +3266,149 @@ window.confirmarPagoRapido = async (clienteId, mes) => {
 // data fresca se trae en silencio por detrás y re-pinta solo si cambió algo.
 let _segDataCache = null;
 
+// =====================================================
+// DOBLE PANTALLA · Seguimiento + otra sección al lado
+// =====================================================
+// Haciendo el seguimiento de la semana uno necesita mirar lo otro: qué
+// entrenó, qué comió, cómo se movió el peso. Antes había que salir de
+// Seguimiento, mirar, y volver — perdiendo el cliente, la pestaña y el
+// scroll. Con la doble pantalla la bitácora se queda a la izquierda y a la
+// derecha se abre la sección que quieras, con EL MISMO cliente ya cargado.
+//
+// No es una copia de esas secciones: es la sección de verdad, funcionando.
+// El truco está en `view`, que es a dónde escribe la vista: mientras se
+// pinta el panel derecho, `view` apunta a esa columna, así que Entrenamiento,
+// Nutrición y Composición escriben ahí sin enterarse (ver conVista()).
+const SPLIT_PANELES = [
+  ['entrenamiento', '🏋️ Entrenamiento'],
+  ['nutricion',     '🥗 Alimentación'],
+  ['composicion',   '🧬 Composición'],
+];
+const SPLIT_ANCHO_MIN = 1280;   // debajo de esto no hay ancho para dos columnas
+const _split = {
+  on: false,
+  panel: 'entrenamiento',
+  sync: null,   // 'clienteId|panel' ya sincronizado (evita recargar en bucle)
+};
+// La preferencia se recuerda entre sesiones (es una forma de trabajar, no un
+// botón que se aprieta cada vez), pero nunca se restaura en una pantalla
+// angosta: ahí las dos columnas se apilan y el panel quedaría a mil píxeles
+// de scroll.
+try {
+  const guardado = JSON.parse(localStorage.getItem('em_split') || 'null');
+  if (guardado && window.innerWidth >= SPLIT_ANCHO_MIN) {
+    _split.on = !!guardado.on;
+    if (SPLIT_PANELES.some(([id]) => id === guardado.panel)) _split.panel = guardado.panel;
+  }
+} catch (e) { /* sin localStorage: se arranca en una sola pantalla */ }
+function splitRecordar() {
+  try { localStorage.setItem('em_split', JSON.stringify({ on: _split.on, panel: _split.panel })); } catch (e) {}
+}
+
+// Las secciones se repintan llamando a su propia ruta (entTab, entVerCliente).
+// Si esa llamada llega con `view` apuntando al contenedor principal, borraría
+// la pantalla entera en vez del panel. Se envuelven una sola vez, la primera
+// vez que se abre la doble pantalla (a esa altura ya cargaron todos los
+// scripts, incluido nutricion-plus.js que reemplaza routes.nutricion).
+let _splitRutasEnvueltas = false;
+function splitEnvolverRutas() {
+  if (_splitRutasEnvueltas) return;
+  _splitRutasEnvueltas = true;
+  for (const [nombre] of SPLIT_PANELES) {
+    const original = routes[nombre];
+    if (typeof original !== 'function') continue;
+    routes[nombre] = async function (...args) {
+      if (_split.on && _currentView === 'seguimiento' && view === VIEW_ROOT) return rerenderView();
+      return original.apply(this, args);
+    };
+  }
+}
+
+window.splitToggle = () => {
+  _split.on = !_split.on;
+  _split.sync = null;
+  if (_split.on) { splitEnvolverRutas(); _segView = 'focus'; }
+  splitRecordar();
+  VIEW_ROOT.innerHTML = '';   // el andamio cambia: se pinta de cero
+  rerenderView();
+};
+window.splitCerrar = () => { if (_split.on) window.splitToggle(); };
+window.splitPanel = (cual) => {
+  _split.panel = cual;
+  _split.sync = null;
+  splitRecordar();
+  rerenderView();
+};
+
+// Prepara el lienzo y devuelve dónde va el Seguimiento.
+function splitLienzo() {
+  document.body.classList.toggle('split-on', _split.on);
+  if (!_split.on) {
+    if (VIEW_ROOT.querySelector('#split-a')) VIEW_ROOT.innerHTML = '';
+    return VIEW_ROOT;
+  }
+  let izq = VIEW_ROOT.querySelector('#split-a');
+  if (!izq) {
+    VIEW_ROOT.innerHTML = `
+      <div class="split">
+        <section class="split-col" id="split-a"></section>
+        <section class="split-col split-col-b" id="split-b"></section>
+      </div>`;
+    izq = VIEW_ROOT.querySelector('#split-a');
+  }
+  return izq;
+}
+
+// Deja la sección del panel apuntando al cliente que se está siguiendo. Solo
+// la primera vez para ese par cliente+panel: si después cambias de cliente
+// DENTRO del panel, se respeta hasta que cambies de cliente en el seguimiento.
+function splitSincronizarCliente() {
+  const cid = _selectedClienteId;
+  if (!cid) return;
+  const marca = `${cid}|${_split.panel}`;
+  if (_split.sync === marca) return;
+  _split.sync = marca;
+  try {
+    if (_split.panel === 'entrenamiento') {
+      if (typeof _ent === 'object' && _ent) { _ent.tab = 'clientes'; _ent.clienteId = cid; }
+    } else if (_split.panel === 'composicion') {
+      if (typeof _comp === 'object' && _comp && _comp.clienteId !== cid) { _comp.tab = 'panorama'; compCargar(cid); }
+    } else if (_split.panel === 'nutricion') {
+      if (typeof _nut === 'object' && _nut && _nut.clienteId !== cid) {
+        _nut.ia = null;
+        nutCargar(cid, _nut.semana || fmt.semanaISO());
+      }
+    }
+  } catch (e) { /* la sección no cargó: el panel mostrará su propio aviso */ }
+}
+
+async function segPintarPanel() {
+  const col = VIEW_ROOT.querySelector('#split-b');
+  if (!col) return;
+  const scroll = col.scrollTop;
+  splitSincronizarCliente();
+  const nombre = (_segDataCache?.clientes || []).find(c => c.id === _selectedClienteId)?.nombre || '';
+  col.innerHTML = `
+    <div class="split-bar">
+      <div class="split-tabs">
+        ${SPLIT_PANELES.map(([id, lab]) => `
+          <button class="chip ${_split.panel === id ? 'active' : ''}" onclick="splitPanel('${id}')">${lab}</button>
+        `).join('')}
+      </div>
+      <button class="split-x" onclick="splitCerrar()" title="Cerrar la doble pantalla">✕</button>
+    </div>
+    ${nombre ? `<div class="split-quien">Mostrando a <b>${escapeHtml(nombre)}</b></div>` : ''}
+    <div id="split-body"></div>`;
+  const cuerpo = col.querySelector('#split-body');
+  const ruta = routes[_split.panel];
+  if (typeof ruta !== 'function') {
+    cuerpo.innerHTML = '<div class="card text-sm text-slate-500">Esa sección no está disponible.</div>';
+    return;
+  }
+  await conVista(cuerpo, () => ruta());
+  col.scrollTop = scroll;
+}
+
 routes.seguimiento = async () => {
   const renderSeguimiento = (todos, allSegs) => {
   // Solo ACTIVOS. Un cliente en pausa o finalizado no es trabajo de esta
@@ -3247,6 +3437,9 @@ routes.seguimiento = async () => {
           <button class="toggle-btn ${_segView === 'focus' ? 'active' : ''}" onclick="switchSegView('focus')">Por cliente</button>
           <button class="toggle-btn ${_segView === 'board' ? 'active' : ''}" onclick="switchSegView('board')">Vista panel</button>
         </div>
+        <button class="btn btn-split ${_split.on ? 'btn-primary' : 'btn-secondary'}" onclick="splitToggle()" title="Seguimiento a la izquierda y otra sección a la derecha, con el mismo cliente">
+          ${_split.on ? '◧ Una pantalla' : '◫ Doble pantalla'}
+        </button>
         <button class="btn btn-primary" onclick="abrirNuevoSeguimiento(_selectedClienteId)">+ Nueva semana</button>
       </div>
     </div>
@@ -3257,8 +3450,26 @@ routes.seguimiento = async () => {
   else renderSegBoard(clientes, allSegs);
   };
 
+  // Pintar = Seguimiento en su columna (la única, o la izquierda) y, si la
+  // doble pantalla está puesta, la sección elegida en la derecha.
+  const pintar = async (todos, allSegs) => {
+    const izq = splitLienzo();
+    // En doble pantalla cada columna tiene su propio scroll: repintar no
+    // puede devolverte al principio de la bitácora.
+    const y = izq === VIEW_ROOT ? 0 : izq.scrollTop;
+    await conVista(izq, () => renderSeguimiento(todos, allSegs));
+    if (y) {
+      izq.scrollTop = y;
+      // El timeline se llena un instante después (renderSegFocus es asíncrono):
+      // sin el segundo ajuste el scroll se queda corto.
+      requestAnimationFrame(() => { izq.scrollTop = y; });
+      setTimeout(() => { izq.scrollTop = y; }, 120);
+    }
+    if (_split.on) await segPintarPanel();
+  };
+
   if (_segDataCache) {
-    renderSeguimiento(_segDataCache.clientes, _segDataCache.allSegs);
+    await pintar(_segDataCache.clientes, _segDataCache.allSegs);
   } else {
     cargando();
   }
@@ -3270,10 +3481,15 @@ routes.seguimiento = async () => {
   const firma = JSON.stringify([clientes, allSegs]);
   const igual = _segDataCache && _segDataCache.firma === firma;
   _segDataCache = { clientes, allSegs, firma };
-  if (!igual) renderSeguimiento(clientes, allSegs);
+  if (!igual) await pintar(clientes, allSegs);
 };
 
-window.switchSegView = (which) => { _segView = which; routes.seguimiento(); };
+// Repintar Seguimiento SIEMPRE por la fila de repintados. Llamar a la ruta
+// directamente se solapaba con los repintados que disparan las cargas del
+// panel derecho (compCargar, nutCargar): dos pintados a la vez se pisan el
+// DOM y, con la doble pantalla, hasta el destino de escritura.
+const repintarSeguimiento = () => (_currentView === 'seguimiento' ? rerenderView() : navigate('seguimiento'));
+window.switchSegView = (which) => { _segView = which; repintarSeguimiento(); };
 
 async function renderSegFocus(clientes, allSegs, ultPorCliente) {
   // Conservar la posición de scroll del sidebar entre re-renders (al
@@ -3396,7 +3612,7 @@ window.filtrarClientesSidebar = (q) => {
   });
 };
 
-window.seleccionarCliente = (id) => { _selectedClienteId = id; routes.seguimiento(); };
+window.seleccionarCliente = (id) => { _selectedClienteId = id; repintarSeguimiento(); };
 
 function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
   const edad = helpers.edadDe(c.fecha_nacimiento);
