@@ -566,3 +566,8 @@ summary.list-none { list-style: none; }
 /* La doble pantalla es de escritorio: en una pantalla angosta las columnas se
    apilan y el panel queda a mil píxeles de scroll, así que ni se ofrece. */
 @media (max-width: 1279px) { .btn-split { display: none; } }
+
+/* El aviso de error no se ve igual que un "guardado": es rojo y se queda más
+   tiempo. Un guardado que falla tiene que doler a la vista. */
+#toast.toast-error { background: #b91c1c; color: #fff; }
+#toast.toast-error { max-width: min(34rem, calc(100vw - 3rem)); line-height: 1.35; }

@@ -2381,12 +2381,25 @@ function generarResumen(cliente, seguimientos, pendientes) {
 // =====================================================
 // TOAST + MODAL
 // =====================================================
-function toast(msg, ms = 2200) {
+// Un aviso de error NO se deja tapar por el "guardado" que viene detrás.
+//
+// Así fue como las semanas del seguimiento se perdían en silencio: el guardado
+// fallaba, la capa de datos sacaba el error en un toast, y la línea siguiente
+// mostraba "Semana guardada" encima. Se veía un guardado exitoso donde no
+// había habido ninguno. Ahora el error manda: mientras esté en pantalla,
+// ningún mensaje de rutina lo reemplaza.
+let _toastErrorHasta = 0;
+function toast(msg, ms = 2200, tipo = 'info') {
+  if (tipo !== 'error' && Date.now() < _toastErrorHasta) return;
+  if (tipo === 'error') _toastErrorHasta = Date.now() + ms;
   toastEl.textContent = msg;
+  toastEl.classList.toggle('toast-error', tipo === 'error');
   toastEl.classList.remove('hidden');
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => toastEl.classList.add('hidden'), ms);
+  toast._t = setTimeout(() => { toastEl.classList.add('hidden'); if (tipo === 'error') _toastErrorHasta = 0; }, ms);
 }
+function toastError(msg, ms = 7000) { toast(msg, ms, 'error'); }
+window.toastError = toastError;
 function openModal(html, opts = {}) {
   modalContent.innerHTML = html;
   modalBox.style.maxWidth = opts.wide ? '64rem' : '42rem';
@@ -2570,6 +2583,41 @@ function invalidarCache(...prefijos) {
 window.invalidarCache = invalidarCache;
 
 // =====================================================
+// COLUMNAS QUE LA BASE TODAVÍA NO TIENE
+// =====================================================
+// El CRM y su base evolucionan por separado: el CRM se actualiza subiendo
+// archivos, la base solo cuando se corre el SQL. Entre una cosa y la otra hay
+// una ventana en la que el CRM manda una columna que la base aún no tiene, y
+// PostgREST no ignora ese campo: rechaza la fila ENTERA. Un dato de más y se
+// pierde toda la semana.
+//
+// Aquí se detecta ese caso concreto para reintentar SIN esa columna: se
+// guarda todo lo demás (que es la mayoría) y se avisa qué migración falta,
+// una sola vez por columna y con el SQL listo para copiar.
+const COLUMNA_SQL = {
+  actividad_extra: 'alter table seguimientos add column if not exists actividad_extra jsonb;',
+};
+function columnaQueFalta(error, row) {
+  if (!error || !row) return null;
+  const msg = `${error.message || ''} ${error.details || ''} ${error.hint || ''}`.toLowerCase();
+  const esDeColumna = error.code === 'PGRST204' || error.code === '42703'
+    || /could not find the .*column/.test(msg) || /column .* does not exist/.test(msg);
+  if (!esDeColumna) return null;
+  // Solo se quita una columna que NOSOTROS mandamos y que el mensaje nombra:
+  // así nunca se descarta un dato por un error que decía otra cosa.
+  return Object.keys(row).find(k => msg.includes(`'${k}'`) || msg.includes(`"${k}"`) || msg.includes(` ${k} `)) || null;
+}
+const _columnasAvisadas = new Set();
+function avisarColumnaFaltante(tabla, col) {
+  const clave = `${tabla}.${col}`;
+  if (_columnasAvisadas.has(clave)) return;
+  _columnasAvisadas.add(clave);
+  const sql = COLUMNA_SQL[col] || `alter table ${tabla} add column if not exists ${col} …;`;
+  toastError(`Guardé sin "${col}": tu base no tiene esa columna. Corre en Supabase → ${sql}`, 11000);
+  console.warn(`[CRM] Falta la columna ${clave}. SQL: ${sql}`);
+}
+
+// =====================================================
 // DATA LAYER
 // =====================================================
 const db = {
@@ -2587,8 +2635,8 @@ const db = {
         return data;
       });
     },
-    async insert(row) { const { data, error } = await sb.from('clientes').insert(row).select().single(); if (error) toast(error.message); invalidarCache('clientes'); return data; },
-    async update(id, row) { const { error } = await sb.from('clientes').update(row).eq('id', id); if (error) toast(error.message); invalidarCache('clientes'); },
+    async insert(row) { const { data, error } = await sb.from('clientes').insert(row).select().single(); if (error) toastError(error.message); invalidarCache('clientes'); return data; },
+    async update(id, row) { const { error } = await sb.from('clientes').update(row).eq('id', id); if (error) toastError(error.message); invalidarCache('clientes'); },
     async remove(id) { await sb.from('clientes').delete().eq('id', id); invalidarCache('clientes', 'seguimientos', 'pagos', 'pendientes', 'mediciones', 'metas'); },
   },
   pagos: {
@@ -2606,7 +2654,7 @@ const db = {
     },
     async upsert(row) {
       const { data, error } = await sb.from('pagos').upsert(row, { onConflict: 'user_id,cliente_id,mes' }).select().single();
-      if (error) toast(error.message);
+      if (error) toastError(error.message);
       invalidarCache('pagos');
       return data;
     },
@@ -2637,11 +2685,30 @@ const db = {
       const { data } = await sb.from('seguimientos').select('*').eq('cliente_id', cliente_id).eq('semana', semana).maybeSingle();
       return data;
     },
-    async upsert(row) {
+    // Guarda de verdad, o revienta. Nunca devuelve como si hubiera guardado.
+    async upsert(row, intento = 0) {
       const { data, error } = await sb.from('seguimientos').upsert(row, { onConflict: 'user_id,cliente_id,semana' }).select().single();
-      if (error) toast(error.message);
       invalidarCache('seguimientos');
-      return data;
+      if (!error) return data;
+      // ¿Es una columna que la base todavía no tiene? Se reintenta sin ella
+      // (pueden faltar varias, de ahí el contador de intentos).
+      const falta = intento < 5 ? columnaQueFalta(error, row) : null;
+      if (falta) {
+        avisarColumnaFaltante('seguimientos', falta);
+        const resto = { ...row };
+        delete resto[falta];
+        return db.seguimientos.upsert(resto, intento + 1);
+      }
+      // La fila pudo haberse escrito y ser el SELECT de vuelta el que falló
+      // (RLS de lectura): antes de dar por perdida la semana, se comprueba.
+      if (error.code === 'PGRST116' && row.cliente_id && row.semana) {
+        const guardada = await db.seguimientos.getByClienteSemana(row.cliente_id, row.semana);
+        if (guardada) return guardada;
+      }
+      const e = new Error(error.message || 'No pude guardar la semana');
+      e.code = error.code;
+      e.details = error.details;
+      throw e;
     },
     async remove(id) { await sb.from('seguimientos').delete().eq('id', id); invalidarCache('seguimientos'); },
   },
@@ -2664,7 +2731,7 @@ const db = {
         return data || [];
       });
     },
-    async insert(row) { const { data, error } = await sb.from('pendientes').insert(row).select().single(); if (error) toast(error.message); invalidarCache('pendientes'); return data; },
+    async insert(row) { const { data, error } = await sb.from('pendientes').insert(row).select().single(); if (error) toastError(error.message); invalidarCache('pendientes'); return data; },
     async update(id, row) { await sb.from('pendientes').update(row).eq('id', id); invalidarCache('pendientes'); },
     async toggle(id, estadoActual) {
       const nuevo = estadoActual === 'completado' ? 'abierto' : 'completado';
@@ -2684,7 +2751,7 @@ const db = {
     },
     async insert(row) {
       const { data, error } = await sb.from('mediciones_corporales').insert(row).select().single();
-      if (error) toast(error.message);
+      if (error) toastError(error.message);
       invalidarCache('mediciones');
       return data;
     },
@@ -2721,7 +2788,7 @@ const db = {
     async save(s) {
       const { data: { user } } = await sb.auth.getUser();
       const { error } = await sb.from('settings').upsert({ user_id: user.id, ...s, updated_at: new Date().toISOString() });
-      if (error) toast(error.message);
+      if (error) toastError(error.message);
       else _settings = { ..._settings, ...s };
     },
   },
@@ -4600,13 +4667,15 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
       </div>
     </div>
 
+    <div id="sg-error" class="hidden mx-6 mb-3 p-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700"></div>
+
     <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-between gap-2 sticky bottom-0 flex-wrap">
       <div>${s.id ? `<button class="btn btn-danger" onclick="eliminarSeguimiento('${s.id}', '${clienteId}')">Eliminar</button>` : ''}</div>
       <div class="flex gap-2 flex-wrap">
         <button class="btn btn-secondary" onclick="enviarPushManual('${clienteId}')" title="Escribe un mensaje y le llega al teléfono como notificación push (si tiene los recordatorios activados en su app)">📲 Push al teléfono</button>
         <button class="btn btn-secondary" onclick="copiarMensajeWhatsApp('${clienteId}')" title="Genera y copia un borrador de mensaje para pegar en WhatsApp">💬 Copiar mensaje</button>
         <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-        <button class="btn btn-primary" onclick="guardarSeguimiento('${clienteId}', '${semana}', ${s.id ? `'${s.id}'` : 'null'})">Guardar semana</button>
+        <button class="btn btn-primary" id="sg-guardar" onclick="guardarSeguimiento('${clienteId}', '${semana}', ${s.id ? `'${s.id}'` : 'null'})">Guardar semana</button>
       </div>
     </div>
   `;
@@ -4744,7 +4813,29 @@ window.guardarSeguimiento = async (cliente_id, semana, id) => {
     lesion_actualizacion: $('#sg-lesion-txt')?.value || null,
     estado: 'hecho',
   };
-  await db.seguimientos.upsert(row);
+  // Guardar es lo único que importa aquí: si falla, el modal NO se cierra y
+  // lo que escribiste sigue en pantalla para reintentar. Cerrar el modal
+  // sobre un guardado fallido es perder el trabajo de la semana.
+  const boton = $('#sg-guardar');
+  const etiqueta = boton ? boton.textContent : '';
+  if (boton) { boton.disabled = true; boton.textContent = 'Guardando…'; }
+  const aviso = $('#sg-error');
+  if (aviso) aviso.classList.add('hidden');
+  try {
+    const guardada = await db.seguimientos.upsert(row);
+    if (!guardada) throw new Error('La base no devolvió la semana guardada.');
+  } catch (e) {
+    const msg = e.message || String(e);
+    if (boton) { boton.disabled = false; boton.textContent = etiqueta || 'Guardar semana'; }
+    if (aviso) {
+      aviso.classList.remove('hidden');
+      aviso.innerHTML = `<b>No pude guardar la semana.</b><br>${escapeHtml(msg)}<br>
+        <span class="text-slate-500">Lo que escribiste sigue aquí: corrige y vuelve a darle a Guardar.</span>`;
+      aviso.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+    toastError('No pude guardar la semana: ' + msg);
+    return;
+  }
   // Las mediciones corporales ya NO se cargan desde aquí: se registran en el
   // perfil del cliente, donde el peso nuevo se ve contra la calculadora de
   // metas y el coach decide si actualiza la meta y la envía al Mealtracker.
@@ -7360,7 +7451,7 @@ window.guardarMedicion = async (clienteId, actualizarMeta = false) => {
         meta_argumento: sug.meta.argumento,
         meta_calculada_en: new Date().toISOString(),
       }).eq('id', clienteId);
-      if (error) toast(error.message);
+      if (error) toastError(error.message);
       else {
         metaCambiada = true;
         invalidarCache('clientes');

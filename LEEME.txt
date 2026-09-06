@@ -1,34 +1,61 @@
-CRM · Doble pantalla en Seguimiento
-====================================
+CRM · URGENTE: el guardado del seguimiento + doble pantalla
+============================================================
 
-Sube estos 2 archivos a la raíz del repo morongmauro/CRM_entrenaconmetodo
-(reemplazando los que están):
+Sube estos 2 archivos a la raíz del repo morongmauro/CRM_entrenaconmetodo,
+reemplazando los que están:
 
   app.js
   styles.css
 
-Nada más. No borres ningún archivo.
+No borres ningún archivo.
 
-QUÉ TRAE
---------
-· Botón "Doble pantalla" en Seguimiento (arriba, junto a "+ Nueva semana").
-  Lo aprietas y la bitácora se va a la izquierda; a la derecha eliges
-  Entrenamiento, Alimentación o Composición, con el mismo cliente ya cargado.
-  Son las secciones de verdad, completas: puedes editar desde ahí.
-  Si cambias de cliente en la lista de la izquierda, el panel lo sigue.
-  El botón se acuerda de tu preferencia para la próxima vez.
-  Solo aparece en pantalla ancha (de 1280 px para arriba): en el teléfono no
-  hay ancho para dos columnas.
 
-· De paso, dos arreglos de fondo que hacían falta igual: los repintados de
-  pantalla ahora van en fila (antes dos podían pisarse a medio pintar) y el
-  cartel de "Cargando…" ya no puede borrar la pantalla equivocada.
+1. POR QUÉ SE PERDÍAN LAS SEMANAS  (esto es lo urgente)
+-------------------------------------------------------
+Lo encontré y lo reproduje. No era de un cliente: era de todos.
 
-TODAVÍA PENDIENTE DE TU LADO (de antes, no de este cambio)
----------------------------------------------------------
-1. En Supabase del CRM, correr una vez:
-     alter table seguimientos add column if not exists actividad_extra jsonb;
-   Sin esto, los días por tipo de actividad (running, caminata, ciclismo…)
-   no se guardan.
-2. En Vercel del CRM, variable de entorno ANTHROPIC_API_KEY (para el
-   asistente y el agente de rutinas).
+El CRM empezó a mandar el campo `actividad_extra` (los días por tipo de
+actividad: running, caminata, ciclismo…). Esa columna todavía NO existe en tu
+base, porque el SQL no se ha corrido. Y Supabase no ignora un campo que no
+conoce: rechaza la fila ENTERA. O sea que por ese campo de más se perdía todo
+lo demás — calorías, proteína, avances, notas, la semana completa.
+
+Y no se veía nada porque el error salía en un aviso que el "Semana guardada"
+de la línea siguiente tapaba al instante. Veías el mensaje verde, el modal se
+cerraba, y no había quedado nada.
+
+Encaja con lo que viste: pudiste guardar algunos (con la versión vieja todavía
+cargada en el navegador) y desde Camilo Rodríguez en adelante ya no, porque
+para entonces el navegador ya tenía la versión nueva.
+
+CON ESTE ARCHIVO YA NO PASA. Aunque no corras nada en Supabase, la semana se
+guarda completa: el CRM detecta la columna que falta, la deja por fuera y
+guarda todo lo demás, avisándote en rojo qué SQL correr.
+
+DE TODAS FORMAS CORRE ESTO EN SUPABASE (SQL Editor del proyecto del CRM):
+
+  alter table seguimientos add column if not exists actividad_extra jsonb;
+
+Mientras no lo corras, todo se guarda menos el desglose de días por tipo de
+actividad (los puntos de cardio se calculan con la regla vieja).
+
+De paso, para que no vuelva a pasar en ningún lado del CRM:
+· un guardado que falla ya no puede decir que guardó;
+· si falla de verdad, el modal NO se cierra y lo que escribiste sigue ahí,
+  con un recuadro rojo que dice el motivo;
+· un aviso de error ya no se deja tapar por el mensaje que venga detrás.
+
+
+2. DOBLE PANTALLA EN SEGUIMIENTO
+--------------------------------
+Botón "Doble pantalla" arriba, junto a "+ Nueva semana". La bitácora se queda
+a la izquierda y a la derecha eliges Entrenamiento, Alimentación o
+Composición, con el mismo cliente ya cargado. Son las secciones de verdad,
+completas y editables. Si cambias de cliente a la izquierda, el panel lo
+sigue. Se acuerda de tu preferencia. Solo en pantalla ancha (1280 px o más).
+
+
+PENDIENTE APARTE
+----------------
+En Vercel del CRM, la variable ANTHROPIC_API_KEY (para el asistente y el
+agente de rutinas).
