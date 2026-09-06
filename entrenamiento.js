@@ -1317,7 +1317,11 @@ window.entBorrarRutina = async (id, esPlantilla) => {
 async function entVistaClientes() {
   const body = $('#ent-body');
   if (!body) return;
-  const clientes = (await db.clientes.list()).filter(c => c.estado !== 'finalizado');
+  // Solo ACTIVOS. A un cliente en pausa no se le está armando entrenamiento;
+  // aparecía en la lista y había que esquivarlo. Está en Clientes, en su
+  // subsección. Si vienes de su ficha, ese sí se abre.
+  const clientes = (await db.clientes.list()).filter(c => c.estado === 'activo'
+    || (_ent.clienteId && c.id === _ent.clienteId));
 
   if (!_ent.clienteId) {
     body.innerHTML = `
@@ -1778,7 +1782,7 @@ window.entBorrarFase = async (id) => {
 // ocurre entero en el servidor, así una copia nunca queda a medias.
 
 async function entSelectClientes(excluir) {
-  const clientes = (await db.clientes.list()).filter(c => c.id !== excluir && c.estado !== 'finalizado');
+  const clientes = (await db.clientes.list()).filter(c => c.id !== excluir && c.estado === 'activo');
   return clientes.map(c => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join('');
 }
 
@@ -1820,7 +1824,7 @@ window.entConfirmarAsignar = async (faseId) => {
 
 // Copiar una rutina a otra fase — de este cliente o de cualquier otro.
 window.entCopiarRutinaA = async (rutinaId) => {
-  const clientes = (await db.clientes.list()).filter(c => c.estado !== 'finalizado');
+  const clientes = (await db.clientes.list()).filter(c => c.estado === 'activo');
   openModal(modalShell('Copiar rutina a…', `
     <p class="text-sm text-slate-600 mb-3">Se crea una copia independiente. El original no se modifica.</p>
     <div class="mb-3"><label>Destino</label>

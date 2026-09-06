@@ -1154,7 +1154,13 @@ const NP_TABS = [
 ];
 
 routes.nutricion = async () => {
-  const clientes = (await db.clientes.list()).filter(c => c.estado !== 'finalizado');
+  // Solo ACTIVOS en el selector. Los de pausa y los finalizados viven en
+  // Clientes, en su subsección. Excepción: si vienes de la ficha de uno que
+  // no está activo, ese sí se muestra — si no, la pantalla quedaría vacía y
+  // el atajo desde la ficha no serviría para nada.
+  const todos = await db.clientes.list();
+  const clientes = todos.filter(c => c.estado === 'activo'
+    || (_nut.clienteId && c.id === _nut.clienteId));
 
   if (!_nut.semana) _nut.semana = fmt.semanaISO();
   if (!_nut.clienteId && clientes.length) {

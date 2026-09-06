@@ -3078,8 +3078,15 @@ window.confirmarPagoRapido = async (clienteId, mes) => {
 let _segDataCache = null;
 
 routes.seguimiento = async () => {
-  const renderSeguimiento = (clientes, allSegs) => {
-  if (!_selectedClienteId && clientes.length) _selectedClienteId = clientes.find(c => c.estado === 'activo')?.id || clientes[0].id;
+  const renderSeguimiento = (todos, allSegs) => {
+  // Solo ACTIVOS. Un cliente en pausa o finalizado no es trabajo de esta
+  // semana; llenaba la lista y obligaba a buscar entre gente con la que no
+  // se está trabajando. Están en Clientes, en su subsección.
+  const clientes = todos.filter(c => c.estado === 'activo');
+  // Si el que estaba abierto pasó a pausa o se finalizó, se suelta la
+  // selección en vez de dejar la pantalla en blanco.
+  if (_selectedClienteId && !clientes.some(c => c.id === _selectedClienteId)) _selectedClienteId = null;
+  if (!_selectedClienteId && clientes.length) _selectedClienteId = clientes[0].id;
 
   // Calcular última semana por cliente
   const ultPorCliente = {};
@@ -5416,11 +5423,31 @@ async function cargarPanelInstalaciones(clientes) {
   `;
 }
 
+// Subsección abierta en Clientes. Arranca en Activos: es con quien se
+// trabaja el día a día. Los otros dos siguen a un toque de distancia.
+let _cliSub = 'activo';   // activo | pausa | finalizado
+window.cliSub = (k) => { _cliSub = k; rerenderView(); };
+
 routes.clientes = async () => {
   const renderClientes = (clientes, allSegs) => {
   const activos = clientes.filter(c => c.estado === 'activo');
   const pausa = clientes.filter(c => c.estado === 'pausa');
   const fin = clientes.filter(c => c.estado === 'finalizado');
+
+  // Los que se pintan es la subsección elegida, no todos revueltos. Un
+  // cliente en pausa o finalizado ya no aparece en Seguimiento, Nutrición
+  // ni Entrenamiento: aquí es donde se le encuentra.
+  const enPantalla = _cliSub === 'pausa' ? pausa : _cliSub === 'finalizado' ? fin : activos;
+  const subs = [
+    ['activo', 'Activos', activos.length],
+    ['pausa', 'En pausa', pausa.length],
+    ['finalizado', 'Finalizados', fin.length],
+  ];
+  const vacio = {
+    activo: 'No tienes clientes activos ahora mismo.',
+    pausa: 'Nadie en pausa.',
+    finalizado: 'Todavía no has finalizado con nadie.',
+  }[_cliSub];
 
   function calcAdh(c) {
     const segs = allSegs.filter(s => s.cliente_id === c.id).sort((a, b) => b.fecha.localeCompare(a.fecha)).slice(0, 4);
@@ -5445,8 +5472,14 @@ routes.clientes = async () => {
       <div id="cli-pwa-panel" class="text-xs text-slate-400">Cargando…</div>
     </div>
 
+    <div class="flex gap-2 flex-wrap mb-4">
+      ${subs.map(([k, lab, n]) => `
+        <button class="chip ${_cliSub === k ? 'active' : ''}" onclick="cliSub('${k}')">${lab} · ${n}</button>
+      `).join('')}
+    </div>
+
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      ${clientes.map(c => {
+      ${enPantalla.map(c => {
         const adh = calcAdh(c);
         return `
           <div class="card card-hover cursor-pointer" onclick="verCliente('${c.id}')">
@@ -5476,11 +5509,15 @@ routes.clientes = async () => {
           </div>
         `;
       }).join('')}
-      ${clientes.length === 0 ? '<div class="col-span-3 card text-center text-slate-500 py-10">Aún no hay clientes. <button class="text-emerald-600 font-semibold" onclick="nuevoCliente()">+ Crear el primero</button></div>' : ''}
+      ${enPantalla.length === 0 ? `<div class="col-span-3 card text-center text-slate-500 py-10">${
+        clientes.length === 0
+          ? 'Aún no hay clientes. <button class="text-emerald-600 font-semibold" onclick="nuevoCliente()">+ Crear el primero</button>'
+          : escapeHtml(vacio)
+      }</div>` : ''}
     </div>
   `;
-  cargarPanelInstalaciones(clientes);
-  pintarCapsulasEnCards(clientes);
+  cargarPanelInstalaciones(enPantalla);
+  pintarCapsulasEnCards(enPantalla);
   };
 
   if (_cliDataCache) {
@@ -8430,7 +8467,10 @@ window.nutTab = (t) => { _nut.tab = t; _nut.diaAbierto = null; rerenderView(); }
 
 // ─── Vista ──────────────────────────────────────────────────────────────
 routes.nutricion = async () => {
-  const clientes = (await db.clientes.list()).filter(c => c.estado !== 'finalizado');
+  // Solo ACTIVOS (más el que venga abierto desde la ficha). Los de pausa y
+  // los finalizados están en Clientes, en su subsección.
+  const clientes = (await db.clientes.list()).filter(c => c.estado === 'activo'
+    || (_nut.clienteId && c.id === _nut.clienteId));
 
   if (!_nut.semana) _nut.semana = fmt.semanaISO();
   if (!_nut.clienteId && clientes.length) {
