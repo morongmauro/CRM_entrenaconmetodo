@@ -510,3 +510,17 @@ summary.list-none { list-style: none; }
 }
 .nut-macro-tit { font-size: 0.875rem; font-weight: 700; color: #1e293b; }
 .nut-macro-sub { font-size: 11px; color: #64748b; min-width: 0; }
+
+/* Actividad complementaria por tipo, en el seguimiento. Dos columnas para
+   que las seis quepan sin hacer scroll dentro del pilar. */
+.sg-act { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 8px; margin-top: 4px; }
+@media (max-width: 420px) { .sg-act { grid-template-columns: 1fr; } }
+.sg-act-fila {
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+  background: #fff; border: 1px solid #e2e8f0; border-radius: 9px; padding: 4px 6px 4px 9px;
+}
+.sg-act-nom { font-size: 0.72rem; font-weight: 600; color: #475569; flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: none; letter-spacing: 0; }
+.sg-act-pts { font-size: 0.62rem; font-weight: 800; color: #8b5cf6; flex: none; }
+.sg-act input { width: 42px !important; padding: 3px 4px !important; text-align: center;
+  font-size: 0.8rem !important; margin: 0 !important; }

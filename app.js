@@ -1745,6 +1745,68 @@ function calcComposicionCorporal({ peso, grasa_pct, edad, sexo, altura_cm }) {
   return out;
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// ACTIVIDAD COMPLEMENTARIA · cada tipo suma lo que pesa
+// ═══════════════════════════════════════════════════════════════════════
+// Antes todo día de actividad extra sumaba +2, fuera una caminata de 20
+// minutos o una hora de running. No es lo mismo, y el score lo decía igual.
+//
+// Los puntos salen del gasto real de cada actividad, en METs (Compendium of
+// Physical Activities, Ainsworth et al.): caminar ronda 3,5 METs, la bici y
+// la natación 6-8, correr 9-11. Se redondea a tres escalones —1, 2 y 3— en
+// vez de usar el MET crudo: la diferencia entre 6,8 y 7,2 METs no la vas a
+// notar en un score semanal, y tres escalones sí se entienden de un vistazo.
+//
+// El tope sigue en +10, igual que antes: así los scores de las semanas
+// nuevas se pueden comparar con los de las viejas.
+const ACTIVIDADES_EXTRA = [
+  { id: 'caminata',  label: 'Caminata',        pts: 1, met: '~3,5 METs' },
+  { id: 'movilidad', label: 'Yoga / movilidad', pts: 1, met: '~3 METs' },
+  { id: 'ciclismo',  label: 'Ciclismo',        pts: 2, met: '~6-8 METs' },
+  { id: 'natacion',  label: 'Natación',        pts: 2, met: '~6-8 METs' },
+  { id: 'deporte',   label: 'Deporte',         pts: 2, met: '~7-8 METs · fútbol, tenis, pádel' },
+  { id: 'running',   label: 'Running',         pts: 3, met: '~9-11 METs' },
+];
+const ACT_TOPE = 10;
+
+// Cuántos días de actividad extra hubo, en total.
+function actDiasTotales(detalle) {
+  if (!detalle || typeof detalle !== 'object') return 0;
+  return ACTIVIDADES_EXTRA.reduce((n, a) => n + (Math.max(0, Number(detalle[a.id]) || 0)), 0);
+}
+
+// El bono. Si la semana NO tiene el desglose por tipo (todas las de antes de
+// este cambio), se respeta la regla vieja de +2 por día: recalcular el
+// pasado con la regla nueva movería scores ya guardados y comentados con el
+// cliente, y eso sería peor que la pequeña inconsistencia de tener dos
+// criterios conviviendo mientras el historial se renueva.
+function actBono(s) {
+  const detalle = actParse(s?.actividad_extra);
+  if (detalle && actDiasTotales(detalle) > 0) {
+    const bruto = ACTIVIDADES_EXTRA.reduce((n, a) => n + (Math.max(0, Number(detalle[a.id]) || 0) * a.pts), 0);
+    return Math.min(ACT_TOPE, bruto);
+  }
+  const dias = Math.max(0, Math.min(7, Number(s?.cardio_ejecutados) || 0));
+  return Math.min(ACT_TOPE, dias * 2);
+}
+
+// El campo puede llegar como objeto (jsonb) o como texto, según por dónde
+// entre. Se acepta lo que venga y se ignora lo que no se entienda.
+function actParse(v) {
+  if (!v) return null;
+  if (typeof v === 'object') return v;
+  try { const o = JSON.parse(v); return (o && typeof o === 'object') ? o : null; } catch (e) { return null; }
+}
+
+// Resumen legible: "3 caminata · 1 running".
+function actResumen(detalle) {
+  if (!detalle) return '';
+  return ACTIVIDADES_EXTRA
+    .filter(a => Number(detalle[a.id]) > 0)
+    .map(a => `${Number(detalle[a.id])} ${a.label.toLowerCase()}`)
+    .join(' · ');
+}
+
 // ===== Scores calculados a partir de indicadores objetivos =====
 function calcScores(s, cliente) {
   const pctSafe = (num, den) => den > 0 ? Math.min(100, (num / den) * 100) : null;
@@ -1754,8 +1816,7 @@ function calcScores(s, cliente) {
   // bono de +2 pts por día hecho (máx +10, tope 100). Premia sin inflar y no
   // puede hundir una semana de fuerza cumplida. cardio_ejecutados = días 0-7.
   const scoreFuerza = pctSafe(s.fuerza_ejecutados, s.fuerza_planeados);
-  const diasComp = Math.max(0, Math.min(7, Number(s.cardio_ejecutados) || 0));
-  const bonoComp = Math.min(10, diasComp * 2);
+  const bonoComp = actBono(s);
   let score_entreno = null;
   if (scoreFuerza !== null) score_entreno = Math.min(100, scoreFuerza + bonoComp);
   else if (s.cardio_planeados) score_entreno = pctSafe(s.cardio_ejecutados, s.cardio_planeados); // semanas viejas sin dato de fuerza
@@ -2983,6 +3044,86 @@ routes.dashboard = async () => {
   `;
 };
 
+// ═══════════════════════════════════════════════════════════════════════
+// LOS ENTRENOS QUE EL CLIENTE MARCÓ EN SU APP
+// ═══════════════════════════════════════════════════════════════════════
+// Hasta ahora "días de fuerza hechos" se escribía a mano: el coach preguntaba
+// por WhatsApp o lo estimaba. Pero desde que el módulo de entrenamiento está
+// en la app del cliente, el dato ya existe — cada sesión que el cliente marca
+// queda en `sesiones`. Esto lo trae y lo pone donde se necesita.
+//
+// NO PISA lo que el coach escribió. Rellena solo cuando el campo está vacío
+// y la semana es NUEVA; si ya hay un registro guardado o el coach ya tecleó
+// algo, el número real se muestra al lado con un botón para usarlo. El coach
+// tiene contexto que la base no tiene ("entrenó pero no marcó", "esa sesión
+// la abrió sin hacer nada") y esa corrección debe ganar siempre.
+async function jalarEntrenos(cliente, semana, esSemanaNueva) {
+  const caja = $('#sg-entrenos-real');
+  if (!caja || !cliente?.id) return;
+  const [ini, fin] = semanaISOToRange(semana);
+
+  let sesiones = [], rutinasFase = null;
+  try {
+    const { data, error } = await sb.from('sesiones')
+      .select('id, fecha, estado, rutina_id')
+      .eq('cliente_id', cliente.id)
+      .gte('fecha', ini).lte('fecha', fin);
+    if (error) throw error;
+    sesiones = data || [];
+
+    // Cuántos días PLANEÓ esa fase: las rutinas de la fase activa. Es mejor
+    // dato que la meta de la ficha, que es un número general del cliente.
+    const { data: fases } = await sb.from('fases')
+      .select('id').eq('cliente_id', cliente.id).eq('estado', 'activa')
+      .order('orden', { ascending: false }).limit(1);
+    if (fases && fases[0]) {
+      // Se traen los ids y se cuentan aquí en vez de pedir un count exacto:
+      // son cuatro o cinco filas, y así no depende de una opción del cliente
+      // de Supabase que no todos los caminos soportan igual.
+      const { data: rr } = await sb.from('rutinas')
+        .select('id').eq('fase_id', fases[0].id).eq('archivada', false);
+      if (Array.isArray(rr) && rr.length) rutinasFase = rr.length;
+    }
+  } catch (e) {
+    // Sin las tablas de entrenamiento (o sin permiso), esto simplemente no
+    // aparece: el coach sigue escribiendo a mano como siempre.
+    return;
+  }
+
+  const hechas = sesiones.filter(x => x.estado === 'completada').length;
+  const aMedias = sesiones.filter(x => x.estado === 'en_curso').length;
+  if (!sesiones.length && rutinasFase === null) return;
+
+  const fe = $('#sg-fe'), fp = $('#sg-fp');
+  // Autorrelleno solo en semana nueva y con el campo vacío.
+  if (esSemanaNueva && fe && !String(fe.value).trim()) {
+    fe.value = hechas;
+    if (fp && !String(fp.value).trim() && rutinasFase) fp.value = rutinasFase;
+    recalcScores();
+    caja.innerHTML = `<span class="text-emerald-600">✓ Puesto desde su app:</span> marcó <strong>${hechas}</strong> entreno(s) esta semana`
+      + (rutinasFase ? ` de <strong>${rutinasFase}</strong> programados` : '')
+      + (aMedias ? ` · ${aMedias} quedó a medias` : '')
+      + '. Corrígelo si sabes algo que la app no.';
+    return;
+  }
+
+  window._segEntrenosReales = { hechas, planeadas: rutinasFase };
+  caja.innerHTML = `En su app marcó <strong class="text-slate-600">${hechas}</strong> entreno(s)`
+    + (rutinasFase ? ` de <strong class="text-slate-600">${rutinasFase}</strong> programados` : '')
+    + (aMedias ? ` · ${aMedias} a medias` : '')
+    + ` <button type="button" class="text-emerald-600 font-semibold underline" onclick="usarEntrenosReales()">usar</button>`;
+}
+
+window.usarEntrenosReales = () => {
+  const r = window._segEntrenosReales;
+  if (!r) return;
+  const fe = $('#sg-fe'), fp = $('#sg-fp');
+  if (fe) fe.value = r.hechas;
+  if (fp && r.planeadas) fp.value = r.planeadas;
+  recalcScores();
+  toast('✓ Puesto lo que marcó en su app');
+};
+
 window.abrirNuevoSeguimiento = async (clienteId) => {
   // El seguimiento se hace sobre la semana YA vencida (la que acaba de cerrar),
   // no la semana en curso: así se garantiza que el cliente terminó sus entrenos
@@ -2996,8 +3137,9 @@ window.abrirNuevoSeguimiento = async (clienteId) => {
 window.cambiarSemanaSeg = (clienteId, semanaActual, delta) => {
   const nueva = delta < 0 ? fmt.semanaPrev(semanaActual) : fmt.semanaNext(semanaActual);
   if (delta > 0 && nueva > fmt.semanaISO()) { toast('No puedes registrar una semana futura'); return; }
-  const hayDatos = ['#sg-fe', '#sg-ce', '#sg-kcal', '#sg-prote', '#sg-avances', '#sg-notas', '#sg-pend']
-    .some(sel => ($(sel)?.value || '').trim());
+  const hayDatos = ['#sg-fe', '#sg-kcal', '#sg-prote', '#sg-avances', '#sg-notas', '#sg-pend']
+    .some(sel => ($(sel)?.value || '').trim())
+    || ACTIVIDADES_EXTRA.some(a => ($(`#sg-act-${a.id}`)?.value || '').trim());
   if (hayDatos && !confirm('¿Cambiar de semana? Se perderá lo que no hayas guardado en esta.')) return;
   abrirModalSeguimiento(clienteId, nueva);
 };
@@ -3922,6 +4064,11 @@ function semanaAnteriorCardHTML(cliente, s, coachPends = [], abierta = false) {
           <div class="bg-slate-50 rounded-lg p-2">
             <div class="text-slate-400">Complementaria</div>
             <div class="font-bold text-violet-600">${s.cardio_ejecutados ? `${s.cardio_ejecutados} día(s)` : '—'}</div>
+            ${(() => {
+              // Qué hizo exactamente, si esa semana quedó con el desglose.
+              const r = actResumen(actParse(s.actividad_extra));
+              return r ? `<div class="text-[10px] text-slate-400 leading-tight mt-0.5">${escapeHtml(r)}</div>` : '';
+            })()}
           </div>
           <div class="bg-slate-50 rounded-lg p-2">
             <div class="text-slate-400">kcal promedio</div>
@@ -4102,14 +4249,32 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
                 <input id="sg-fe" type="number" min="0" class="w-16" value="${s.fuerza_ejecutados ?? ''}" placeholder="0" onchange="recalcScores()">
                 <span id="sg-f-pct" class="ml-auto text-sm font-bold text-emerald-600"></span>
               </div>
+              <!-- Lo que el cliente marcó de verdad en su app. Lo rellena
+                   jalarEntrenos() después de abrir el modal. -->
+              <div id="sg-entrenos-real" class="text-xs text-slate-400 mt-1"></div>
             </div>
             <div>
-              <label class="text-xs">Complementaria — días (0-7)${cliente.actividades_complementarias ? ` · <span style="text-transform:none;font-weight:400" class="text-slate-400">${escapeHtml(cliente.actividades_complementarias)}</span>` : ''}</label>
-              <div class="flex items-center gap-2">
-                <input id="sg-ce" type="number" min="0" max="7" class="w-16" value="${s.cardio_ejecutados ?? ''}" placeholder="0" onchange="recalcScores()">
-                <span id="sg-c-pct" class="text-sm font-bold text-violet-600"></span>
+              <div class="flex items-baseline justify-between gap-2">
+                <label class="text-xs">Complementaria</label>
+                <span id="sg-c-pct" class="text-sm font-bold text-violet-600 whitespace-nowrap"></span>
               </div>
-              <p class="text-xs text-slate-400 mt-1">Suma +2 pts/día al score, máx +10.</p>
+              ${cliente.actividades_complementarias ? `<div class="text-xs text-slate-400 -mt-1 mb-1">${escapeHtml(cliente.actividades_complementarias)}</div>` : ''}
+              <!-- Un contador por actividad. Cada una suma según lo que
+                   cuesta de verdad (METs), no todas +2 como antes. -->
+              <div class="sg-act">
+                ${(() => {
+                  const det = actParse(s.actividad_extra) || {};
+                  return ACTIVIDADES_EXTRA.map(a => `
+                    <label class="sg-act-fila" title="${escapeHtml(a.met)} · suma ${a.pts} pt${a.pts > 1 ? 's' : ''} por día">
+                      <span class="sg-act-nom">${a.label}</span>
+                      <span class="sg-act-pts">+${a.pts}</span>
+                      <input type="number" min="0" max="7" id="sg-act-${a.id}" data-act="${a.id}"
+                             value="${Number(det[a.id]) > 0 ? Number(det[a.id]) : ''}"
+                             placeholder="0" onchange="recalcScores()">
+                    </label>`).join('');
+                })()}
+              </div>
+              <p class="text-xs text-slate-400 mt-1">Días de cada una. Suman según su exigencia (caminata +1, ciclismo/natación/deporte +2, running +3), con tope de +10 al score.</p>
             </div>
             ${cliente.lesion_actual ? `
             <div class="bg-white rounded-lg p-2 ring-1 ring-red-200">
@@ -4237,6 +4402,8 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
   setTimeout(() => { recalcScores(); renderPendEditPreview(); renderPendCoachSeg(); }, 0);
   // Recordatorios visibles en la app del cliente (async, no bloquea el modal)
   cargarRemindersMT(cliente);
+  // Entrenos que el cliente marcó en su app esa semana (async, no bloquea)
+  jalarEntrenos(cliente, semana, !s.id);
 
   // Auto-resolver y jalar del Mealtracker si aún no hay data
   if (mtConfigured() && !s.kcal_promedio && !s.proteina_promedio_g) {
@@ -4253,12 +4420,30 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
 }
 
 // Recalcula scores vivos mientras se llena
+// Lee los contadores por actividad del formulario. Devuelve null si no hay
+// ninguno: así una semana sin tocar no guarda un objeto de ceros que luego
+// haría creer que el desglose existe y vale 0 puntos.
+function leerActividadExtra() {
+  const out = {};
+  let algo = false;
+  ACTIVIDADES_EXTRA.forEach(a => {
+    const el = $(`#sg-act-${a.id}`);
+    const n = Math.max(0, Math.min(7, Number(el?.value) || 0));
+    if (n > 0) { out[a.id] = n; algo = true; }
+  });
+  return algo ? out : null;
+}
+
 window.recalcScores = () => {
   const seg = {
     fuerza_planeados: Number($('#sg-fp')?.value) || null,
     fuerza_ejecutados: Number($('#sg-fe')?.value) || 0,
     cardio_planeados: Number($('#sg-cp')?.value) || null,
-    cardio_ejecutados: Number($('#sg-ce')?.value) || 0,
+    // cardio_ejecutados sigue siendo el TOTAL de días: media docena de
+    // pantallas del CRM lo leen (tarjetas, listados, el resumen que se copia
+    // al cliente) y no tienen por qué saber del desglose.
+    cardio_ejecutados: actDiasTotales(leerActividadExtra()),
+    actividad_extra: leerActividadExtra(),
     kcal_promedio: $('#sg-kcal')?.value ? Number($('#sg-kcal').value) : null,
     proteina_promedio_g: $('#sg-prote')?.value ? Number($('#sg-prote').value) : null,
     dias_registro_alim: $('#sg-dr')?.value ? Number($('#sg-dr').value) : null,
@@ -4269,9 +4454,13 @@ window.recalcScores = () => {
 
   // % de fuerza y bono de complementaria en vivo
   const fPct = seg.fuerza_planeados ? Math.min(100, Math.round((seg.fuerza_ejecutados / seg.fuerza_planeados) * 100)) : null;
-  const bono = Math.min(10, Math.max(0, Math.min(7, seg.cardio_ejecutados || 0)) * 2);
+  const bono = actBono(seg);
   const fLabel = $('#sg-f-pct'); if (fLabel) fLabel.textContent = fPct !== null ? `${fPct}%` : '';
-  const cLabel = $('#sg-c-pct'); if (cLabel) cLabel.textContent = bono ? `+${bono} pts` : '';
+  const cLabel = $('#sg-c-pct');
+  if (cLabel) {
+    const tope = bono >= ACT_TOPE ? ' (tope)' : '';
+    cLabel.textContent = bono ? `+${bono} pts${tope}` : '';
+  }
 
   const card = (titulo, valor, color) => `
     <div class="rounded-xl p-3 text-center" style="background:${color}15;border:1px solid ${color}40">
@@ -4312,7 +4501,8 @@ window.guardarSeguimiento = async (cliente_id, semana, id) => {
     fuerza_planeados: $('#sg-fp')?.value ? Number($('#sg-fp').value) : null,
     fuerza_ejecutados: $('#sg-fe')?.value ? Number($('#sg-fe').value) : null,
     cardio_planeados: $('#sg-cp')?.value ? Number($('#sg-cp').value) : null,
-    cardio_ejecutados: $('#sg-ce')?.value ? Number($('#sg-ce').value) : null,
+    cardio_ejecutados: actDiasTotales(leerActividadExtra()),
+    actividad_extra: leerActividadExtra(),
     kcal_promedio: $('#sg-kcal')?.value ? Number($('#sg-kcal').value) : null,
     proteina_promedio_g: $('#sg-prote')?.value ? Number($('#sg-prote').value) : null,
     dias_registro_alim: $('#sg-dr')?.value ? Number($('#sg-dr').value) : null,
@@ -4629,7 +4819,8 @@ window.copiarMensajeWhatsApp = async (cliente_id) => {
     fuerza_planeados: $('#sg-fp')?.value ? Number($('#sg-fp').value) : null,
     fuerza_ejecutados: $('#sg-fe')?.value ? Number($('#sg-fe').value) : null,
     cardio_planeados: $('#sg-cp')?.value ? Number($('#sg-cp').value) : null,
-    cardio_ejecutados: $('#sg-ce')?.value ? Number($('#sg-ce').value) : null,
+    cardio_ejecutados: actDiasTotales(leerActividadExtra()),
+    actividad_extra: leerActividadExtra(),
     kcal_promedio: $('#sg-kcal')?.value ? Number($('#sg-kcal').value) : null,
     proteina_promedio_g: $('#sg-prote')?.value ? Number($('#sg-prote').value) : null,
     dias_registro_alim: $('#sg-dr')?.value ? Number($('#sg-dr').value) : null,

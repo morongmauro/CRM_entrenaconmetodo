@@ -165,6 +165,15 @@ alter table clientes add column if not exists grasa_pct_kcal numeric;
 -- de qué fue lo último que efectivamente se cargó a su app (puede diferir de
 -- la meta guardada en la ficha si aún no se envía). Segura de repetir:
 alter table clientes add column if not exists meta_enviada_mt jsonb;
+-- Desglose de la actividad complementaria de la semana, por tipo:
+-- {"caminata":3,"running":1}. Cada tipo suma puntos distintos al score según
+-- su gasto real en METs (ver ACTIVIDADES_EXTRA en app.js) — antes todo día
+-- sumaba +2, fuera una caminata o una hora de running. cardio_ejecutados se
+-- conserva con el TOTAL de días: media docena de pantallas lo leen y no
+-- tienen por qué saber del desglose. Las semanas sin este campo siguen
+-- puntuando con la regla vieja. Segura de repetir:
+alter table seguimientos add column if not exists actividad_extra jsonb;
+
 -- Nota: el acceso de clientes al Mealtracker / Centro de Recursos lo
 -- resuelve el Mealtracker (api/authorize.js) leyendo la tabla clientes
 -- directo con la service_role key. No requiere tabla extra en el CRM.

@@ -1399,6 +1399,7 @@ async function entVistaClientes() {
   const subtabs = [
     ['calendario', '📅 Calendario'],
     ['rutinas', `📋 Rutinas${rutinas.length ? ` (${rutinas.length})` : ''}`],
+    ['sesiones', '✅ Lo que entrenó'],
     ['fases', '🗂️ Fases'],
   ];
 
@@ -1410,6 +1411,7 @@ async function entVistaClientes() {
     </div>
     ${_ent.subtab === 'calendario' ? entCalendarioHTML(cliente, fase, rutinas, ejerciciosPorRutina)
       : _ent.subtab === 'rutinas'  ? entListaRutinasHTML(fase, rutinas, ejerciciosPorRutina)
+      : _ent.subtab === 'sesiones' ? '<div id="ent-sesiones" class="card text-sm text-slate-400">Leyendo lo que registró…</div>'
       : fases.map(f => entTarjetaFase(f, rutinasPorFase[f.id] || [])).join('')}
 
     <!-- El agente de rutinas se monta aquí si asistente-rutinas.js está
@@ -1418,6 +1420,85 @@ async function entVistaClientes() {
   `;
 
   if (typeof rutMontarPanel === 'function') rutMontarPanel();
+  if (_ent.subtab === 'sesiones') entPintarSesiones(cliente);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// LO QUE ENTRENÓ  ·  lo que el cliente marcó en su app
+// ═══════════════════════════════════════════════════════════════════════
+// La app del cliente ya guardaba las sesiones, el esfuerzo percibido y las
+// notas ("me molestó el hombro"), pero no había ninguna pantalla del CRM
+// donde verlo: el dato se registraba y moría ahí. Pedirle al cliente que
+// marque su percepción sin tener dónde leerla es pedirle trabajo a cambio
+// de nada.
+async function entPintarSesiones(cliente) {
+  const caja = $('#ent-sesiones');
+  if (!caja) return;
+  const ses = await entDb.sesiones(cliente.id, { limite: 40 });
+
+  if (ses === null) {
+    caja.outerHTML = `<div class="card text-sm text-slate-500">
+      Todavía no puedo leer las sesiones. Corre <code>schema.sql</code> del módulo de entrenamiento en el Supabase del CRM.
+    </div>`;
+    return;
+  }
+  if (!ses.length) {
+    caja.outerHTML = `<div class="card text-center text-slate-500 py-8">
+      <div class="font-bold text-slate-700 mb-1">Todavía no ha marcado ningún entreno</div>
+      <div class="text-sm">Cuando abra una rutina en su app y marque series, aparece aquí.</div>
+    </div>`;
+    return;
+  }
+
+  const mins = (s) => (s ? Math.round(s / 60) : null);
+  // El RPE se lee de un vistazo por color: 1-6 cómodo, 7-8 el rango donde se
+  // entrena, 9-10 al límite. Tres seguidos en 9-10 es una bandera roja.
+  const colorRpe = (r) => r == null ? 'bg-slate-100 text-slate-400'
+    : r >= 9 ? 'bg-red-100 text-red-700'
+    : r >= 7 ? 'bg-emerald-100 text-emerald-700'
+    : 'bg-amber-100 text-amber-700';
+
+  const completadas = ses.filter(s => s.estado === 'completada');
+  const conRpe = completadas.filter(s => s.rpe != null);
+  const rpeProm = conRpe.length
+    ? Math.round(conRpe.reduce((a, s) => a + s.rpe, 0) / conRpe.length * 10) / 10 : null;
+
+  caja.outerHTML = `
+    <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+      <div class="card"><div class="text-[10px] uppercase text-slate-400 font-bold">Entrenos marcados</div>
+        <div class="text-2xl font-bold text-slate-800">${completadas.length}</div>
+        <div class="text-[11px] text-slate-500">últimas ${ses.length} sesiones abiertas</div></div>
+      <div class="card"><div class="text-[10px] uppercase text-slate-400 font-bold">Esfuerzo promedio</div>
+        <div class="text-2xl font-bold ${rpeProm == null ? 'text-slate-400' : rpeProm >= 8.5 ? 'text-red-600' : 'text-slate-800'}">${rpeProm ?? '—'}</div>
+        <div class="text-[11px] text-slate-500">${conRpe.length ? `sobre ${conRpe.length} con percepción` : 'todavía sin percepción'}</div></div>
+      <div class="card"><div class="text-[10px] uppercase text-slate-400 font-bold">Sin terminar</div>
+        <div class="text-2xl font-bold ${ses.length - completadas.length > 0 ? 'text-amber-600' : 'text-slate-800'}">${ses.length - completadas.length}</div>
+        <div class="text-[11px] text-slate-500">abrió y no cerró</div></div>
+    </div>
+
+    <div class="space-y-2">
+      ${ses.map(s => `
+        <div class="card ${s.estado !== 'completada' ? 'border-l-4 border-amber-300' : ''}">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="font-bold text-slate-800 text-sm">${escapeHtml(s.rutinas?.nombre || 'Sesión')}</span>
+            <span class="text-xs text-slate-400">${fmt.fechaCorta(s.fecha)}</span>
+            ${s.estado === 'completada'
+              ? '<span class="tag tag-green">✓ terminada</span>'
+              : s.estado === 'saltada' ? '<span class="tag">saltada</span>'
+              : '<span class="tag tag-yellow">abrió y no cerró</span>'}
+            <span class="ml-auto flex items-center gap-2">
+              ${mins(s.duracion_seg) ? `<span class="text-xs text-slate-500">${mins(s.duracion_seg)} min</span>` : ''}
+              <span class="text-xs font-bold px-2 py-0.5 rounded-full ${colorRpe(s.rpe)}" title="Esfuerzo percibido del 1 al 10">
+                ${s.rpe != null ? `RPE ${s.rpe}` : 'sin RPE'}
+              </span>
+            </span>
+          </div>
+          ${s.notas_cliente ? `<div class="mt-2 text-xs bg-slate-50 rounded-lg px-3 py-2 text-slate-700">💬 ${escapeHtml(s.notas_cliente)}</div>` : ''}
+        </div>`).join('')}
+    </div>
+    <div class="text-[11px] text-slate-400 mt-3">
+      RPE = qué tan duro se sintió, del 1 al 10, según el cliente. Verde 7-8 es el rango de trabajo; rojo 9-10, al límite. Tres rojos seguidos suelen pedir bajar la carga.
+    </div>`;
 }
 
 window.entSubtab = (t) => { _ent.subtab = t; entVistaClientes(); };
