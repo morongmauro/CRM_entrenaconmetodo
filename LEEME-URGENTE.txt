@@ -1,0 +1,35 @@
+CRM CAIDO · sube este index.html ya
+====================================
+
+QUE PASO
+En tu ultima subida a GitHub (hoy) el archivo index.html del CRM quedo
+reemplazado por el index.html de tu PAGINA WEB publica (la landing de
+"Entrena con Metodo - Coaching online").
+
+Ese archivo es el que carga todo el CRM: app.js, styles.css, entrenamiento.js,
+nutricion-plus.js, composicion.js, el asistente... Sin el, la direccion del CRM
+muestra la landing y el CRM no abre.
+
+Lo comprobe asi:
+  . el index.html que esta hoy en GitHub tiene CERO referencias a app.js
+    y su titulo es "Entrena con Metodo - Coaching online - Mauro Moron"
+  . el del 1 de septiembre tenia 4 referencias a app.js
+    y su titulo era "Entrena con Metodo - CRM"
+
+No perdiste nada: tus datos estan en Supabase y el resto de archivos del CRM
+siguen bien en el repo. Es solo este archivo.
+
+QUE HACER
+Sube este index.html a la RAIZ del repo morongmauro/CRM_entrenaconmetodo,
+reemplazando el que esta. Con eso el CRM vuelve.
+
+Y revisa a donde querias subir la landing: seguramente era a otro repo, no a
+este.
+
+DE PASO (opcional, no urgente)
+En la raiz del repo del CRM te quedaron tres archivos sueltos que no son del
+CRM y que puedes borrar cuando quieras:
+  LEEME.txt
+  LEEME-ESTE-CAMBIO.md
+  coach-insight.js     <- el bueno es api/coach-insight.js, este de la raiz
+                          es una copia vieja que no usa nadie
