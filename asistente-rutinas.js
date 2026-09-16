@@ -751,6 +751,10 @@ function rutPanelHTML() {
       <div class="flex items-center justify-between gap-2 mb-2 flex-wrap">
         <div class="font-bold text-slate-900 text-sm">💬 Agente de rutinas</div>
         <div class="flex gap-1">
+          <button class="btn btn-ghost btn-sm" onclick="abrirGuiaAgente('ent')"
+                  title="${(_settings.guia_entrenamiento || '').trim() ? 'Está usando tu guía de entrenamiento. Tócalo para cambiarla.' : 'Dile cómo armas tú las rutinas: criterios, preferencias, tope de ejercicios…'}">
+            ${(_settings.guia_entrenamiento || '').trim() ? '⚙️ Tu guía ✓' : '⚙️ Cómo trabaja'}
+          </button>
           <button class="btn btn-ghost btn-sm" onclick="rutLimpiar()">Nueva conversación</button>
           <button class="btn btn-ghost btn-sm" onclick="rutToggle()">Cerrar ✕</button>
         </div>

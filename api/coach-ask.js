@@ -498,7 +498,7 @@ export default async function handler(req, res) {
   if (!guard(req, res, { key: 'coach-ask', limit: 60 })) return;
 
   try {
-    const { messages, contexto, nivel, modo, perfil } = req.body || {};
+    const { messages, contexto, nivel, modo, perfil, guia } = req.body || {};
     // `modo` es la forma vieja de pedirlo (rápido / a fondo). Se sigue
     // aceptando para que una pestaña abierta con el código anterior no falle.
     const nivelPedido = nivel || (modo === 'a_fondo' ? 'muy_profundo' : 'rapido');
@@ -530,6 +530,26 @@ export default async function handler(req, res) {
         ? { role: m.role, content: `${preludio}\n\n${m.content}` }
         : m);
 
+    // GUÍA FIJA DEL COACH · lo que escribió una vez en Ajustes: su método,
+    // sus criterios, cómo arma él las rutinas. Va como segundo bloque de
+    // system, DESPUÉS del punto de caché, para que editarla no invalide el
+    // prefijo cacheado (herramientas + instrucciones), que es el caro.
+    //
+    // Suma, no reemplaza: no puede quitarle herramientas, ni hacer que escriba
+    // en la base sin pasar por la tarjeta de propuesta, ni inventarse datos.
+    // Lo que sí mueve es el criterio, el orden de preferencia y el tono.
+    const guiaTxt = typeof guia === 'string' && guia.trim()
+      ? [{
+          type: 'text',
+          text: `CÓMO TRABAJA ESTE COACH (lo escribió él, en Ajustes del CRM).
+Ajusta a esto tu criterio, tus preferencias y tu tono. NO cambia las reglas de
+esta herramienta: sigues sin poder inventar datos que no leíste, y todo cambio
+sigue saliendo como propuesta para que él la apruebe.
+
+${guia.trim().slice(0, 4000)}`,
+        }]
+      : [];
+
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -551,7 +571,7 @@ export default async function handler(req, res) {
         // instrucciones): a partir de la segunda pregunta ese tramo cuesta una
         // décima parte.
         tools: cfg.tools,
-        system: [{ type: 'text', text: cfg.system, cache_control: { type: 'ephemeral' } }],
+        system: [{ type: 'text', text: cfg.system, cache_control: { type: 'ephemeral' } }, ...guiaTxt],
         messages: conPreludio,
       }),
     });

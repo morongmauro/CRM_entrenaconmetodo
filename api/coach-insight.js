@@ -157,7 +157,7 @@ export default async function handler(req, res) {
   if (!guard(req, res, { key: 'coach-insight', limit: 12 })) return;
 
   try {
-    const { analisis, extra, nivel } = req.body || {};
+    const { analisis, extra, guia, nivel } = req.body || {};
     const N = resolverNivel(nivel, process.env.CRM_INSIGHT_NIVEL);
     if (!analisis || typeof analisis !== 'object') {
       return res.status(400).json({ error: 'Falta el análisis de la semana' });
@@ -171,6 +171,27 @@ export default async function handler(req, res) {
     const nota = typeof extra === 'string' && extra.trim()
       ? `\n\nNOTA DEL COACH (tenla en cuenta, manda sobre lo que diga la data):\n${extra.trim().slice(0, 1500)}`
       : '';
+
+    // GUÍA FIJA DEL COACH · lo que escribió una vez en Ajustes y aplica a
+    // todos sus análisis: su método, sus manías, cómo le habla a la gente.
+    // Va como segundo bloque de system, DESPUÉS del punto de caché, para que
+    // editarla no invalide el prefijo cacheado (que es el caro).
+    //
+    // Suma, no reemplaza: el formato de salida y las reglas de seguridad no se
+    // negocian, porque el CRM parsea esa salida y si cambia, la pantalla se
+    // rompe. Lo que la guía sí puede mover es el criterio, el tono, las
+    // prioridades y qué mirar primero.
+    const guiaTxt = typeof guia === 'string' && guia.trim()
+      ? [{
+          type: 'text',
+          text: `CÓMO TRABAJA ESTE COACH (lo escribió él, en Ajustes del CRM).
+Ajusta a esto tu criterio, tus prioridades y tu tono. NO cambia el formato de
+salida (@@OPORTUNIDAD, @@NO_TOCAR, @@PREGUNTAS, @@ALERTA), que es obligatorio,
+ni las reglas de no diagnosticar ni de derivar cuando toque:
+
+${guia.trim().slice(0, 4000)}`,
+        }]
+      : [];
 
     const userMsg =
       `Análisis de la semana (JSON):\n\`\`\`json\n${payload}\n\`\`\`${nota}\n\n` +
@@ -190,7 +211,7 @@ export default async function handler(req, res) {
         // no una extracción. Acá SÍ queremos que el modelo piense antes.
         thinking: { type: 'adaptive' },
         output_config: { effort: N.effort },
-        system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+        system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }, ...guiaTxt],
         messages: [{ role: 'user', content: userMsg }],
         stream: true,
       }),

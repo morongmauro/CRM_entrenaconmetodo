@@ -468,6 +468,10 @@ async function asisLlamar(mensajes, { perfil = 'general', nivel = 'rapido' } = {
       contexto: { hoy: fmt.hoy(), semana: fmt.semanaISO(), coach: _settings.nombre_coach },
       nivel,
       perfil,
+      // La guía que el coach escribió en Ajustes. Cada agente recibe la suya:
+      // el de rutinas la de entrenamiento, el general la de alimentación
+      // (que es de lo que más se le pregunta). Si está vacía no cambia nada.
+      guia: (perfil === 'rutinas' ? _settings.guia_entrenamiento : _settings.guia_alimentacion) || '',
     }),
   });
   const data = await r.json().catch(() => ({}));

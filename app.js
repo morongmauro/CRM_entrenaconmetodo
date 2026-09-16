@@ -1266,11 +1266,16 @@ const loginScreen = $('#login-screen');
 const appScreen = $('#app-screen');
 const bootScreen = $('#boot-screen');
 
-let _settings = { usd_cop_rate: 4000, nombre_coach: 'Coach', mealtracker_url: '', mealtracker_anon_key: '' };
+let _settings = { usd_cop_rate: 4000, nombre_coach: 'Coach', mealtracker_url: '', mealtracker_anon_key: '',
+                  guia_alimentacion: '', guia_entrenamiento: '', guia_mealtracker: '' };
 let _clientesCache = null;
 let _selectedClienteId = null;
 let _segView = 'focus';
 let _pagosView = 'table';
+// Lo que la app del cliente le está mostrando AHORA sobre su pago. Se pide al
+// Mealtracker en una sola llamada (no una por cliente) y se guarda aquí.
+let _avisosApp = null;      // { [nombre]: {due, motivo, meses, visto, …} }
+let _avisosAppError = null;
 let _pagosYear = new Date().getFullYear();
 let _pendientesFilter = 'todos';
 
@@ -1295,6 +1300,23 @@ const fmt = {
   mesEs: (ym) => {
     const [y, m] = ym.split('-').map(Number);
     return new Date(y, m - 1, 1).toLocaleDateString('es-CO', { month: 'short' }).replace('.', '');
+  },
+  // "hace 2 horas", "hace 3 días". Para decir cuándo el cliente vio algo en su
+  // app sin obligar a leer una marca de tiempo.
+  hace: (iso) => {
+    if (!iso) return '';
+    const ms = Date.now() - Date.parse(iso);
+    if (!Number.isFinite(ms) || ms < 0) return 'hace un momento';
+    const min = Math.floor(ms / 60000);
+    if (min < 2) return 'hace un momento';
+    if (min < 60) return `hace ${min} min`;
+    const h = Math.floor(min / 60);
+    if (h < 24) return `hace ${h} h`;
+    const d = Math.floor(h / 24);
+    if (d === 1) return 'ayer';
+    if (d < 30) return `hace ${d} días`;
+    const me = Math.floor(d / 30);
+    return me === 1 ? 'hace un mes' : `hace ${me} meses`;
   },
   mesEsLargo: (ym) => {
     const [y, m] = ym.split('-').map(Number);
@@ -2534,6 +2556,9 @@ async function loadSettings() {
     mealtracker_anon_key: data.mealtracker_anon_key || '',
     mealtracker_app_url: data.mealtracker_app_url || '',
     mealtracker_coach_password: data.mealtracker_coach_password || '',
+    guia_alimentacion: data.guia_alimentacion || '',
+    guia_entrenamiento: data.guia_entrenamiento || '',
+    guia_mealtracker: data.guia_mealtracker || '',
   };
 }
 
@@ -2596,6 +2621,9 @@ window.invalidarCache = invalidarCache;
 // una sola vez por columna y con el SQL listo para copiar.
 const COLUMNA_SQL = {
   actividad_extra: 'alter table seguimientos add column if not exists actividad_extra jsonb;',
+  guia_alimentacion: 'alter table settings add column if not exists guia_alimentacion text;',
+  guia_entrenamiento: 'alter table settings add column if not exists guia_entrenamiento text;',
+  guia_mealtracker: 'alter table settings add column if not exists guia_mealtracker text;',
 };
 function columnaQueFalta(error, row) {
   if (!error || !row) return null;
@@ -2656,10 +2684,13 @@ const db = {
       const { data, error } = await sb.from('pagos').upsert(row, { onConflict: 'user_id,cliente_id,mes' }).select().single();
       if (error) toastError(error.message);
       invalidarCache('pagos');
+      // Marcar un pago cambia lo que ve el cliente en su app: la columna
+      // "En su app" tiene que volver a preguntar, no repetir lo de hace un rato.
+      olvidarAvisosApp();
       return data;
     },
-    async update(id, row) { await sb.from('pagos').update(row).eq('id', id); invalidarCache('pagos'); },
-    async remove(id) { await sb.from('pagos').delete().eq('id', id); invalidarCache('pagos'); },
+    async update(id, row) { await sb.from('pagos').update(row).eq('id', id); invalidarCache('pagos'); olvidarAvisosApp(); },
+    async remove(id) { await sb.from('pagos').delete().eq('id', id); invalidarCache('pagos'); olvidarAvisosApp(); },
   },
   seguimientos: {
     async listCliente(cliente_id) {
@@ -2785,11 +2816,23 @@ const db = {
     async remove(id) { await sb.from('metas_historial').delete().eq('id', id); invalidarCache('metas'); },
   },
   settings: {
-    async save(s) {
+    // Mismo blindaje que el seguimiento: si la base todavía no tiene una
+    // columna que el CRM manda (porque falta correr el SQL), se reintenta sin
+    // ella en vez de perder TODOS los ajustes por un campo nuevo.
+    async save(s, intento = 0) {
       const { data: { user } } = await sb.auth.getUser();
-      const { error } = await sb.from('settings').upsert({ user_id: user.id, ...s, updated_at: new Date().toISOString() });
-      if (error) toastError(error.message);
-      else _settings = { ..._settings, ...s };
+      const fila = { user_id: user.id, ...s, updated_at: new Date().toISOString() };
+      const { error } = await sb.from('settings').upsert(fila);
+      if (!error) { _settings = { ..._settings, ...s }; return true; }
+      const falta = intento < 5 ? columnaQueFalta(error, fila) : null;
+      if (falta) {
+        avisarColumnaFaltante('settings', falta);
+        const resto = { ...s };
+        delete resto[falta];
+        return db.settings.save(resto, intento + 1);
+      }
+      toastError(error.message);
+      return false;
     },
   },
 };
@@ -5245,7 +5288,71 @@ routes.pagos = async () => {
 
   if (_pagosView === 'table') renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActualNum);
   else renderPagosCards(clientes, map, mesActual);
+
+  // Lo que ve el cliente en su app se pide DESPUÉS de pintar, no antes: la
+  // tabla de pagos es la pantalla que más se abre y no puede quedarse
+  // esperando a una llamada a otro servidor. Llega, y la columna se rellena.
+  if (_pagosView === 'table' && _avisosApp === null && !_avisosAppError) {
+    await cargarAvisosApp(clientes.filter(c => c.estado !== 'finalizado'));
+    if (_currentView === 'pagos' && _pagosView === 'table') {
+      renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActualNum);
+    }
+  }
 };
+
+// Al marcar un pago, lo que ve el cliente cambia: se tira la caché para que la
+// columna vuelva a preguntarle a la app en vez de mostrar lo de hace un rato.
+function olvidarAvisosApp() { _avisosApp = null; _avisosAppError = null; }
+window.olvidarAvisosApp = olvidarAvisosApp;
+
+// ── QUÉ VE EL CLIENTE EN SU APP ──────────────────────────────────────────
+// El aviso de pago de la app NO lo decide el CRM: lo calcula el Mealtracker
+// con su propia regla (meses vencidos sin cubrir). Por eso aquí no se
+// reimplementa esa regla — se le PREGUNTA a la app, que es la única que sabe
+// qué está viendo el cliente de verdad. Una copia de la regla en el CRM se
+// despegaría de la otra con el primer ajuste, y el coach vería una cosa y su
+// cliente otra: justo el problema que esta columna existe para evitar.
+async function cargarAvisosApp(clientes) {
+  // Basta la URL de la app: /api/payment-status responde por nombre y no pide
+  // la contraseña de coach (mtApiBase() sí la exige, y aquí no hace falta).
+  const base = (_settings?.mealtracker_app_url || '').trim().replace(/\/+$/, '');
+  if (!base) { _avisosAppError = 'sin-conexion'; return; }
+  try {
+    const r = await fetch(`${base}/api/payment-status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ names: clientes.map(c => c.nombre) }),
+    });
+    if (!r.ok) { _avisosAppError = `HTTP ${r.status}`; return; }
+    const d = await r.json();
+    _avisosApp = d.clientes || {};
+    _avisosAppError = null;
+  } catch (e) {
+    _avisosAppError = String(e?.message || e).slice(0, 80);
+  }
+}
+
+// La celda "En su app" de un cliente.
+function celdaAvisoApp(c) {
+  if (_avisosApp === null) {
+    return `<td class="px-2 text-center text-slate-300 text-xs">${_avisosAppError ? '—' : '⏳'}</td>`;
+  }
+  const v = _avisosApp[c.nombre];
+  if (!v) {
+    return `<td class="px-2 text-center text-xs text-amber-600" title="El Mealtracker no encontró ningún cliente con este nombre. Revisa que el nombre en su app sea igual al del CRM.">sin vincular</td>`;
+  }
+  const visto = v.visto ? `Lo vio ${fmt.hace(v.visto)}` : 'Todavía no lo ha abierto desde que le aparece';
+  if (!v.due) {
+    return `<td class="px-2 text-center text-xs text-slate-400" title="${escapeHtml(v.motivo || 'sin aviso')}">—</td>`;
+  }
+  const meses = (v.meses || []).map(m => fmt.mesEsLargo(m)).join(', ');
+  return `<td class="px-2 text-center">
+    <span class="inline-flex flex-col items-center leading-tight" title="${escapeHtml(`Le cobra: ${meses}. ${v.motivo || ''}`)}">
+      <span class="status-pill status-end" style="background:#fee2e2;color:#991b1b">📣 ${v.meses_deuda || 1} mes${(v.meses_deuda || 1) > 1 ? 'es' : ''}</span>
+      <span class="text-[10px] ${v.visto ? 'text-slate-500' : 'text-amber-600'} mt-0.5">${escapeHtml(visto)}</span>
+    </span>
+  </td>`;
+}
 
 window.switchPagView = (which) => { _pagosView = which; routes.pagos(); };
 window.cambiarAnio = (d) => { _pagosYear += d; routes.pagos(); };
@@ -5307,12 +5414,13 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
               <th style="position:sticky; left:0; background:#f8fafc; z-index:3; min-width:200px;">Cliente</th>
               <th>Estado</th>
               <th>Día</th>
+              <th title="Lo que la app del cliente le está mostrando AHORA sobre su pago, y si ya lo vio">En su app</th>
               ${meses.map(m => `<th>${fmt.mesEs(m)}</th>`).join('')}
               <th>Total año</th>
             </tr>
           </thead>
           <tbody>
-            ${activos.length === 0 ? `<tr><td colspan="${meses.length + 4}" class="text-center text-slate-500 py-6">Sin clientes.</td></tr>` :
+            ${activos.length === 0 ? `<tr><td colspan="${meses.length + 5}" class="text-center text-slate-500 py-6">Sin clientes.</td></tr>` :
               activos.map(c => {
                 let totalFila = 0;
                 const celdas = meses.map((m, i) => {
@@ -5372,13 +5480,14 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
                     </td>
                     <td class="px-2"><span class="status-pill ${c.estado === 'activo' ? 'status-active' : c.estado === 'pausa' ? 'status-hold' : 'status-end'}"><span class="w-1.5 h-1.5 rounded-full ${c.estado === 'activo' ? 'bg-emerald-500' : c.estado === 'pausa' ? 'bg-orange-500' : 'bg-slate-500'}"></span>${c.estado}</span></td>
                     <td class="px-2 text-center text-slate-600">${c.dia_pago || '—'}</td>
+                    ${celdaAvisoApp(c)}
                     ${celdas}
                     <td class="total-cell">${fmt.moneyCop(totalFila).replace('COP ', '')}</td>
                   </tr>
                 `;
               }).join('')}
             <tr class="bg-slate-900 text-white font-bold">
-              <td style="position:sticky; left:0; background:#0f172a; z-index:2; padding:0.65rem 0.8rem;" colspan="3">Total mes (COP equivalente)</td>
+              <td style="position:sticky; left:0; background:#0f172a; z-index:2; padding:0.65rem 0.8rem;" colspan="4">Total mes (COP equivalente)</td>
               ${meses.map(m => `<td class="px-2 py-3 text-right ${totalesMes[m] === 0 ? 'text-slate-500' : ''}">${totalesMes[m] > 0 ? totalesMes[m].toLocaleString('es-CO') : '—'}</td>`).join('')}
               <td class="px-3 py-3 text-right text-emerald-300">${totalAnio.toLocaleString('es-CO')}</td>
             </tr>
@@ -5388,6 +5497,16 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
       <div class="px-5 py-3 bg-slate-50 border-t border-slate-100 text-xs text-slate-500">
         Click en cualquier celda para registrar o editar el pago. Conversión USD→COP a tasa ${_settings.usd_cop_rate.toLocaleString('es-CO')}.
         Convención: una celda del mes en curso pasa de <strong>Pendiente</strong> a <strong>Vencido</strong> al día siguiente del día de pago del cliente — el mismo día en que le empieza a salir el recordatorio en su Mealtracker.
+        <div class="mt-2 pt-2 border-t border-slate-200">
+          <strong>En su app</strong>: se lo pregunta a la app del cliente, no lo calcula el CRM — es literalmente lo que él está viendo.
+          📣 = le está saliendo el aviso; pasa el mouse por encima y te dice <em>qué meses</em> le cobra y por qué.
+          ${_avisosAppError === 'sin-conexion'
+            ? '<span class="text-amber-700">Necesita la conexión al Mealtracker configurada arriba en Ajustes.</span>'
+            : _avisosAppError
+              ? `<span class="text-red-600">No pude preguntarle a la app (${escapeHtml(_avisosAppError)}).</span>`
+              : ''}
+          <br>Un mes que aquí se ve <strong>—</strong> y ya pasó su corte, la app se lo cobra: lo que no está registrado, para la app no está pagado.
+        </div>
       </div>
     </div>
   `;
@@ -7725,6 +7844,65 @@ routes.negocio = async () => {
 };
 
 // =====================================================
+// GUÍAS DE LOS AGENTES
+// =====================================================
+// Un agente genérico da consejos genéricos. Estos dos ya leen bien los datos;
+// lo que no pueden adivinar es CÓMO decide este coach: si prioriza adherencia
+// o precisión, si odia los ejercicios de máquina, si a su gente le habla de
+// usted. Eso se escribe una vez y se aplica siempre.
+//
+// Los ejemplos NO se guardan solos: viven de placeholder y hay un botón para
+// copiarlos al campo si quieres arrancar desde ahí y editarlo.
+const GUIA_EJEMPLO_ALIM = `Trabajo con gente de oficina en Colombia; la comida real es arepa, arroz, huevo, pollo, fríjol.
+Priorizo adherencia sobre precisión: prefiero un cambio que sí van a hacer.
+La proteína es lo primero que miro; las calorías van después.
+Nunca les pongo alimentos que no aparezcan ya en su registro.
+Háblales de tú, corto, sin regaños. Nada de "deberías".`;
+
+const GUIA_EJEMPLO_MT = `Háblales de tú, corto y cálido. Nunca los regañes por lo que comieron.
+Si preguntan por una comida típica colombiana, respóndeles con esa, no con una versión "fit".
+Cuando pidan ideas, propón cosas que se consigan en tienda de barrio.
+Si alguien dice que no llegó a la proteína, dale UNA solución concreta, no una lista de cinco.
+No hables de dietas de moda ni de suplementos.`;
+
+const GUIA_EJEMPLO_ENT = `Entreno fuerza con base en patrones, no en músculos sueltos.
+Prefiero barra y mancuerna; la máquina solo si hay lesión o es accesorio final.
+Progresión: primero repeticiones dentro del rango, después peso.
+Nunca más de 6 ejercicios por sesión ni más de 60 minutos.
+Si hay una lesión anotada en la ficha, esa manda sobre cualquier progresión.`;
+
+const GUIA_CAMPOS = {
+  alim: { sel: '#st-guia-alim', ejemplo: () => GUIA_EJEMPLO_ALIM },
+  ent:  { sel: '#st-guia-ent',  ejemplo: () => GUIA_EJEMPLO_ENT },
+  mt:   { sel: '#st-guia-mt',   ejemplo: () => GUIA_EJEMPLO_MT },
+};
+
+window.usarEjemploGuia = (cual) => {
+  const campo = $(GUIA_CAMPOS[cual]?.sel);
+  if (!campo) return;
+  if (campo.value.trim() && !confirm('Ya escribiste algo ahí. ¿Lo reemplazo por el ejemplo?')) return;
+  campo.value = GUIA_CAMPOS[cual].ejemplo();
+  campo.focus();
+};
+
+// Atajo desde el panel de cada agente: te lleva a Ajustes y te deja el cursor
+// en SU campo, resaltado. Sin esto, "configúralo en Ajustes" es una caminata.
+window.abrirGuiaAgente = async (cual) => {
+  await navigate('ajustes');
+  setTimeout(() => {
+    const caja = $('#ajustes-agentes');
+    const campo = $(GUIA_CAMPOS[cual]?.sel);
+    if (caja) caja.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (campo) {
+      campo.focus();
+      campo.style.transition = 'box-shadow .3s';
+      campo.style.boxShadow = '0 0 0 3px rgba(16,185,129,0.35)';
+      setTimeout(() => { campo.style.boxShadow = ''; }, 1800);
+    }
+  }, 120);
+};
+
+// =====================================================
 // VIEW: AJUSTES
 // =====================================================
 routes.ajustes = async () => {
@@ -7774,6 +7952,52 @@ routes.ajustes = async () => {
       </div>` : ''}
     </div>
 
+    <div class="card max-w-xl mb-4" id="ajustes-agentes">
+      <h3 class="font-bold text-slate-900 mb-1">🤖 Cómo quieres que trabajen tus agentes</h3>
+      <p class="text-xs text-slate-500 mb-4">
+        Los tres ya saben hacer su trabajo. Aquí les dices <strong>tu método</strong>: con qué criterio
+        decides, qué miras primero, cómo le hablas a tu gente. Los dos primeros trabajan para ti;
+        el tercero le contesta a tu cliente en su app.
+        Es opcional — si los dejas vacíos siguen funcionando igual que hoy.
+        No cambia el formato de lo que entregan ni les da permiso para escribir solos.
+      </p>
+
+      <div class="mb-4">
+        <label>🥗 Agente de alimentación <span class="font-normal text-slate-400">— el análisis semanal de Nutrición</span></label>
+        <textarea id="st-guia-alim" rows="6" placeholder="${escapeHtml(GUIA_EJEMPLO_ALIM)}">${escapeHtml(_settings.guia_alimentacion || '')}</textarea>
+        <div class="flex items-center justify-between mt-1">
+          <p class="text-xs text-slate-500">Se aplica cuando pides el análisis con IA de una semana.</p>
+          <button class="text-xs text-emerald-700 font-semibold" onclick="usarEjemploGuia('alim')">Ver un ejemplo</button>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <label>🏋️ Agente de entrenamiento <span class="font-normal text-slate-400">— el que arma y ajusta rutinas</span></label>
+        <textarea id="st-guia-ent" rows="6" placeholder="${escapeHtml(GUIA_EJEMPLO_ENT)}">${escapeHtml(_settings.guia_entrenamiento || '')}</textarea>
+        <div class="flex items-center justify-between mt-1">
+          <p class="text-xs text-slate-500">Se aplica cuando le pides algo al agente dentro de Entrenamiento.</p>
+          <button class="text-xs text-emerald-700 font-semibold" onclick="usarEjemploGuia('ent')">Ver un ejemplo</button>
+        </div>
+      </div>
+
+      <div class="pt-4 border-t border-slate-100">
+        <label>📱 Asistente de la app del cliente <span class="font-normal text-slate-400">— el que le contesta a él en el Mealtracker</span></label>
+        <textarea id="st-guia-mt" rows="6" placeholder="${escapeHtml(GUIA_EJEMPLO_MT)}">${escapeHtml(_settings.guia_mealtracker || '')}</textarea>
+        <div class="flex items-start justify-between gap-3 mt-1">
+          <p class="text-xs text-slate-500">
+            Este lo lee <strong>el cliente</strong>, no tú: es el asistente de su app. Se aplica cuando pide consejo,
+            ideas de comida o un plan. <strong>No toca el registro de comidas</strong> — esos gramos y calorías salen de
+            la base de alimentos, no de una opinión, y ahí no se negocia.
+          </p>
+          <button class="text-xs text-emerald-700 font-semibold flex-shrink-0" onclick="usarEjemploGuia('mt')">Ver un ejemplo</button>
+        </div>
+        <p class="text-[11px] text-slate-400 mt-2">
+          Vive aquí porque es tu voz, no la de la app. El Mealtracker la lee de este CRM cada pocos minutos:
+          la guardas y a los 5 minutos ya la están usando tus clientes, sin volver a desplegar nada.
+        </p>
+      </div>
+    </div>
+
     <div class="flex gap-2 max-w-xl">
       <button class="btn btn-primary" onclick="guardarAjustes()">Guardar ajustes</button>
       <button class="btn btn-danger ml-auto" id="lo">Cerrar sesión</button>
@@ -7787,6 +8011,9 @@ window.guardarAjustes = async () => {
     usd_cop_rate: Number($('#st-rate').value) || 4000,
     nombre_coach: $('#st-nombre').value.trim() || 'Coach',
   };
+  if ($('#st-guia-alim')) s.guia_alimentacion = $('#st-guia-alim').value.trim() || null;
+  if ($('#st-guia-ent')) s.guia_entrenamiento = $('#st-guia-ent').value.trim() || null;
+  if ($('#st-guia-mt')) s.guia_mealtracker = $('#st-guia-mt').value.trim() || null;
   if ($('#st-mt-url')) {
     s.mealtracker_app_url = $('#st-mt-url').value.trim() || null;
     s.mealtracker_coach_password = $('#st-mt-pass').value || null;
@@ -9404,7 +9631,15 @@ function nutVistaIA(a) {
     <details class="mt-3">
       <summary class="cursor-pointer text-xs font-semibold text-slate-500">➕ Agregar contexto que la data no ve (opcional)</summary>
       <textarea id="nut-ia-nota" rows="2" class="text-sm mt-2" placeholder="Ej: viajó jueves y viernes · está con gastritis · dijo que el gym le queda lejos esta semana"></textarea>
+      <p class="text-[11px] text-slate-400 mt-1">Esto es solo para ESTA semana. Lo que aplica siempre —tu método— va en la guía del agente.</p>
     </details>
+
+    <div class="text-[11px] text-slate-500 mt-3 pt-3 border-t border-slate-100">
+      ${(_settings.guia_alimentacion || '').trim()
+        ? '✅ Está usando <strong>tu guía</strong> de alimentación.'
+        : 'Todavía no le has dicho cómo trabajas tú.'}
+      <button class="text-emerald-700 font-semibold ml-1" onclick="abrirGuiaAgente('alim')">Ajustar cómo trabaja este agente →</button>
+    </div>
     ${a.registro.dias_registrados < 3 ? '<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mt-3">Con menos de 3 días registrados, lo único que la IA puede recomendar honestamente es que registre. Igual puedes generarlo.</div>' : ''}
   </div>
   <div id="nut-ia-out">${yaHay ? nutRenderIa(_nut.ia.texto) : '<div class="card text-sm text-slate-400">Todavía no has generado las oportunidades de esta semana.</div>'}</div>`;
@@ -9443,7 +9678,7 @@ window.nutGenerarIA = async () => {
     const r = await fetch('/api/coach-insight', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ analisis: a, extra: nota, nivel: _nut.nivel }),
+      body: JSON.stringify({ analisis: a, extra: nota, guia: _settings.guia_alimentacion || '', nivel: _nut.nivel }),
     });
     if (!r.ok || !r.body) {
       const err = await r.json().catch(() => ({}));

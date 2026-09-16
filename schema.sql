@@ -114,8 +114,24 @@ create table if not exists settings (
   mealtracker_anon_key text,
   mealtracker_app_url text,          -- URL de la app Mealtracker en Vercel (API segura)
   mealtracker_coach_password text,   -- COACH_PASSWORD del dashboard de coach
+  -- Instrucciones propias del coach para sus agentes. SUMAN a lo que el
+  -- agente ya sabe hacer; no lo reemplazan, y si están vacías todo sigue
+  -- funcionando igual que antes.
+  guia_alimentacion text,
+  guia_entrenamiento text,
+  guia_mealtracker text,             -- para el asistente que ve el CLIENTE en su app
   updated_at timestamptz default now()
 );
+
+-- Si la tabla settings ya existía, estas dos columnas se agregan aquí:
+alter table settings add column if not exists guia_alimentacion text;
+alter table settings add column if not exists guia_entrenamiento text;
+alter table settings add column if not exists guia_mealtracker text;
+
+-- Cuándo se le PINTÓ al cliente el aviso de pago en su app. Lo escribe el
+-- Mealtracker; el CRM solo lo lee, para que el coach sepa si el recordatorio
+-- llegó a los ojos del cliente o si reclama por algo que nunca vio.
+alter table clientes add column if not exists aviso_pago_visto_at timestamptz;
 
 -- ================================================================
 -- ROW LEVEL SECURITY
