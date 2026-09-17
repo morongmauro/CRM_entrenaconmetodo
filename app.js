@@ -5244,6 +5244,18 @@ routes.pagos = async () => {
     return true;
   }).reduce((s, c) => s + copConv(c.monto, c.moneda), 0);
 
+  // RED DE SEGURIDAD DEL MES NUEVO
+  // Desde que la tabla es la única fuente de verdad, un mes sin cobros
+  // generados es un mes en el que NADIE recibe recordatorio. El día 1 lo hace
+  // el cron solo; esto es por si el cron no está configurado todavía, o falló,
+  // o alguien entró antes de que corriera. Solo aparece cuando de verdad
+  // faltan, y solo en el año en curso.
+  const anioActual = String(new Date().getFullYear()) === String(_pagosYear);
+  const sinCobro = anioActual
+    ? clientes.filter(c => c.estado === 'activo' && !map[c.id]?.[mesActual]
+        && !(String(c.fecha_inicio || '').slice(0, 7) > mesActual))
+    : [];
+
   view.innerHTML = `
     <div class="flex items-baseline justify-between flex-wrap gap-3 mb-5">
       <div>
@@ -5265,6 +5277,19 @@ routes.pagos = async () => {
         </div>
       </div>
     </div>
+
+    ${sinCobro.length ? `
+    <div class="card border-l-4 border-amber-400 mb-5 flex items-center justify-between gap-4 flex-wrap">
+      <div>
+        <div class="font-bold text-slate-900">Faltan los cobros de ${fmt.mesEsLargo(mesActual)}</div>
+        <p class="text-sm text-slate-600 mt-0.5">
+          ${sinCobro.length} cliente${sinCobro.length > 1 ? 's activos no tienen' : ' activo no tiene'} cobro registrado este mes:
+          <span class="text-slate-500">${sinCobro.slice(0, 6).map(c => escapeHtml(c.nombre)).join(', ')}${sinCobro.length > 6 ? ` y ${sinCobro.length - 6} más` : ''}</span>.
+        </p>
+        <p class="text-xs text-slate-500 mt-1">Mientras no exista el cobro, ${sinCobro.length > 1 ? 'a esos clientes no les llega' : 'a ese cliente no le llega'} ningún recordatorio de pago — ni en la app ni por notificación.</p>
+      </div>
+      <button class="btn btn-primary flex-shrink-0" onclick="generarMesActual()">📅 Generarlos ahora</button>
+    </div>` : ''}
 
     <div class="bg-gradient-to-br from-slate-900 to-slate-700 text-white rounded-2xl p-6 shadow-md mb-5">
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -5323,12 +5348,26 @@ async function cargarAvisosApp(clientes) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ names: clientes.map(c => c.nombre) }),
     });
-    if (!r.ok) { _avisosAppError = `HTTP ${r.status}`; return; }
+    if (!r.ok) {
+      _avisosAppError = r.status === 403
+        ? 'la app rechazó la consulta: falta el dominio del CRM en ALLOWED_ORIGINS del proyecto mealtracker en Vercel'
+        : `la app respondió ${r.status}`;
+      return;
+    }
     const d = await r.json();
-    _avisosApp = d.clientes || {};
+    // Si responde pero sin `clientes`, es la versión VIEJA de la app: todavía
+    // no sabe contestar por varios clientes de una vez.
+    if (!d || typeof d.clientes !== 'object') {
+      _avisosAppError = 'tu app todavía no tiene la versión que sabe responder esto (sube api/payment-status.js y espera el deploy)';
+      return;
+    }
+    _avisosApp = d.clientes;
     _avisosAppError = null;
   } catch (e) {
-    _avisosAppError = String(e?.message || e).slice(0, 80);
+    // "Failed to fetch" no le dice nada a nadie. El navegador lo da tanto si
+    // la app no responde como si respondió sin permitir al CRM leerla (CORS),
+    // que es lo que pasaba antes de que payment-status.js mandara cabeceras.
+    _avisosAppError = 'no pude comunicarme con la app — revisa que api/payment-status.js esté subido y desplegado, y que el dominio del CRM esté en ALLOWED_ORIGINS en Vercel';
   }
 }
 
@@ -5404,7 +5443,8 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
         <div class="flex gap-2 text-xs">
           <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-100"></span><span class="text-slate-500">Pagado</span></span>
           <span class="flex items-center gap-1.5" title="Aún no llega su día de pago (o es hoy)"><span class="w-3 h-3 rounded bg-amber-100"></span><span class="text-slate-500">Pendiente (no llega su día)</span></span>
-          <span class="flex items-center gap-1.5" title="Pasó su día de pago sin registrar el pago (desde el día siguiente), o es un mes anterior sin pago"><span class="w-3 h-3 rounded bg-red-100"></span><span class="text-slate-500">Vencido (pasó su día)</span></span>
+          <span class="flex items-center gap-1.5" title="Hay un cobro registrado, pasó su día de pago y sigue sin marcarse como pagado. Es lo único que la app le cobra al cliente."><span class="w-3 h-3 rounded bg-red-100"></span><span class="text-slate-500">Vencido (pasó su día)</span></span>
+          <span class="flex items-center gap-1.5" title="Sin cobro registrado: esa persona no tuvo coaching ese mes. No es deuda y la app no le cobra nada."><span class="w-3 h-3 rounded bg-slate-100"></span><span class="text-slate-500">— sin coaching</span></span>
         </div>
       </div>
       <div class="overflow-x-auto scrollbar-thin">
@@ -5460,12 +5500,20 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
                     // Solo sumar pendientes al total anual si el cliente está activo
                     if (c.estado === 'activo') totalFila += copConv(p.monto, p.moneda);
                   } else if (monthNum < mesActualNum) {
-                    cls = 'pay-overdue';
+                    // Mes pasado SIN cobro registrado. No es deuda: es un mes
+                    // en el que esta persona no tuvo coaching. Antes se pintaba
+                    // rojo como si debiera, y eso era lo que hacía que una
+                    // ficha nueva se viera llena de deuda inventada.
+                    cls = 'pay-future';
                     val = '—';
+                    titleExtra = ' · sin cobro registrado (no tuvo coaching ese mes)';
                   } else if (monthNum === mesActualNum) {
-                    // Sin registro de pago este mes: misma regla de vencimiento
-                    cls = (c.dia_pago && diaHoy > c.dia_pago) ? 'pay-overdue' : 'pay-pending';
-                    val = Number(c.monto) > 0 ? fmtVal(c.monto) : '—';
+                    // Este mes todavía sin cobro generado. Tampoco es deuda —
+                    // ámbar de recordatorio, nunca rojo, y sin inventar el
+                    // monto: el que manda es el que tú registres.
+                    cls = 'pay-pending';
+                    val = '—';
+                    titleExtra = ' · aún no has generado el cobro de este mes';
                   } else {
                     cls = 'pay-future';
                     val = '—';
@@ -5501,11 +5549,12 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
           <strong>En su app</strong>: se lo pregunta a la app del cliente, no lo calcula el CRM — es literalmente lo que él está viendo.
           📣 = le está saliendo el aviso; pasa el mouse por encima y te dice <em>qué meses</em> le cobra y por qué.
           ${_avisosAppError === 'sin-conexion'
-            ? '<span class="text-amber-700">Necesita la conexión al Mealtracker configurada arriba en Ajustes.</span>'
+            ? '<span class="text-amber-700">Falta poner la URL de tu app en Ajustes → Conexión Mealtracker.</span>'
             : _avisosAppError
-              ? `<span class="text-red-600">No pude preguntarle a la app (${escapeHtml(_avisosAppError)}).</span>`
+              ? `<span class="text-red-600">⚠️ ${escapeHtml(_avisosAppError)}</span>`
               : ''}
-          <br>Un mes que aquí se ve <strong>—</strong> y ya pasó su corte, la app se lo cobra: lo que no está registrado, para la app no está pagado.
+          <br>La app le cobra <strong>solo lo que aquí se ve en rojo con cifra</strong>: un cobro que registraste y sigue sin marcar como pagado.
+          Un <strong>—</strong> o un <strong>0</strong> no son deuda — son meses sin coaching o de cortesía, y la app no los menciona.
         </div>
       </div>
     </div>

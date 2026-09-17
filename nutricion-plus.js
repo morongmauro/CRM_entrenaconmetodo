@@ -1144,6 +1144,7 @@ window.nutTab = (t) => { _np.tab = t; _nut.diaAbierto = null; rerenderView(); };
 
 const NP_TABS = [
   ['resumen',   '📊 Resumen'],
+  ['lecturas',  '🔎 Lecturas'],
   ['calendario', '📆 Calendario'],
   ['semanas',   '🗓 Semana a semana'],
   ['detalle',   '📅 Día a día'],
@@ -1239,6 +1240,7 @@ routes.nutricion = async () => {
     <div class="bg-slate-100 rounded-xl p-1 flex gap-1 mb-4 overflow-x-auto">${tabs}</div>
     ${barraFuente}
     ${_np.tab === 'resumen' ? nutVistaResumen(a)
+      : _np.tab === 'lecturas' ? npVistaLecturas(a)
       : _np.tab === 'calendario' ? npVistaCalendario(a, d)
       : _np.tab === 'semanas' ? npVistaSemanas(a, d)
       : _np.tab === 'detalle' ? nutVistaDetalle(a, d)
@@ -1265,3 +1267,280 @@ window.verNutricionCliente = (clienteId) => {
 // mostrando el mes que se estaba mirando del cliente anterior).
 const _npElegirBase = window.nutElegirCliente;
 window.nutElegirCliente = (id) => { _np.mesAncla = null; _np.literalQ = ''; return _npElegirBase(id); };
+
+// ═══════════════════════════════════════════════════════════════════════
+// LECTURAS DE LA SEMANA  ·  sin agente, sin tokens
+// ═══════════════════════════════════════════════════════════════════════
+// Todo lo de esta pestaña se calcula AQUÍ, en el navegador, con los datos que
+// ya están cargados. Cero llamadas al modelo, cero costo, y sale al instante.
+//
+// La idea: el 80% de lo que uno le pregunta al agente cada semana son las
+// mismas cinco preguntas — de dónde salieron las calorías, qué está frenando,
+// qué mejoró, qué vigilar. Eso no necesita un modelo: necesita que alguien lo
+// haya calculado una vez. El agente queda para lo que sí es conversación
+// ("y si le quito el arroz de la cena, ¿qué le pongo?").
+//
+// REGLA DE HONESTIDAD: cada lectura dice el número que la sustenta. Nada de
+// afirmaciones sin cifra detrás, y nada que los datos no puedan respaldar —
+// por eso aquí NO hay un "índice de hinchazón": con lo que registra el cliente
+// no se puede medir eso sin inventarlo.
+
+const NP_MIN_DIAS = 3;      // menos de esto y casi todo es ruido
+const NP_MIN_KCAL_ALIMENTO = 150;  // un alimento por debajo no explica nada
+
+// Un hallazgo: tono, título y el dato que lo respalda.
+//   tono: 'bien' (felicítalo) · 'ojo' (vigílalo) · 'idea' (refuérzalo) · 'dato'
+function npHallazgo(tono, titulo, detalle, dato) {
+  return { tono, titulo, detalle, dato };
+}
+
+const NP_TONOS = {
+  bien: { icono: '✅', clase: 'border-emerald-300 bg-emerald-50', tinta: 'text-emerald-900' },
+  ojo:  { icono: '⚠️', clase: 'border-amber-300 bg-amber-50',   tinta: 'text-amber-900' },
+  idea: { icono: '💡', clase: 'border-blue-300 bg-blue-50',     tinta: 'text-blue-900' },
+  dato: { icono: '•',  clase: 'border-slate-200 bg-slate-50',   tinta: 'text-slate-700' },
+};
+
+// ─── Las lecturas, una por una ──────────────────────────────────────────
+function npLecturas(a) {
+  const H = [];
+  const r = a.registro || {};
+  const c = a.cumplimiento || {};
+  const cons = a.consistencia || {};
+  const meta = a.meta || {};
+  const prom = a.promedio || {};
+
+  // 1. ¿Hay con qué? Sin registro no hay lectura que valga.
+  if (r.dias_registrados < NP_MIN_DIAS) {
+    H.push(npHallazgo('ojo', 'Esta semana casi no registró',
+      `Con ${r.dias_registrados} de 7 días no se puede leer un patrón. Lo único honesto que se puede trabajar esta semana es el registro mismo.`,
+      `${r.dias_registrados}/7 días`));
+    return H;
+  }
+
+  // 2. Adherencia al registro
+  if (r.dias_registrados === 7) {
+    H.push(npHallazgo('bien', 'Registró los 7 días',
+      'Semana completa. Es el hábito que sostiene todo lo demás, y no es fácil.', '7/7 días'));
+  } else if (r.dias_registrados >= 5) {
+    H.push(npHallazgo('bien', `Registró ${r.dias_registrados} de 7 días`,
+      `Le faltaron ${(r.dias_sin_registro || []).join(', ')}. Con esto ya se puede leer la semana.`,
+      `${r.pct}%`));
+  } else {
+    H.push(npHallazgo('ojo', `Solo registró ${r.dias_registrados} de 7 días`,
+      `Sin registro en ${(r.dias_sin_registro || []).join(', ')}. Los promedios de abajo salen de los días que sí registró, no de la semana entera.`,
+      `${r.pct}%`));
+  }
+
+  // 3. LA BRECHA: qué macro está más lejos de su meta
+  const brechas = [
+    { k: 'Proteína', pct: c.prote_pct, prom: prom.p, meta: meta.p, u: 'g' },
+    { k: 'Calorías', pct: c.kcal_pct, prom: prom.kcal, meta: meta.kcal, u: '' },
+    { k: 'Carbohidratos', pct: c.carbos_pct, prom: prom.c, meta: meta.c, u: 'g' },
+    { k: 'Grasas', pct: c.grasas_pct, prom: prom.g, meta: meta.g, u: 'g' },
+  ].filter(b => b.pct != null && b.meta);
+  if (brechas.length) {
+    const peor = brechas.reduce((x, y) => (Math.abs(y.pct - 100) > Math.abs(x.pct - 100) ? y : x));
+    if (Math.abs(peor.pct - 100) >= 12) {
+      const falta = Math.round(Math.abs(peor.meta - peor.prom));
+      H.push(npHallazgo('idea', `La brecha está en ${peor.k.toLowerCase()}`,
+        peor.pct < 100
+          ? `Le faltan ${falta}${peor.u} al día para su meta. Es la palanca más grande que tiene esta semana.`
+          : `Se pasa ${falta}${peor.u} al día de su meta. Es lo que más se aleja.`,
+        `${peor.pct}% de la meta`));
+    } else {
+      H.push(npHallazgo('bien', 'Sus macros están donde deben',
+        'Ninguno se aparta más de un 12% de su meta. Cuando esto pasa, lo que toca es no tocar nada.',
+        `${peor.k} ${peor.pct}%`));
+    }
+  }
+
+  // 4. Proteína por kilo — el número que de verdad manda en composición
+  if (c.prote_g_por_kg != null) {
+    const g = c.prote_g_por_kg;
+    if (g >= 1.6) H.push(npHallazgo('bien', 'La proteína está sólida', `${g} g por kilo de peso al día. Ese es el rango donde la masa magra se protege.`, `${g} g/kg`));
+    else if (g >= 1.2) H.push(npHallazgo('idea', 'La proteína se puede subir', `Va en ${g} g por kilo. Llevarla a 1,6 suele ser el cambio que más se nota, y casi siempre cabe en lo que ya come.`, `${g} g/kg`));
+    else H.push(npHallazgo('ojo', 'La proteína está baja', `${g} g por kilo al día. Por debajo de 1,2 cuesta sostener masa magra, sobre todo en déficit.`, `${g} g/kg`));
+  }
+
+  // 5. Fin de semana vs. entre semana — el patrón que más repite la gente
+  if (cons.entre_semana_kcal && cons.fin_de_semana_kcal) {
+    const dif = cons.fin_de_semana_kcal - cons.entre_semana_kcal;
+    const pct = Math.round((dif / cons.entre_semana_kcal) * 100);
+    if (pct >= 20) {
+      H.push(npHallazgo('ojo', 'El fin de semana se le va',
+        `Come ${Math.abs(dif)} kcal más al día el sábado y domingo que entre semana. Dos días así borran buena parte del déficit de los otros cinco.`,
+        `+${pct}% finde`));
+    } else if (pct <= -20) {
+      H.push(npHallazgo('ojo', 'El fin de semana come bastante menos',
+        `${Math.abs(dif)} kcal menos al día que entre semana. A veces es que no registra el finde, no que no coma — vale la pena preguntarle.`,
+        `${pct}% finde`));
+    } else {
+      H.push(npHallazgo('bien', 'Sostiene el fin de semana',
+        `Solo ${Math.abs(pct)}% de diferencia entre sus días de semana y el finde. Es lo que separa a quien avanza de quien va y viene.`,
+        `${pct >= 0 ? '+' : ''}${pct}%`));
+    }
+  }
+
+  // 6. Consistencia día a día
+  if (cons.desviacion_kcal != null && meta.kcal) {
+    const varia = Math.round((cons.desviacion_kcal / meta.kcal) * 100);
+    if (varia >= 25) {
+      H.push(npHallazgo('ojo', 'Los días le varían mucho',
+        `Sus calorías oscilan ±${cons.desviacion_kcal} kcal entre un día y otro. El promedio de la semana puede verse bien y aun así estar comiendo a saltos.`,
+        `±${varia}%`));
+    }
+  }
+
+  // 7. Días en rango
+  if (c.dias_en_rango_kcal != null && r.dias_registrados) {
+    const d = c.dias_en_rango_kcal;
+    if (d >= r.dias_registrados - 1 && d >= 4) {
+      H.push(npHallazgo('bien', `${d} de ${r.dias_registrados} días dentro de la meta`,
+        'Dar en el blanco casi todos los días es más difícil que un buen promedio. Vale decírselo.', `${d} días`));
+    }
+  }
+
+  // 8. Horarios
+  if (cons.primera_comida_prom && cons.ultima_comida_prom) {
+    H.push(npHallazgo('dato', 'Su ventana de comidas',
+      `Primera comida ${cons.primera_comida_prom}, última ${cons.ultima_comida_prom}. Útil si está peleando con hambre nocturna o con el desayuno.`,
+      `${cons.primera_comida_prom} → ${cons.ultima_comida_prom}`));
+  }
+
+  // 9. Bienestar — solo si lo registró
+  const b = a.bienestar || {};
+  if (b.energia != null && b.energia <= 2.5) {
+    H.push(npHallazgo('ojo', 'Reportó energía baja',
+      `Promedio de ${b.energia}/5 esta semana. Con déficit agresivo o proteína baja suele ser lo primero que cae.`, `${b.energia}/5`));
+  } else if (b.energia != null && b.energia >= 4) {
+    H.push(npHallazgo('bien', 'Se sintió con energía', `Promedio de ${b.energia}/5. Buena señal de que el plan le está cayendo bien.`, `${b.energia}/5`));
+  }
+  if (b.hambre != null && b.hambre >= 4) {
+    H.push(npHallazgo('ojo', 'Reportó hambre alta',
+      `Promedio de ${b.hambre}/5. Antes de bajar calorías, mirar proteína y fibra: casi siempre el problema es de saciedad, no de cantidad.`, `${b.hambre}/5`));
+  }
+
+  return H;
+}
+
+// ─── Los alimentos, ordenados por lo que de verdad se pregunta ──────────
+// "Qué le está costando caro" no es lo mismo que "qué come más veces", y
+// ninguno de los dos es "qué le está rindiendo". Son tres preguntas distintas
+// y aquí van las tres, cada una con su número.
+function npRankings(a) {
+  const todos = (a.alimentos || []).filter(f => f.kcal >= NP_MIN_KCAL_ALIMENTO);
+  if (!todos.length) return null;
+
+  // Grasa: qué parte de las calorías de ESE alimento vino de grasa. Sin esto,
+  // el aceite (que es 100% grasa pero poca cantidad) se perdía detrás de
+  // cualquier plato grande.
+  const conGrasa = todos.map(f => ({
+    ...f,
+    pct_grasa: f.kcal > 0 ? Math.round(((f.g * 9) / f.kcal) * 100) : 0,
+    kcal_grasa: Math.round(f.g * 9),
+  }));
+
+  return {
+    // De dónde salieron sus calorías
+    calorico: [...todos].sort((x, y) => y.kcal - x.kcal).slice(0, 5),
+    // Dónde está la grasa — por CANTIDAD de calorías que aporta como grasa
+    graso: [...conGrasa].filter(f => f.g >= 8).sort((x, y) => y.kcal_grasa - x.kcal_grasa).slice(0, 5),
+    // Lo que le rinde: proteína y fibra por caloría
+    eficiente: [...todos].filter(f => f.calidad > 0).sort((x, y) => y.calidad - x.calidad).slice(0, 5),
+    // Lo que le cuesta: muchas calorías, poco aporte
+    flojo: [...todos].filter(f => f.calidad <= 5).sort((x, y) => y.kcal - x.kcal).slice(0, 5),
+    // Azúcar añadida — el único dato de "hinchazón/vacío" que los registros
+    // sostienen de verdad. No inventamos un índice de hinchazón: con lo que
+    // el cliente escribe no se puede medir eso sin mentir.
+    azucar: [...todos].filter(f => f.azucar >= 5).sort((x, y) => y.azucar - x.azucar).slice(0, 5),
+    // Lo que más repite: cambiar aquí pesa más que cualquier alimento nuevo
+    repetido: [...todos].sort((x, y) => y.veces - x.veces).slice(0, 5),
+  };
+}
+
+function npRankCard(titulo, nota, items, valor, unidad, extra) {
+  if (!items || !items.length) return '';
+  const max = Math.max(1, ...items.map(valor));
+  return `
+    <div class="card">
+      <div class="font-bold text-slate-900 text-sm">${titulo}</div>
+      <div class="text-xs text-slate-500 mb-3 mt-0.5">${nota}</div>
+      ${items.map(f => `
+        <div class="py-1.5" style="border-bottom:1px solid #f1f5f9">
+          <div class="flex items-baseline justify-between gap-2">
+            <span class="text-sm font-semibold text-slate-800 truncate">${escapeHtml(f.nombre)}</span>
+            <span class="text-sm font-bold text-slate-900 whitespace-nowrap">${valor(f)}${unidad}</span>
+          </div>
+          <div class="h-1.5 rounded-full mt-1 overflow-hidden bg-slate-100">
+            <div style="width:${(valor(f) / max) * 100}%;height:100%;background:#0E8060;border-radius:999px"></div>
+          </div>
+          <div class="text-[11px] text-slate-400 mt-0.5">${extra(f)}</div>
+        </div>`).join('')}
+    </div>`;
+}
+
+function npVistaLecturas(a) {
+  const H = npLecturas(a);
+  const R = npRankings(a);
+  const r = a.registro || {};
+
+  const tarjetas = H.map(h => {
+    const t = NP_TONOS[h.tono] || NP_TONOS.dato;
+    return `
+      <div class="rounded-xl border ${t.clase} p-3">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="font-bold text-sm ${t.tinta}">${t.icono} ${escapeHtml(h.titulo)}</div>
+            <p class="text-xs text-slate-600 mt-1 leading-relaxed">${escapeHtml(h.detalle)}</p>
+          </div>
+          <span class="text-xs font-bold ${t.tinta} whitespace-nowrap flex-shrink-0">${escapeHtml(h.dato)}</span>
+        </div>
+      </div>`;
+  }).join('');
+
+  const porTono = (t) => H.filter(h => h.tono === t).length;
+
+  return `
+    <div class="card mb-4">
+      <div class="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 class="font-bold text-slate-900">🔎 Lecturas de la semana</h3>
+          <p class="text-xs text-slate-500 mt-1 max-w-2xl">
+            Calculado aquí mismo con lo que ya está cargado — sin consultar al modelo, sin costo y al instante.
+            Cada lectura trae el número que la sustenta, para que puedas decírselo al cliente tal cual.
+          </p>
+        </div>
+        <div class="flex gap-2 text-xs flex-shrink-0">
+          ${porTono('bien') ? `<span class="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-800 font-semibold">✅ ${porTono('bien')} para felicitar</span>` : ''}
+          ${porTono('ojo') ? `<span class="px-2 py-1 rounded-lg bg-amber-50 text-amber-800 font-semibold">⚠️ ${porTono('ojo')} para cuidar</span>` : ''}
+          ${porTono('idea') ? `<span class="px-2 py-1 rounded-lg bg-blue-50 text-blue-800 font-semibold">💡 ${porTono('idea')} para reforzar</span>` : ''}
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-4">${tarjetas}</div>
+    </div>
+
+    ${R ? `
+    <div class="text-xs font-semibold text-slate-500 mb-2 px-1">
+      SUS ALIMENTOS · sobre ${r.dias_con_detalle} ${r.dias_con_detalle === 1 ? 'día' : 'días'} en que registró QUÉ comió, no solo el total
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+      ${npRankCard('🔥 De aquí salieron sus calorías', 'Los cinco que más aportaron. Suelen explicar la semana entera.',
+        R.calorico, f => f.kcal, ' kcal', f => `${f.pct_kcal_detalle}% de lo que registró · ${f.veces} ${f.veces === 1 ? 'vez' : 'veces'}`)}
+      ${npRankCard('🧈 Dónde está la grasa', 'Calorías que aportó como grasa. El aceite y los frutos secos suelen aparecer aquí sin que nadie los note.',
+        R.graso, f => f.kcal_grasa, ' kcal', f => `${f.g} g de grasa · el ${f.pct_grasa}% de sus calorías`)}
+      ${npRankCard('💪 Lo que más le rinde', 'Proteína y fibra por caloría. Estos son los que hay que pedirle que repita.',
+        R.eficiente, f => f.calidad, '', f => `${f.densidad_proteica_pct}% de sus kcal en proteína · ${f.fibra} g de fibra`)}
+      ${npRankCard('🪨 Lo que le cuesta caro', 'Muchas calorías y poco aporte. No para prohibir: para saber dónde hay margen.',
+        R.flojo, f => f.kcal, ' kcal', f => `${f.veces} ${f.veces === 1 ? 'vez' : 'veces'} · ${f.kcal_por_vez} kcal cada vez`)}
+      ${npRankCard('🍬 Azúcar añadida', 'Lo único que los registros permiten medir de verdad por este lado. No es un índice de hinchazón: eso no se puede calcular con lo que el cliente escribe.',
+        R.azucar, f => f.azucar, ' g', f => `${f.veces} ${f.veces === 1 ? 'vez' : 'veces'} esta semana`)}
+      ${npRankCard('🔁 Lo que más repite', 'Su dieta real. Un cambio aquí pesa más que cualquier alimento nuevo.',
+        R.repetido, f => f.veces, '×', f => `${f.kcal} kcal en total · ${f.dias} ${f.dias === 1 ? 'día' : 'días'}`)}
+    </div>` : `
+    <div class="card text-sm text-slate-500">
+      Para los rankings de alimentos hace falta que registre QUÉ comió, no solo el total del día.
+      Esta semana tiene ${r.dias_con_detalle || 0} ${r.dias_con_detalle === 1 ? 'día' : 'días'} con ese desglose.
+    </div>`}
+  `;
+}

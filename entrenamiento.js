@@ -1400,6 +1400,7 @@ async function entVistaClientes() {
     ['calendario', '📅 Calendario'],
     ['rutinas', `📋 Rutinas${rutinas.length ? ` (${rutinas.length})` : ''}`],
     ['sesiones', '✅ Lo que entrenó'],
+    ['lecturas', '🔎 Lecturas'],
     ['fases', '🗂️ Fases'],
   ];
 
@@ -1412,6 +1413,7 @@ async function entVistaClientes() {
     ${_ent.subtab === 'calendario' ? entCalendarioHTML(cliente, fase, rutinas, ejerciciosPorRutina)
       : _ent.subtab === 'rutinas'  ? entListaRutinasHTML(fase, rutinas, ejerciciosPorRutina)
       : _ent.subtab === 'sesiones' ? '<div id="ent-sesiones" class="card text-sm text-slate-400">Leyendo lo que registró…</div>'
+      : _ent.subtab === 'lecturas' ? '<div id="ent-lecturas" class="card text-sm text-slate-400">Calculando…</div>'
       : fases.map(f => entTarjetaFase(f, rutinasPorFase[f.id] || [])).join('')}
 
     <!-- El agente de rutinas se monta aquí si asistente-rutinas.js está
@@ -1421,6 +1423,7 @@ async function entVistaClientes() {
 
   if (typeof rutMontarPanel === 'function') rutMontarPanel();
   if (_ent.subtab === 'sesiones') entPintarSesiones(cliente);
+  if (_ent.subtab === 'lecturas') entPintarLecturas(cliente);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -2054,3 +2057,220 @@ window.verEntrenamientoCliente = (clienteId) => {
   closeModal();
   navigate('entrenamiento');
 };
+
+// ═══════════════════════════════════════════════════════════════════════
+// LECTURAS DE ENTRENAMIENTO  ·  sin agente, sin tokens
+// ═══════════════════════════════════════════════════════════════════════
+// Lo mismo que en Nutrición: lo que uno le pregunta al agente cada semana son
+// las mismas preguntas, y esas no necesitan un modelo — necesitan que alguien
+// las haya calculado. Todo esto sale de `sesiones` y `series_log`, que ya
+// estaban ahí guardando lo que el cliente marca en su app.
+//
+// LA PREGUNTA QUE MÁS IMPORTA: ¿qué ejercicio lleva semanas sin moverse?
+// Un cliente puede entrenar los cuatro días, marcar todo, sentirse bien, y
+// llevar dos meses levantando lo mismo en press banca. Eso no aparece en
+// ninguna gráfica de adherencia — y es exactamente lo que un coach necesita
+// ver para intervenir.
+
+const ENT_ESTANCADO_DIAS = 28;     // sin subir peso en 4 semanas = mirarlo
+const ENT_ESTANCADO_MIN_SES = 3;   // con menos de 3 registros no es un patrón
+
+// El peso más alto que movió en cada sesión, por ejercicio.
+// Se usa el MÁXIMO de la sesión, no el promedio: si hizo 60×10 y luego 50×12
+// como back-off, lo que dice si progresó es el 60.
+function entSeriesPorEjercicio(sesiones, series) {
+  const fechaDe = {};
+  for (const s of sesiones) fechaDe[s.id] = s.fecha;
+  const porEj = new Map();
+  for (const l of series) {
+    if (l.completada === false) continue;
+    const peso = Number(l.peso);
+    if (!Number.isFinite(peso) || peso <= 0) continue;
+    const fecha = fechaDe[l.sesion_id];
+    if (!fecha) continue;
+    const id = l.ejercicio_id;
+    const e = porEj.get(id) || { id, nombre: l.ejercicios?.nombre || 'ejercicio', unidad: l.unidad || 'kg', sesiones: new Map() };
+    const prev = e.sesiones.get(fecha);
+    if (!prev || peso > prev.peso) {
+      e.sesiones.set(fecha, { fecha, peso, reps: Number(l.reps) || null });
+    }
+    porEj.set(id, e);
+  }
+  // Ordenado de la más vieja a la más nueva: la progresión se lee así.
+  for (const e of porEj.values()) {
+    e.puntos = [...e.sesiones.values()].sort((a, b) => a.fecha.localeCompare(b.fecha));
+  }
+  return [...porEj.values()];
+}
+
+function entLecturasDatos(sesiones, series) {
+  const hoy = fmt.hoy();
+  const dias = (a, b) => Math.round((Date.parse(b + 'T12:00:00Z') - Date.parse(a + 'T12:00:00Z')) / 86400000);
+  const ejercicios = entSeriesPorEjercicio(sesiones, series);
+
+  const estancados = [];
+  const progresando = [];
+  const nuevos = [];
+  for (const e of ejercicios) {
+    const p = e.puntos;
+    if (p.length < ENT_ESTANCADO_MIN_SES) { nuevos.push({ ...e, veces: p.length }); continue; }
+    const maximo = Math.max(...p.map(x => x.peso));
+    // Cuándo alcanzó ese máximo por PRIMERA vez: desde ahí no ha subido.
+    const primeraVezEnMax = p.find(x => x.peso === maximo);
+    const diasEnMax = dias(primeraVezEnMax.fecha, hoy);
+    const sesionesDesde = p.filter(x => x.fecha >= primeraVezEnMax.fecha).length;
+    const primero = p[0].peso, ultimo = p[p.length - 1].peso;
+
+    if (diasEnMax >= ENT_ESTANCADO_DIAS && sesionesDesde >= ENT_ESTANCADO_MIN_SES) {
+      estancados.push({ ...e, maximo, diasEnMax, sesionesDesde, desde: primeraVezEnMax.fecha });
+    } else if (ultimo > primero) {
+      progresando.push({ ...e, de: primero, a: ultimo, subida: Math.round((ultimo - primero) * 10) / 10, veces: p.length });
+    }
+  }
+  estancados.sort((a, b) => b.diasEnMax - a.diasEnMax);
+  progresando.sort((a, b) => (b.subida / b.de) - (a.subida / a.de));
+
+  const completadas = sesiones.filter(s => s.estado === 'completada');
+  const sinTerminar = sesiones.filter(s => s.estado && s.estado !== 'completada');
+  const conRpe = completadas.filter(s => s.rpe != null);
+  const rpeProm = conRpe.length ? Math.round((conRpe.reduce((s, x) => s + x.rpe, 0) / conRpe.length) * 10) / 10 : null;
+  // Tres seguidas al límite no es esfuerzo, es una fatiga que hay que mirar.
+  const ultimas = [...completadas].sort((a, b) => b.fecha.localeCompare(a.fecha)).slice(0, 3);
+  const tresAlLimite = ultimas.length === 3 && ultimas.every(s => s.rpe != null && s.rpe >= 9);
+  const ultimaFecha = completadas.length ? completadas.map(s => s.fecha).sort().pop() : null;
+
+  return {
+    ejercicios, estancados, progresando, nuevos,
+    completadas: completadas.length,
+    sinTerminar: sinTerminar.length,
+    rpeProm, tresAlLimite,
+    diasSinEntrenar: ultimaFecha ? dias(ultimaFecha, hoy) : null,
+    notas: sesiones.filter(s => s.notas_cliente && String(s.notas_cliente).trim())
+      .sort((a, b) => b.fecha.localeCompare(a.fecha)).slice(0, 5),
+  };
+}
+
+// ─── La pantalla ────────────────────────────────────────────────────────
+async function entPintarLecturas(cliente) {
+  const caja = $('#ent-lecturas');
+  if (!caja) return;
+
+  const ses = await entDb.sesiones(cliente.id, { limite: 60 });
+  if (ses === null) {
+    caja.innerHTML = `<div class="card text-sm text-slate-500">
+      Todavía no puedo leer las sesiones. Corre <code>schema.sql</code> del módulo de entrenamiento en el Supabase del CRM.</div>`;
+    return;
+  }
+  if (!ses.length) {
+    caja.innerHTML = `<div class="card text-center text-slate-500 py-8">
+      <div class="font-bold text-slate-700 mb-1">Todavía no ha marcado ningún entreno</div>
+      <div class="text-sm">Cuando abra una rutina en su app y marque series, esto se llena solo.</div></div>`;
+    return;
+  }
+
+  const series = await entDb.seriesDeSesiones(ses.map(s => s.id));
+  const d = entLecturasDatos(ses, series);
+
+  const H = [];
+  const push = (tono, titulo, detalle, dato) => H.push({ tono, titulo, detalle, dato });
+
+  if (d.diasSinEntrenar != null && d.diasSinEntrenar >= 10) {
+    push('ojo', `Lleva ${d.diasSinEntrenar} días sin marcar un entreno`,
+      'Puede que esté entrenando y no lo registre, o puede que no esté entrenando. Vale preguntar antes de asumir.', `${d.diasSinEntrenar} días`);
+  } else if (d.completadas >= 8) {
+    push('bien', `${d.completadas} entrenos registrados`,
+      'Constancia sostenida. Es la variable que más pesa en el resultado y la que más cuesta.', `${d.completadas}`);
+  }
+
+  if (d.tresAlLimite) {
+    push('ojo', 'Tres sesiones seguidas al límite',
+      'Esfuerzo percibido de 9 o más en las últimas tres. Sostenido, eso deja de ser intensidad y pasa a ser fatiga acumulada.', 'RPE 9+ ×3');
+  } else if (d.rpeProm != null && d.rpeProm >= 7 && d.rpeProm <= 8.5) {
+    push('bien', 'El esfuerzo está en su punto', `Promedio de ${d.rpeProm}/10. Es el rango donde se entrena de verdad sin quemarse.`, `RPE ${d.rpeProm}`);
+  } else if (d.rpeProm != null && d.rpeProm < 6) {
+    push('idea', 'Podría apretar más', `Esfuerzo promedio de ${d.rpeProm}/10. Si además lleva semanas con los mismos pesos, ahí está la explicación.`, `RPE ${d.rpeProm}`);
+  }
+
+  if (d.sinTerminar >= 3) {
+    push('ojo', `${d.sinTerminar} sesiones que abrió y no terminó`,
+      'Puede ser falta de tiempo, una rutina demasiado larga, o que algo le está molestando. Las tres se arreglan distinto.', `${d.sinTerminar}`);
+  }
+
+  if (d.estancados.length) {
+    const e = d.estancados[0];
+    push('idea', `${e.nombre} lleva ${e.diasEnMax} días en el mismo peso`,
+      `${e.maximo} ${e.unidad} desde ${fmt.fecha(e.desde)}, en ${e.sesionesDesde} sesiones. ${d.estancados.length > 1 ? `Y no es el único: hay ${d.estancados.length} así.` : ''}`,
+      `${e.maximo} ${e.unidad}`);
+  }
+  if (d.progresando.length) {
+    const p = d.progresando[0];
+    push('bien', `Subió en ${p.nombre}`, `De ${p.de} a ${p.a} ${p.unidad} en ${p.veces} sesiones. Eso se le dice.`, `+${p.subida} ${p.unidad}`);
+  }
+
+  const T = {
+    bien: { icono: '✅', clase: 'border-emerald-300 bg-emerald-50', tinta: 'text-emerald-900' },
+    ojo:  { icono: '⚠️', clase: 'border-amber-300 bg-amber-50',   tinta: 'text-amber-900' },
+    idea: { icono: '💡', clase: 'border-blue-300 bg-blue-50',     tinta: 'text-blue-900' },
+  };
+  const tabla = (titulo, nota, filas) => filas.length ? `
+    <div class="card">
+      <div class="font-bold text-slate-900 text-sm">${titulo}</div>
+      <div class="text-xs text-slate-500 mb-2 mt-0.5">${nota}</div>
+      ${filas.join('')}
+    </div>` : '';
+
+  caja.innerHTML = `
+    <div class="card mb-4">
+      <h3 class="font-bold text-slate-900">🔎 Lecturas de su entrenamiento</h3>
+      <p class="text-xs text-slate-500 mt-1 max-w-2xl">
+        Calculado aquí con lo que el cliente ya marcó en su app — sin consultar al modelo y sin costo.
+        Sobre sus últimas ${ses.length} sesiones.
+      </p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-4">
+        ${H.map(h => {
+          const t = T[h.tono];
+          return `<div class="rounded-xl border ${t.clase} p-3">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="font-bold text-sm ${t.tinta}">${t.icono} ${escapeHtml(h.titulo)}</div>
+                <p class="text-xs text-slate-600 mt-1 leading-relaxed">${escapeHtml(h.detalle)}</p>
+              </div>
+              <span class="text-xs font-bold ${t.tinta} whitespace-nowrap flex-shrink-0">${escapeHtml(h.dato)}</span>
+            </div></div>`;
+        }).join('') || '<div class="text-sm text-slate-500">Todavía no hay suficiente historial para sacar lecturas.</div>'}
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      ${tabla('🟰 Llevan tiempo en el mismo peso',
+        `Sin subir en ${ENT_ESTANCADO_DIAS} días o más, con al menos ${ENT_ESTANCADO_MIN_SES} sesiones de por medio. No siempre hay que cambiarlos — pero hay que saberlo.`,
+        d.estancados.slice(0, 8).map(e => `
+          <div class="flex items-center justify-between gap-2 py-1.5" style="border-bottom:1px solid #f1f5f9">
+            <div class="min-w-0">
+              <div class="text-sm font-semibold text-slate-800 truncate">${escapeHtml(e.nombre)}</div>
+              <div class="text-[11px] text-slate-400">${e.sesionesDesde} sesiones desde ${fmt.fecha(e.desde)}</div>
+            </div>
+            <div class="text-right flex-shrink-0">
+              <div class="text-sm font-bold text-amber-700">${e.maximo} ${e.unidad}</div>
+              <div class="text-[11px] text-slate-400">${e.diasEnMax} días</div>
+            </div>
+          </div>`))}
+
+      ${tabla('📈 Sí se movieron', 'Comparando la primera vez que lo hizo con la última, dentro de este historial.',
+        d.progresando.slice(0, 8).map(p => `
+          <div class="flex items-center justify-between gap-2 py-1.5" style="border-bottom:1px solid #f1f5f9">
+            <div class="min-w-0">
+              <div class="text-sm font-semibold text-slate-800 truncate">${escapeHtml(p.nombre)}</div>
+              <div class="text-[11px] text-slate-400">${p.de} → ${p.a} ${p.unidad} · ${p.veces} sesiones</div>
+            </div>
+            <div class="text-sm font-bold text-emerald-700 flex-shrink-0">+${p.subida} ${p.unidad}</div>
+          </div>`))}
+
+      ${tabla('🗣️ Lo que escribió al terminar', 'Sus notas de las últimas sesiones. Aquí es donde avisa de una molestia antes de que sea lesión.',
+        d.notas.map(n => `
+          <div class="py-1.5" style="border-bottom:1px solid #f1f5f9">
+            <div class="text-[11px] text-slate-400">${fmt.fecha(n.fecha)}${n.rutinas?.nombre ? ` · ${escapeHtml(n.rutinas.nombre)}` : ''}${n.rpe != null ? ` · esfuerzo ${n.rpe}/10` : ''}</div>
+            <div class="text-sm text-slate-700">${escapeHtml(n.notas_cliente)}</div>
+          </div>`))}
+    </div>`;
+}

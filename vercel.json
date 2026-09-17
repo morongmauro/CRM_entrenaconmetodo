@@ -4,5 +4,11 @@
   "installCommand": null,
   "outputDirectory": ".",
   "cleanUrls": true,
-  "trailingSlash": false
+  "trailingSlash": false,
+  "crons": [
+    {
+      "path": "/api/cobros-cron",
+      "schedule": "0 11 1 * *"
+    }
+  ]
 }
