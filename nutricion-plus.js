@@ -1408,7 +1408,136 @@ function npLecturas(a) {
       `${cons.primera_comida_prom} → ${cons.ultima_comida_prom}`));
   }
 
-  // 9. Bienestar — solo si lo registró
+  // 9. EL PLATO QUE REPITE — la lectura más accionable de todas.
+  // Un alimento suelto no se cambia; un plato sí. Si su almuerzo es el mismo
+  // cuatro veces por semana, ese plato ES su dieta entre semana, y subirle
+  // 20 g de proteína ahí vale más que cualquier consejo general.
+  const platos = a.platos || [];
+  const plato = platos.find(pl => pl.veces >= 2);
+  if (plato) {
+    const meta_p = meta.p ? Math.round(meta.p / Math.max(3, Math.round(prom.comidas || 4))) : null;
+    const flojo = meta_p && plato.p_prom < meta_p * 0.7;
+    H.push(npHallazgo(flojo ? 'idea' : 'dato', `Su plato de siempre: ${plato.nombre}`,
+      `Lo repitió ${plato.veces} ${plato.veces === 1 ? 'vez' : 'veces'} en ${plato.dias} ${plato.dias === 1 ? 'día' : 'días'}`
+      + `${plato.tipo ? ` (casi siempre en ${plato.tipo}${plato.hora_prom ? `, sobre las ${plato.hora_prom}` : ''})` : ''}. `
+      + `Cada vez: ${plato.kcal_prom} kcal · ${plato.p_prom} g de proteína · ${plato.c_prom} g de carbos · ${plato.g_prom} g de grasa`
+      + `${plato.fibra_prom > 0 ? ` · ${plato.fibra_prom} g de fibra` : ''}. `
+      + (flojo
+        ? `Es el plato que más pesa en su semana y se le queda corto de proteína: ajustar ESTE plato le cambia la semana entera.`
+        : `Es su plato ancla. Cualquier ajuste que le hagas aquí se multiplica por ${plato.veces}.`),
+      `${plato.veces}× · ${plato.kcal_prom} kcal`));
+  }
+
+  // 10. DÓNDE ESTÁ (Y DÓNDE FALTA) LA PROTEÍNA
+  // El promedio diario puede verse bien y aun así tener toda la proteína
+  // concentrada en la cena, que es la peor forma de repartirla.
+  const porComida = (a.comidas_por_tipo || []).filter(c => c.veces >= 2 && c.tipo !== 'sin tipo');
+  if (porComida.length >= 2) {
+    const fuerte = porComida.reduce((x, y) => (y.p_prom > x.p_prom ? y : x));
+    const debil = porComida.reduce((x, y) => (y.p_prom < x.p_prom ? y : x));
+    if (fuerte.p_prom >= 5) {
+      H.push(npHallazgo(debil.p_prom < fuerte.p_prom * 0.4 ? 'idea' : 'dato',
+        `Su proteína se concentra en ${fuerte.tipo}`,
+        `${fuerte.tipo} le aporta ${fuerte.p_prom} g de proteína en promedio (el ${fuerte.pct_prote}% de toda la semana) y ${debil.tipo} solo ${debil.p_prom} g. `
+        + `Repartirla mejor sube la saciedad sin tocar las calorías del día.`,
+        `${fuerte.p_prom} g vs ${debil.p_prom} g`));
+    }
+  }
+
+  // 11. EL DESAYUNO — el sitio donde más veces falta proteína
+  const desayuno = porComida.find(c => c.tipo === 'desayuno');
+  if (desayuno) {
+    if (desayuno.p_prom < 20) {
+      H.push(npHallazgo('idea', 'El desayuno va corto de proteína',
+        `${desayuno.p_prom} g en promedio (${desayuno.kcal_prom} kcal). Por debajo de 20 g casi nadie llega saciado al almuerzo, y es la comida más fácil de arreglar porque suele ser la misma todos los días.`,
+        `${desayuno.p_prom} g`));
+    } else if (desayuno.p_prom >= 30) {
+      H.push(npHallazgo('bien', 'Arranca el día con proteína',
+        `${desayuno.p_prom} g en el desayuno. Es la comida donde más gente falla y él la tiene resuelta.`, `${desayuno.p_prom} g`));
+    }
+  }
+
+  // 12. VARIEDAD Y CONCENTRACIÓN — de cuántos alimentos vive de verdad
+  const v = a.variedad || {};
+  if (v.pct_kcal_top5 != null && v.alimentos_distintos) {
+    if (v.pct_kcal_top5 >= 60) {
+      H.push(npHallazgo('dato', 'Su dieta vive de muy pocos alimentos',
+        `Cinco alimentos explican el ${v.pct_kcal_top5}% de lo que comió, sobre ${v.alimentos_distintos} distintos en la semana. `
+        + `No es bueno ni malo por sí solo: significa que un cambio pequeño en esos cinco mueve casi todo, y también que se aburre pronto.`,
+        `${v.pct_kcal_top5}% en 5`));
+    } else if (v.alimentos_distintos >= 30) {
+      H.push(npHallazgo('bien', 'Come variado',
+        `${v.alimentos_distintos} alimentos distintos y ninguno domina la semana (los cinco primeros son el ${v.pct_kcal_top5}%). La variedad cubre micronutrientes sin que nadie tenga que pensarlo.`,
+        `${v.alimentos_distintos} alimentos`));
+    }
+  }
+  if (v.columna_vertebral && v.columna_vertebral.length) {
+    H.push(npHallazgo('dato', 'Lo que come casi todos los días',
+      `${v.columna_vertebral.slice(0, 6).join(', ')}. Aparecen en 5 días o más: son el esqueleto de su alimentación y lo que hay que respetar al proponerle cambios.`,
+      `${v.columna_vertebral.length} fijos`));
+  }
+
+  // 13. CONTRA LA SEMANA PASADA — la pregunta que siempre se hace
+  const cp = a.comparativa;
+  if (cp) {
+    if (cp.delta_dias >= 2) {
+      H.push(npHallazgo('bien', 'Registró más que la semana pasada',
+        `${r.dias_registrados} días esta semana contra ${cp.dias_registrados} la anterior. El registro es el hábito que sostiene todo lo demás.`,
+        `+${cp.delta_dias} días`));
+    } else if (cp.delta_dias <= -2) {
+      H.push(npHallazgo('ojo', 'Registró menos que la semana pasada',
+        `${r.dias_registrados} días contra ${cp.dias_registrados} la anterior. Antes de leer los números, vale la pena preguntarle qué pasó.`,
+        `${cp.delta_dias} días`));
+    }
+    if (cp.delta_p != null && Math.abs(cp.delta_p) >= 15) {
+      H.push(npHallazgo(cp.delta_p > 0 ? 'bien' : 'ojo',
+        cp.delta_p > 0 ? 'Subió la proteína respecto a la semana pasada' : 'Bajó la proteína respecto a la semana pasada',
+        `${prom.p} g al día esta semana contra ${cp.p} g la anterior.`,
+        `${cp.delta_p > 0 ? '+' : ''}${cp.delta_p} g`));
+    }
+    if (cp.delta_kcal != null && Math.abs(cp.delta_kcal) >= 200) {
+      H.push(npHallazgo('dato',
+        cp.delta_kcal > 0 ? 'Comió más que la semana pasada' : 'Comió menos que la semana pasada',
+        `${prom.kcal} kcal al día contra ${cp.kcal} la anterior. Con dos semanas ya se puede hablar de dirección, no de un día suelto.`,
+        `${cp.delta_kcal > 0 ? '+' : ''}${cp.delta_kcal} kcal`));
+    }
+  }
+
+  // 14. FIBRA Y AZÚCAR AÑADIDA — los dos micros que sí se sostienen
+  if (prom.fibra != null && r.dias_con_detalle >= NP_MIN_DIAS) {
+    if (prom.fibra >= 25) {
+      H.push(npHallazgo('bien', 'La fibra está bien', `${prom.fibra} g al día. Por encima de 25 g se nota en saciedad y en digestión.`, `${prom.fibra} g`));
+    } else if (prom.fibra < 15) {
+      H.push(npHallazgo('idea', 'La fibra está baja',
+        `${prom.fibra} g al día sobre los ${r.dias_con_detalle} días con desglose. Subirla con legumbres, avena, verdura y fruta entera baja el hambre sin quitar comida.`,
+        `${prom.fibra} g`));
+    }
+  }
+  if (prom.azucar != null && r.dias_con_detalle >= NP_MIN_DIAS && prom.azucar >= 25) {
+    H.push(npHallazgo('ojo', 'El azúcar añadida se pasa de la referencia',
+      `${prom.azucar} g al día (la OMS sugiere menos de 25). Esto NO cuenta la fruta entera ni el lácteo natural: es azúcar que alguien le agregó a la comida.`,
+      `${prom.azucar} g`));
+  }
+
+  // 15. AGUA — solo si la registra, y diciendo sobre cuántos días
+  if (prom.agua && prom.dias_agua >= 3) {
+    H.push(npHallazgo(prom.agua >= 2000 ? 'bien' : 'idea',
+      prom.agua >= 2000 ? 'La hidratación está cubierta' : 'Se queda corto de agua',
+      `${(prom.agua / 1000).toFixed(1)} litros al día, sobre ${prom.dias_agua} días en que la registró.`,
+      `${(prom.agua / 1000).toFixed(1)} L`));
+  }
+
+  // 16. Cuántas comidas hace al día
+  if (prom.comidas) {
+    H.push(npHallazgo('dato', `Hace ${prom.comidas} comidas al día`,
+      `Promedio sobre los ${r.dias_con_detalle} días con desglose, con ${prom.items} alimentos registrados por día. `
+      + (prom.comidas <= 2
+        ? 'Con dos comidas cuesta repartir la proteína: casi siempre conviene una más.'
+        : 'Útil para saber en cuántos sitios se puede repartir la proteína del día.'),
+      `${prom.comidas} comidas`));
+  }
+
+  // 17. Bienestar — solo si lo registró
   const b = a.bienestar || {};
   if (b.energia != null && b.energia <= 2.5) {
     H.push(npHallazgo('ojo', 'Reportó energía baja',
@@ -1501,6 +1630,119 @@ function npVistaLecturas(a) {
 
   const porTono = (t) => H.filter(h => h.tono === t).length;
 
+  const platos = (a.platos || []).filter(pl => pl.veces >= 2).slice(0, 6);
+  const porComida = (a.comidas_por_tipo || []).filter(c => c.tipo !== 'sin tipo');
+  const v = a.variedad || {};
+  const cp = a.comparativa;
+
+  // ── Sus platos de siempre ──────────────────────────────────────────────
+  // Lo que pidió el coach: el plato que se repite, cuántas veces y con qué
+  // macros. Un alimento suelto no se cambia; un plato sí.
+  const tarjetaPlatos = platos.length ? `
+    <div class="card mb-3">
+      <div class="font-bold text-slate-900 text-sm">🍽 Sus platos de siempre</div>
+      <div class="text-xs text-slate-500 mb-3 mt-0.5">
+        La combinación completa, no el alimento suelto. Si un plato se repite cuatro veces, ajustar ESE plato vale por cuatro consejos.
+      </div>
+      <div class="overflow-x-auto -mx-1 px-1">
+      <table class="w-full text-sm">
+        <thead><tr class="text-[11px] text-slate-400 uppercase tracking-wide">
+          <th class="text-left font-semibold py-1">Plato</th>
+          <th class="text-right font-semibold">Veces</th>
+          <th class="text-right font-semibold">kcal</th>
+          <th class="text-right font-semibold">P</th>
+          <th class="text-right font-semibold">C</th>
+          <th class="text-right font-semibold">G</th>
+          <th class="text-right font-semibold">Fibra</th>
+        </tr></thead>
+        <tbody>
+        ${platos.map(pl => `
+          <tr style="border-top:1px solid #f1f5f9">
+            <td class="py-1.5 pr-2">
+              <div class="font-semibold text-slate-800 leading-tight">${escapeHtml(pl.nombre)}</div>
+              <div class="text-[11px] text-slate-400">
+                ${pl.tipo ? escapeHtml(pl.tipo) : 'sin tipo'}${pl.hora_prom ? ` · ~${pl.hora_prom}` : ''} · en ${pl.dias} ${pl.dias === 1 ? 'día' : 'días'}
+                · ${pl.densidad_proteica_pct}% de sus kcal en proteína
+              </div>
+            </td>
+            <td class="text-right font-bold text-slate-900 whitespace-nowrap">${pl.veces}×</td>
+            <td class="text-right text-slate-700 whitespace-nowrap">${pl.kcal_prom}</td>
+            <td class="text-right whitespace-nowrap font-semibold ${pl.p_prom >= 30 ? 'text-emerald-600' : pl.p_prom >= 18 ? 'text-slate-700' : 'text-amber-600'}">${pl.p_prom} g</td>
+            <td class="text-right text-slate-500 whitespace-nowrap">${pl.c_prom} g</td>
+            <td class="text-right text-slate-500 whitespace-nowrap">${pl.g_prom} g</td>
+            <td class="text-right text-slate-500 whitespace-nowrap">${pl.fibra_prom} g</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      </div>
+      <div class="text-[11px] text-slate-400 mt-2">
+        Macros por vez, no de la semana. Se cuenta como plato una comida con dos alimentos o más; el orden no importa.
+        ${v.platos_distintos ? `Registró ${v.platos_distintos} combinaciones distintas.` : ''}
+      </div>
+    </div>` : '';
+
+  // ── Cómo reparte el día ────────────────────────────────────────────────
+  const maxKcalComida = Math.max(1, ...porComida.map(c => c.kcal_prom));
+  const tarjetaReparto = porComida.length ? `
+    <div class="card mb-3">
+      <div class="font-bold text-slate-900 text-sm">🕐 Cómo reparte el día</div>
+      <div class="text-xs text-slate-500 mb-3 mt-0.5">
+        Dónde están sus calorías y —más importante— dónde está su proteína. Un promedio diario correcto puede esconder toda la proteína en la cena.
+      </div>
+      ${porComida.map(c => `
+        <div class="py-1.5" style="border-bottom:1px solid #f1f5f9">
+          <div class="flex items-baseline justify-between gap-2">
+            <span class="text-sm font-semibold text-slate-800 capitalize">${escapeHtml(c.tipo)}</span>
+            <span class="text-sm text-slate-900 whitespace-nowrap">
+              <strong>${c.kcal_prom}</strong> kcal
+              <span class="text-slate-400">·</span>
+              <span class="font-semibold ${c.p_prom >= 25 ? 'text-emerald-600' : 'text-slate-600'}">${c.p_prom} g P</span>
+            </span>
+          </div>
+          <div class="h-1.5 rounded-full mt-1 overflow-hidden bg-slate-100">
+            <div style="width:${(c.kcal_prom / maxKcalComida) * 100}%;height:100%;background:#0E8060;border-radius:999px"></div>
+          </div>
+          <div class="text-[11px] text-slate-400 mt-0.5">
+            ${c.veces}× en ${c.dias} ${c.dias === 1 ? 'día' : 'días'}${c.hora_prom ? ` · ~${c.hora_prom}` : ''}
+            · ${c.pct_kcal}% de sus calorías y ${c.pct_prote}% de su proteína
+            · C ${c.c_prom} g · G ${c.g_prom} g
+          </div>
+        </div>`).join('')}
+    </div>` : '';
+
+  // ── Contra la semana pasada ────────────────────────────────────────────
+  const flecha = (n, mejorArriba = true) => {
+    if (n == null || n === 0) return '<span class="text-slate-400">=</span>';
+    const sube = n > 0;
+    const bien = mejorArriba ? sube : !sube;
+    return `<span class="${bien ? 'text-emerald-600' : 'text-amber-600'} font-bold">${sube ? '▲' : '▼'} ${Math.abs(n)}</span>`;
+  };
+  const tarjetaComparativa = cp ? `
+    <div class="card mb-3">
+      <div class="font-bold text-slate-900 text-sm">📈 Contra la semana pasada</div>
+      <div class="text-xs text-slate-500 mb-3 mt-0.5">Misma cuenta, semana anterior. Es la dirección, que casi siempre importa más que el número suelto.</div>
+      <div class="grid grid-cols-3 gap-2 text-center">
+        <div class="bg-slate-50 rounded-xl p-2">
+          <div class="text-[11px] text-slate-400">Días registrados</div>
+          <div class="text-lg font-bold text-slate-900">${a.registro.dias_registrados}<span class="text-xs text-slate-400 font-normal"> vs ${cp.dias_registrados}</span></div>
+          <div class="text-xs">${flecha(cp.delta_dias)}</div>
+        </div>
+        <div class="bg-slate-50 rounded-xl p-2">
+          <div class="text-[11px] text-slate-400">kcal / día</div>
+          <div class="text-lg font-bold text-slate-900">${a.promedio.kcal ?? '—'}<span class="text-xs text-slate-400 font-normal"> vs ${cp.kcal}</span></div>
+          <div class="text-xs">${cp.delta_kcal == null || cp.delta_kcal === 0 ? '<span class="text-slate-400">=</span>' : `<span class="text-slate-600 font-bold">${cp.delta_kcal > 0 ? '▲' : '▼'} ${Math.abs(cp.delta_kcal)}</span>`}</div>
+        </div>
+        <div class="bg-slate-50 rounded-xl p-2">
+          <div class="text-[11px] text-slate-400">Proteína / día</div>
+          <div class="text-lg font-bold text-slate-900">${a.promedio.p ?? '—'}<span class="text-xs text-slate-400 font-normal"> vs ${cp.p}</span></div>
+          <div class="text-xs">${flecha(cp.delta_p)}</div>
+        </div>
+      </div>
+      <div class="text-[11px] text-slate-400 mt-2">
+        Las calorías no tienen flecha de color a propósito: si va en déficit, comer menos es bueno; si va en volumen, es lo contrario. El número está, el juicio es tuyo.
+      </div>
+    </div>` : '';
+
   return `
     <div class="card mb-4">
       <div class="flex items-start justify-between gap-3 flex-wrap">
@@ -1520,6 +1762,10 @@ function npVistaLecturas(a) {
       <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-4">${tarjetas}</div>
     </div>
 
+    ${tarjetaComparativa}
+    ${tarjetaPlatos}
+    ${tarjetaReparto}
+
     ${R ? `
     <div class="text-xs font-semibold text-slate-500 mb-2 px-1">
       SUS ALIMENTOS · sobre ${r.dias_con_detalle} ${r.dias_con_detalle === 1 ? 'día' : 'días'} en que registró QUÉ comió, no solo el total
@@ -1533,10 +1779,10 @@ function npVistaLecturas(a) {
         R.eficiente, f => f.calidad, '', f => `${f.densidad_proteica_pct}% de sus kcal en proteína · ${f.fibra} g de fibra`)}
       ${npRankCard('🪨 Lo que le cuesta caro', 'Muchas calorías y poco aporte. No para prohibir: para saber dónde hay margen.',
         R.flojo, f => f.kcal, ' kcal', f => `${f.veces} ${f.veces === 1 ? 'vez' : 'veces'} · ${f.kcal_por_vez} kcal cada vez`)}
-      ${npRankCard('🍬 Azúcar añadida', 'Lo único que los registros permiten medir de verdad por este lado. No es un índice de hinchazón: eso no se puede calcular con lo que el cliente escribe.',
+      ${npRankCard('🍬 Azúcar añadida', 'Solo el azúcar que alguien le AGREGÓ a la comida. La fruta entera, el lácteo natural y la verdura no suman aquí: su azúcar viene con fibra y agua, y ninguna guía la cuenta.',
         R.azucar, f => f.azucar, ' g', f => `${f.veces} ${f.veces === 1 ? 'vez' : 'veces'} esta semana`)}
       ${npRankCard('🔁 Lo que más repite', 'Su dieta real. Un cambio aquí pesa más que cualquier alimento nuevo.',
-        R.repetido, f => f.veces, '×', f => `${f.kcal} kcal en total · ${f.dias} ${f.dias === 1 ? 'día' : 'días'}`)}
+        R.repetido, f => f.veces, '×', f => `${f.kcal_por_vez} kcal por vez · P ${f.p} g · C ${f.c} g · G ${f.g} g · en ${f.dias} ${f.dias === 1 ? 'día' : 'días'}`)}
     </div>` : `
     <div class="card text-sm text-slate-500">
       Para los rankings de alimentos hace falta que registre QUÉ comió, no solo el total del día.

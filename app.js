@@ -391,23 +391,84 @@ const JOURNEY_STEPS = [
 const CENTRO_SUPA_URL = 'https://kkoayfexdhpazufmyeoj.supabase.co';
 const CENTRO_SUPA_KEY = 'sb_publishable_9UimuwTGp2aIhe-4oSwJpw_ORwmzzhn';
 
-// Catálogo de cápsulas publicadas en el centro. Es la copia de
-// capsulas/capsulas.js del repo del Centro de Recursos, y sirve para saber
-// cuáles FALTAN por ver, no solo cuáles vio.
-// >>> Si publicas una cápsula nueva allá, añade aquí su id y su título. <<<
-// Si se te olvida no se rompe nada: una cápsula vista que no esté en esta
-// lista igual aparece, con el título que traiga el registro.
+// ── CATÁLOGO DEL CENTRO DE APRENDIZAJE ────────────────────────────────
+// Copia de lo que hay publicado en el repo del Centro de Recursos. Sirve
+// para saber qué le FALTA a cada cliente, no solo qué vio.
+//
+// >>> Si publicas algo nuevo allá, añádelo aquí con su id y su título. <<<
+// Si se te olvida no se rompe nada: lo que el cliente vio aparece igual,
+// bajo "Otras", con el título que traiga el registro.
+//
+// OJO: los `id` tienen que ser EXACTAMENTE los de `capsulas/capsulas.js` y
+// `podcast/podcasts.js` del otro repo. Antes estaban puestos a ojo
+// ('nutricion-proteina' en vez de 'nut-07-cada-macro') y el resultado era
+// que el CRM decía 0/10 siempre y mandaba todo lo visto al cajón de "Otras".
 const CENTRO_CAPSULAS = [
-  { id: 'nutricion-proteina',   cat: 'Nutrición',     title: 'Proteína: cuánta y cuándo' },
-  { id: 'nutricion-plato',      cat: 'Nutrición',     title: 'El plato balanceado, en 3 pasos' },
-  { id: 'entreno-sobrecarga',   cat: 'Entrenamiento', title: 'Cómo elegir el peso y progresar' },
-  { id: 'entreno-orden',        cat: 'Entrenamiento', title: 'El orden de los ejercicios importa' },
-  { id: 'entreno-rpe',          cat: 'Entrenamiento', title: 'RPE: entrena con percepción' },
-  { id: 'entreno-maquinas',     cat: 'Entrenamiento', title: 'Configura la máquina antes de la serie' },
-  { id: 'entreno-herramientas', cat: 'Entrenamiento', title: 'Bandas, kettlebell y mancuernas' },
-  { id: 'movilidad-para-que',   cat: 'Movilidad',     title: 'Movilidad: para qué sirve de verdad' },
-  { id: 'habitos-sueno',        cat: 'Hábitos',       title: 'Dormir es entrenar' },
-  { id: 'habitos-pasos',        cat: 'Hábitos',       title: 'Pasos diarios: el cardio invisible' },
+  { id: 'ent-01-capacidades',   cat: 'Entrenamiento',     title: 'Las cinco capacidades' },
+  { id: 'ent-02-crece-musculo', cat: 'Entrenamiento',     title: 'Cómo crece el músculo' },
+  { id: 'ent-03-lenguaje-rutina', cat: 'Entrenamiento',   title: 'El lenguaje de tu rutina' },
+  { id: 'ent-04-subir-peso',    cat: 'Entrenamiento',     title: 'Cuándo subir el peso' },
+  { id: 'ent-05-orden-sesion',  cat: 'Entrenamiento',     title: 'El orden de la sesión' },
+  { id: 'ent-06-entiende-rutina', cat: 'Entrenamiento',   title: 'Entiende tu rutina' },
+  { id: 'nut-07-cada-macro',    cat: 'Nutrición',         title: 'Cuánto de cada macro' },
+  { id: 'nut-08-grasa-y-musculo', cat: 'Nutrición',       title: 'Perder grasa y ganar músculo' },
+  { id: 'nut-09-comer-sin-pesar', cat: 'Nutrición',       title: 'Comer bien sin pesar' },
+  { id: 'bie-10-dormir-mejor',  cat: 'Bienestar general', title: 'Dormir mejor con lo que tienes' },
+  { id: 'bie-11-muevete-fuera', cat: 'Bienestar general', title: 'Muévete fuera del gimnasio' },
+];
+
+// Capítulos de la guía de alimentación. La llave es el `data-section` del
+// capítulo en guiaalimentacion.html.
+const CENTRO_GUIA = [
+  { id: 'no-es-una-decision-aislada-es-un-sistema', cat: 'Apertura', title: 'No es una decisión aislada, es un sistema' },
+  { id: 'como-leer-esta-guia', cat: 'Apertura', title: 'Cómo leer esta guía' },
+  { id: 'capitulo-1-antes-de-cambiar-tu-alimentacion-entiende-tu-cuer', cat: 'Capítulos', title: 'Cap. 1 · Antes de cambiar tu alimentación, entiende tu cuerpo' },
+  { id: 'capitulo-2-nutrientes-y-alimentos-como-tomar-buenas-decision', cat: 'Capítulos', title: 'Cap. 2 · Nutrientes y alimentos: cómo tomar buenas decisiones' },
+  { id: 'capitulo-3-como-gestionar-tu-alimentacion-en-la-vida-real', cat: 'Capítulos', title: 'Cap. 3 · Cómo gestionar tu alimentación en la vida real' },
+  { id: 'capitulo-4-adherencia-lo-que-sostiene-los-resultados', cat: 'Capítulos', title: 'Cap. 4 · Adherencia: lo que sostiene los resultados' },
+  { id: 'capitulo-5-dormir-y-recuperar-el-motor-de-tu-progreso', cat: 'Capítulos', title: 'Cap. 5 · Dormir y recuperar: el motor de tu progreso' },
+  { id: 'capitulo-6-salud-digestiva-funcional', cat: 'Capítulos', title: 'Cap. 6 · Salud digestiva funcional' },
+  { id: 'capitulo-7-suplementos-menos-ruido-mas-criterio', cat: 'Capítulos', title: 'Cap. 7 · Suplementos: menos ruido, más criterio' },
+  { id: 'bonus-1-alcohol-la-variable-subestimada', cat: 'Bonus', title: 'Bonus 1 · Alcohol: la variable subestimada' },
+  { id: 'bonus-2-ayuno-cuando-tiene-sentido', cat: 'Bonus', title: 'Bonus 2 · Ayuno: cuándo tiene sentido' },
+  { id: 'bonus-3-como-leer-etiquetas-y-no-caer-en-marketing', cat: 'Bonus', title: 'Bonus 3 · Cómo leer etiquetas y no caer en marketing' },
+  { id: 'cierre-criterio-metodo-y-aplicacion', cat: 'Cierre', title: 'Cierre: criterio, método y aplicación' },
+  { id: 'aviso-legal-y-uso-del-material', cat: 'Cierre', title: 'Aviso legal y uso del material' },
+  { id: 'referencias-y-fuentes', cat: 'Cierre', title: 'Referencias y fuentes' },
+];
+
+// Episodios recomendados del centro (podcast/podcasts.js).
+const CENTRO_PODCASTS = [
+  { id: 'etiquetas-leer-1', cat: 'Nutrición', title: 'Leer etiquetas sin que te engañen (1 de 2)' },
+  { id: 'etiquetas-leer-2', cat: 'Nutrición', title: 'Leer etiquetas: el tutorial (2 de 2)' },
+  { id: 'compra-yogures', cat: 'Nutrición', title: 'Kéfir, griego, proteico o desnatado: cuál elegir' },
+  { id: 'compra-cafe', cat: 'Nutrición', title: 'Qué café comprar y cuál no' },
+  { id: 'cafe-beneficios', cat: 'Nutrición', title: 'Los beneficios del café, uno por uno' },
+  { id: 'vinagre-manzana', cat: 'Nutrición', title: 'Vinagre de manzana: ¿es para tanto?' },
+  { id: 'suple-colageno', cat: 'Nutrición', title: 'Qué colágeno elegir, según para qué lo quieres' },
+  { id: 'suple-creatina-mayores', cat: 'Nutrición', title: 'Creatina después de los 70' },
+  { id: 'suple-magnesio-senales', cat: 'Nutrición', title: 'Calambres, insomnio y antojos de dulce: ¿te falta magnesio?' },
+  { id: 'suple-magnesio-cual', cat: 'Nutrición', title: 'Qué magnesio tomar y cuál no' },
+  { id: 'nutricion-ayuno', cat: 'Nutrición', title: '¿Qué rompe el ayuno intermitente?' },
+  { id: 'ayuno-siete-dias', cat: 'Nutrición', title: 'Qué pasa en el cuerpo con siete días de ayuno' },
+  { id: 'hormona-hambre', cat: 'Nutrición', title: 'La hormona del hambre: por qué no paras de comer' },
+  { id: 'nutricion-grasas', cat: 'Nutrición', title: 'Las grasas, más allá de las calorías' },
+  { id: 'salud-metabolica-inmune', cat: 'Nutrición', title: 'Salud metabólica y sistema inmune' },
+  { id: 'hub-esencial-grasa', cat: 'Nutrición', title: 'Perder grasa: lo que de verdad mueve la aguja' },
+  { id: 'hub-norton-comer', cat: 'Nutrición', title: 'Comer para perder grasa y ganar músculo' },
+  { id: 'hub-lustig-azucar', cat: 'Nutrición', title: 'Qué le hace el azúcar añadido a tu cuerpo' },
+  { id: 'deportistas', cat: 'Entrenamiento', title: 'Si entrenas en serio, esto va para ti' },
+  { id: 'hub-cavaliere-plan', cat: 'Entrenamiento', title: 'Cómo se arma un plan de entrenamiento que sirve' },
+  { id: 'dormir-descanso', cat: 'Bienestar general', title: 'Duermes ocho horas y sigues cansado' },
+  { id: 'dolor-menstrual', cat: 'Bienestar general', title: 'Dolor menstrual: alimentos y suplementos que ayudan' },
+  { id: 'hormonas-testosterona', cat: 'Bienestar general', title: 'Testosterona: qué la baja y qué la sostiene' },
+  { id: 'hub-walker-sueno', cat: 'Bienestar general', title: 'Cuántas horas necesitas dormir tú' },
+  { id: 'hub-calor-sauna', cat: 'Bienestar general', title: 'Sauna y calor: qué gana el cuerpo' },
+  { id: 'hub-goggins-fuerza', cat: 'Bienestar general', title: 'De dónde sale la fuerza mental' },
+  { id: 'hub-conti-salud-mental', cat: 'Bienestar general', title: 'Cuidar tu salud mental, en concreto' },
+  { id: 'hub-suzuki-memoria', cat: 'Bienestar general', title: 'Atención y memoria: cómo se entrenan' },
+  { id: 'hub-ferriss-aprender', cat: 'Bienestar general', title: 'Aprender mejor y elegir tu rumbo' },
+  { id: 'hub-musica-animo', cat: 'Bienestar general', title: 'La música como palanca de ánimo' },
 ];
 
 let _centroLecturas = null;   // cache de sesión: todas las filas del centro
@@ -423,7 +484,11 @@ function cargarLecturasCentro() {
   const pedir = (cols) => fetch(`${CENTRO_SUPA_URL}/rest/v1/reading_state?select=${cols}`, { headers });
   _centroPendiente = (async () => {
     try {
-      let r = await pedir('client_name,source,section_key,section_label');
+      // `*` primero: la vista puede tener una fecha (y queremos saber CUÁNDO
+      // lo vio, no solo que lo vio), y su nombre no lo controlamos desde
+      // aquí. Si `*` no estuviera permitido, se cae a las columnas seguras.
+      let r = await pedir('*');
+      if (!r.ok) r = await pedir('client_name,source,section_key,section_label');
       if (!r.ok) r = await pedir('client_name,source,section_key');
       _centroLecturas = r.ok ? await r.json() : [];
     } catch (e) {
@@ -435,6 +500,19 @@ function cargarLecturasCentro() {
   return _centroPendiente;
 }
 
+// La fecha de una fila, venga con el nombre de columna que venga. Devuelve
+// 'YYYY-MM-DD' o null si la vista no expone ninguna fecha.
+function centroFechaFila(f) {
+  for (const k of ['last_at', 'updated_at', 'created_at', 'first_at', 'seen_at', 'read_at', 'fecha', 'ts']) {
+    const v = f && f[k];
+    if (v) {
+      const t = String(v).slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+    }
+  }
+  return null;
+}
+
 // Devuelve TODO lo que el centro sabe de un cliente: los hitos que usa el
 // journey y, además, el detalle de cápsulas y podcast para la trazabilidad.
 async function fetchLecturasCentro(nombre) {
@@ -443,42 +521,66 @@ async function fetchLecturasCentro(nombre) {
   const buscado = normalizeName(nombre);
   const filas = todas.filter(f => normalizeName(f.client_name) === buscado);
 
-  // Cápsulas: la llave viaja como 'cap:<id>'
-  const vistasCap = new Map();
-  filas.filter(f => f.source === 'capsula').forEach(f => {
-    const id = String(f.section_key || '').replace(/^cap:/, '');
-    if (id) vistasCap.set(id, f.section_label || null);
-  });
-  const capsulas = CENTRO_CAPSULAS.map(c => ({
-    id: c.id, cat: c.cat, title: c.title, vista: vistasCap.has(c.id),
-  }));
-  // Cápsulas vistas que no están en el catálogo de arriba (publicaste una
-  // nueva en el centro y no la copiaste aquí): se muestran igual.
-  vistasCap.forEach((label, id) => {
-    if (!CENTRO_CAPSULAS.some(c => c.id === id)) {
-      capsulas.push({ id, cat: 'Otras', title: label || id, vista: true });
-    }
-  });
+  // Cruza un catálogo con lo que el cliente vio. Devuelve el catálogo
+  // completo marcado, más lo que vio y no está en el catálogo (publicaste
+  // algo nuevo allá y no lo copiaste aquí): eso no se pierde, va a "Otras".
+  const cruzar = (catalogo, fuente, prefijo) => {
+    const vistas = new Map();
+    filas.filter(f => fuente.includes(f.source)).forEach(f => {
+      const id = String(f.section_key || '').replace(prefijo, '');
+      if (id) vistas.set(id, { label: f.section_label || null, fecha: centroFechaFila(f) });
+    });
+    const lista = catalogo.map(c => ({
+      id: c.id, cat: c.cat, title: c.title,
+      vista: vistas.has(c.id),
+      fecha: vistas.get(c.id)?.fecha || null,
+    }));
+    vistas.forEach((v, id) => {
+      if (!catalogo.some(c => c.id === id)) {
+        lista.push({ id, cat: 'Otras', title: v.label || id, vista: true, fecha: v.fecha });
+      }
+    });
+    return lista;
+  };
 
-  // Podcast: llave 'pod:<id>'. No hay catálogo, así que solo se listan los
-  // que sí vio, con el título que quedó registrado.
-  const podcasts = filas.filter(f => f.source === 'podcast').map(f => {
-    const id = String(f.section_key || '').replace(/^pod:/, '');
-    return { id, title: f.section_label || id };
-  });
+  // OJO con las fuentes de la guía: el Centro escribe source='guia'. El CRM
+  // solo miraba 'ga', así que la guía SIEMPRE salía en cero y el paso del
+  // journey "Leyó la guía de alimentación" no se marcaba nunca. Se aceptan
+  // las dos por si quedan filas viejas.
+  const capsulas = cruzar(CENTRO_CAPSULAS, ['capsula'], /^cap:/);
+  const guia = cruzar(CENTRO_GUIA, ['guia', 'ga'], /^$/);
+  const podcasts = cruzar(CENTRO_PODCASTS, ['podcast'], /^pod:/);
 
+  const hubFilas = filas.filter(f => f.source === 'hub');
+  const hub = hubFilas.map(f => f.section_key);
   const capsVistas = capsulas.filter(c => c.vista).length;
+  const guiaVistos = guia.filter(c => c.vista).length;
+  const podVistos = podcasts.filter(c => c.vista).length;
+
+  // La última señal de vida en el centro, sea de lo que sea.
+  const fechas = filas.map(centroFechaFila).filter(Boolean).sort();
+  const ultima = fechas.length ? fechas[fechas.length - 1] : null;
+
   return {
     onboarding: filas.some(f => f.source === 'hub' && f.section_key === 'programa'),
     faq: filas.some(f => f.source === 'hub' && f.section_key === 'faq'),
-    guia: filas.some(f => f.source === 'ga'),
-    // Detalle para el panel de trazabilidad
-    hub: filas.filter(f => f.source === 'hub').map(f => f.section_key),
-    guiaCaps: filas.filter(f => f.source === 'ga').length,
+    guia: guiaVistos > 0,
+    entro: filas.some(f => f.source === 'entrada'),
+    // Detalle para el panel de trazabilidad y para el módulo de aprendizaje
+    hub,
+    hubTotal: 5,
+    guiaCaps: guiaVistos,      // nombre histórico: lo usa el panel de la ficha
+    guiaDetalle: guia,
+    guiaTotal: guia.filter(c => c.cat !== 'Otras').length,
     capsulas,
     capsVistas,
     capsTotal: capsulas.length,
-    podcasts,
+    podcasts: podcasts.filter(p => p.vista),   // el panel viejo solo lista los vistos
+    podcastDetalle: podcasts,
+    podVistos,
+    podTotal: podcasts.filter(c => c.cat !== 'Otras').length,
+    piezas: capsVistas + guiaVistos + podVistos + hub.length,
+    ultima,
   };
 }
 
@@ -555,14 +657,21 @@ async function cargarPanelCentro(cliente) {
   el2.innerHTML = `
     <div class="flex gap-1.5 flex-wrap mb-2">
       ${chipCentro('🚀 Onboarding', hubHechas, CENTRO_HUB_SECCIONES.length, 'Secciones del onboarding y preguntas frecuentes')}
-      ${chipCentro('📖 Guía', lec.guiaCaps, 0, 'Capítulos leídos de la guía de alimentación')}
+      ${chipCentro('📖 Guía', lec.guiaCaps, lec.guiaTotal, 'Capítulos leídos de la guía de alimentación')}
       ${chipCentro('🖼️ Cápsulas', lec.capsVistas, lec.capsTotal, 'Infografías abiertas')}
-      ${lec.podcasts.length ? chipCentro('🎧 Podcast', lec.podcasts.length, 0, 'Episodios abiertos') : ''}
+      ${chipCentro('🎧 Podcast', lec.podVistos, lec.podTotal, 'Episodios abiertos')}
     </div>
 
     <div class="mb-2">
       <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">Onboarding</div>
       ${CENTRO_HUB_SECCIONES.map(([k, t]) => lineaMaterial(t, lec.hub.includes(k))).join('')}
+    </div>
+
+    <div class="mb-2">
+      <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">
+        Guía de alimentación · ${lec.guiaCaps} de ${lec.guiaTotal} capítulos
+      </div>
+      ${(lec.guiaDetalle || []).map(c => lineaMaterial(c.title, c.vista)).join('')}
     </div>
 
     <div class="mb-2">
@@ -586,6 +695,9 @@ async function cargarPanelCentro(cliente) {
 
     <div class="flex items-center justify-between gap-2 mt-2">
       <div class="text-[10px] text-slate-400 flex-1">Se registra solo cuando el cliente abre cada pieza en el Centro de Recursos. Si entra desde otro teléfono, el avance lo sigue igual.</div>
+      ${typeof verAprendizajeCliente === 'function'
+        ? `<button type="button" class="tag flex-shrink-0" style="background:#ecfdf5;color:#065f46" onclick="verAprendizajeCliente('${cliente.id}')" title="Compararlo con el resto de clientes">📚 ver en aprendizaje</button>`
+        : ''}
       <button type="button" class="tag flex-shrink-0" style="background:#e0f2fe;color:#075985" onclick="refrescarCentro()" title="Volver a consultar el centro">↻ actualizar</button>
     </div>
   `;
@@ -8688,12 +8800,139 @@ const NUT_MICRO_DB = {
   'pastel': { fiber: 0.01, omega3: 0, sugar: 0.35 },
   'dulce': { fiber: 0, omega3: 0, sugar: 0.55 },
   'miel': { fiber: 0, omega3: 0, sugar: 0.82 },
+  'panela': { fiber: 0, omega3: 0, sugar: 0.95 },
+  'azucar': { fiber: 0, omega3: 0, sugar: 1.0 },
+  'mermelada': { fiber: 0.01, omega3: 0, sugar: 0.49 },
+  'arequipe': { fiber: 0, omega3: 0, sugar: 0.50 },
+  // Fruta y verdura: aquí están por su FIBRA. Todas con azúcar añadida 0 —
+  // la fructosa de la fruta entera no es azúcar añadida.
+  'mango': { fiber: 0.016, omega3: 0, sugar: 0 },
+  'papaya': { fiber: 0.017, omega3: 0, sugar: 0 },
+  'pina': { fiber: 0.014, omega3: 0, sugar: 0 },
+  'sandia': { fiber: 0.004, omega3: 0, sugar: 0 },
+  'melon': { fiber: 0.009, omega3: 0, sugar: 0 },
+  'uva': { fiber: 0.009, omega3: 0, sugar: 0 },
+  'fresa': { fiber: 0.02, omega3: 0, sugar: 0 },
+  'mora': { fiber: 0.053, omega3: 0, sugar: 0 },
+  'arandano': { fiber: 0.024, omega3: 0, sugar: 0 },
+  'naranja': { fiber: 0.024, omega3: 0, sugar: 0 },
+  'mandarina': { fiber: 0.018, omega3: 0, sugar: 0 },
+  'pera': { fiber: 0.031, omega3: 0, sugar: 0 },
+  'kiwi': { fiber: 0.03, omega3: 0.0004, sugar: 0 },
+  'durazno': { fiber: 0.015, omega3: 0, sugar: 0 },
+  'guayaba': { fiber: 0.054, omega3: 0, sugar: 0 },
+  'zanahoria': { fiber: 0.028, omega3: 0, sugar: 0 },
+  'lechuga': { fiber: 0.013, omega3: 0.0001, sugar: 0 },
+  'pepino': { fiber: 0.005, omega3: 0, sugar: 0 },
+  'ahuyama': { fiber: 0.011, omega3: 0, sugar: 0 },
+  'papa': { fiber: 0.018, omega3: 0, sugar: 0 },
+  'yuca': { fiber: 0.018, omega3: 0, sugar: 0 },
+  'garbanzo': { fiber: 0.076, omega3: 0.001, sugar: 0 },
+  'quinua': { fiber: 0.028, omega3: 0.0009, sugar: 0 },
 };
 
+// ── AZÚCAR AÑADIDA: la capa determinística ──────────────────────────────
+// Gemela de la de src/foods.js del Mealtracker (misma regla, mismo
+// resultado: los dos tableros tienen que decir el mismo número).
+//
+// El problema que resuelve: el campo `sugar` de cada item lo estima el
+// modelo al registrar la comida, y devolvía la fructosa de la fruta entera
+// — un banano entraba con 12-14 g y encabezaba "🍬 Azúcar añadida", con lo
+// que el coach terminaba señalándole la fruta al cliente. La fructosa de la
+// fruta entera NO es azúcar añadida: viene con fibra y agua, y ni la OMS ni
+// la AHA la cuentan en el techo de azúcares libres. Lo que cuenta es lo que
+// alguien le AGREGA a la comida.
+const nutNormTxt = (s) => String(s || '')
+  .toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9ñ ]/g, ' ').replace(/\s+/g, ' ').trim();
+
+// Marcas que delatan azúcar agregada aunque la base sea fruta.
+const NUT_MARCAS_AZUCAR = ['con azucar', 'azucarad', 'endulzad', 'almibar', 'confitad',
+  'cristalizad', 'caramelizad', 'acaramelad', 'glasead', 'con miel', 'con panela',
+  'con arequipe', 'leche condensada', 'sirope', 'jarabe', 'melao', 'melaza',
+  'con mermelada', 'con chocolate', 'con nutella', 'con dulce', 'con helado'];
+// Y las que confirman lo contrario (van primero: "café sin azúcar" contiene
+// la palabra "azucar").
+const NUT_MARCAS_SIN_AZUCAR = ['sin azucar', 'sin azucares', 'sin endulzar', 'cero azucar', 'zero'];
+
+// Comida entera: nada de esto lleva azúcar añadida por definición.
+const NUT_ENTEROS = new Set([
+  'banano', 'banana', 'bananos', 'guineo', 'platano', 'maduro', 'manzana', 'manzanas',
+  'pera', 'peras', 'naranja', 'naranjas', 'mandarina', 'mandarinas', 'limon', 'lima',
+  'toronja', 'pomelo', 'mango', 'mangos', 'papaya', 'pina', 'sandia', 'melon',
+  'uva', 'uvas', 'fresa', 'fresas', 'frutilla', 'frutillas', 'mora', 'moras',
+  'arandano', 'arandanos', 'frambuesa', 'frambuesas', 'kiwi', 'kiwis', 'durazno',
+  'duraznos', 'melocoton', 'ciruela', 'ciruelas', 'cereza', 'cerezas', 'granadilla',
+  'maracuya', 'lulo', 'guayaba', 'guanabana', 'curuba', 'feijoa', 'mamey', 'nispero',
+  'chirimoya', 'higo', 'higos', 'datil', 'datiles', 'coco', 'aguacate', 'palta',
+  'fruta', 'frutas', 'macedonia',
+  'tomate', 'tomates', 'lechuga', 'espinaca', 'espinacas', 'acelga', 'kale', 'rucula',
+  'brocoli', 'coliflor', 'repollo', 'col', 'zanahoria', 'zanahorias', 'pepino',
+  'calabacin', 'zapallo', 'ahuyama', 'auyama', 'calabaza', 'berenjena', 'pimenton',
+  'pimiento', 'cebolla', 'ajo', 'apio', 'esparragos', 'habichuela', 'habichuelas',
+  'arveja', 'arvejas', 'champinon', 'champinones', 'hongos', 'remolacha', 'rabano',
+  'verdura', 'verduras', 'vegetales', 'ensalada',
+  'papa', 'papas', 'yuca', 'batata', 'camote', 'name', 'arracacha', 'arroz', 'quinua',
+  'quinoa', 'avena', 'maiz', 'mazorca', 'pasta', 'espagueti', 'fideos', 'macarrones',
+  'frijol', 'frijoles', 'lenteja', 'lentejas', 'garbanzo', 'garbanzos', 'haba', 'habas',
+  'soya', 'edamame',
+  'pollo', 'pechuga', 'muslo', 'pavo', 'carne', 'res', 'lomo', 'cerdo', 'pescado',
+  'salmon', 'atun', 'tilapia', 'mojarra', 'trucha', 'sardina', 'camaron', 'camarones',
+  'huevo', 'huevos', 'clara', 'claras',
+  'almendra', 'almendras', 'nuez', 'nueces', 'mani', 'cacahuate', 'pistacho',
+  'pistachos', 'avellana', 'avellanas', 'chia', 'linaza', 'ajonjoli', 'semillas',
+  'leche', 'yogur', 'yogurt', 'kefir', 'queso', 'quesito', 'cuajada', 'requeson',
+  'aceite', 'mantequilla', 'ghee', 'agua', 'cafe', 'tinto', 'te', 'aromatica',
+].map(nutNormTxt));
+
+// Productos donde el azúcar añadida es la regla, aunque el nombre mencione
+// una fruta ("jugo de mango", "torta de banano").
+const NUT_VETO = new Set([
+  'jugo', 'zumo', 'batido', 'smoothie', 'malteada', 'gaseosa', 'refresco', 'soda',
+  'coca', 'pepsi', 'limonada', 'torta', 'pastel', 'ponque', 'galleta', 'galletas',
+  'helado', 'postre', 'dulce', 'dulces', 'bombon', 'chocolatina', 'chocolate',
+  'mermelada', 'arequipe', 'manjar', 'compota', 'nectar', 'cereal', 'granola',
+  'barra', 'barrita', 'panela', 'azucar', 'miel', 'flan', 'gelatina', 'brownie',
+  'muffin', 'donut', 'dona', 'churro', 'bocadillo', 'obleas', 'ketchup', 'salsa',
+].map(nutNormTxt));
+const NUT_VETO_FRASES = ['empanada dulce', 'avena en leche', 'arroz con leche',
+  'leche condensada', 'cereal de caja', 'leche saborizada'].map(nutNormTxt);
+const NUT_VETO_REGEX = [/\byogur(?:t)?\s+de\s+(?!cabra|oveja|bufala|vaca)/, /\bleche\s+de\s+sabor/];
+// Excepciones: llevan palabra vetada pero son comida entera ("maíz dulce"),
+// o son jugo sin azúcar agregada.
+const NUT_PESE_AL_VETO = ['maiz dulce', 'mazorca dulce', 'batata dulce', 'papa dulce',
+  'camote dulce', 'aji dulce', 'pimenton dulce', 'pimiento dulce', 'limon dulce',
+  'jugo natural', 'zumo natural', 'jugo exprimido', 'jugo recien exprimido',
+  'jugo de limon'].map(nutNormTxt);
+
+// ¿Es comida entera sin azúcar agregada? Solo devuelve true cuando estamos
+// SEGUROS: ante la duda, false y se respeta lo que estimó el modelo.
+function nutEsComidaEntera(nombre) {
+  const n = nutNormTxt(nombre);
+  if (!n) return false;
+  if (NUT_MARCAS_SIN_AZUCAR.some(m => n.includes(m))) return true;
+  if (NUT_MARCAS_AZUCAR.some(m => n.includes(m))) return false;
+  if (NUT_PESE_AL_VETO.some(f => n.includes(f))) return true;
+  if (NUT_ENTEROS.has(n)) return true;
+  if (NUT_VETO_FRASES.some(f => n.includes(f))) return false;
+  if (NUT_VETO_REGEX.some(re => re.test(n))) return false;
+  const palabras = n.split(' ').filter(Boolean);
+  if (!palabras.length) return false;
+  if (palabras.some(p => NUT_VETO.has(p))) return false;
+  return palabras.some(p => NUT_ENTEROS.has(p));
+}
+
+// Antes comparaba con `toLowerCase()` a secas y con includes(): "café sin
+// azucar" caía en la llave 'azucar' (1 g de azúcar por gramo de café) y
+// "maíz dulce" en 'dulce'. Ahora normaliza tildes, va de la llave más larga
+// a la más corta y exige que calce en límite de palabra.
+const NUT_MICRO_KEYS = Object.keys(NUT_MICRO_DB).sort((a, b) => b.length - a.length);
 function nutMicroKey(name) {
-  if (!name) return null;
-  const n = String(name).toLowerCase();
-  for (const key of Object.keys(NUT_MICRO_DB)) if (n.includes(key)) return key;
+  const n = nutNormTxt(name);
+  if (!n) return null;
+  for (const key of NUT_MICRO_KEYS) {
+    if (new RegExp(`(^| )${key}( |$)`).test(n)) return key;
+  }
   return null;
 }
 
@@ -8708,11 +8947,15 @@ function nutGramos(it) {
 }
 
 function nutMicrosItem(it) {
+  // La azúcar AÑADIDA se recalcula SIEMPRE, también sobre lo ya guardado:
+  // las semanas viejas traen el número del modelo (un banano con 14 g) y son
+  // justo las que el coach está mirando cuando lee la semana.
+  const entera = nutEsComidaEntera(it.name);
   if (it.fiber != null || it.omega3 != null || it.sugar != null) {
     return {
       fiber: Number(it.fiber) > 0 ? Number(it.fiber) : 0,
       omega3: Number(it.omega3) > 0 ? Number(it.omega3) : 0,
-      sugar: Number(it.sugar) > 0 ? Number(it.sugar) : 0,
+      sugar: entera ? 0 : (Number(it.sugar) > 0 ? Number(it.sugar) : 0),
       estimado: false,
     };
   }
@@ -8720,7 +8963,12 @@ function nutMicrosItem(it) {
   const grams = nutGramos(it);
   if (!key || grams <= 0) return { fiber: 0, omega3: 0, sugar: 0, estimado: true };
   const db = NUT_MICRO_DB[key];
-  return { fiber: db.fiber * grams, omega3: db.omega3 * grams, sugar: db.sugar * grams, estimado: true };
+  return {
+    fiber: db.fiber * grams,
+    omega3: db.omega3 * grams,
+    sugar: entera ? 0 : db.sugar * grams,
+    estimado: true,
+  };
 }
 
 // ─── Utilidades de la semana ────────────────────────────────────────────
@@ -8778,6 +9026,12 @@ function analizarNutricionSemana(d, semanaISO, cliente, pesoKg) {
   const foods = new Map();
   // Agregado por tipo de comida (desayuno/almuerzo/…)
   const comidas = new Map();
+  // Agregado por PLATO: la combinación de alimentos de una misma comida.
+  // "Pollo + arroz + ensalada" repetido cuatro veces dice muchísimo más que
+  // ver pollo, arroz y ensalada cada uno por su lado en tres rankings
+  // distintos: es el plato que el cliente de verdad come, y es lo que hay
+  // que tocar si algo hay que cambiar.
+  const platos = new Map();
 
   const dias = fechas.map((fecha, i) => {
     const tot = history[fecha] || null;
@@ -8793,8 +9047,11 @@ function analizarNutricionSemana(d, semanaISO, cliente, pesoKg) {
       const h = nutHoraNum(e.time);
       if (h != null) horas.push(h);
       const tipo = String(e.meal || 'sin tipo').toLowerCase();
-      const cm = comidas.get(tipo) || { tipo, veces: 0, kcal: 0 };
+      const cm = comidas.get(tipo) || { tipo, veces: 0, kcal: 0, p: 0, c: 0, g: 0, dias: new Set(), horas: [] };
       cm.veces++; cm.kcal += Number(e.kcal) || 0;
+      cm.p += Number(e.p) || 0; cm.c += Number(e.c) || 0; cm.g += Number(e.g) || 0;
+      cm.dias.add(fecha);
+      if (h != null) cm.horas.push(h);
       comidas.set(tipo, cm);
 
       for (const it of (e.items || [])) {
@@ -8817,6 +9074,36 @@ function analizarNutricionSemana(d, semanaISO, cliente, pesoKg) {
         f.gramos += nutGramos(it);
         f.dias.add(fecha);
         foods.set(key, f);
+      }
+
+      // El plato: la firma es el conjunto de alimentos de esta comida,
+      // ordenado alfabéticamente para que "arroz + pollo" y "pollo + arroz"
+      // sean el mismo plato. Se piden 2 alimentos como mínimo: con uno solo
+      // esto sería el ranking de alimentos otra vez.
+      const nombresPlato = (e.items || [])
+        .map(it => String(it.name || '').trim()).filter(Boolean);
+      if (nombresPlato.length >= 2) {
+        const firma = [...new Set(nombresPlato.map(normalizeName))].sort().join(' | ');
+        const pl = platos.get(firma) || {
+          firma, nombres: nombresPlato, veces: 0, kcal: 0, p: 0, c: 0, g: 0,
+          fibra: 0, azucar: 0, dias: new Set(), tipos: new Map(), horas: [],
+        };
+        pl.veces++;
+        for (const it of (e.items || [])) {
+          pl.kcal += Number(it.kcal) || 0;
+          pl.p += Number(it.p) || 0;
+          pl.c += Number(it.c) || 0;
+          pl.g += Number(it.g) || 0;
+          const mm = nutMicrosItem(it);
+          pl.fibra += mm.fiber; pl.azucar += mm.sugar;
+        }
+        pl.dias.add(fecha);
+        pl.tipos.set(tipo, (pl.tipos.get(tipo) || 0) + 1);
+        if (h != null) pl.horas.push(h);
+        // El nombre legible se queda con la versión que tenga más alimentos
+        // escritos (a veces la misma comida se registra más completa un día).
+        if (nombresPlato.length > pl.nombres.length) pl.nombres = nombresPlato;
+        platos.set(firma, pl);
       }
     }
 
@@ -8917,6 +9204,70 @@ function analizarNutricionSemana(d, semanaISO, cliente, pesoKg) {
   // top de mejores/peores se llena de una pizca de sal y un té.
   const signif = alimentos.filter(a => a.kcal >= 150);
 
+  // ── Los platos, ya promediados ──
+  const totalKcalComidas = [...comidas.values()].reduce((s2, c) => s2 + c.kcal, 0);
+  const totalProteComidas = [...comidas.values()].reduce((s2, c) => s2 + c.p, 0);
+  const platosLista = [...platos.values()].map(pl => ({
+    firma: pl.firma,
+    nombre: pl.nombres.join(' + '),
+    alimentos: pl.nombres,
+    n_alimentos: pl.nombres.length,
+    veces: pl.veces,
+    dias: pl.dias.size,
+    // El tipo de comida en el que más aparece ("almuerzo")
+    tipo: [...pl.tipos.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null,
+    hora_prom: pl.horas.length ? nutHoraTxt(pl.horas.reduce((a, b) => a + b, 0) / pl.horas.length) : null,
+    kcal_prom: nutR0(pl.kcal / pl.veces),
+    p_prom: nutR1(pl.p / pl.veces),
+    c_prom: nutR1(pl.c / pl.veces),
+    g_prom: nutR1(pl.g / pl.veces),
+    fibra_prom: nutR1(pl.fibra / pl.veces),
+    azucar_prom: nutR1(pl.azucar / pl.veces),
+    kcal_total: nutR0(pl.kcal),
+    // Qué parte de las calorías de ese plato es proteína: el mismo criterio
+    // que se usa para los alimentos, para poder compararlos.
+    densidad_proteica_pct: pl.kcal > 0 ? Math.round((pl.p * 4 / pl.kcal) * 100) : 0,
+  })).sort((a, b) => b.veces - a.veces || b.kcal_total - a.kcal_total);
+
+  // ── Variedad: de cuántos alimentos distintos vive ──
+  // Una dieta de 8 alimentos es fácil de sostener y fácil de aburrir; una de
+  // 60 casi nunca se registra bien. El número por sí solo no es bueno ni
+  // malo, pero explica media conversación.
+  const top5Kcal = alimentos.slice(0, 5).reduce((s2, f) => s2 + f.kcal, 0);
+  const variedad = {
+    alimentos_distintos: alimentos.length,
+    platos_distintos: platosLista.length,
+    // Concentración: qué parte de lo que comió sale de solo 5 alimentos.
+    pct_kcal_top5: totalKcalDetalle ? Math.round((top5Kcal / totalKcalDetalle) * 100) : null,
+    // Los que aparecieron una sola vez: ruido, no dieta.
+    una_sola_vez: alimentos.filter(f => f.veces === 1).length,
+    // Alimentos que están en 5 días o más: el esqueleto real de su semana.
+    columna_vertebral: alimentos.filter(f => f.dias >= 5).map(f => f.nombre),
+  };
+
+  // ── Comparativa con la semana anterior ──
+  // Es la pregunta que el coach hace siempre ("¿mejoró o no?") y hasta ahora
+  // tocaba cambiar de semana en el selector y acordarse de los números.
+  const comparativa = (() => {
+    const prev = [];
+    const base = new Date(ini + 'T00:00:00');
+    for (let k = 7; k >= 1; k--) {
+      const dd = new Date(base);
+      dd.setDate(base.getDate() - k);
+      prev.push(`${dd.getFullYear()}-${String(dd.getMonth() + 1).padStart(2, '0')}-${String(dd.getDate()).padStart(2, '0')}`);
+    }
+    const regPrev = prev.map(f => history[f]).filter(t => t && (Number(t.kcal) || 0) > 0);
+    if (!regPrev.length || !nReg) return null;
+    const pr = (k) => nutR0(regPrev.reduce((s2, t) => s2 + (Number(t[k]) || 0), 0) / regPrev.length);
+    return {
+      dias_registrados: regPrev.length,
+      kcal: pr('kcal'), p: pr('p'), c: pr('c'), g: pr('g'),
+      delta_dias: nReg - regPrev.length,
+      delta_kcal: promedio.kcal != null ? nutR0(promedio.kcal - pr('kcal')) : null,
+      delta_p: promedio.p != null ? nutR0(promedio.p - pr('p')) : null,
+    };
+  })();
+
   const resultado = {
     cliente: {
       nombre: cliente?.nombre || '',
@@ -8964,7 +9315,26 @@ function analizarNutricionSemana(d, semanaISO, cliente, pesoKg) {
       ultima_comida_prom: horasUltima.length ? nutHoraTxt(horasUltima.reduce((a, b) => a + b, 0) / horasUltima.length) : null,
     },
     dias,
-    comidas_por_tipo: [...comidas.values()].sort((a, b) => b.veces - a.veces).map(c => ({ ...c, kcal: nutR0(c.kcal), kcal_prom: nutR0(c.kcal / c.veces) })),
+    // Por tipo de comida, ahora con MACROS y hora: sin esto se veía cuántas
+    // calorías lleva el almuerzo pero no si ahí está o no la proteína, que
+    // es lo que de verdad se corrige.
+    comidas_por_tipo: [...comidas.values()].sort((a, b) => b.veces - a.veces).map(c => ({
+      tipo: c.tipo,
+      veces: c.veces,
+      dias: c.dias.size,
+      kcal: nutR0(c.kcal),
+      kcal_prom: nutR0(c.kcal / c.veces),
+      p_prom: nutR1(c.p / c.veces),
+      c_prom: nutR1(c.c / c.veces),
+      g_prom: nutR1(c.g / c.veces),
+      pct_kcal: totalKcalComidas ? Math.round((c.kcal / totalKcalComidas) * 100) : 0,
+      pct_prote: totalProteComidas ? Math.round((c.p / totalProteComidas) * 100) : 0,
+      hora_prom: c.horas.length ? nutHoraTxt(c.horas.reduce((a, b) => a + b, 0) / c.horas.length) : null,
+    })),
+    // Los PLATOS que repite: la combinación completa, no el alimento suelto.
+    platos: platosLista,
+    variedad,
+    comparativa,
     alimentos,
     top_calorias: alimentos.slice(0, 8),
     top_frecuentes: [...alimentos].sort((a, b) => b.veces - a.veces).slice(0, 8),
