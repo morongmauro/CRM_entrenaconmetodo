@@ -252,6 +252,15 @@ const entDb = {
     const { error } = await sb.from('fases').delete().eq('id', id);
     if (error) toast(error.message);
   },
+  // Enviar la fase al cliente (o retirarla). Va por RPC a publicar_fase():
+  // así el cambio de `visible_cliente`, la fecha de publicación y el paso de
+  // borrador a activa ocurren en UNA transacción del servidor, y no puede
+  // quedar a medias. Devuelve cuántas rutinas ve el cliente después.
+  async publicarFase(id, visible) {
+    const { data, error } = await sb.rpc('publicar_fase', { p_fase_id: id, p_visible: visible });
+    if (error) { toastError('No se pudo ' + (visible ? 'enviar' : 'retirar') + ': ' + error.message); return null; }
+    return data;
+  },
   async rutinasDeFase(faseId) {
     const { data } = await sb.from('rutinas').select('*')
       .eq('fase_id', faseId).eq('archivada', false).order('dia_orden');
@@ -1727,6 +1736,15 @@ function entFechaFin(f) {
 function entTarjetaFase(f, rutinas) {
   const fin = entFechaFin(f);
   const estadoTag = { activa: 'tag-green', borrador: 'tag-yellow', finalizada: 'tag-gray', archivada: 'tag-gray' }[f.estado] || 'tag-gray';
+  // ¿El cliente la está viendo en su app? Es la pregunta que de verdad
+  // importa antes de tocar nada, así que va en grande junto al nombre y no
+  // escondida en el formulario de edición. `visible_cliente` es la columna
+  // de migracion-visibilidad.sql; si todavía no la corriste, esto se
+  // comporta como "no enviada" en vez de romperse.
+  const enviada = f.visible_cliente === true;
+  const chipEnvio = enviada
+    ? `<span class="tag tag-green" title="${f.publicada_en ? 'Enviada el ' + String(f.publicada_en).slice(0, 10) : 'Enviada'}">📲 la ve el cliente</span>`
+    : '<span class="tag" style="background:#f1f5f9;color:#64748b" title="Solo tú la ves. Está cargada y la puedes editar, pero no aparece en la app del cliente.">🔒 solo tú</span>';
   return `
     <div class="card mb-3">
       <div class="flex justify-between items-start gap-2 flex-wrap mb-2">
@@ -1734,6 +1752,7 @@ function entTarjetaFase(f, rutinas) {
           <div class="flex items-center gap-2 flex-wrap">
             <span class="font-bold text-slate-900">${escapeHtml(f.nombre)}</span>
             <span class="tag ${estadoTag}">${escapeHtml(f.estado)}</span>
+            ${chipEnvio}
           </div>
           <div class="text-xs text-slate-500 mt-0.5">
             ${f.semanas || '?'} semana${f.semanas === 1 ? '' : 's'}
@@ -1743,6 +1762,9 @@ function entTarjetaFase(f, rutinas) {
           ${f.objetivo ? `<div class="text-xs text-slate-600 mt-1">${escapeHtml(f.objetivo)}</div>` : ''}
         </div>
         <div class="flex gap-1 flex-wrap flex-shrink-0">
+          ${enviada
+            ? `<button class="btn btn-secondary btn-sm" onclick="entRetirarFase('${f.id}')" title="Deja de mostrársela en su app. No se borra nada.">↩ Retirar</button>`
+            : `<button class="btn btn-primary btn-sm" onclick="entEnviarFase('${f.id}')" ${rutinas.length ? '' : 'disabled title="Añade al menos una rutina antes de enviarla"'}>📤 Enviar al cliente</button>`}
           <button class="btn btn-ghost btn-sm" onclick="entEditarFase('${f.id}')">Editar</button>
           <button class="btn btn-ghost btn-sm" onclick="entCopiarFaseA('${f.id}')">Copiar a…</button>
           <button class="btn btn-ghost btn-sm" onclick="entBorrarFase('${f.id}')">Borrar</button>
@@ -1849,6 +1871,39 @@ window.entGuardarFase = async (id) => {
   }
   closeModal();
   toast(id ? '✓ Fase actualizada' : '✓ Fase creada');
+  entVistaClientes();
+};
+
+// ── Enviar al cliente ───────────────────────────────────────────────────
+// Es la única acción de esta pantalla que el cliente NOTA, así que se
+// confirma diciendo exactamente qué va a ver y desde cuándo. Antes de esto
+// no había forma de tener una rutina cargada y a la vez oculta: o existía y
+// se veía, o no existía.
+window.entEnviarFase = async (id) => {
+  const fases = await entDb.fases(_ent.clienteId);
+  const f = fases.find(x => x.id === id);
+  if (!f) return;
+  const rutinas = await entDb.rutinasDeFase(id);
+  if (!rutinas.length) { toast('Esa fase no tiene rutinas todavía.'); return; }
+  const dias = rutinas.map(r => `· Día ${r.dia_orden}: ${r.nombre}`).join('\n');
+  const ok = confirm(
+    `Enviar «${f.nombre}» al cliente.\n\n`
+    + `A partir de ahora verá en su app:\n${dias}\n\n`
+    + `${f.fecha_inicio ? `Arranca el ${f.fecha_inicio} y dura ${f.semanas || '?'} semanas.\n\n` : ''}`
+    + `Lo que NO se envía: tus notas de coach, ni las de cada ejercicio.\n`
+    + `Puedes retirarla cuando quieras sin borrar nada.`);
+  if (!ok) return;
+  const n = await entDb.publicarFase(id, true);
+  if (n == null) return;
+  toast(`📤 Enviada · el cliente ya ve ${n} ${n === 1 ? 'rutina' : 'rutinas'}`);
+  entVistaClientes();
+};
+
+window.entRetirarFase = async (id) => {
+  if (!confirm('Retirar esta fase de la app del cliente.\n\nDeja de verla, pero no se borra: ni la rutina, ni lo que ya entrenó. Puedes volver a enviarla cuando quieras.')) return;
+  const n = await entDb.publicarFase(id, false);
+  if (n == null) return;
+  toast('↩ Retirada · el cliente ya no la ve');
   entVistaClientes();
 };
 

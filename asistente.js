@@ -329,7 +329,7 @@ const ASIS_HERRAMIENTAS = {
     if (nombre) {
       const c = await asisBuscarCliente(nombre);
       if (!c) return asisNoEncontrado(nombre, clientes);
-      const l = await fetchLecturasCentro(c.nombre);
+      const l = await fetchLecturasCentro(c);
       if (!l) return { error: 'No pude conectarme al Centro de Recursos en este momento.' };
       return {
         cliente: c.nombre,
@@ -345,7 +345,7 @@ const ASIS_HERRAMIENTAS = {
     // Cuadro completo: quién vio qué. Es la vista que responde "quiénes han
     // leído la cápsula X".
     const activos = clientes.filter(c => c.estado === 'activo');
-    const filas = await Promise.all(activos.map(async c => ({ c, l: await fetchLecturasCentro(c.nombre) })));
+    const filas = await Promise.all(activos.map(async c => ({ c, l: await fetchLecturasCentro(c) })));
     if (filas.every(f => !f.l)) return { error: 'No pude conectarme al Centro de Recursos en este momento.' };
 
     const busca = capsula ? normalizeName(capsula) : null;

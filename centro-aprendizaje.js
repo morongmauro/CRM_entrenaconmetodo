@@ -102,7 +102,7 @@ async function apCargar() {
     if (!filas) { _ap.datos = null; return; }
     const datos = [];
     for (const c of todos) {
-      const lec = await fetchLecturasCentro(c.nombre);
+      const lec = await fetchLecturasCentro(c);
       if (lec) datos.push({ cliente: c, lec });
     }
     _ap.datos = datos;

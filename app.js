@@ -515,11 +515,35 @@ function centroFechaFila(f) {
 
 // Devuelve TODO lo que el centro sabe de un cliente: los hitos que usa el
 // journey y, además, el detalle de cápsulas y podcast para la trazabilidad.
-async function fetchLecturasCentro(nombre) {
+// Todos los nombres con los que un cliente puede aparecer por ahí: el
+// actual y los que tuvo antes. Acepta el objeto cliente o solo su nombre
+// (en cuyo caso busca los alias en la lista de clientes).
+async function nombresDelCliente(clienteONombre) {
+  const uno = (v) => [normalizeName(v)].filter(Boolean);
+  if (!clienteONombre) return [];
+  if (typeof clienteONombre === 'object') {
+    return [...new Set([
+      ...uno(clienteONombre.nombre),
+      ...(clienteONombre.nombres_alternos || []).map(normalizeName).filter(Boolean),
+    ])];
+  }
+  const n = normalizeName(clienteONombre);
+  try {
+    const todos = await db.clientes.list();
+    const c = todos.find(x => normalizeName(x.nombre) === n
+      || (x.nombres_alternos || []).some(a => normalizeName(a) === n));
+    if (c) return nombresDelCliente(c);
+  } catch (e) { /* sin lista: al menos el nombre que nos dieron */ }
+  return uno(n);
+}
+
+async function fetchLecturasCentro(cliente) {
   const todas = await cargarLecturasCentro();
   if (!todas) return null;
-  const buscado = normalizeName(nombre);
-  const filas = todas.filter(f => normalizeName(f.client_name) === buscado);
+  // Se cruza contra el nombre ACTUAL y contra los que tuvo antes: si le
+  // corregiste el apellido en el CRM, su avance de lectura no se evapora.
+  const nombres = await nombresDelCliente(cliente);
+  const filas = todas.filter(f => nombres.includes(normalizeName(f.client_name)));
 
   // Cruza un catálogo con lo que el cliente vio. Devuelve el catálogo
   // completo marcado, más lo que vio y no está en el catálogo (publicaste
@@ -585,8 +609,8 @@ async function fetchLecturasCentro(nombre) {
 }
 
 // Resumen corto (vistas/total) para las tarjetas del listado de clientes.
-async function resumenCapsulas(nombre) {
-  const lec = await fetchLecturasCentro(nombre);
+async function resumenCapsulas(cliente) {
+  const lec = await fetchLecturasCentro(cliente);
   if (!lec) return null;
   return { vistas: lec.capsVistas, total: lec.capsTotal };
 }
@@ -636,7 +660,7 @@ async function cargarPanelCentro(cliente) {
   _centroPanelCliente = cliente;
   const el = $('#centro-panel');
   if (!el) return;
-  const lec = await fetchLecturasCentro(cliente.nombre);
+  const lec = await fetchLecturasCentro(cliente);
   const el2 = $('#centro-panel'); // la ficha pudo cerrarse mientras cargaba
   if (!el2) return;
   if (!lec) {
@@ -715,7 +739,7 @@ async function pintarCapsulasEnCards(clientes) {
   for (const c of clientes) {
     const celda = document.querySelector(`[data-caps-cell="${c.id}"]`);
     if (!celda) continue;
-    const r = await resumenCapsulas(c.nombre);
+    const r = await resumenCapsulas(c);
     if (!r) { celda.innerHTML = ''; continue; }
     const color = r.total && r.vistas >= r.total ? 'text-emerald-600'
                 : r.vistas ? 'text-amber-600' : 'text-slate-400';
@@ -779,7 +803,7 @@ async function autollenarJourney(cliente, segs, meds) {
   if (segs && segs.length) marca('training', primera(segs, 'fecha'));
 
   // Lecturas del Centro de Recursos: onboarding, FAQ y guía de alimentación
-  const lec = await fetchLecturasCentro(cliente.nombre);
+  const lec = await fetchLecturasCentro(cliente);
   if (lec) {
     if (lec.onboarding) marca('onboarding');
     if (lec.faq) marca('faq');
@@ -1313,10 +1337,16 @@ async function resolverMealtrackerId(cliente) {
     if (!nombresNorm[n] || u.updated_at > nombresNorm[n].updated_at) nombresNorm[n] = u;
   }
 
+  // Se prueba contra el nombre actual y contra los anteriores: la cuenta del
+  // Mealtracker guarda el nombre con el que el cliente se registró, que tras
+  // un renombrado en el CRM ya no es el mismo.
+  const candidatos = [cliente.nombre, ...(cliente.nombres_alternos || [])].filter(Boolean);
   let mejor = null;
   for (const u of Object.values(nombresNorm)) {
-    const score = similitudNombre(cliente.nombre, u.name);
-    if (!mejor || score > mejor.score) mejor = { ...u, score };
+    for (const cand of candidatos) {
+      const score = similitudNombre(cand, u.name);
+      if (!mejor || score > mejor.score) mejor = { ...u, score };
+    }
   }
 
   if (mejor && mejor.score >= 85) {
@@ -2732,6 +2762,7 @@ window.invalidarCache = invalidarCache;
 // guarda todo lo demás (que es la mayoría) y se avisa qué migración falta,
 // una sola vez por columna y con el SQL listo para copiar.
 const COLUMNA_SQL = {
+  nombres_alternos: "alter table clientes add column if not exists nombres_alternos text[] default '{}';",
   actividad_extra: 'alter table seguimientos add column if not exists actividad_extra jsonb;',
   guia_alimentacion: 'alter table settings add column if not exists guia_alimentacion text;',
   guia_entrenamiento: 'alter table settings add column if not exists guia_entrenamiento text;',
@@ -6722,8 +6753,37 @@ window.guardarCliente = async (id = null) => {
 
 // Guarda un cliente tolerando que la BD aún no tenga las columnas nuevas
 // (email/telefono): si Supabase las rechaza, reintenta sin ellas y avisa.
-const COLS_NUEVAS_CLIENTE = ['email', 'telefono', 'suplementos', 'actividades_complementarias', 'grasa_pct_kcal'];
+const COLS_NUEVAS_CLIENTE = ['email', 'telefono', 'suplementos', 'actividades_complementarias', 'grasa_pct_kcal', 'nombres_alternos'];
 async function guardarClienteSeguro(id, row) {
+  // ── RENOMBRAR SIN ROMPER NADA ─────────────────────────────────────────
+  // El nombre del cliente NO es solo una etiqueta: es la llave con la que
+  // entra a su app y con la que se cruzan sus lecturas del Centro de
+  // Recursos. Cambiarlo, tal cual, lo dejaba fuera de su propia app
+  // (authorize.js compara el nombre tecleado contra `clientes.nombre`) y,
+  // peor, en un teléfono nuevo el Mealtracker no encontraba su cuenta y le
+  // abría una vacía — el clásico "se me borró todo".
+  //
+  // La solución es no perder el nombre viejo: se guarda como alias en
+  // `nombres_alternos` y todo el ecosistema acepta cualquiera de ellos. Así
+  // corregir un apellido mal escrito es lo que debe ser: un cambio de
+  // etiqueta, no una mudanza de identidad.
+  if (id && row && row.nombre) {
+    try {
+      const { data: antes } = await sb.from('clientes')
+        .select('nombre, nombres_alternos').eq('id', id).maybeSingle();
+      if (antes && antes.nombre && normalizeName(antes.nombre) !== normalizeName(row.nombre)) {
+        const alias = Array.isArray(antes.nombres_alternos) ? [...antes.nombres_alternos] : [];
+        // Sin duplicados y sin meter como alias el nombre nuevo.
+        const yaEsta = (n) => alias.some(a => normalizeName(a) === normalizeName(n));
+        if (!yaEsta(antes.nombre)) alias.push(antes.nombre);
+        row = { ...row, nombres_alternos: alias.filter(a => normalizeName(a) !== normalizeName(row.nombre)) };
+      }
+    } catch (e) {
+      // Si la columna todavía no existe, el guardado sigue igual: solo se
+      // pierde el alias, y el aviso de columna que falta ya lo cuenta.
+    }
+  }
+
   // Devuelve el id (el que venía, o el que asigna Supabase al insertar) para
   // poder colgar el punto del historial de metas del cliente recién creado.
   const q = (r) => id

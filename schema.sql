@@ -9,7 +9,12 @@ create table if not exists clientes (
   user_id uuid not null default auth.uid() references auth.users on delete cascade,
 
   -- Identidad
+  -- OJO: `nombre` no es solo una etiqueta — es la llave con la que el cliente
+  -- entra al Meal Tracker y al Centro de Recursos, y con la que se cruzan sus
+  -- lecturas. Por eso al corregirlo NO se pierde el anterior: se guarda en
+  -- `nombres_alternos` y todo el ecosistema sigue aceptándolo.
   nombre text not null,
+  nombres_alternos text[] default '{}',   -- nombres que tuvo antes (se llena solo al renombrar)
   fecha_nacimiento date,
   sexo text,                         -- M | F | otro
   ciudad text,
@@ -141,6 +146,17 @@ alter table pagos         enable row level security;
 alter table seguimientos  enable row level security;
 alter table pendientes    enable row level security;
 alter table settings      enable row level security;
+
+-- El `drop` va antes a propósito: Postgres no tiene "create policy if not
+-- exists", así que sin esto volver a correr este archivo sobre una base que
+-- ya existe reventaba con «policy "own clientes" already exists» — y como el
+-- editor de Supabase corre todo en una transacción, se deshacía el archivo
+-- entero. Es el mismo patrón que ya usaban las secciones de más abajo.
+drop policy if exists "own clientes"     on clientes;
+drop policy if exists "own pagos"        on pagos;
+drop policy if exists "own seguimientos" on seguimientos;
+drop policy if exists "own pendientes"   on pendientes;
+drop policy if exists "own settings"     on settings;
 
 create policy "own clientes"     on clientes     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "own pagos"        on pagos        for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
