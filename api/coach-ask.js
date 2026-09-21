@@ -404,6 +404,59 @@ const HERRAMIENTAS_RUTINAS = [
       required: ['rutina'],
     },
   },
+
+  // ---- Eventos del calendario ----
+  {
+    name: 'ver_eventos',
+    description:
+      'Lo que el cliente tiene en el calendario que NO es una rutina: natación, mediciones, ' +
+      'citas, notas. Míralo antes de añadir algo para no duplicar lo que ya está.',
+    input_schema: {
+      type: 'object',
+      properties: { nombre: { type: 'string' }, fase: { type: 'string' } },
+    },
+  },
+  {
+    name: 'agregar_evento',
+    description:
+      'PROPONE poner en el calendario algo que NO es una rutina de gimnasio: una actividad que ' +
+      'hace por su cuenta (natación, fútbol, caminata), una medición (pesarse, medidas, fotos), ' +
+      'una cita, una nota o un descanso marcado. No lo guarda.\n' +
+      'CUÁNDO USAR ESTA Y NO OTRA: si lo que pide es un ejercicio de gimnasio dentro de una ' +
+      'sesión, eso es agregar_ejercicio_a_rutina. Si es algo que pasa ese día al margen del ' +
+      'entreno, es esto. "Los lunes hace natación" y "el viernes toca medición de peso" son ' +
+      'eventos; "agrégale press banca al push" no.\n' +
+      'Da "dias" para que se repita cada semana de la fase, o "fecha" para un solo día. Los ' +
+      'eventos heredan de la fase si el cliente los ve o no: no se publican solos.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nombre: { type: 'string' },
+        titulo: { type: 'string', description: 'Cómo se llama: "Natación", "Medición de peso".' },
+        tipo: {
+          type: 'string',
+          enum: ['actividad', 'medicion', 'cita', 'nota', 'descanso'],
+          description: 'actividad = lo hace; medicion = lo registra; cita; nota = recordatorio; descanso = día libre a propósito.',
+        },
+        dias: { type: 'string', description: 'Se repite estos días: "lunes, miércoles". Necesita que el cliente tenga una fase.' },
+        fecha: { type: 'string', description: 'O un solo día, en AAAA-MM-DD. Excluyente con "dias".' },
+        semanas: { type: 'string', description: 'Solo esas semanas de la fase: "1, 4". Omítelo para todas.' },
+        hora: { type: 'string', description: 'HH:MM, opcional.' },
+        detalle: { type: 'string', description: 'Lo que leerá el cliente: "45 min suave".' },
+        fase: { type: 'string' },
+      },
+      required: ['titulo'],
+    },
+  },
+  {
+    name: 'quitar_evento',
+    description: 'PROPONE quitar un evento del calendario. No lo guarda. Si el título coincide con varios, te dirá cuáles en vez de adivinar.',
+    input_schema: {
+      type: 'object',
+      properties: { nombre: { type: 'string' }, titulo: { type: 'string' } },
+      required: ['titulo'],
+    },
+  },
 ];
 
 const SYSTEM_RUTINAS = `Eres el agente de construcción de rutinas del CRM de un coach de
@@ -413,8 +466,9 @@ pantalla: cuando no te digan un nombre, es de ese cliente de quien se habla.
 
 QUÉ PUEDES HACER
 Leer su plan (fases, rutinas, calendario), sus rutinas ejercicio por ejercicio, la galería de
-ejercicios del coach, la cobertura del plan por patrón y músculo, y lo que el cliente ha
-registrado al entrenar (pesos y reps serie a serie). Y PROPONER cambios en las rutinas.
+ejercicios del coach, la cobertura del plan por patrón y músculo, lo que el cliente ha
+registrado al entrenar (pesos y reps serie a serie) y los eventos de su calendario. Y PROPONER
+cambios en las rutinas y en el calendario.
 
 LA REGLA MÁS IMPORTANTE
 Tus herramientas de escritura NO GUARDAN NADA. Dejan el cambio propuesto en una tarjeta que el
@@ -433,6 +487,11 @@ CÓMO TRABAJAS
    plan_del_cliente y en cobertura_del_plan). Si lo que te piden choca con una restricción,
    dilo ANTES de proponerlo, y propón la alternativa.
 5. Pide varias herramientas a la vez cuando la pregunta las necesite juntas.
+6. Separa el GIMNASIO del RESTO DEL CALENDARIO. Un ejercicio dentro de una sesión va con
+   agregar_ejercicio_a_rutina; algo que el cliente hace ese día al margen del entreno
+   —natación, una medición de peso, una cita, "esa semana está de viaje"— es agregar_evento.
+   "Agrégale natación los lunes" NO es crear una rutina de natación: llenaría su historial de
+   entrenos no hechos y le arruinaría la adherencia.
 
 CÓMO RESPONDES
 - Corto y con los números concretos que devolvió la herramienta ("4 series de empuje a la

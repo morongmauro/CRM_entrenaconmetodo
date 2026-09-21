@@ -1,0 +1,87 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<style>
+  body{font-family:Inter,system-ui,sans-serif;background:#f1f5f9;margin:0;padding:20px;color:#0f172a}
+  h1{font-size:15px;margin:0 0 14px}
+  .card{background:#fff;border:1px solid #e2e8f0;border-radius:.85rem;padding:.9rem}
+  .btn{border:1px solid #e2e8f0;background:#fff;border-radius:.5rem;padding:.25rem .6rem;font-size:.78rem;cursor:pointer}
+  .btn-sm{font-size:.72rem}.btn-primary{background:#606c38;color:#fff;border-color:#606c38}
+  .btn-ghost{border-color:transparent;background:transparent}
+  .chip{border:1px solid #e2e8f0;background:#fff;border-radius:9999px;padding:.15rem .55rem;font-size:.72rem}
+  .tag{font-size:.65rem;border-radius:9999px;padding:.05rem .4rem}
+  .tag-green{background:#dcfce7;color:#166534}.tag-gray{background:#f1f5f9;color:#64748b}
+  .tag-violet{background:#ede9fe;color:#5b21b6}
+  .sec-title{font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin:.6rem 0 .3rem}
+  label{display:block;font-size:.7rem;color:#64748b;margin-bottom:.15rem}
+  input,select,textarea{width:100%;border:1px solid #e2e8f0;border-radius:.45rem;padding:.3rem .45rem;font-size:.78rem}
+  .hidden{display:none}
+  .flex{display:flex}.flex-col{flex-direction:column}.gap-2{gap:.5rem}.gap-0\.5{gap:.125rem}
+  .items-start{align-items:flex-start}.justify-between{justify-content:space-between}
+  .min-w-0{min-width:0}.flex-shrink-0{flex-shrink:0}.mb-2{margin-bottom:.5rem}.mt-2{margin-top:.5rem}
+  .p-3{padding:.75rem}.grid{display:grid}.grid-cols-2{grid-template-columns:repeat(2,1fr)}
+  .md\:grid-cols-4{grid-template-columns:repeat(4,1fr)}.text-xs{font-size:.72rem}
+  .text-sm{font-size:.82rem}.font-bold{font-weight:700}.text-slate-900{color:#0f172a}
+  .text-slate-500{color:#64748b}.rounded-xl{border-radius:.75rem}
+  .text-\[0\.65rem\]{font-size:.65rem}.flex-wrap{flex-wrap:wrap}.gap-1\.5{gap:.375rem}
+  .mt-0\.5{margin-top:.125rem}.py-2{padding:.5rem 0}.text-center{text-align:center}
+  .text-slate-400{color:#94a3b8}.py-3{padding:.75rem 0}.text-slate-800{color:#1e293b}
+  #ent-body{max-width:640px}
+</style></head><body>
+<h1>Editor de rutina · filas arrastrables</h1>
+<div id="ent-body"></div>
+
+<script src="../../musculos-figura.js"></script>
+<script>
+// ── Lo mínimo de app.js que necesita el módulo ──
+const $ = (s, c = document) => c.querySelector(s);
+const $$ = (s, c = document) => Array.from(c.querySelectorAll(s));
+function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function toast(m){console.log('TOAST:',m);}
+const fmt = { hoy: () => '2026-10-14',
+  fechaCorta: (s) => s ? new Date(s+'T00:00:00').toLocaleDateString('es-CO',{day:'2-digit',month:'short'}) : '—' };
+function openModal(h){console.log('MODAL');}
+function modalShell(t,b,f){return b;}
+const sb = { from: () => ({ select: () => ({ eq: () => ({ order: async () => ({data:[]}) }) }) }) };
+const db = { clientes: { list: async () => [] } };
+// entrenamiento.js se auto-registra en el router y clona un botón de la barra.
+const routes = {};
+const navBtn = document.createElement('button');
+navBtn.dataset.route = 'clientes';
+document.body.appendChild(navBtn);
+</script>
+<script src="../../entrenamiento.js"></script>
+<script src="../../eventos.js"></script>
+<script>
+// ── Datos de ejemplo ──
+_ent.musculos = [
+  {slug:'pectoral_mayor',corto:'Pecho'},{slug:'triceps',corto:'Tríceps'},
+  {slug:'deltoide_anterior',corto:'Deltoide ant.'},{slug:'dorsal_ancho',corto:'Dorsales'},
+  {slug:'biceps',corto:'Bíceps'},{slug:'cuadriceps',corto:'Cuádriceps'},
+];
+const ej = (id,nombre,tipo,prim,sec,desc) => ({
+  id, nombre, tipo, descripcion: desc || null,
+  musculos_primarios: prim, musculos_secundarios: sec || [],
+});
+const rutina = {
+  id:'r1', nombre:'Push · Empuje',
+  bloques: [
+    { id:'b1', nombre:'A · Circuito final', tipo:'circuito', vueltas:3, descanso_entre_seg:20, descanso_seg:90, orden:1 },
+    { id:'b2', nombre:'B · Core', tipo:'superserie', vueltas:2, orden:2 },
+  ],
+  ejercicios: [
+    { id:'re1', orden:1, bloque_id:null, series:4, reps:'6-8', peso_objetivo:'70 kg', descanso_seg:150,
+      ejercicios: ej('e1','Press banca con barra','fuerza',['pectoral_mayor'],['triceps','deltoide_anterior'],
+                     'Acuéstate en el banco con los pies firmes en el suelo. Baja la barra controlada hasta el pecho y empuja.') },
+    { id:'re2', orden:2, bloque_id:null, series:3, reps:'8-10', descanso_seg:120,
+      ejercicios: ej('e2','Press militar de pie','fuerza',['deltoide_anterior'],['triceps']) },
+    { id:'re3', orden:3, bloque_id:'b1', series:3, reps:'12', descanso_seg:20,
+      ejercicios: ej('e3','Fondos en paralelas','fuerza',['pectoral_mayor','triceps'],[],
+                     'Baja hasta que los codos formen 90 grados, sin encoger los hombros.') },
+    { id:'re4', orden:4, bloque_id:'b1', series:3, reps:'15', descanso_seg:20,
+      ejercicios: ej('e4','Elevaciones laterales','fuerza',['deltoide_anterior'],[]) },
+  ],
+};
+_ent.rutina = rutina;
+document.getElementById('ent-body').innerHTML = entRenderRutina(rutina);
+console.log('RENDER OK');
+</script></body></html>

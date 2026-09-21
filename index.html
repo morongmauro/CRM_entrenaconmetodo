@@ -123,6 +123,10 @@
 
   <script src="/config.js"></script>
   <script src="/app.js"></script>
+  <!-- Figura muscular: dibuja qué trabaja cada ejercicio. ANTES de
+       entrenamiento.js, que la usa en la ficha y en el editor. No depende
+       de nada: solo expone window.figuraMusculos. -->
+  <script src="/musculos-figura.js"></script>
   <!-- Sección Entrenamiento. DESPUÉS de app.js: usa sus funciones y se
        registra sola en el router y en la barra de navegación. -->
   <script src="/entrenamiento.js"></script>
@@ -136,6 +140,10 @@
        cada cliente. DESPUÉS de app.js: usa sus catálogos y su lectura del
        centro, y se registra solo en el router y en la barra. -->
   <script src="/centro-aprendizaje.js"></script>
+  <!-- Eventos del calendario: natación, mediciones, citas. DESPUÉS de
+       entrenamiento.js (usa su catálogo de días) y ANTES del agente de
+       rutinas, que los crea por voz. -->
+  <script src="/eventos.js"></script>
   <!-- Asistente: responde preguntas leyendo tus propios datos. Va al final
        porque usa la capa db de app.js y los lectores del Mealtracker y del
        Centro de Recursos. -->

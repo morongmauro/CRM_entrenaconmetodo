@@ -35,6 +35,7 @@ const _comp = {
   cargando: false,
   error: null,
   tab: 'panorama',   // panorama | corporal | metas | actividad | calculadora
+  actos: null,       // lo que el cliente registró de cardio/deportes (null = sin tabla)
 };
 
 // =====================================================
@@ -329,6 +330,128 @@ function compActividadHTML(cliente, metas, segs) {
       ${!palHtml && !asistHtml ? '<p class="text-xs text-slate-500">Todavía no hay historial: aparece cuando haya al menos dos metas calculadas o seguimientos semanales con días planeados.</p>' : ''}
       ${complementarias}
       ${cliente.antecedentes_deportivos ? `<div class="text-sm text-slate-600 mt-2">${campoColapsable('Antecedentes deportivos', cliente.antecedentes_deportivos, 'text-slate-600')}</div>` : ''}
+    </div>
+    ${compRegistradaHTML(_comp.actos)}`;
+}
+
+// ---------- Lo que de verdad hizo ----------
+// El bloque de arriba es lo DECLARADO: el nivel que el cliente dijo tener y
+// las actividades que escribió en su ficha. Esto es lo REGISTRADO: lo que
+// marcó en su app, con minutos y kilómetros. Van separados a propósito —
+// "dice que es activo" y "esta semana se movió 40 minutos" son cosas
+// distintas, y la diferencia entre las dos es justo lo que hay que mirar
+// para saber si el PAL con el que se calculó su meta se sostiene.
+function compRegistradaHTML(actos) {
+  if (actos === null) {
+    return `
+      <div class="card mt-3 border-l-4 border-slate-300">
+        <div class="font-bold text-sm text-slate-800 mb-1">Actividad complementaria registrada</div>
+        <p class="text-xs text-slate-600">
+          Para que el cliente pueda marcar su cardio y sus deportes desde la app falta correr
+          <code>carga/migracion-actividades.sql</code> en el SQL Editor de Supabase.
+        </p>
+      </div>`;
+  }
+  if (!actos.length) {
+    return `
+      <div class="card mt-3">
+        <div class="sec-title">🏊 Actividad complementaria registrada</div>
+        <p class="text-xs text-slate-500">
+          No ha marcado nada en los últimos 90 días. Lo registra él desde su app,
+          en “Además de la fuerza”.
+        </p>
+      </div>`;
+  }
+
+  const cat = Object.fromEntries((_compCatalogo || []).map(c => [c.slug, c]));
+  const nombreDe = (a) => a.titulo || cat[a.tipo]?.nombre || a.tipo;
+  const iconoDe = (a) => cat[a.tipo]?.icono || '✨';
+
+  // Por semana ISO: es la unidad en la que se mira la adherencia y la que
+  // cruza con `seguimientos` y con el mealtracker.
+  const porSemana = {};
+  actos.forEach(a => {
+    const k = fmt.semanaISO(new Date(a.fecha + 'T00:00:00'));
+    (porSemana[k] ||= { veces: 0, min: 0, km: 0, tipos: new Set() });
+    porSemana[k].veces++;
+    porSemana[k].min += Number(a.duracion_min) || 0;
+    porSemana[k].km += Number(a.distancia_km) || 0;
+    porSemana[k].tipos.add(a.tipo);
+  });
+  const semanas = Object.entries(porSemana).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 12);
+
+  // Qué hace, ordenado por cuánto. Responde "¿qué deporte hace de verdad?"
+  // sin leer 90 filas.
+  const porTipo = {};
+  actos.forEach(a => {
+    (porTipo[a.tipo] ||= { veces: 0, min: 0 });
+    porTipo[a.tipo].veces++;
+    porTipo[a.tipo].min += Number(a.duracion_min) || 0;
+  });
+  const tipos = Object.entries(porTipo).sort((a, b) => b[1].veces - a[1].veces);
+
+  const totalMin = actos.reduce((a, x) => a + (Number(x.duracion_min) || 0), 0);
+  const totalKm = Math.round(actos.reduce((a, x) => a + (Number(x.distancia_km) || 0), 0) * 10) / 10;
+  const maxMin = Math.max(...semanas.map(([, v]) => v.min), 1);
+
+  return `
+    <div class="card mt-3">
+      <div class="sec-title">🏊 Actividad complementaria registrada</div>
+      <div class="text-[11px] text-slate-400 mb-3 -mt-1">
+        Lo que marcó en su app en los últimos 90 días. No es lo que declaró: es lo que hizo.
+      </div>
+
+      <div class="grid grid-cols-3 gap-2 mb-3">
+        <div class="bg-white rounded-xl border border-slate-200 p-3">
+          <div class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Veces</div>
+          <div class="text-xl font-bold text-slate-900 mt-0.5">${actos.length}</div>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 p-3">
+          <div class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Minutos</div>
+          <div class="text-xl font-bold text-slate-900 mt-0.5">${totalMin}</div>
+          <div class="text-[11px] text-slate-500 mt-0.5">${Math.round(totalMin / Math.max(semanas.length, 1))}/semana</div>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 p-3">
+          <div class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Kilómetros</div>
+          <div class="text-xl font-bold text-slate-900 mt-0.5">${totalKm || '—'}</div>
+        </div>
+      </div>
+
+      <div class="text-xs font-bold text-slate-700 mb-2">Qué hace</div>
+      <div class="flex flex-wrap gap-1 mb-4">
+        ${tipos.map(([t, v]) => `
+          <span class="tag tag-gray">${iconoDe({ tipo: t })} ${escapeHtml(cat[t]?.nombre || t)} · ${v.veces}${v.min ? ` · ${v.min} min` : ''}</span>
+        `).join('')}
+      </div>
+
+      <div class="text-xs font-bold text-slate-700 mb-2">Minutos por semana</div>
+      <div class="flex items-end gap-1 mb-4" style="height:54px">
+        ${semanas.slice().reverse().map(([k, v]) => `
+          <div class="flex-1 flex flex-col items-center justify-end h-full" title="${escapeHtml(k)} · ${v.veces} veces · ${v.min} min">
+            <div class="w-full rounded-t" style="height:${Math.max(3, Math.round(v.min / maxMin * 42))}px;background:var(--brand-olive);opacity:.75"></div>
+            <div class="text-[8px] text-slate-400 font-bold mt-0.5">${escapeHtml(k.slice(6))}</div>
+          </div>`).join('')}
+      </div>
+
+      <details>
+        <summary class="text-xs font-bold text-slate-600 cursor-pointer">Ver los ${actos.length} registros</summary>
+        <table class="ent-tabla-ejs mt-2">
+          <thead><tr>
+            <th class="text-left">Día</th><th class="text-left">Qué</th>
+            <th class="text-right">Min</th><th class="text-right">Km</th><th class="text-left">Intensidad</th>
+          </tr></thead>
+          <tbody>
+            ${actos.slice(0, 120).map(a => `
+              <tr>
+                <td>${fmt.fechaCorta(a.fecha)}</td>
+                <td>${iconoDe(a)} ${escapeHtml(nombreDe(a))}${a.origen === 'coach' ? ' <span class="tag tag-gray">tú</span>' : ''}</td>
+                <td class="text-right">${a.duracion_min ?? '—'}</td>
+                <td class="text-right">${a.distancia_km ?? '—'}</td>
+                <td>${escapeHtml(a.intensidad || '—')}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </details>
     </div>`;
 }
 
@@ -634,23 +757,47 @@ async function compCargar(clienteId, { forzar = false } = {}) {
   try {
     // 🔄 Actualizar tiene que traer datos frescos de verdad, no lo cacheado.
     if (forzar) invalidarCache('clientes', 'mediciones', 'metas', 'seguimientos');
-    const [cliente, meds, metas, segs] = await Promise.all([
+    const [cliente, meds, metas, segs, actos] = await Promise.all([
       db.clientes.get(clienteId),
       db.mediciones.listCliente(clienteId),
       db.metas.listCliente(clienteId),
       db.seguimientos.listCliente(clienteId),
+      compActividades(clienteId),
     ]);
     if (!cliente) throw new Error('Cliente no encontrado');
     _comp.cliente = cliente;
     _comp.meds = meds || [];
     _comp.metas = metas;              // null = falta la migración de metas_historial
     _comp.segs = segs || [];
+    _comp.actos = actos;              // null = falta la migración de actividades
   } catch (e) {
     _comp.error = e.message || String(e);
     _comp.cliente = null;
   }
   _comp.cargando = false;
   rerenderView();
+}
+
+// Lo que el cliente registró en su app: cardio, deportes, caminatas. Los
+// últimos tres meses, que es el horizonte en el que una tendencia significa
+// algo. Devuelve null —y no []— si la tabla no existe todavía, para poder
+// distinguir "no ha registrado nada" de "falta correr la migración".
+let _compCatalogo = null;
+async function compActividades(clienteId) {
+  const desde = (() => {
+    const d = new Date(); d.setDate(d.getDate() - 90);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+  const { data, error } = await sb.from('actividades')
+    .select('id,fecha,tipo,titulo,duracion_min,distancia_km,intensidad,rpe,origen')
+    .eq('cliente_id', clienteId).gte('fecha', desde).order('fecha', { ascending: false });
+  if (error) return null;
+  if (!_compCatalogo) {
+    const { data: cat } = await sb.from('actividades_catalogo')
+      .select('slug,nombre,categoria,icono').order('orden');
+    _compCatalogo = cat || [];
+  }
+  return data || [];
 }
 
 window.compElegirCliente = (id) => { _comp.tab = 'panorama'; compCargar(id); };

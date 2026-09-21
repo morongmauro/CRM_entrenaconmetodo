@@ -404,32 +404,134 @@ summary.list-none { list-style: none; }
 .asis-modos { display: inline-flex; gap: 0.15rem; background: rgba(0,0,0,0.05); border-radius: 9999px; padding: 0.15rem; }
 
 /* ===== Entrenamiento · calendario de la fase ===================== */
-.ent-semana {
-  display: grid; gap: 0.5rem;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+/* ---- Calendario mensual ---- */
+.ent-mes-cabecera {
+  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.35rem; margin-bottom: 0.35rem;
 }
-.ent-dia {
-  background: white; border: 1px solid #e2e8f0; border-radius: 0.85rem;
-  padding: 0.7rem 0.6rem; min-height: 6.5rem;
-  display: flex; flex-direction: column; gap: 0.2rem;
-  cursor: pointer; transition: border-color 0.14s, transform 0.14s, box-shadow 0.14s;
+.ent-mes-cabecera > div {
+  font-size: 0.62rem; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.06em; color: #94a3b8; text-align: center;
 }
-.ent-dia:hover { border-color: var(--brand-olive); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,0.05); }
-.ent-dia-descanso { background: #f8fafc; border-style: dashed; cursor: default; }
-.ent-dia-descanso:hover { border-color: #e2e8f0; transform: none; box-shadow: none; }
-.ent-dia-hoy { border-color: var(--brand-olive); box-shadow: inset 3px 0 0 var(--brand-olive); }
-.ent-dia-nombre {
-  font-size: 0.65rem; font-weight: 800; text-transform: uppercase;
-  letter-spacing: 0.05em; color: #94a3b8;
+.ent-mes {
+  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.35rem;
 }
-.ent-dia-rutina { font-size: 0.82rem; font-weight: 700; color: #0f172a; line-height: 1.25; }
-.ent-dia-meta { font-size: 0.68rem; color: #64748b; }
-.ent-dia-vacio { font-size: 0.7rem; color: #cbd5e1; margin-top: auto; }
-.ent-dia-auto {
-  margin-top: auto; align-self: flex-start;
-  font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
-  color: #92400e; background: #fef3c7; padding: 0.05rem 0.35rem; border-radius: 9999px;
+.ent-celda {
+  background: white; border: 1px solid #e2e8f0; border-radius: 0.6rem;
+  min-height: 5.4rem; padding: 0.3rem 0.32rem;
+  display: flex; flex-direction: column; gap: 0.18rem;
+  cursor: pointer; transition: border-color 0.12s, background 0.12s;
 }
+.ent-celda:hover { border-color: var(--brand-olive); }
+/* Fuera de la fase no es un día "malo": simplemente el plan no llega ahí.
+   Se apaga en vez de esconderse para que el mes siga leyéndose como un mes. */
+.ent-celda-off { background: #fafafa; border-style: dashed; }
+.ent-celda-off:hover { border-color: #e2e8f0; }
+.ent-celda-fuera { opacity: 0.45; }
+.ent-celda-hoy { border-color: var(--brand-olive); box-shadow: inset 0 2px 0 var(--brand-olive); }
+.ent-celda-cab { display: flex; align-items: center; justify-content: space-between; gap: 0.2rem; }
+.ent-celda-num { font-size: 0.72rem; font-weight: 700; color: #475569; }
+.ent-celda-hoy .ent-celda-num { color: var(--brand-olive); }
+.ent-celda-sem {
+  font-size: 0.55rem; font-weight: 800; letter-spacing: 0.04em;
+  color: #94a3b8; background: #f1f5f9; border-radius: 9999px; padding: 0 0.28rem;
+}
+.ent-celda-cuerpo { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+
+.ent-chip {
+  font-size: 0.63rem; line-height: 1.25; border-radius: 0.35rem;
+  padding: 0.15rem 0.3rem; display: flex; align-items: center; gap: 0.18rem;
+  min-width: 0;
+}
+.ent-chip-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ent-chip-rutina {
+  background: #eef2e6; color: #3f4a22; font-weight: 700;
+  border: 1px solid transparent; cursor: grab;
+}
+.ent-chip-rutina:active { cursor: grabbing; }
+/* Punteado = el día no está fijado en la rutina, sale del reparto. */
+.ent-chip-sugerida { border-style: dashed; border-color: #b6bf94; background: #f5f7ef; }
+.ent-chip-arrastre { opacity: 0.4; }
+/* LA FUERZA MANDA. El evento y la sesión suelta se ven, se tocan y se
+   editan, pero NO compiten con la rutina: sin negrita, más pequeños y con
+   el color reducido a un punto a la izquierda. Al planificar se mira "qué
+   entrena el lunes", y una natación tan gritona como el Push obliga a leer
+   dos veces cada casilla. */
+.ent-chip-evento {
+  background: transparent; color: #64748b; font-weight: 500; font-size: 0.6rem;
+  padding-left: 0.15rem;
+}
+.ent-chip-evento::before {
+  content: ''; width: 5px; height: 5px; border-radius: 9999px;
+  background: var(--evc); flex-shrink: 0;
+}
+.ent-chip-suelta {
+  background: transparent; color: #94a3b8; font-style: italic; font-size: 0.6rem;
+}
+
+/* Mientras se arrastra, los días donde SÍ se puede soltar se marcan. Sin
+   esto no se sabe si el sitio donde estás soltando cuenta. */
+.ent-mes-arrastrando .ent-celda:not(.ent-celda-off) { background: #fbfdf7; }
+.ent-celda-destino {
+  border-color: var(--brand-olive) !important;
+  box-shadow: 0 0 0 2px rgba(96,108,56,0.18);
+}
+
+.ent-marca { font-size: 0.7rem; line-height: 1; flex-shrink: 0; }
+.ent-marca-ok    { color: #15803d; font-weight: 800; }
+.ent-marca-no    { color: #b91c1c; font-weight: 800; }
+.ent-marca-curso { color: #b45309; }
+.ent-marca-vacia { color: #cbd5e1; font-weight: 800; }
+
+.ent-leyenda {
+  display: flex; flex-wrap: wrap; gap: 0.1rem 0.9rem; align-items: center;
+  font-size: 0.66rem; color: #64748b; margin-top: 0.6rem;
+}
+.ent-leyenda-nota { flex-basis: 100%; color: #94a3b8; line-height: 1.5; }
+
+/* En móvil el mes no cabe con 7 columnas legibles: se deja desplazar en
+   horizontal en vez de espachurrar las casillas hasta que no se lea nada. */
+@media (max-width: 640px) {
+  .ent-mes, .ent-mes-cabecera { min-width: 34rem; }
+  .ent-mes-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .ent-celda { min-height: 4.6rem; }
+}
+
+/* ---- Editor de rutina: filas arrastrables ---- */
+.ent-fila { position: relative; transition: box-shadow 0.12s, opacity 0.12s; }
+.ent-fila-arrastre { opacity: 0.35; }
+/* La línea marca DÓNDE va a caer. Sin ella hay que soltar para averiguarlo. */
+.ent-fila-antes::before, .ent-fila-despues::after {
+  content: ''; position: absolute; left: 0; right: 0; height: 3px;
+  background: var(--brand-olive); border-radius: 9999px;
+}
+.ent-fila-antes::before  { top: -0.35rem; }
+.ent-fila-despues::after { bottom: -0.35rem; }
+
+.ent-agarre {
+  color: #cbd5e1; font-size: 1rem; line-height: 1.1; cursor: grab;
+  user-select: none; flex-shrink: 0; padding-top: 0.05rem;
+}
+.ent-fila:hover .ent-agarre { color: var(--brand-olive); }
+.ent-agarre:active { cursor: grabbing; }
+.ent-fila-fig { width: 1.9rem; flex-shrink: 0; opacity: 0.85; }
+
+.ent-bloque { transition: border-color 0.12s, background 0.12s; }
+.ent-bloque-destino {
+  border-color: var(--brand-olive) !important; background: #f6f8f0 !important;
+}
+.ent-bloque-vacio { border: 1px dashed #cbd5e1; border-radius: 0.5rem; }
+
+/* El aviso de "sin descripción" es un botón, no un cartel: leerlo y no poder
+   arreglarlo ahí mismo obliga a buscar el ejercicio en la galería. */
+.ent-aviso {
+  display: inline-flex; align-items: center; gap: 0.2rem; margin-top: 0.25rem;
+  font-size: 0.63rem; font-weight: 700; color: #92400e;
+  background: #fef3c7; border: 1px solid #fde68a; border-radius: 9999px;
+  padding: 0.1rem 0.45rem; cursor: pointer;
+}
+.ent-aviso:hover { background: #fde68a; }
+
 .ent-progreso { height: 5px; background: #e2e8f0; border-radius: 9999px; overflow: hidden; }
 .ent-progreso-relleno { height: 100%; background: var(--brand-olive); border-radius: 9999px; }
 
@@ -442,16 +544,6 @@ summary.list-none { list-style: none; }
   color: #94a3b8; font-weight: 800; padding: 0.3rem 0.5rem; white-space: nowrap;
 }
 .ent-tabla-ejs td { padding: 0.45rem 0.5rem; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
-
-/* En el teléfono la semana no cabe en 7 columnas: se hacen dos filas de
-   tarjetas que siguen siendo legibles, en vez de siete columnas de 45px. */
-@media (max-width: 900px) {
-  .ent-semana { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-}
-@media (max-width: 560px) {
-  .ent-semana { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ent-dia { min-height: 5.5rem; }
-}
 
 /* ===== Agente de rutinas ========================================= */
 .rut-abrir {

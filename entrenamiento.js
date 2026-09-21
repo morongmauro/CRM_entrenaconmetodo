@@ -42,6 +42,15 @@ const _ent = {
   subtab: 'calendario',    // calendario | rutinas  (dentro de un cliente)
   faseId: null,            // qué fase se está mirando
   rutinaAbierta: null,     // qué rutina está desplegada en la lista
+  // Calendario mensual
+  mes: null,               // 'YYYY-MM' que se mira; null = lo decide la fase
+  arrastrando: null,       // id de la rutina que va en el aire ahora mismo
+  arrastrandoRE: null,     // id del ejercicio que va en el aire en el editor
+  // Cachés de la última pintada. El arrastre y el editor de eventos ocurren
+  // fuera del render y necesitan saber sobre qué están operando.
+  faseCache: null,
+  rutinasCache: null,
+  eventosCache: null,
 };
 
 // ---------- Taxonomía ----------
@@ -301,7 +310,7 @@ const entDb = {
   async ejerciciosDeRutinas(rutinaIds) {
     if (!rutinaIds || !rutinaIds.length) return {};
     const { data, error } = await sb.from('rutina_ejercicios')
-      .select('*, ejercicios(id, nombre, patron, segmento, tipo, equipo, musculos_primarios, musculos_secundarios, unilateral)')
+      .select('*, ejercicios(id, nombre, patron, segmento, tipo, equipo, descripcion, musculos_primarios, musculos_secundarios, unilateral)')
       .in('rutina_id', rutinaIds).order('orden');
     if (error) { toast(error.message); return {}; }
     const porRutina = {};
@@ -459,6 +468,7 @@ function entTarjetaEjercicio(e, opts = {}) {
       <div class="flex items-center justify-between mt-2 pt-2 border-t border-slate-100">
         <div>${entIconoVideo(e)}</div>
         <div class="flex gap-1">
+          <button class="btn btn-ghost btn-sm" onclick="entVerFicha('${e.id}')" title="Ver la ficha como la recibe el cliente">👁 Ficha</button>
           ${opts.agregar
             ? `<button class="btn btn-primary btn-sm" onclick="entAgregarARutina('${e.id}')">+ Añadir</button>`
             : `<button class="btn btn-ghost btn-sm" onclick="entEditarEjercicio('${e.id}')">Editar</button>`}
@@ -541,6 +551,65 @@ async function entVistaEjercicios() {
   if (c) c.textContent = `${lista.length} de ${todos.length}`;
 }
 
+// ---------- Ficha del ejercicio (solo lectura) ----------
+// Lo que el cliente va a ver, con la misma disposición: descripción a la
+// izquierda y el dibujo del cuerpo al lado. Sirve para revisar la galería sin
+// abrir el editor y sin tener que imaginarse cómo queda en el teléfono.
+window.entVerFicha = async (id) => {
+  const e = (await entDb.ejercicios()).find(x => x.id === id);
+  if (!e) return toast('No encuentro ese ejercicio');
+  await entDb.musculos();   // llena _ent.musculos para los nombres del dibujo
+
+  const thumb = e.poster_url
+    || (e.video_fuente === 'youtube' ? entYoutubeThumb(e.video_ref) : null)
+    || (e.poster_path ? _ent.posters[e.poster_path] : null);
+  const claves = e.claves_tecnicas || [];
+  const figura = typeof figuraMusculos === 'function'
+    ? figuraMusculos({
+        primarios: e.musculos_primarios || [],
+        secundarios: e.musculos_secundarios || [],
+        mapa: entMapaMusculos(), alto: 190,
+      })
+    : '';
+
+  openModal(modalShell(escapeHtml(e.nombre), `
+    <div class="text-xs text-slate-500 mb-4">
+      ${entLabel(ENT_TIPOS, e.tipo)} · ${entLabel(ENT_SEGMENTOS, e.segmento)} ·
+      ${entLabel(ENT_PATRONES, e.patron)} · ${entLabel(ENT_NIVELES, e.nivel)}
+    </div>
+
+    ${thumb ? `<img src="${escapeHtml(thumb)}" class="rounded-xl w-full max-w-sm mb-4" alt="">` : ''}
+
+    <div class="grid md:grid-cols-[1fr_auto] gap-5">
+      <div>
+        <div class="sec-title">Cómo se hace</div>
+        ${e.descripcion
+          ? `<p class="text-sm text-slate-700 whitespace-pre-line">${escapeHtml(e.descripcion)}</p>`
+          : `<p class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+               ⚠ Este ejercicio no tiene descripción. El cliente lo verá sin instrucciones.
+               <button class="btn btn-ghost btn-sm ml-1" onclick="closeModal(); entEditarEjercicio('${e.id}')">Escribirla</button>
+             </p>`}
+
+        ${claves.length ? `
+          <div class="sec-title mt-4">Claves técnicas</div>
+          <ul class="text-sm text-slate-700 list-disc pl-5 space-y-1">
+            ${claves.map(c => `<li>${escapeHtml(c)}</li>`).join('')}
+          </ul>` : ''}
+      </div>
+
+      <div class="md:w-56 md:border-l md:pl-5 border-slate-100">
+        ${figura || '<p class="text-xs text-slate-400">Sin músculos asignados.</p>'}
+      </div>
+    </div>
+
+    ${e.notas_coach ? `
+      <div class="sec-title mt-5">Notas de coach <span class="tag tag-gray">no se envía al cliente</span></div>
+      <p class="text-sm text-slate-600 whitespace-pre-line">${escapeHtml(e.notas_coach)}</p>` : ''}
+  `, `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>
+      <button class="btn btn-primary" onclick="closeModal(); entEditarEjercicio('${e.id}')">Editar</button>`),
+    { wide: true });
+};
+
 // ---------- Editor de ejercicio (crear / editar) ----------
 // Sin id = ficha nueva.
 window.entEditarEjercicio = async (id) => {
@@ -561,7 +630,7 @@ window.entEditarEjercicio = async (id) => {
                  style="${(seleccionados || []).includes(m.slug) ? 'background:#d1fae5;color:#065f46' : ''}">
             <input type="checkbox" class="ej-${campo}" value="${m.slug}"
                    ${(seleccionados || []).includes(m.slug) ? 'checked' : ''}
-                   onchange="this.parentNode.style.cssText = this.checked ? 'background:#d1fae5;color:#065f46' : ''"
+                   onchange="this.parentNode.style.cssText = this.checked ? 'background:#d1fae5;color:#065f46' : ''; entRefrescarFigura()"
                    style="margin-right:3px;vertical-align:middle">
             ${escapeHtml(m.corto)}
           </label>`).join('')}
@@ -596,14 +665,21 @@ window.entEditarEjercicio = async (id) => {
 
     <div class="sec-title">Músculos que trabaja</div>
     <p class="text-xs text-slate-500 mb-2">Los <b>primarios</b> se pintan fuerte en el dibujo del cuerpo que ve el cliente; los secundarios, suave.</p>
-    <details class="mb-2" open>
-      <summary class="text-xs font-bold text-slate-600 cursor-pointer mb-1">Primarios</summary>
-      ${casillas('prim', e.musculos_primarios)}
-    </details>
-    <details class="mb-4">
-      <summary class="text-xs font-bold text-slate-600 cursor-pointer mb-1">Secundarios</summary>
-      ${casillas('sec', e.musculos_secundarios)}
-    </details>
+    <div class="grid md:grid-cols-[1fr_auto] gap-4 mb-4">
+      <div>
+        <details class="mb-2" open>
+          <summary class="text-xs font-bold text-slate-600 cursor-pointer mb-1">Primarios</summary>
+          ${casillas('prim', e.musculos_primarios)}
+        </details>
+        <details>
+          <summary class="text-xs font-bold text-slate-600 cursor-pointer mb-1">Secundarios</summary>
+          ${casillas('sec', e.musculos_secundarios)}
+        </details>
+      </div>
+      <!-- El mismo dibujo que verá el cliente, aquí al lado. Marcar músculos
+           a ciegas era fácil de equivocar: el error se veía recién en la app. -->
+      <div id="ej-figura" class="md:w-52 md:border-l md:pl-4 border-slate-100"></div>
+    </div>
 
     <div class="sec-title">Equipo y lugar</div>
     <div class="flex flex-wrap gap-1 mb-2">${multiChips(ENT_EQUIPO, 'equipo', e.equipo)}</div>
@@ -638,6 +714,8 @@ window.entEditarEjercicio = async (id) => {
 
   // Estado del video vive fuera del DOM: al cambiar de pestaña se repinta el
   // panel y se perderían los valores si se leyeran de los inputs.
+  entRefrescarFigura();
+
   _ent._video = {
     fuente: e.video_fuente || 'ninguno',
     url: e.video_url || '',
@@ -647,6 +725,22 @@ window.entEditarEjercicio = async (id) => {
     inicio: e.video_inicio_seg || '',
   };
   entPintarPanelVideo();
+};
+
+// Mapa slug -> nombre corto para los tooltips de la figura. Sale del mismo
+// catálogo `musculos` que llena las casillas, así que no se desincroniza.
+function entMapaMusculos() {
+  return Object.fromEntries((_ent.musculos || []).map(m => [m.slug, m.corto]));
+}
+
+window.entRefrescarFigura = () => {
+  const caja = $('#ej-figura');
+  if (!caja || typeof figuraMusculos !== 'function') return;
+  const marcados = (clase) => $$(`.${clase}:checked`).map(i => i.value);
+  const prim = marcados('ej-prim'), sec = marcados('ej-sec');
+  caja.innerHTML = (prim.length || sec.length)
+    ? figuraMusculos({ primarios: prim, secundarios: sec, mapa: entMapaMusculos(), alto: 170 })
+    : '<p class="text-xs text-slate-400 text-center py-8">Marca un músculo y aquí verás el dibujo que recibe el cliente.</p>';
 };
 
 window.entVideoFuente = (f) => {
@@ -975,6 +1069,13 @@ async function entPintarConstructor() {
     }
   }
 
+  // Los que llegarían al cliente sin una sola línea de cómo se hacen. De la
+  // galería importada de Trainerize son la mayoría, así que decir cuántos hay
+  // y cuáles evita ir fila por fila buscando el triángulo amarillo.
+  const sinTexto = r.ejercicios
+    .filter(re => !String(re.ejercicios?.descripcion || '').trim())
+    .map(re => re.ejercicios?.nombre || 'Ejercicio');
+
   body.innerHTML = `
     <div class="card mb-4">
       <div class="flex justify-between items-start gap-3 flex-wrap">
@@ -982,6 +1083,11 @@ async function entPintarConstructor() {
           <button class="btn btn-ghost btn-sm mb-1" onclick="entCerrarConstructor()">← Volver</button>
           <div class="font-bold text-lg text-slate-900">${escapeHtml(r.nombre)}</div>
           <div class="text-xs text-slate-500">${contexto} · ${r.ejercicios.length} ejercicio${r.ejercicios.length === 1 ? '' : 's'}</div>
+          ${sinTexto.length ? `
+            <div class="text-xs text-amber-700 mt-1">
+              ⚠ ${sinTexto.length} sin descripción: el cliente los verá sin instrucciones
+              (${sinTexto.slice(0, 3).map(n => escapeHtml(n)).join(', ')}${sinTexto.length > 3 ? '…' : ''})
+            </div>` : ''}
         </div>
         <div class="flex gap-1 flex-wrap">
           <button class="btn btn-ghost btn-sm" onclick="entNuevoBloque()">+ Bloque</button>
@@ -1053,8 +1159,8 @@ function entRenderRutina(r) {
   // y desaparecería hasta meterle algo.
   const usados = new Set(r.ejercicios.map(e => e.bloque_id).filter(Boolean));
   r.bloques.filter(b => !usados.has(b.id)).forEach(b => {
-    html += entEnvolverBloque(b, `<div class="text-xs text-slate-400 py-2 text-center">
-      Bloque vacío — elígelo arriba como destino y añade ejercicios.</div>`, 0);
+    html += entEnvolverBloque(b, `<div class="text-xs text-slate-400 py-3 text-center ent-bloque-vacio">
+      Bloque vacío — arrastra aquí un ejercicio, o elígelo arriba como destino.</div>`, 0);
   });
   return html;
 }
@@ -1066,7 +1172,10 @@ function entEnvolverBloque(b, dentro, cuantos) {
   if (b.descanso_entre_seg != null) partes.push(`${b.descanso_entre_seg}s entre ejercicios`);
   if (b.descanso_seg != null) partes.push(`${b.descanso_seg}s entre vueltas`);
   return `
-    <div class="rounded-xl mb-2" style="border:1.5px solid #cbd5e1;background:#f8fafc;padding:0.6rem">
+    <div class="rounded-xl mb-2 ent-bloque" data-bloque="${b.id}"
+         ondragover="entBloqueDragOver(event)" ondragleave="entBloqueDragLeave(event)"
+         ondrop="entBloqueDrop(event)"
+         style="border:1.5px solid #cbd5e1;background:#f8fafc;padding:0.6rem">
       <div class="flex justify-between items-start gap-2 mb-2">
         <div class="min-w-0">
           <div class="flex items-center gap-1.5 flex-wrap">
@@ -1090,14 +1199,36 @@ function entEnvolverBloque(b, dentro, cuantos) {
 
 function entFilaRutina(re, i, total, bloques) {
   const e = re.ejercicios || {};
+  // Un ejercicio sin descripción llega al cliente sin ninguna instrucción de
+  // cómo hacerlo. Se avisa AQUÍ, al meterlo en la rutina, porque es el único
+  // momento en que alguien lo está mirando con la intención de mandárselo.
+  const sinTexto = !String(e.descripcion || '').trim();
+  const mini = (typeof figuraMusculos === 'function')
+    ? figuraMusculos({
+        primarios: e.musculos_primarios || [], secundarios: e.musculos_secundarios || [],
+        mapa: entMapaMusculos(), alto: 54, leyenda: false, cara: 'frente',
+      })
+    : '';
   return `
-    <div class="card p-3">
+    <div class="card p-3 ent-fila" draggable="true" data-re="${re.id}" data-bloque="${re.bloque_id || ''}"
+         ondragstart="entReDragStart(event)" ondragend="entReDragEnd(event)"
+         ondragover="entReDragOver(event)" ondrop="entReDrop(event)">
       <div class="flex justify-between items-start gap-2 mb-2">
-        <div class="min-w-0">
-          <div class="font-bold text-sm text-slate-900">${i + 1}. ${escapeHtml(e.nombre || 'Ejercicio')}</div>
-          <div class="text-xs text-slate-500">${entLabel(ENT_TIPOS, e.tipo)} · ${entChipMusculos(e)}</div>
+        <div class="flex gap-2 min-w-0">
+          <div class="ent-agarre" title="Arrastra para cambiar el orden">⠿</div>
+          ${mini ? `<div class="ent-fila-fig">${mini}</div>` : ''}
+          <div class="min-w-0">
+            <div class="font-bold text-sm text-slate-900">${i + 1}. ${escapeHtml(e.nombre || 'Ejercicio')}</div>
+            <div class="text-xs text-slate-500">${entLabel(ENT_TIPOS, e.tipo)} · ${entChipMusculos(e)}</div>
+            ${sinTexto ? `
+              <button class="ent-aviso" onclick="entEditarEjercicio('${e.id}')"
+                      title="El cliente lo verá sin ninguna instrucción de cómo hacerlo">
+                ⚠ Sin descripción · escribirla
+              </button>` : ''}
+          </div>
         </div>
         <div class="flex gap-0.5 flex-shrink-0">
+          <button class="btn btn-ghost btn-sm" onclick="entVerFicha('${e.id}')" title="Ver la ficha completa">👁</button>
           <button class="btn btn-ghost btn-sm" ${i === 0 ? 'disabled' : ''} onclick="entMoverRE('${re.id}', -1)">↑</button>
           <button class="btn btn-ghost btn-sm" ${i === total - 1 ? 'disabled' : ''} onclick="entMoverRE('${re.id}', 1)">↓</button>
           <button class="btn btn-ghost btn-sm" onclick="entQuitarRE('${re.id}')">✕</button>
@@ -1162,6 +1293,135 @@ window.entGuardarRE = async (id, campo, valor) => {
 window.entQuitarRE = async (id) => {
   await entDb.quitarRE(id);
   await entPintarConstructor();
+};
+
+// ---------- Arrastrar ejercicios dentro de la rutina ----------
+// Las flechas ↑↓ siguen ahí (en el móvil arrastrar es incómodo y son más
+// precisas), pero mover el 8º ejercicio al 2º puesto son seis clics. Con el
+// arrastre es uno.
+//
+// Soltar sobre otro ejercicio lo INSERTA en esa posición, no los intercambia:
+// intercambiar deja la lista con dos ejercicios cambiados de sitio, que casi
+// nunca es lo que se quiere al reordenar un entreno.
+//
+// Y hereda el bloque de donde cae. Arrastrar un ejercicio dentro de un
+// circuito y que se quede suelto sería el error silencioso de siempre: se ve
+// dentro del recuadro pero el cliente lo ejecuta aparte.
+window.entReDragStart = (e) => {
+  const fila = e.currentTarget;
+  _ent.arrastrandoRE = fila.dataset.re;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', fila.dataset.re);   // Firefox lo exige
+  fila.classList.add('ent-fila-arrastre');
+};
+
+window.entReDragEnd = (e) => {
+  e.currentTarget.classList.remove('ent-fila-arrastre');
+  document.querySelectorAll('.ent-fila-antes, .ent-fila-despues')
+    .forEach(f => f.classList.remove('ent-fila-antes', 'ent-fila-despues'));
+  _ent.arrastrandoRE = null;
+};
+
+window.entReDragOver = (e) => {
+  if (!_ent.arrastrandoRE) return;
+  const fila = e.currentTarget;
+  if (fila.dataset.re === _ent.arrastrandoRE) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  // La mitad superior de la fila significa "antes", la inferior "después".
+  // Sin esta línea no se sabe dónde va a caer hasta que ya cayó.
+  const caja = fila.getBoundingClientRect();
+  const antes = (e.clientY - caja.top) < caja.height / 2;
+  document.querySelectorAll('.ent-fila-antes, .ent-fila-despues')
+    .forEach(f => f.classList.remove('ent-fila-antes', 'ent-fila-despues'));
+  fila.classList.add(antes ? 'ent-fila-antes' : 'ent-fila-despues');
+};
+
+window.entReDrop = async (e) => {
+  const id = _ent.arrastrandoRE;
+  const fila = e.currentTarget;
+  const destinoId = fila.dataset.re;
+  _ent.arrastrandoRE = null;
+  if (!id || !destinoId || id === destinoId) return;
+  e.preventDefault();
+  e.stopPropagation();
+
+  const caja = fila.getBoundingClientRect();
+  const antes = (e.clientY - caja.top) < caja.height / 2;
+  await entReordenarRE(id, destinoId, antes, fila.dataset.bloque || null);
+};
+
+// Saca el ejercicio de la lista, lo vuelve a meter donde toca y renumera
+// TODO. Renumerar entero (y no solo los de en medio) es lo que mantiene
+// `orden` sin huecos ni empates después de mil movimientos.
+async function entReordenarRE(id, destinoId, antes, bloqueDestino) {
+  const lista = (_ent.rutina?.ejercicios || []).slice();
+  const desde = lista.findIndex(x => x.id === id);
+  if (desde < 0) return;
+
+  const [movido] = lista.splice(desde, 1);
+  let hasta = lista.findIndex(x => x.id === destinoId);
+  if (hasta < 0) return;
+  if (!antes) hasta++;
+  lista.splice(hasta, 0, movido);
+
+  const nuevoBloque = bloqueDestino || null;
+  const cambioBloque = (movido.bloque_id || null) !== nuevoBloque;
+
+  // Solo se escriben las filas cuyo `orden` cambió de verdad: mover el último
+  // al penúltimo puesto son dos escrituras, no quince.
+  const escrituras = [];
+  lista.forEach((re, i) => {
+    const parche = {};
+    if (re.orden !== i + 1) parche.orden = i + 1;
+    if (re.id === id && cambioBloque) parche.bloque_id = nuevoBloque;
+    if (Object.keys(parche).length) escrituras.push(entDb.actualizarRE(re.id, parche));
+  });
+  await Promise.all(escrituras);
+  await entPintarConstructor();
+}
+
+// Soltar en el hueco de un bloque (no sobre una fila concreta) mete el
+// ejercicio AL FINAL de ese bloque. Es la única forma de meter algo a un
+// circuito vacío arrastrando: sin filas dentro, no hay sobre qué soltar.
+window.entBloqueDragOver = (e) => {
+  if (!_ent.arrastrandoRE) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  // Si el cursor está sobre una fila, esa fila ya está pintando su línea de
+  // inserción; resaltar además el bloque entero son dos señales a la vez.
+  const sobreFila = e.target.closest?.('.ent-fila');
+  e.currentTarget.classList.toggle('ent-bloque-destino', !sobreFila);
+};
+window.entBloqueDragLeave = (e) => {
+  // `dragleave` también salta al pasar sobre los hijos; solo cuenta salir del
+  // recuadro de verdad.
+  if (e.currentTarget.contains(e.relatedTarget)) return;
+  e.currentTarget.classList.remove('ent-bloque-destino');
+};
+window.entBloqueDrop = async (e) => {
+  const caja = e.currentTarget;
+  caja.classList.remove('ent-bloque-destino');
+  const id = _ent.arrastrandoRE;
+  const bloqueId = caja.dataset.bloque;
+  _ent.arrastrandoRE = null;
+  // Cuando la fila resuelve el drop llama a stopPropagation(), así que este
+  // manejador ni se ejecuta. Si llega aquí es que cayó en el hueco. La única
+  // excepción es soltar un ejercicio sobre sí mismo, y entonces `id` ya es
+  // null porque la fila lo limpió.
+  if (!id) return;
+  e.preventDefault();
+  e.stopPropagation();
+
+  const lista = (_ent.rutina?.ejercicios || []);
+  const dentro = lista.filter(x => x.id !== id && x.bloque_id === bloqueId);
+  if (dentro.length) {
+    await entReordenarRE(id, dentro[dentro.length - 1].id, false, bloqueId);
+  } else {
+    // Bloque vacío: basta con marcarle el bloque, el orden no cambia.
+    await entDb.actualizarRE(id, { bloque_id: bloqueId });
+    await entPintarConstructor();
+  }
 };
 
 // Reordenar intercambiando el campo `orden` con el vecino. Con listas de 5-15
@@ -1365,6 +1625,13 @@ async function entVistaClientes() {
   const fase = fases.find(f => f.id === _ent.faseId) || null;
   const rutinas = fase ? (rutinasPorFase[fase.id] || []) : [];
 
+  // El calendario opera fuera del render: al arrastrar una rutina o abrir un
+  // evento hay que saber sobre qué fase y qué rutinas, y a esas alturas el
+  // render ya terminó.
+  _ent.fases = fases;
+  _ent.faseCache = fase;
+  _ent.rutinasCache = rutinas;
+
   // Los ejercicios de todas las rutinas de la fase, de un solo viaje: son los
   // que se despliegan al abrir cada rutina, y contarlos en la tarjeta.
   const ejerciciosPorRutina = await entDb.ejerciciosDeRutinas(rutinas.map(r => r.id));
@@ -1431,6 +1698,7 @@ async function entVistaClientes() {
   `;
 
   if (typeof rutMontarPanel === 'function') rutMontarPanel();
+  if (_ent.subtab === 'calendario') entPintarCalendario(cliente, fase, rutinas, ejerciciosPorRutina);
   if (_ent.subtab === 'sesiones') entPintarSesiones(cliente);
   if (_ent.subtab === 'lecturas') entPintarLecturas(cliente);
 }
@@ -1514,7 +1782,11 @@ async function entPintarSesiones(cliente) {
 }
 
 window.entSubtab = (t) => { _ent.subtab = t; entVistaClientes(); };
-window.entVerFase = (id) => { _ent.faseId = id; _ent.rutinaAbierta = null; entVistaClientes(); };
+window.entVerFase = (id) => {
+  _ent.faseId = id; _ent.rutinaAbierta = null;
+  _ent.mes = null;            // el mes de la fase anterior no vale para esta
+  entVistaClientes();
+};
 window.entToggleRutina = (id) => {
   _ent.rutinaAbierta = _ent.rutinaAbierta === id ? null : id;
   entVistaClientes();
@@ -1550,6 +1822,29 @@ function entRepartirRutinas(fase, rutinas) {
   return { porDia, sinDia };
 }
 
+// ---------- Fechas, en local ----------
+// `toISOString()` trabaja en UTC: en Colombia (UTC-5) una fecha construida a
+// medianoche local sale bien por los pelos, pero basta un viaje al otro lado
+// del meridiano para que el calendario se corra un día entero. Estas dos
+// funciones nunca tocan UTC.
+function evtISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function evtDia(iso) {
+  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+function evtSumarDias(iso, n) {
+  const d = evtDia(iso);
+  d.setDate(d.getDate() + n);
+  return evtISO(d);
+}
+// Lunes = 0 … domingo = 6. getDay() da domingo = 0, que descuadra la semana
+// española en todos los cálculos si se usa tal cual.
+const evtOffsetDia = (iso) => (evtDia(iso).getDay() + 6) % 7;
+const EVT_CODIGO_DIA = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+const evtCodigoDe = (iso) => EVT_CODIGO_DIA[evtOffsetDia(iso)];
+
 // En qué semana de la fase estamos hoy (1..semanas), o null si no arrancó.
 function entSemanaActual(fase) {
   if (!fase?.fecha_inicio || !fase?.semanas) return null;
@@ -1561,75 +1856,357 @@ function entSemanaActual(fase) {
   return semana > fase.semanas ? null : semana;
 }
 
+// ---------- El mes ----------
+// Antes esto era una tira de 7 casillas: la semana tipo, siempre la misma.
+// Servía para ver "los lunes hace Push", pero no para lo que de verdad se
+// pregunta al planificar — en qué fecha empieza, cuándo se acaba, en qué
+// semana vamos, y qué días el cliente entrenó de verdad y cuáles se saltó.
+// Eso solo se ve en un mes.
+//
+// Se pinta en dos tiempos: el armazón sale de una (para que el clic en la
+// pestaña responda al instante) y las sesiones y los eventos entran cuando
+// llegan de la red.
 function entCalendarioHTML(cliente, fase, rutinas, ejerciciosPorRutina) {
   if (!fase) return '<div class="card text-center text-slate-500 py-8">Elige una fase.</div>';
-  const { porDia, sinDia } = entRepartirRutinas(fase, rutinas);
-  const semana = entSemanaActual(fase);
-  const fin = entFechaFin(fase);
-  const hoyLetra = ENT_DIAS[(new Date().getDay() + 6) % 7][0];   // getDay: 0=domingo
+  return `<div id="ent-cal">${entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina, null, null, null)}</div>`;
+}
 
-  const cabeceraFase = `
+// Mes que se está mirando, 'YYYY-MM'. Arranca en el de la fecha de inicio de
+// la fase, no en el de hoy: al abrir una fase que empieza el mes que viene lo
+// que quieres ver es esa fase, no un mes vacío.
+function entMesVisible(fase) {
+  if (_ent.mes) return _ent.mes;
+  const hoy = fmt.hoy().slice(0, 7);
+  if (!fase?.fecha_inicio) return hoy;
+  const ini = String(fase.fecha_inicio).slice(0, 7);
+  const fin = (entFechaFin(fase) || '').slice(0, 7);
+  // Si hoy cae dentro de la fase, manda hoy; si no, el arranque.
+  return (fin && hoy >= ini && hoy <= fin) ? hoy : ini;
+}
+
+window.entMes = (delta) => {
+  const [y, m] = entMesVisible(_ent.faseCache).split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  _ent.mes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  entVistaClientes();
+};
+window.entMesHoy = () => { _ent.mes = fmt.hoy().slice(0, 7); entVistaClientes(); };
+
+const ENT_MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+                   'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+// Qué rutina toca cada fecha. Sale del reparto por día de la semana, que es
+// como se planifica ("los lunes, Push"), aplicado a todos los días del mes
+// que caen dentro de la fase.
+function entRutinaPorFecha(fase, rutinas) {
+  const { porDia, sinDia } = entRepartirRutinas(fase, rutinas);
+  return { porDia, sinDia };
+}
+
+function entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina, sesionesPorFecha, eventosPorFecha, faltaTabla) {
+  const { porDia, sinDia } = entRutinaPorFecha(fase, rutinas);
+  const semanaHoy = entSemanaActual(fase);
+  const finFase = entFechaFin(fase);
+  const hoy = fmt.hoy();
+  const mes = entMesVisible(fase);
+  const [anio, mesNum] = mes.split('-').map(Number);
+
+  // La rejilla arranca el lunes de la semana del día 1 y termina el domingo
+  // de la del último: así el mes siempre son filas completas de 7.
+  const primero = `${mes}-01`;
+  const arranque = evtSumarDias(primero, -evtOffsetDia(primero));
+  const ultimo = evtISO(new Date(anio, mesNum, 0));
+  const cierre = evtSumarDias(ultimo, 6 - evtOffsetDia(ultimo));
+
+  const celdas = [];
+  for (let f = arranque; f <= cierre; f = evtSumarDias(f, 1)) {
+    celdas.push(entCeldaDia(f, { fase, finFase, hoy, mesNum, porDia, ejerciciosPorRutina,
+                                 sesionesPorFecha, eventosPorFecha }));
+  }
+
+  const cabecera = `
     <div class="card mb-3">
       <div class="flex flex-wrap items-start justify-between gap-2">
         <div class="min-w-0">
           <div class="font-bold text-slate-900">${escapeHtml(fase.nombre)}</div>
           <div class="text-xs text-slate-500 mt-0.5">
             ${fase.semanas || '?'} semana${fase.semanas === 1 ? '' : 's'}
-            ${fase.fecha_inicio ? ` · ${fmt.fechaCorta(fase.fecha_inicio)}${fin ? ` → ${fmt.fechaCorta(fin)}` : ''}` : ' · sin fecha de inicio'}
-            ${semana ? ` · <strong class="text-emerald-700">vas en la semana ${semana} de ${fase.semanas}</strong>` : ''}
+            ${fase.fecha_inicio
+              ? ` · ${fmt.fechaCorta(fase.fecha_inicio)}${finFase ? ` → ${fmt.fechaCorta(finFase)}` : ''}`
+              : ' · <strong class="text-amber-700">sin fecha de inicio</strong>'}
+            ${semanaHoy ? ` · <strong class="text-emerald-700">vas en la semana ${semanaHoy} de ${fase.semanas}</strong>` : ''}
           </div>
           ${fase.objetivo ? `<div class="text-xs text-slate-600 mt-1">🎯 ${escapeHtml(fase.objetivo)}</div>` : ''}
         </div>
-        <button class="btn btn-secondary btn-sm flex-shrink-0" onclick="entEditarFase('${fase.id}')">Editar fase</button>
+        <div class="flex gap-1 flex-shrink-0 flex-wrap">
+          <button class="btn btn-ghost btn-sm" onclick="entNuevoEvento()">+ Evento</button>
+          <button class="btn btn-secondary btn-sm" onclick="entEditarFase('${fase.id}')">Editar fase</button>
+        </div>
       </div>
-      ${semana ? `
+      ${semanaHoy ? `
         <div class="mt-2">
-          <div class="ent-progreso"><div class="ent-progreso-relleno" style="width:${Math.round(semana / fase.semanas * 100)}%"></div></div>
+          <div class="ent-progreso"><div class="ent-progreso-relleno" style="width:${Math.round(semanaHoy / fase.semanas * 100)}%"></div></div>
         </div>` : ''}
+      ${!fase.fecha_inicio ? `
+        <p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-2">
+          Sin fecha de inicio el calendario no sabe en qué días cae la fase.
+          <button class="btn btn-ghost btn-sm" onclick="entEditarFase('${fase.id}')">Ponerla</button>
+        </p>` : ''}
     </div>`;
 
-  const tarjetas = ENT_DIAS.map(([d, lab]) => {
-    const slot = porDia[d];
-    const esHoy = d === hoyLetra;
-    const declarado = (fase.dias_semana || []).includes(d);
-    if (!slot) {
-      return `
-        <div class="ent-dia ent-dia-descanso ${esHoy ? 'ent-dia-hoy' : ''}">
-          <div class="ent-dia-nombre">${lab}${esHoy ? ' · hoy' : ''}</div>
-          <div class="ent-dia-vacio">${declarado ? 'Día de entreno sin rutina' : 'Descanso'}</div>
-        </div>`;
-    }
+  const navegacion = `
+    <div class="flex items-center justify-between gap-2 mb-2">
+      <div class="flex items-center gap-1">
+        <button class="btn btn-ghost btn-sm" onclick="entMes(-1)" title="Mes anterior">←</button>
+        <div class="font-bold text-slate-800 text-sm min-w-[9rem] text-center">
+          ${ENT_MESES[mesNum - 1]} ${anio}
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="entMes(1)" title="Mes siguiente">→</button>
+      </div>
+      <button class="btn btn-ghost btn-sm ${mes === hoy.slice(0, 7) ? 'opacity-40' : ''}" onclick="entMesHoy()">Hoy</button>
+    </div>`;
+
+  return cabecera + navegacion + `
+    <div class="ent-mes-scroll">
+      <div class="ent-mes-cabecera">
+        ${ENT_DIAS.map(([, lab]) => `<div>${lab}</div>`).join('')}
+      </div>
+      <div class="ent-mes" ondragover="entCalDragOver(event)" ondrop="entCalDrop(event)">${celdas.join('')}</div>
+    </div>
+    ${entCalendarioPie(fase, sinDia, rutinas, faltaTabla)}`;
+}
+
+// Una casilla del mes.
+function entCeldaDia(f, ctx) {
+  const { fase, finFase, hoy, mesNum, porDia, ejerciciosPorRutina,
+          sesionesPorFecha, eventosPorFecha } = ctx;
+  const dia = Number(f.slice(8, 10));
+  const deOtroMes = Number(f.slice(5, 7)) !== mesNum;
+  const dentroFase = !!fase.fecha_inicio && f >= fase.fecha_inicio && (!finFase || f <= finFase);
+  const esHoy = f === hoy;
+  const codigo = evtCodigoDe(f);
+  const slot = dentroFase ? porDia[codigo] : null;
+
+  const clases = ['ent-celda'];
+  if (deOtroMes) clases.push('ent-celda-fuera');
+  if (!dentroFase) clases.push('ent-celda-off');
+  if (esHoy) clases.push('ent-celda-hoy');
+
+  // Semana 1..N dentro de la fase — es como se habla de la planificación.
+  let semana = null;
+  if (dentroFase) {
+    const off = Math.floor((evtDia(f) - evtDia(fase.fecha_inicio)) / 86400000);
+    semana = Math.floor(off / 7) + 1;
+  }
+
+  const trozos = [];
+
+  if (slot) {
     const r = slot.r;
     const n = (ejerciciosPorRutina[r.id] || []).length;
-    return `
-      <div class="ent-dia ${esHoy ? 'ent-dia-hoy' : ''}" onclick="entAbrirRutinaDesdeCalendario('${r.id}')" role="button" tabindex="0">
-        <div class="ent-dia-nombre">${lab}${esHoy ? ' · hoy' : ''}</div>
-        <div class="ent-dia-rutina">${escapeHtml(r.nombre)}</div>
-        <div class="ent-dia-meta">
-          ${n} ejercicio${n === 1 ? '' : 's'}
-          ${r.duracion_estimada_min ? ` · ${r.duracion_estimada_min} min` : ''}
-        </div>
-        ${!slot.fijada ? '<div class="ent-dia-auto" title="Este día no está fijado en la rutina: sale del reparto por orden sobre los días de la fase">sugerido</div>' : ''}
-      </div>`;
-  }).join('');
+    // Lo que el cliente marcó ese día, si ya llegó de la red.
+    const ses = sesionesPorFecha ? (sesionesPorFecha[f] || []).find(x => x.rutina_id === r.id) : null;
+    const marca = entMarcaSesion(ses, f, hoy, dentroFase);
+    trozos.push(`
+      <div class="ent-chip ent-chip-rutina ${slot.fijada ? '' : 'ent-chip-sugerida'}"
+           draggable="true" data-rutina="${r.id}" data-dia="${codigo}"
+           ondragstart="entCalDragStart(event)" ondragend="entCalDragEnd(event)"
+           onclick="event.stopPropagation(); entAbrirRutinaDesdeCalendario('${r.id}')"
+           title="${escapeHtml(r.nombre)} · ${n} ejercicio${n === 1 ? '' : 's'}${slot.fijada ? '' : ' · día sugerido, no fijado'}&#10;Arrástrala a otro día para moverla">
+        ${marca}<span class="ent-chip-txt">${escapeHtml(r.nombre)}</span>
+      </div>`);
+  }
 
-  return cabeceraFase + `
-    <div class="ent-semana">${tarjetas}</div>
+  const evs = eventosPorFecha ? (eventosPorFecha[f] || []) : [];
+  evs.forEach(ev => {
+    trozos.push(`
+      <div class="ent-chip ent-chip-evento" style="--evc:${evtColor(ev)}"
+           onclick="event.stopPropagation(); entEditarEvento('${ev.id}')"
+           title="${escapeHtml(evtLabel(ev.tipo))}${ev.detalle ? ' · ' + escapeHtml(ev.detalle) : ''}">
+        <span class="ent-chip-txt">${ev.hora ? `${String(ev.hora).slice(0, 5)} ` : ''}${escapeHtml(ev.titulo)}</span>
+      </div>`);
+  });
+
+  // Una sesión sin rutina asignada (el cliente entrenó por su cuenta) no
+  // tendría dónde pintarse y se perdería. Se muestra igual.
+  if (sesionesPorFecha) {
+    (sesionesPorFecha[f] || []).filter(x => !x.rutina_id || !slot || x.rutina_id !== slot.r.id)
+      .forEach(x => trozos.push(`
+        <div class="ent-chip ent-chip-suelta" title="Sesión registrada sin rutina del plan">
+          ${entMarcaSesion(x, f, hoy, true)}<span class="ent-chip-txt">${escapeHtml(x.rutinas?.nombre || 'Entrenó')}</span>
+        </div>`));
+  }
+
+  return `
+    <div class="${clases.join(' ')}" data-fecha="${f}"
+         ondragover="entCalDragOver(event)" ondrop="entCalDrop(event)"
+         onclick="entNuevoEvento('${f}')"
+         title="Clic para añadir un evento este día">
+      <div class="ent-celda-cab">
+        <span class="ent-celda-num">${dia}</span>
+        ${semana && codigo === 'L' ? `<span class="ent-celda-sem">S${semana}</span>` : ''}
+      </div>
+      <div class="ent-celda-cuerpo">${trozos.join('')}</div>
+    </div>`;
+}
+
+// El estado de la sesión, en un solo carácter. Es lo que responde "¿entrenó
+// o no?" sin abrir nada.
+function entMarcaSesion(ses, fecha, hoy, dentroFase) {
+  if (ses) {
+    if (ses.estado === 'completada') return '<span class="ent-marca ent-marca-ok" title="Lo marcó como hecho">✓</span>';
+    if (ses.estado === 'saltada') return '<span class="ent-marca ent-marca-no" title="La saltó">✕</span>';
+    return '<span class="ent-marca ent-marca-curso" title="La empezó y no la cerró">◐</span>';
+  }
+  // Un día pasado con rutina y sin sesión es la ausencia que importa: no la
+  // marcó. Un día futuro simplemente no ha llegado.
+  if (dentroFase && fecha < hoy) return '<span class="ent-marca ent-marca-vacia" title="No registró nada ese día">·</span>';
+  return '';
+}
+
+function entCalendarioPie(fase, sinDia, rutinas, faltaTabla) {
+  return `
+    ${faltaTabla ? `
+      <div class="card mt-3 border-l-4 border-amber-400">
+        <div class="font-bold text-sm text-slate-800 mb-1">Los eventos todavía no están instalados</div>
+        <p class="text-xs text-slate-600">
+          Para poner natación, mediciones o citas en el calendario falta correr
+          <code>carga/migracion-eventos.sql</code> en el SQL Editor de Supabase.
+          El resto del calendario funciona igual.
+        </p>
+      </div>` : ''}
     ${sinDia.length ? `
       <div class="card mt-3 border-l-4 border-amber-400">
         <div class="font-bold text-sm text-slate-800 mb-1">⚠️ ${sinDia.length} rutina(s) sin día en la semana</div>
         <p class="text-xs text-slate-600 mb-2">
           La fase declara ${(fase.dias_semana || []).length || 0} día(s) de entreno y hay ${rutinas.length} rutinas.
-          Añade días a la fase o fíjale el día a cada rutina.
+          Arrastra una rutina a un día libre, añade días a la fase, o fíjale el día a cada rutina.
         </p>
         <div class="flex flex-wrap gap-1">
-          ${sinDia.map(r => `<button class="chip" onclick="entAbrirRutinaDesdeCalendario('${r.id}')">${escapeHtml(r.nombre)}</button>`).join('')}
+          ${sinDia.map(r => `
+            <div class="chip" draggable="true" data-rutina="${r.id}" data-dia=""
+                 ondragstart="entCalDragStart(event)" ondragend="entCalDragEnd(event)"
+                 onclick="entAbrirRutinaDesdeCalendario('${r.id}')"
+                 style="cursor:grab">${escapeHtml(r.nombre)}</div>`).join('')}
         </div>
       </div>` : ''}
-    <div class="text-[11px] text-slate-400 mt-2">
-      Los días marcados como <strong>sugerido</strong> no están fijados en la rutina: se reparten por orden
-      sobre los días que declaraste en la fase. Para fijarlos, entra a la rutina y elige su día.
+    <div class="ent-leyenda">
+      <span><span class="ent-marca ent-marca-ok">✓</span> lo hizo</span>
+      <span><span class="ent-marca ent-marca-no">✕</span> la saltó</span>
+      <span><span class="ent-marca ent-marca-curso">◐</span> la empezó</span>
+      <span><span class="ent-marca ent-marca-vacia">·</span> no registró nada</span>
+      <span class="ent-leyenda-nota">
+        Las rutinas se arrastran de un día a otro. Las <b>sugeridas</b> (borde punteado)
+        no tienen día fijo: salen del reparto por orden sobre los días de la fase, y
+        arrastrarlas las fija.
+      </span>
     </div>`;
+}
+
+// ---------- Arrastrar rutinas entre días ----------
+// Soltar una rutina en otro día le FIJA ese día (`dia_semana`). No mueve una
+// fecha concreta: la planificación se piensa por día de la semana ("los
+// lunes, Push"), y una fase de 8 semanas son 8 lunes, no uno.
+window.entCalDragStart = (e) => {
+  const chip = e.currentTarget;
+  _ent.arrastrando = chip.dataset.rutina;
+  e.dataTransfer.effectAllowed = 'move';
+  // Firefox no inicia el arrastre si no se escribe algo en el dataTransfer.
+  e.dataTransfer.setData('text/plain', chip.dataset.rutina);
+  chip.classList.add('ent-chip-arrastre');
+  document.querySelector('.ent-mes')?.classList.add('ent-mes-arrastrando');
+};
+
+window.entCalDragEnd = (e) => {
+  e.currentTarget.classList.remove('ent-chip-arrastre');
+  document.querySelector('.ent-mes')?.classList.remove('ent-mes-arrastrando');
+  document.querySelectorAll('.ent-celda-destino').forEach(c => c.classList.remove('ent-celda-destino'));
+  _ent.arrastrando = null;
+};
+
+window.entCalDragOver = (e) => {
+  if (!_ent.arrastrando) return;
+  const celda = e.target.closest('.ent-celda');
+  if (!celda || celda.classList.contains('ent-celda-off')) return;
+  e.preventDefault();                       // sin esto el navegador no deja soltar
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('.ent-celda-destino').forEach(c => c.classList.remove('ent-celda-destino'));
+  celda.classList.add('ent-celda-destino');
+};
+
+window.entCalDrop = async (e) => {
+  const id = _ent.arrastrando;
+  const celda = e.target.closest('.ent-celda');
+  if (!id || !celda || celda.classList.contains('ent-celda-off')) return;
+  e.preventDefault();
+  e.stopPropagation();                      // que no dispare el "+ evento" de la celda
+
+  const destino = evtCodigoDe(celda.dataset.fecha);
+  const rutinas = _ent.rutinasCache || [];
+  const r = rutinas.find(x => x.id === id);
+  _ent.arrastrando = null;
+  if (!r || r.dia_semana === destino) return entVistaClientes();
+
+  // Si el día ya lo ocupa otra rutina, se intercambian. Dejar dos rutinas el
+  // mismo día las apilaría y una quedaría invisible.
+  const ocupa = rutinas.find(x => x.id !== id && x.dia_semana === destino);
+  await entDb.actualizarRutina(id, { dia_semana: destino });
+  if (ocupa) await entDb.actualizarRutina(ocupa.id, { dia_semana: r.dia_semana || null });
+
+  toast(ocupa
+    ? `${r.nombre} ↔ ${ocupa.nombre}`
+    : `${r.nombre} → ${entLabel(ENT_DIAS, destino)}`);
+  entVistaClientes();
+};
+
+// ---------- Eventos en el calendario ----------
+window.entNuevoEvento = (fecha = null) => {
+  if (!_ent.clienteId) return;
+  evtEditar(fecha ? { fecha } : {}, entCtxEvento());
+};
+
+window.entEditarEvento = (id) => {
+  const ev = (_ent.eventosCache || []).find(x => x.id === id);
+  if (!ev) return;
+  evtEditar(ev, entCtxEvento());
+};
+
+function entCtxEvento() {
+  return {
+    clienteId: _ent.clienteId,
+    fase: _ent.faseCache,
+    alGuardar: () => { _ent.eventosCache = null; entVistaClientes(); },
+  };
+}
+
+// ---------- La segunda pasada: sesiones y eventos ----------
+// El armazón ya está en pantalla; esto rellena lo que hubo que ir a buscar.
+async function entPintarCalendario(cliente, fase, rutinas, ejerciciosPorRutina) {
+  const caja = $('#ent-cal');
+  if (!caja || !fase) return;
+
+  const desde = fase.fecha_inicio || null;
+  const [sesiones, eventos] = await Promise.all([
+    entDb.sesiones(cliente.id, { desde, limite: 400 }),
+    evtDb.lista(cliente.id),
+  ]);
+
+  _ent.eventosCache = eventos || [];
+
+  const sesionesPorFecha = {};
+  (sesiones || []).forEach(s => { (sesionesPorFecha[String(s.fecha).slice(0, 10)] ||= []).push(s); });
+
+  // Los eventos que se repiten necesitan la fase para saber dónde caen. Se
+  // indexan TODAS las fases del cliente, no solo la abierta: un evento de
+  // otra fase que cae en este mes tiene que verse igual.
+  const fasesPorId = Object.fromEntries((_ent.fases || [fase]).map(f => [f.id, f]));
+  const eventosPorFecha = evtPorFecha(_ent.eventosCache, fasesPorId);
+
+  // Si `entVistaClientes` se repintó mientras esperábamos (otro cliente, otra
+  // fase), esto ya no es la pantalla vigente y escribir aquí la pisaría.
+  if (!$('#ent-cal') || _ent.clienteId !== cliente.id) return;
+  caja.innerHTML = entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina,
+                                        sesionesPorFecha, eventosPorFecha, eventos === null);
 }
 
 window.entAbrirRutinaDesdeCalendario = (rutinaId) => {
@@ -1723,14 +2300,19 @@ function entResumenEjerciciosHTML(ejs, rutina) {
     </div>`;
 }
 
-window.entVerCliente = (id) => { _ent.clienteId = id; entVistaClientes(); };
+window.entVerCliente = (id) => {
+  _ent.clienteId = id;
+  _ent.mes = null;
+  _ent.eventosCache = null;
+  entVistaClientes();
+};
 
+// OJO con `toISOString()` aquí: convierte a UTC, y en un navegador al este de
+// Greenwich la medianoche local del día correcto sale como el día ANTERIOR.
+// `evtSumarDias` (eventos.js) trabaja siempre en local.
 function entFechaFin(f) {
   if (!f.fecha_inicio || !f.semanas) return null;
-  const [y, m, d] = f.fecha_inicio.split('-').map(Number);
-  const fin = new Date(y, m - 1, d);
-  fin.setDate(fin.getDate() + f.semanas * 7 - 1);
-  return fin.toISOString().slice(0, 10);
+  return evtSumarDias(f.fecha_inicio, f.semanas * 7 - 1);
 }
 
 function entTarjetaFase(f, rutinas) {

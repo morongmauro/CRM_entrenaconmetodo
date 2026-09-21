@@ -33,6 +33,8 @@ const RUT_EJEMPLOS = [
   '¿Qué pesos ha venido moviendo en press banca?',
   'Agrégale fondos en paralelas al Push, 3×10',
   'Pon el Lower el miércoles',
+  'Agrégale natación los lunes y miércoles',
+  'Ponle medición de peso los viernes de la semana 1 y la 4',
   '¿Le falta algún patrón de movimiento en esta fase?',
 ];
 
@@ -580,6 +582,105 @@ const RUT_HERRAMIENTAS = {
       },
     );
   },
+
+  // ---- Eventos: lo del calendario que no es una rutina ----
+  // "agrégale natación lunes y miércoles", "ponle medición de peso el viernes
+  // de la semana 1 y la 4", "quítale el fútbol". Son la mitad de las frases
+  // que uno le dice al planificar y hasta ahora no tenían dónde caer.
+  async ver_eventos({ nombre, fase } = {}) {
+    const c = await rutCliente(nombre);
+    if (!c) return rutSinCliente(nombre);
+    const eventos = await evtDb.lista(c.id);
+    if (eventos === null) return { error: 'La tabla de eventos no está instalada todavía (falta correr carga/migracion-eventos.sql).' };
+    const fases = await entDb.fases(c.id);
+    const porId = Object.fromEntries(fases.map(f => [f.id, f]));
+    return {
+      cliente: c.nombre,
+      eventos: eventos.map(ev => ({
+        titulo: ev.titulo,
+        tipo: ev.tipo,
+        cuando: ev.fecha
+          ? `el ${ev.fecha}`
+          : `${(ev.dias_semana || []).map(d => entLabel(ENT_DIAS, d)).join(', ')}${ev.semanas?.length ? ` · solo semanas ${ev.semanas.join(', ')}` : ' · todas las semanas'}`,
+        fase: porId[ev.fase_id]?.nombre || null,
+        hora: ev.hora || null,
+        detalle: ev.detalle || null,
+        dias_en_que_cae: evtFechasDe(ev, porId[ev.fase_id]).length,
+        lo_ve_el_cliente: ev.visible_cliente == null ? 'lo que diga la fase' : (ev.visible_cliente ? 'sí' : 'no'),
+      })),
+    };
+  },
+
+  async agregar_evento({ nombre, titulo, tipo, dias, fecha, semanas, hora, detalle, fase } = {}) {
+    const c = await rutCliente(nombre);
+    if (!c) return rutSinCliente(nombre);
+    if (!titulo) return { error: '¿Qué evento? Necesito un título, por ejemplo "Natación".' };
+    const { fase: f } = await rutContexto(c, fase);
+
+    const codigos = dias
+      ? [...new Set((Array.isArray(dias) ? dias : String(dias).split(/[,\s]+/)).map(rutDia).filter(Boolean))]
+      : [];
+    if (!codigos.length && !fecha) {
+      return { error: 'Dime cuándo: unos días de la semana ("lunes y miércoles") o una fecha concreta.' };
+    }
+    // Repetir necesita un rango, y el rango lo pone la fase. Sin fase, lo
+    // único honesto es pedir una fecha en vez de crear algo que no se pintaría.
+    if (codigos.length && !f) {
+      return { error: `${c.nombre} no tiene ninguna fase, y sin fase no hay semanas sobre las que repetir. Créale una fase, o dime una fecha concreta.` };
+    }
+
+    const nums = semanas
+      ? (Array.isArray(semanas) ? semanas : String(semanas).split(/[,\s]+/)).map(Number).filter(n => n > 0)
+      : [];
+    const t = ['actividad', 'medicion', 'cita', 'nota', 'descanso'].includes(tipo) ? tipo : 'actividad';
+
+    const cuando = codigos.length
+      ? `${codigos.map(d => entLabel(ENT_DIAS, d)).join(', ')}${nums.length ? ` · semanas ${nums.join(', ')}` : ' · todas las semanas'} de "${f.nombre}"`
+      : `el ${fecha}`;
+
+    return rutProponer(
+      `Añadir "${titulo}" al calendario de ${c.nombre}`,
+      `${evtLabel(t)} · ${cuando}${hora ? ` · ${hora}` : ''}`,
+      async () => {
+        const creado = await evtDb.crear({
+          cliente_id: c.id,
+          fase_id: codigos.length ? f.id : (f?.id || null),
+          tipo: t, titulo: String(titulo),
+          detalle: detalle ? String(detalle) : null,
+          hora: hora || null,
+          fecha: codigos.length ? null : String(fecha),
+          dias_semana: codigos,
+          semanas: nums.length ? nums : null,
+          visible_cliente: null,        // hereda de la fase: nada se publica solo
+        });
+        if (!creado) throw new Error('El evento no se creó');
+      },
+    );
+  },
+
+  async quitar_evento({ nombre, titulo } = {}) {
+    const c = await rutCliente(nombre);
+    if (!c) return rutSinCliente(nombre);
+    const eventos = await evtDb.lista(c.id);
+    if (eventos === null) return { error: 'La tabla de eventos no está instalada todavía.' };
+    const buscado = normalizeName(String(titulo || ''));
+    if (!buscado) return { error: '¿Cuál evento?' };
+    const encontrados = eventos.filter(ev => normalizeName(ev.titulo).includes(buscado));
+    if (!encontrados.length) {
+      return { error: `No encontré ningún evento que se llame "${titulo}".`, eventos_del_cliente: eventos.map(e => e.titulo) };
+    }
+    // Borrar "el que más se parezca" cuando hay dos candidatos es justo el
+    // tipo de decisión que no debe tomar el agente solo.
+    if (encontrados.length > 1) {
+      return { error: `"${titulo}" coincide con ${encontrados.length} eventos. Dime cuál.`, coinciden: encontrados.map(e => e.titulo) };
+    }
+    const ev = encontrados[0];
+    return rutProponer(
+      `Quitar "${ev.titulo}" del calendario de ${c.nombre}`,
+      ev.fecha ? `era el ${ev.fecha}` : `era ${(ev.dias_semana || []).map(d => entLabel(ENT_DIAS, d)).join(', ')}`,
+      async () => { if (!(await evtDb.borrar(ev.id))) throw new Error('No se pudo borrar'); },
+    );
+  },
 };
 
 const RUT_ETIQUETAS = {
@@ -594,6 +695,9 @@ const RUT_ETIQUETAS = {
   editar_rutina: 'Preparando un cambio de rutina',
   editar_dias_de_fase: 'Preparando los días de la fase',
   duplicar_rutina: 'Preparando una copia',
+  ver_eventos: 'Mirando su calendario',
+  agregar_evento: 'Preparando un evento',
+  quitar_evento: 'Preparando quitar un evento',
 };
 
 // =====================================================

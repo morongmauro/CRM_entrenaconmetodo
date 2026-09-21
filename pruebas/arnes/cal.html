@@ -1,0 +1,76 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<style>
+  body{font-family:Inter,system-ui,sans-serif;background:#f1f5f9;margin:0;padding:20px;color:#0f172a}
+  h1{font-size:15px;margin:0 0 14px}
+  .card{background:#fff;border:1px solid #e2e8f0;border-radius:.85rem;padding:.9rem}
+  .btn{border:1px solid #e2e8f0;background:#fff;border-radius:.5rem;padding:.25rem .6rem;font-size:.78rem;cursor:pointer}
+  .btn-sm{font-size:.72rem}.btn-primary{background:#606c38;color:#fff;border-color:#606c38}
+  .btn-ghost{border-color:transparent;background:transparent}
+  .chip{border:1px solid #e2e8f0;background:#fff;border-radius:9999px;padding:.15rem .55rem;font-size:.72rem}
+  .tag{font-size:.65rem;border-radius:9999px;padding:.05rem .4rem}
+  .tag-green{background:#dcfce7;color:#166534}.tag-gray{background:#f1f5f9;color:#64748b}
+  .tag-violet{background:#ede9fe;color:#5b21b6}
+  .sec-title{font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin:.6rem 0 .3rem}
+  label{display:block;font-size:.7rem;color:#64748b;margin-bottom:.15rem}
+  input,select,textarea{width:100%;border:1px solid #e2e8f0;border-radius:.45rem;padding:.3rem .45rem;font-size:.78rem}
+  .hidden{display:none}
+</style></head><body>
+<h1>Calendario mensual · octubre 2026</h1>
+<div id="ent-body"></div>
+
+<script src="../../musculos-figura.js"></script>
+<script>
+// ── Lo mínimo de app.js que necesita el módulo ──
+const $ = (s, c = document) => c.querySelector(s);
+const $$ = (s, c = document) => Array.from(c.querySelectorAll(s));
+function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function toast(m){console.log('TOAST:',m);}
+const fmt = { hoy: () => '2026-10-14',
+  fechaCorta: (s) => s ? new Date(s+'T00:00:00').toLocaleDateString('es-CO',{day:'2-digit',month:'short'}) : '—' };
+function openModal(h){console.log('MODAL');}
+function modalShell(t,b,f){return b;}
+const sb = { from: () => ({ select: () => ({ eq: () => ({ order: async () => ({data:[]}) }) }) }) };
+const db = { clientes: { list: async () => [] } };
+// entrenamiento.js se auto-registra en el router y clona un botón de la barra.
+const routes = {};
+const navBtn = document.createElement('button');
+navBtn.dataset.route = 'clientes';
+document.body.appendChild(navBtn);
+</script>
+<script src="../../entrenamiento.js"></script>
+<script src="../../eventos.js"></script>
+<script>
+// ── Datos de ejemplo ──
+const fase = { id:'f1', nombre:'Fase 2 · Fuerza', semanas:4, fecha_inicio:'2026-10-05',
+               dias_semana:['L','X','V'], objetivo:'Subir el básico sin perder técnica' };
+const rutinas = [
+  { id:'r1', nombre:'Push · Empuje',  dia_semana:'L', dia_orden:1, duracion_estimada_min:55 },
+  { id:'r2', nombre:'Pull · Tirón',   dia_semana:null, dia_orden:2 },
+  { id:'r3', nombre:'Lower · Pierna', dia_semana:'V', dia_orden:3 },
+];
+const ejerciciosPorRutina = { r1:[1,2,3,4,5], r2:[1,2,3,4], r3:[1,2,3,4,5,6] };
+_ent.faseCache = fase; _ent.rutinasCache = rutinas; _ent.fases = [fase]; _ent.clienteId='c1';
+_ent.musculos = [{slug:'pectoral_mayor',corto:'Pecho'},{slug:'triceps',corto:'Tríceps'}];
+
+const sesionesPorFecha = {
+  '2026-10-05': [{ rutina_id:'r1', estado:'completada' }],
+  '2026-10-07': [{ rutina_id:'r2', estado:'completada' }],
+  '2026-10-09': [{ rutina_id:'r3', estado:'saltada' }],
+  '2026-10-12': [{ rutina_id:'r1', estado:'completada' }],
+  '2026-10-13': [{ rutina_id:null, estado:'completada', rutinas:{nombre:'Cardio suelto'} }],
+  '2026-10-14': [{ rutina_id:'r2', estado:'en_curso' }],
+};
+const eventos = [
+  { id:'e1', fase_id:'f1', tipo:'actividad', titulo:'Natación', dias_semana:['M','J'], semanas:null },
+  { id:'e2', fase_id:'f1', tipo:'medicion', titulo:'Medición de peso', dias_semana:['S'], semanas:[1,4], hora:'08:00' },
+  { id:'e3', fase_id:null, tipo:'cita', titulo:'Control médico', fecha:'2026-10-20' },
+];
+_ent.eventosCache = eventos;
+const eventosPorFecha = evtPorFecha(eventos, { f1: fase });
+
+document.getElementById('ent-body').innerHTML =
+  entCalendarioArmazon({id:'c1',nombre:'Diana Tovar'}, fase, rutinas, ejerciciosPorRutina,
+                       sesionesPorFecha, eventosPorFecha, false);
+console.log('RENDER OK');
+</script></body></html>
