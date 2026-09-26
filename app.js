@@ -3365,7 +3365,7 @@ async function jalarEntrenos(cliente, semana, esSemanaNueva) {
   let sesiones = [], rutinasFase = null;
   try {
     const { data, error } = await sb.from('sesiones')
-      .select('id, fecha, estado, rutina_id')
+      .select('id, fecha, estado, rutina_id, origen')
       .eq('cliente_id', cliente.id)
       .gte('fecha', ini).lte('fecha', fin);
     if (error) throw error;
@@ -3390,28 +3390,55 @@ async function jalarEntrenos(cliente, semana, esSemanaNueva) {
     return;
   }
 
-  const hechas = sesiones.filter(x => x.estado === 'completada').length;
+  const completadas = sesiones.filter(x => x.estado === 'completada');
+  const hechas = completadas.length;
   const aMedias = sesiones.filter(x => x.estado === 'en_curso').length;
   if (!sesiones.length && rutinasFase === null) return;
 
+  // De dónde salió el número. No es lo mismo que el cliente lo marcara en su
+  // app que que lo trajera la importación de Trainerize: el número puede ser
+  // igual de cierto, pero solo el primero prueba que está usando la app. Sin
+  // esta distinción el CRM decía "✓ marcó en su app" sobre historial
+  // importado, y además rellenaba el seguimiento solo dándolo por bueno.
+  const deSuApp = completadas.filter(x => (x.origen || 'cliente') === 'cliente').length;
+  const importadas = completadas.filter(x => x.origen === 'importada').length;
+  const soloImportado = hechas > 0 && deSuApp === 0;
+  const cuando = completadas.length
+    ? completadas.map(x => x.fecha).sort()
+    : [];
+  const rango = cuando.length
+    ? ` (${fmt.fechaCorta(cuando[0])}${cuando.length > 1 ? ` – ${fmt.fechaCorta(cuando[cuando.length - 1])}` : ''})`
+    : '';
+
+  const deQue = rutinasFase ? ` de <strong>${rutinasFase}</strong> programados` : '';
+  const medias = aMedias ? ` · ${aMedias} quedó a medias` : '';
   const fe = $('#sg-fe'), fp = $('#sg-fp');
-  // Autorrelleno solo en semana nueva y con el campo vacío.
-  if (esSemanaNueva && fe && !String(fe.value).trim()) {
+
+  // Autorrelleno solo en semana nueva, con el campo vacío Y con datos que el
+  // cliente puso él. El historial importado se ofrece, no se da por bueno:
+  // rellenar solo con él te firmaría una adherencia que nadie registró.
+  if (esSemanaNueva && fe && !String(fe.value).trim() && !soloImportado) {
     fe.value = hechas;
     if (fp && !String(fp.value).trim() && rutinasFase) fp.value = rutinasFase;
     recalcScores();
     caja.innerHTML = `<span class="text-emerald-600">✓ Puesto desde su app:</span> marcó <strong>${hechas}</strong> entreno(s) esta semana`
-      + (rutinasFase ? ` de <strong>${rutinasFase}</strong> programados` : '')
-      + (aMedias ? ` · ${aMedias} quedó a medias` : '')
-      + '. Corrígelo si sabes algo que la app no.';
+      + deQue + medias + '. Corrígelo si sabes algo que la app no.';
     return;
   }
 
   window._segEntrenosReales = { hechas, planeadas: rutinasFase };
-  caja.innerHTML = `En su app marcó <strong class="text-slate-600">${hechas}</strong> entreno(s)`
-    + (rutinasFase ? ` de <strong class="text-slate-600">${rutinasFase}</strong> programados` : '')
-    + (aMedias ? ` · ${aMedias} a medias` : '')
-    + ` <button type="button" class="text-emerald-600 font-semibold underline" onclick="usarEntrenosReales()">usar</button>`;
+  const usar = ` <button type="button" class="text-emerald-600 font-semibold underline" onclick="usarEntrenosReales()">usar</button>`;
+
+  if (soloImportado) {
+    caja.innerHTML = `<span class="text-slate-500">📦 De su historial de Trainerize:</span> `
+      + `<strong class="text-slate-600">${importadas}</strong> entreno(s)${rango}`
+      + deQue + '. <span class="text-slate-500">Todavía no ha marcado nada en su app.</span>' + usar;
+    return;
+  }
+
+  caja.innerHTML = `En su app marcó <strong class="text-slate-600">${deSuApp}</strong> entreno(s)`
+    + (importadas ? ` · ${importadas} más vienen de Trainerize` : '')
+    + deQue + medias + usar;
 }
 
 window.usarEntrenosReales = () => {

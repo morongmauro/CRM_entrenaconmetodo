@@ -1796,19 +1796,27 @@ window.entToggleRutina = (id) => {
 // CALENDARIO DE LA FASE
 // =====================================================
 // Reparte las rutinas sobre los días de la semana. Dos reglas, en este orden:
-//   1. La rutina que tiene `dia_semana` fijado manda: va a ese día.
-//   2. Las que no lo tienen se reparten, por `dia_orden`, sobre los días que
-//      la fase declaró (dias_semana), saltándose los ya ocupados.
+//   1. La rutina que declara sus días manda: va a todos ellos.
+//   2. Las que no declaran nada se reparten, por `dia_orden`, sobre los días
+//      que la fase declaró (dias_semana), saltándose los ya ocupados.
 // Así el coach ve la semana real aunque no haya fijado día por día.
+//
+// Una rutina puede caer en VARIOS días, y eso no es un adorno: Andrea tiene
+// dos rutinas repartidas en cuatro días (A-B-A-B), igual que Amauri y Diana.
+// Con un solo `dia_semana` por rutina esa semana no se podía ni guardar.
 function entRepartirRutinas(fase, rutinas) {
   const porDia = {};
   ENT_DIAS.forEach(([d]) => { porDia[d] = null; });
 
-  const fijadas = rutinas.filter(r => r.dia_semana);
-  const libres = rutinas.filter(r => !r.dia_semana)
-    .slice().sort((a, b) => (a.dia_orden || 0) - (b.dia_orden || 0));
+  // Por `dia_orden` para que, si dos rutinas se pelean el mismo día, gane
+  // siempre la misma y el calendario no baile entre recargas.
+  const porOrden = rutinas.slice().sort((a, b) => (a.dia_orden || 0) - (b.dia_orden || 0));
+  const fijadas = porOrden.filter(r => entDiasDe(r).length);
+  const libres = porOrden.filter(r => !entDiasDe(r).length);
 
-  fijadas.forEach(r => { if (porDia[r.dia_semana] === null) porDia[r.dia_semana] = { r, fijada: true }; });
+  fijadas.forEach(r => {
+    entDiasDe(r).forEach(d => { if (porDia[d] === null) porDia[d] = { r, fijada: true }; });
+  });
 
   const diasFase = (fase?.dias_semana || []).filter(d => porDia[d] === null);
   libres.forEach((r, i) => {
@@ -1821,6 +1829,19 @@ function entRepartirRutinas(fase, rutinas) {
   const sinDia = rutinas.filter(r => !colocadas.has(r.id));
   return { porDia, sinDia };
 }
+
+// Los días de una rutina. `dias_semana` (lista) es lo que manda; el viejo
+// `dia_semana` (un día suelto) se sigue leyendo para las rutinas que aún no
+// han pasado por `migracion-calendario.sql`. En cuanto la corras, todas
+// tienen lista y esta segunda rama deja de usarse sola.
+function entDiasDe(r) {
+  if (Array.isArray(r?.dias_semana) && r.dias_semana.length) return r.dias_semana;
+  return r?.dia_semana ? [r.dia_semana] : [];
+}
+// Para pintarla: "L M X" en orden de semana, nunca alfabético.
+const entDiasTexto = (r) => entDiasDe(r)
+  .slice().sort((a, b) => 'LMXJVSD'.indexOf(a) - 'LMXJVSD'.indexOf(b))
+  .map(d => entLabel(ENT_DIAS, d)).join(' · ');
 
 // ---------- Fechas, en local ----------
 // `toISOString()` trabaja en UTC: en Colombia (UTC-5) una fecha construida a
@@ -2104,12 +2125,20 @@ function entCalendarioPie(fase, sinDia, rutinas, faltaTabla) {
 }
 
 // ---------- Arrastrar rutinas entre días ----------
-// Soltar una rutina en otro día le FIJA ese día (`dia_semana`). No mueve una
-// fecha concreta: la planificación se piensa por día de la semana ("los
-// lunes, Push"), y una fase de 8 semanas son 8 lunes, no uno.
+// Soltar una rutina en otro día le FIJA ese día. No mueve una fecha concreta:
+// la planificación se piensa por día de la semana ("los lunes, Push"), y una
+// fase de 8 semanas son 8 lunes, no uno.
+//
+// Como una rutina puede estar en varios días, arrastrar mueve SOLO el día del
+// que la sacaste y le deja los otros. Sacar el lunes de una rutina que va
+// lunes y miércoles y soltarlo en viernes la deja en miércoles y viernes.
 window.entCalDragStart = (e) => {
   const chip = e.currentTarget;
   _ent.arrastrando = chip.dataset.rutina;
+  // De qué día se sacó: es lo único que distingue mover el lunes de mover el
+  // miércoles cuando la misma rutina está en los dos.
+  const f = chip.closest('.ent-celda')?.dataset.fecha;
+  _ent.arrastrandoDesde = f ? evtCodigoDe(f) : null;
   e.dataTransfer.effectAllowed = 'move';
   // Firefox no inicia el arrastre si no se escribe algo en el dataTransfer.
   e.dataTransfer.setData('text/plain', chip.dataset.rutina);
@@ -2122,6 +2151,7 @@ window.entCalDragEnd = (e) => {
   document.querySelector('.ent-mes')?.classList.remove('ent-mes-arrastrando');
   document.querySelectorAll('.ent-celda-destino').forEach(c => c.classList.remove('ent-celda-destino'));
   _ent.arrastrando = null;
+  _ent.arrastrandoDesde = null;
 };
 
 window.entCalDragOver = (e) => {
@@ -2142,16 +2172,34 @@ window.entCalDrop = async (e) => {
   e.stopPropagation();                      // que no dispare el "+ evento" de la celda
 
   const destino = evtCodigoDe(celda.dataset.fecha);
+  const desde = _ent.arrastrandoDesde;
   const rutinas = _ent.rutinasCache || [];
   const r = rutinas.find(x => x.id === id);
   _ent.arrastrando = null;
-  if (!r || r.dia_semana === destino) return entVistaClientes();
+  _ent.arrastrandoDesde = null;
+  if (!r || desde === destino) return entVistaClientes();
+
+  // Quita el día del que se sacó y añade el nuevo. Los demás días de esa
+  // rutina no se tocan.
+  const mover = (dias, quita, pon) => {
+    const s = new Set(dias);
+    if (quita) s.delete(quita);
+    s.add(pon);
+    return [...s].sort((a, b) => 'LMXJVSD'.indexOf(a) - 'LMXJVSD'.indexOf(b));
+  };
 
   // Si el día ya lo ocupa otra rutina, se intercambian. Dejar dos rutinas el
   // mismo día las apilaría y una quedaría invisible.
-  const ocupa = rutinas.find(x => x.id !== id && x.dia_semana === destino);
-  await entDb.actualizarRutina(id, { dia_semana: destino });
-  if (ocupa) await entDb.actualizarRutina(ocupa.id, { dia_semana: r.dia_semana || null });
+  const ocupa = rutinas.find(x => x.id !== id && entDiasDe(x).includes(destino));
+  await entDb.actualizarRutina(id, { dias_semana: mover(entDiasDe(r), desde, destino) });
+  if (ocupa && desde) {
+    await entDb.actualizarRutina(ocupa.id, { dias_semana: mover(entDiasDe(ocupa), destino, desde) });
+  } else if (ocupa) {
+    // Venía de "sugerida" (sin día propio): la otra rutina solo pierde el día.
+    await entDb.actualizarRutina(ocupa.id, {
+      dias_semana: entDiasDe(ocupa).filter(d => d !== destino),
+    });
+  }
 
   toast(ocupa
     ? `${r.nombre} ↔ ${ocupa.nombre}`
@@ -2246,7 +2294,7 @@ function entListaRutinasHTML(fase, rutinas, ejerciciosPorRutina) {
             <div class="min-w-0">
               <div class="font-bold text-slate-900">${escapeHtml(r.nombre)}</div>
               <div class="text-xs text-slate-500">
-                Día ${r.dia_orden}${r.dia_semana ? ` · ${entLabel(ENT_DIAS, r.dia_semana)}` : ''}
+                Día ${r.dia_orden}${entDiasTexto(r) ? ` · ${entDiasTexto(r)}` : ''}
                 · ${ejs.length} ejercicio${ejs.length === 1 ? '' : 's'}
                 ${series ? ` · ${series} series` : ''}
                 ${r.duracion_estimada_min ? ` · ${r.duracion_estimada_min} min` : ''}
@@ -2362,7 +2410,7 @@ function entTarjetaFase(f, rutinas) {
                   <div class="min-w-0 text-sm">
                     <span class="text-slate-400">Día ${r.dia_orden}</span>
                     <span class="font-semibold text-slate-800 ml-1">${escapeHtml(r.nombre)}</span>
-                    ${r.dia_semana ? `<span class="tag tag-blue ml-1">${entLabel(ENT_DIAS, r.dia_semana)}</span>` : ''}
+                    ${entDiasTexto(r) ? `<span class="tag tag-blue ml-1">${entDiasTexto(r)}</span>` : ''}
                   </div>
                   <div class="flex gap-1 flex-shrink-0">
                     <button class="btn btn-ghost btn-sm" onclick="entAbrirConstructor('${r.id}')">Construir</button>

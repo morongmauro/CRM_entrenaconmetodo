@@ -28,15 +28,31 @@ const _rut = {
 
 const RUT_MAX_PROPUESTAS = 25;
 
-const RUT_EJEMPLOS = [
+// Los ejemplos cambian según qué pestaña estés mirando. Armar un calendario
+// y revisar una rutina son dos trabajos distintos, y ofrecerle "¿qué pesos ha
+// movido?" a quien está cuadrando la semana no le ahorra nada.
+const RUT_EJEMPLOS_CALENDARIO = [
+  'Quítale el martes al Lower',
+  'Pon el Upper lunes, miércoles y viernes',
+  'Pasa el Push del martes al viernes',
+  'Agrégale natación los lunes y miércoles',
+  'Deja los días como los venía entrenando',
+  'Ponle medición de peso los viernes de la semana 1 y la 4',
+  '¿Qué días le quedaron libres?',
+];
+
+const RUT_EJEMPLOS_PLAN = [
   '¿Qué ejercicios de empuje NO le he puesto?',
   '¿Qué pesos ha venido moviendo en press banca?',
   'Agrégale fondos en paralelas al Push, 3×10',
   'Pon el Lower el miércoles',
-  'Agrégale natación los lunes y miércoles',
-  'Ponle medición de peso los viernes de la semana 1 y la 4',
+  'Cámbiale las sentadillas por prensa',
   '¿Le falta algún patrón de movimiento en esta fase?',
 ];
+
+const rutEjemplos = () =>
+  (typeof _ent === 'object' && _ent?.subtab === 'calendario')
+    ? RUT_EJEMPLOS_CALENDARIO : RUT_EJEMPLOS_PLAN;
 
 // =====================================================
 // UTILIDADES
@@ -118,6 +134,39 @@ function rutDia(txt) {
   if (RUT_DIAS_ALIAS[k]) return RUT_DIAS_ALIAS[k];
   const may = String(txt).trim().toUpperCase();
   return ENT_DIAS.some(([d]) => d === may) ? may : null;
+}
+
+// Los días de una rutina. `dias_semana` (lista) es lo que manda; el viejo
+// `dia_semana` se sigue leyendo para las rutinas que no han pasado por
+// `migracion-calendario.sql`.
+function rutDiasDe(r) {
+  if (Array.isArray(r?.dias_semana) && r.dias_semana.length) return r.dias_semana;
+  return r?.dia_semana ? [r.dia_semana] : [];
+}
+const rutOrdenDias = (a, b) => 'LMXJVSD'.indexOf(a) - 'LMXJVSD'.indexOf(b);
+const rutDiasTexto = (r) => rutDiasDe(r).slice().sort(rutOrdenDias)
+  .map(d => entLabel(ENT_DIAS, d)).join(', ');
+
+// Uno o varios días, como venga: "martes", "L,X,V", "lunes y miércoles",
+// ['L','X']. Devuelve `{ok, dias}` o `{ok:false, error}` nombrando lo que no
+// entendió, porque un día mal leído mueve una rutina al día equivocado en
+// silencio.
+function rutDias(txt) {
+  const bruto = Array.isArray(txt)
+    ? txt
+    : String(txt).split(/[,;/]|\s+y\s+|\s+/i);
+  const dias = [];
+  const malos = [];
+  bruto.map(x => String(x).trim()).filter(Boolean).forEach(x => {
+    const d = rutDia(x);
+    if (!d) malos.push(x);
+    else if (!dias.includes(d)) dias.push(d);
+  });
+  if (malos.length) {
+    return { ok: false, error: `No entendí ${malos.map(m => `"${m}"`).join(', ')}. Usa lunes…domingo o L M X J V S D.` };
+  }
+  if (!dias.length) return { ok: false, error: 'No me dijiste ningún día.' };
+  return { ok: true, dias: dias.sort(rutOrdenDias) };
 }
 
 // =====================================================
@@ -206,7 +255,7 @@ const RUT_HERRAMIENTAS = {
         rutinas: rutinas.map(r => ({
           nombre: r.nombre,
           dia_orden: r.dia_orden,
-          dia_semana: r.dia_semana || null,
+          dias_semana: rutDiasDe(r),
           ejercicios: (ejs[r.id] || []).length,
           duracion_min: r.duracion_estimada_min || null,
         })),
@@ -236,7 +285,7 @@ const RUT_HERRAMIENTAS = {
       cliente: c.nombre,
       fase: f.nombre,
       rutina: r.nombre,
-      dia_semana: r.dia_semana || null,
+      dias_semana: rutDiasDe(r),
       dia_orden: r.dia_orden,
       duracion_min: r.duracion_estimada_min || null,
       ejercicios: ejs.map((re, i) => {
@@ -507,7 +556,8 @@ const RUT_HERRAMIENTAS = {
     );
   },
 
-  async editar_rutina({ nombre, rutina, nuevo_nombre, dia_semana, duracion_min, fase } = {}) {
+  async editar_rutina({ nombre, rutina, nuevo_nombre, dia_semana, dias_semana,
+                        agregar_dias, quitar_dias, duracion_min, fase } = {}) {
     const c = await rutCliente(nombre);
     if (!c) return rutSinCliente(nombre);
     const { fase: f, rutinas } = await rutContexto(c, fase);
@@ -518,24 +568,80 @@ const RUT_HERRAMIENTAS = {
     const row = {};
     const cambios = [];
     if (nuevo_nombre) { row.nombre = String(nuevo_nombre); cambios.push(`nombre "${r.nombre}" → "${row.nombre}"`); }
-    if (dia_semana !== undefined) {
-      if (dia_semana === null || dia_semana === '') { row.dia_semana = null; cambios.push('deja de tener día fijo'); }
-      else {
-        const d = rutDia(dia_semana);
-        if (!d) return { error: `No entendí el día "${dia_semana}". Usa lunes…domingo o L M X J V S D.` };
-        const ocupa = rutinas.find(x => x.dia_semana === d && x.id !== r.id);
-        if (ocupa) return { error: `El ${entLabel(ENT_DIAS, d)} ya lo ocupa "${ocupa.nombre}". Cámbiale el día a esa primero, o elige otro.` };
-        row.dia_semana = d;
-        cambios.push(`día ${r.dia_semana ? entLabel(ENT_DIAS, r.dia_semana) : 'libre'} → ${entLabel(ENT_DIAS, d)}`);
+
+    // `dias_semana` es lo que manda; `dia_semana` se acepta como sinónimo
+    // porque es como se llamaba antes y como lo dice mucha gente ("ponla el
+    // martes"). Los dos admiten uno o varios días.
+    const pedido = dias_semana !== undefined ? dias_semana : dia_semana;
+    if (pedido !== undefined) {
+      if (pedido === null || pedido === '' || (Array.isArray(pedido) && !pedido.length)) {
+        row.dias_semana = [];
+        cambios.push('deja de tener días fijos');
+      } else {
+        const ds = rutDias(pedido);
+        if (!ds.ok) return { error: ds.error };
+        const choque = ds.dias
+          .map(d => ({ d, otra: rutinas.find(x => x.id !== r.id && rutDiasDe(x).includes(d)) }))
+          .find(x => x.otra);
+        if (choque) {
+          return { error: `El ${entLabel(ENT_DIAS, choque.d)} ya lo ocupa "${choque.otra.nombre}". Quítaselo a esa primero, o elige otro día.` };
+        }
+        row.dias_semana = ds.dias;
+        const antes = rutDiasTexto(r) || 'libre';
+        cambios.push(`días ${antes} → ${ds.dias.map(d => entLabel(ENT_DIAS, d)).join(', ')}`);
       }
     }
+    // Quitar y añadir días SUELTOS, sin repetir la lista entera. Es como se
+    // habla de verdad: "quítale el martes", "ponla también el viernes". Con
+    // solo `dias_semana` el agente tendría que recalcular la lista completa
+    // cada vez, y basta que se equivoque una vez para borrarle un día al
+    // cliente sin que nadie lo note.
+    if (agregar_dias !== undefined || quitar_dias !== undefined) {
+      if (row.dias_semana) {
+        return { error: 'No mezcles: o me das la lista completa de días, o me dices cuáles quitar y cuáles añadir.' };
+      }
+      let dias = rutDiasDe(r).slice();
+
+      if (quitar_dias !== undefined && quitar_dias !== null && quitar_dias !== '') {
+        const q = rutDias(quitar_dias);
+        if (!q.ok) return { error: q.error };
+        const noTiene = q.dias.filter(d => !dias.includes(d));
+        if (noTiene.length) {
+          return { error: `"${r.nombre}" no está ${noTiene.map(d => 'el ' + entLabel(ENT_DIAS, d)).join(' ni ')}. Está ${rutDiasTexto(r) || 'sin días fijos'}.` };
+        }
+        dias = dias.filter(d => !q.dias.includes(d));
+        cambios.push(`quita ${q.dias.map(d => entLabel(ENT_DIAS, d)).join(', ')}`);
+      }
+
+      if (agregar_dias !== undefined && agregar_dias !== null && agregar_dias !== '') {
+        const g = rutDias(agregar_dias);
+        if (!g.ok) return { error: g.error };
+        const choque = g.dias
+          .map(d => ({ d, otra: rutinas.find(x => x.id !== r.id && rutDiasDe(x).includes(d)) }))
+          .find(x => x.otra);
+        if (choque) {
+          return { error: `El ${entLabel(ENT_DIAS, choque.d)} ya lo ocupa "${choque.otra.nombre}". Quítaselo a esa primero, o elige otro día.` };
+        }
+        const yaEsta = g.dias.filter(d => dias.includes(d));
+        if (yaEsta.length === g.dias.length) {
+          return { error: `"${r.nombre}" ya está ${g.dias.map(d => 'el ' + entLabel(ENT_DIAS, d)).join(' y ')}. No hay nada que cambiar.` };
+        }
+        dias = [...new Set([...dias, ...g.dias])];
+        cambios.push(`añade ${g.dias.map(d => entLabel(ENT_DIAS, d)).join(', ')}`);
+      }
+
+      row.dias_semana = dias.sort(rutOrdenDias);
+      cambios.push(`queda ${row.dias_semana.map(d => entLabel(ENT_DIAS, d)).join(', ') || 'sin días fijos'}`);
+    }
+
     if (duracion_min != null) { row.duracion_estimada_min = Number(duracion_min); cambios.push(`duración → ${row.duracion_estimada_min} min`); }
     if (!cambios.length) return { error: 'No me dijiste qué cambiar de la rutina.' };
 
-    // Si el día nuevo no está entre los días de la fase, el calendario lo
+    // Si algún día nuevo no está entre los días de la fase, el calendario lo
     // mostraría sin que la fase lo declare. Se avisa, no se bloquea.
-    const aviso = row.dia_semana && !(f.dias_semana || []).includes(row.dia_semana)
-      ? `Ojo: la fase "${f.nombre}" no tiene el ${entLabel(ENT_DIAS, row.dia_semana)} entre sus días. Quizá también quieras cambiar los días de la fase.`
+    const fuera = (row.dias_semana || []).filter(d => !(f.dias_semana || []).includes(d));
+    const aviso = fuera.length
+      ? `Ojo: la fase "${f.nombre}" no tiene ${fuera.map(d => entLabel(ENT_DIAS, d)).join(', ')} entre sus días. Quizá también quieras cambiar los días de la fase.`
       : null;
 
     const res = rutProponer(`Cambiar la rutina "${r.nombre}" de ${c.nombre}`, cambios.join(' · '),
@@ -560,24 +666,26 @@ const RUT_HERRAMIENTAS = {
     );
   },
 
-  async duplicar_rutina({ nombre, rutina, nuevo_nombre, dia_semana, fase } = {}) {
+  async duplicar_rutina({ nombre, rutina, nuevo_nombre, dia_semana, dias_semana, fase } = {}) {
     const c = await rutCliente(nombre);
     if (!c) return rutSinCliente(nombre);
     const { fase: f, rutinas } = await rutContexto(c, fase);
     if (!f) return { error: `${c.nombre} no tiene fases.` };
     const r = rutBuscarRutina(rutinas, rutina);
     if (!r) return { error: `No encontré la rutina "${rutina}".` };
-    const d = dia_semana ? rutDia(dia_semana) : null;
-    if (dia_semana && !d) return { error: `No entendí el día "${dia_semana}".` };
+    const pedido = dias_semana !== undefined ? dias_semana : dia_semana;
+    const ds = (pedido === undefined || pedido === null || pedido === '') ? null : rutDias(pedido);
+    if (ds && !ds.ok) return { error: ds.error };
+    const d = ds ? ds.dias : null;
     return rutProponer(
       `Duplicar "${r.nombre}" de ${c.nombre}`,
-      `${nuevo_nombre ? `se llamará "${nuevo_nombre}"` : 'copia con los mismos ejercicios'}${d ? ` · el ${entLabel(ENT_DIAS, d)}` : ''}`,
+      `${nuevo_nombre ? `se llamará "${nuevo_nombre}"` : 'copia con los mismos ejercicios'}${d ? ` · ${d.map(x => entLabel(ENT_DIAS, x)).join(', ')}` : ''}`,
       async () => {
         const nueva = await entDb.duplicarRutina(r.id);
         if (!nueva) throw new Error('La copia no se creó');
         const row = {};
         if (nuevo_nombre) row.nombre = String(nuevo_nombre);
-        if (d) row.dia_semana = d;
+        if (d) row.dias_semana = d;
         if (Object.keys(row).length) await entDb.actualizarRutina(nueva, row);
       },
     );
@@ -798,11 +906,13 @@ function rutHiloHTML() {
     return `
       <div class="py-4">
         <div class="text-xs text-slate-500 mb-2">
-          Pregúntale sobre el plan de este cliente, o pídele cambios. Los cambios te los deja
+          ${_ent?.subtab === 'calendario'
+            ? 'Cuádrale la semana escribiendo, en vez de arrastrar. Los cambios te los deja'
+            : 'Pregúntale sobre el plan de este cliente, o pídele cambios. Los cambios te los deja'}
           <strong>propuestos</strong>: nada se guarda sin que tú lo apruebes.
         </div>
         <div class="flex flex-col gap-1.5">
-          ${RUT_EJEMPLOS.map(e => `
+          ${rutEjemplos().map(e => `
             <button class="asis-ejemplo" onclick="rutPreguntar(${JSON.stringify(e).replace(/"/g, '&quot;')})">${escapeHtml(e)}</button>
           `).join('')}
         </div>
@@ -846,14 +956,16 @@ function rutPanelHTML() {
   if (!_rut.abierto) {
     return `
       <button class="rut-abrir" onclick="rutToggle()">
-        💬 Preguntarle al agente sobre este plan
+        ${_ent?.subtab === 'calendario'
+          ? '💬 Cuadrar la semana escribiéndole al agente'
+          : '💬 Preguntarle al agente sobre este plan'}
         ${pendientes ? `<span class="tag tag-yellow ml-1">${pendientes} sin aplicar</span>` : ''}
       </button>`;
   }
   return `
     <div class="card rut-caja">
       <div class="flex items-center justify-between gap-2 mb-2 flex-wrap">
-        <div class="font-bold text-slate-900 text-sm">💬 Agente de rutinas</div>
+        <div class="font-bold text-slate-900 text-sm">${_ent?.subtab === 'calendario' ? '💬 Agente del calendario' : '💬 Agente de rutinas'}</div>
         <div class="flex gap-1">
           <button class="btn btn-ghost btn-sm" onclick="abrirGuiaAgente('ent')"
                   title="${(_settings.guia_entrenamiento || '').trim() ? 'Está usando tu guía de entrenamiento. Tócalo para cambiarla.' : 'Dile cómo armas tú las rutinas: criterios, preferencias, tope de ejercicios…'}">
@@ -867,7 +979,9 @@ function rutPanelHTML() {
       <div id="rut-hilo" class="asis-hilo" style="max-height:42vh">${rutHiloHTML()}</div>
       <div class="flex gap-2 items-end mt-3">
         <textarea id="rut-input" rows="2" class="resize-none"
-                  placeholder="Ej: agrégale fondos al Push, 3×10 — o: ¿qué pesos ha movido en sentadilla?"
+                  placeholder="${_ent?.subtab === 'calendario'
+                    ? 'Ej: quítale el martes al Lower — o: pon el Upper lunes, miércoles y viernes'
+                    : 'Ej: agrégale fondos al Push, 3×10 — o: ¿qué pesos ha movido en sentadilla?'}"
                   onkeydown="rutTeclado(event)" ${ch?.trabajando ? 'disabled' : ''}></textarea>
         <button class="btn btn-primary flex-shrink-0" onclick="rutPreguntar()" ${ch?.trabajando ? 'disabled' : ''}>
           ${ch?.trabajando ? '…' : 'Preguntar'}

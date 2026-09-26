@@ -34,8 +34,13 @@ const _comp = {
   segs: null,
   cargando: false,
   error: null,
-  tab: 'panorama',   // panorama | corporal | metas | actividad | calculadora
+  tab: 'panorama',   // panorama | corporal | metas | actividad | fotos | calculadora
   actos: null,       // lo que el cliente registró de cardio/deportes (null = sin tabla)
+  // Fotos de progreso. Se piden aparte al abrir su pestaña, no en compCargar:
+  // firmar veinte URLs en cada carga del perfil sería pagar por algo que casi
+  // nunca se mira. `fotosEn` es cuándo se firmaron, para no pasarse de los
+  // cinco minutos que duran.
+  fotos: null, fotosDe: null, fotosEn: 0, fotosError: null,
 };
 
 // =====================================================
@@ -753,7 +758,12 @@ async function compCargar(clienteId, { forzar = false } = {}) {
   // medición) no se borra la pantalla: se deja lo que hay y se cambia por
   // debajo cuando llegan los datos. Vaciar para volver a llenar en 200 ms es
   // justo lo que hacía sentir lento el CRM.
-  if (otroCliente) { _comp.cliente = null; _comp.meds = []; _comp.metas = null; _comp.segs = []; rerenderView(); }
+  if (otroCliente) {
+    _comp.cliente = null; _comp.meds = []; _comp.metas = null; _comp.segs = [];
+    // Las fotos del cliente anterior NO se quedan en pantalla ni un instante.
+    _comp.fotos = null; _comp.fotosDe = null; _comp.fotosEn = 0; _comp.fotosError = null;
+    rerenderView();
+  }
   try {
     // 🔄 Actualizar tiene que traer datos frescos de verdad, no lo cacheado.
     if (forzar) invalidarCache('clientes', 'mediciones', 'metas', 'seguimientos');
@@ -800,8 +810,98 @@ async function compActividades(clienteId) {
   return data || [];
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// FOTOS DE PROGRESO
+// ═══════════════════════════════════════════════════════════════════════
+// Son lo más sensible que hay en el CRM. Dos cosas a tener claras:
+//
+//   · El bucket es privado: lo que se pinta son URLs FIRMADAS que caducan en
+//     cinco minutos. Salir de la pestaña y volver a los diez minutos vuelve
+//     a pedirlas, y por eso la caché dura menos que la firma.
+//   · Desde aquí NO se borran. Son del cliente: si quiere quitarlas, lo hace
+//     desde su app. Un coach borrando fotos del cuerpo de alguien sin que se
+//     entere es justo lo que no queremos poder hacer.
+const COMP_FOTO_SEG = 300;
+async function compCargarFotos() {
+  const id = _comp.clienteId;
+  if (!id) return;
+  // Si las firmas siguen vivas, no se vuelve a pedir nada.
+  if (_comp.fotos && _comp.fotosDe === id && Date.now() - _comp.fotosEn < (COMP_FOTO_SEG - 60) * 1000) return;
+  _comp.fotos = null; _comp.fotosDe = id; _comp.fotosError = null; rerenderView();
+  try {
+    const { data, error } = await sb.from('fotos_progreso')
+      .select('id,fecha,pose,ruta,peso_kg,nota')
+      .eq('cliente_id', id).order('fecha', { ascending: false }).limit(200);
+    if (error) throw error;
+    const filas = data || [];
+    const firmadas = await Promise.all(filas.map(async f => {
+      const { data: u } = await sb.storage.from('progreso').createSignedUrl(f.ruta, COMP_FOTO_SEG);
+      return u?.signedUrl ? { ...f, url: u.signedUrl } : null;
+    }));
+    _comp.fotos = firmadas.filter(Boolean);
+    _comp.fotosEn = Date.now();
+  } catch (e) {
+    // null = no se pudo; [] = no tiene ninguna. La pantalla los distingue.
+    _comp.fotos = null; _comp.fotosEn = 0; _comp.fotosError = e.message || String(e);
+  }
+  rerenderView();
+}
+
+const COMP_POSES = { frente: 'De frente', lado: 'De lado', espalda: 'De espalda', otra: 'Otra' };
+
+function compFotosHTML() {
+  const fotos = _comp.fotos;
+  if (fotos === null && _comp.fotosError) {
+    return `<div class="card text-sm text-slate-500">
+      No pude cargar las fotos. ${_comp.fotosError.includes('does not exist') || _comp.fotosError.includes('relation')
+        ? 'Parece que falta correr <code>migracion-fotos.sql</code> en Supabase.'
+        : escapeHtml(_comp.fotosError)}
+    </div>`;
+  }
+  if (fotos === null) return '<div class="card text-sm text-slate-400">Pidiendo las fotos…</div>';
+  if (!fotos.length) {
+    return `<div class="card text-sm text-slate-500">
+      Todavía no ha subido ninguna foto. Las sube él desde su app, en <strong>Entrena → Fotos</strong>.
+      Tú no puedes subirlas por él: son suyas.
+    </div>`;
+  }
+
+  // Agrupadas por pose, porque comparar una de frente con una de lado no
+  // enseña progreso.
+  const porPose = {};
+  fotos.forEach(f => (porPose[f.pose] || (porPose[f.pose] = [])).push(f));
+
+  return Object.entries(porPose).map(([pose, lista]) => `
+    <div class="card mb-3">
+      <div class="font-bold text-slate-900 text-sm mb-2">
+        ${COMP_POSES[pose] || pose}
+        <span class="text-slate-400 font-normal">· ${lista.length} foto${lista.length === 1 ? '' : 's'}</span>
+      </div>
+      <div class="grid gap-2" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr))">
+        ${lista.map(f => `
+          <a href="${escapeHtml(f.url)}" target="_blank" rel="noopener" class="block">
+            <img src="${escapeHtml(f.url)}" alt="${fmt.fechaCorta(f.fecha)}" loading="lazy"
+                 class="w-full rounded-lg bg-slate-100" style="aspect-ratio:3/4;object-fit:cover">
+            <div class="text-[11px] text-slate-500 mt-1">
+              ${fmt.fechaCorta(f.fecha)}${f.peso_kg ? ` · ${f.peso_kg} kg` : ''}
+            </div>
+            ${f.nota ? `<div class="text-[11px] text-slate-400">${escapeHtml(f.nota)}</div>` : ''}
+          </a>`).join('')}
+      </div>
+    </div>`).join('')
+    + `<div class="text-[11px] text-slate-400 px-1">
+         Los enlaces caducan en 5 minutos. Si una imagen deja de verse, cambia de pestaña y vuelve.
+       </div>`;
+}
+
 window.compElegirCliente = (id) => { _comp.tab = 'panorama'; compCargar(id); };
-window.compTab = (t) => { _comp.tab = t; rerenderView(); setTimeout(() => { if (t === 'calculadora') compCalcVivo(); }, 0); };
+window.compTab = (t) => {
+  _comp.tab = t; rerenderView();
+  setTimeout(() => { if (t === 'calculadora') compCalcVivo(); }, 0);
+  // Las fotos se piden solo al abrir la pestaña: firmar veinte URLs en cada
+  // carga del perfil sería pagar por algo que casi nunca se mira.
+  if (t === 'fotos') compCargarFotos();
+};
 window.compRefrescar = () => compCargar(_comp.clienteId, { forzar: true });
 
 const COMP_TABS = [
@@ -809,6 +909,7 @@ const COMP_TABS = [
   ['corporal',    '⚖️ Peso y medidas'],
   ['metas',       '🎯 Historial de metas'],
   ['actividad',   '🏃 Actividad física'],
+  ['fotos',       '📷 Fotos'],
   ['calculadora', '🧮 Calculadora de meta'],
 ];
 
@@ -935,6 +1036,7 @@ routes.composicion = async () => {
           ${historialMetasHTML(c, metas, { max: 30 })}
         </div>`
       : _comp.tab === 'actividad' ? compActividadHTML(c, metas, _comp.segs)
+      : _comp.tab === 'fotos' ? compFotosHTML()
       : compCalculadoraHTML(c, meds, aviso)}`;
 
   if (_comp.tab === 'calculadora') setTimeout(compCalcVivo, 0);

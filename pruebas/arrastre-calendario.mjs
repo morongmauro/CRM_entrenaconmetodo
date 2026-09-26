@@ -65,20 +65,43 @@ const r = await p.evaluate(async () => {
   const end = ev('dragend'); Object.defineProperty(end,'currentTarget',{value:c1}); entCalDragEnd(end);
   ok('dragend limpia', !_ent.arrastrando && !document.querySelector('.ent-celda-destino,.ent-mes-arrastrando'));
 
+  // Ahora una rutina guarda una LISTA de días, no uno suelto. Lo que se
+  // escribe es `dias_semana`, y arrastrar mueve solo el día del que se sacó.
+  const dias = (w, id) => (w.find(([x]) => x === id) || [null, {}])[1].dias_semana;
+
   // --- mover a un día libre ---
   let w = await soltar('r1', '2026-10-15');   // Push (lunes) → jueves
-  ok('mover a día libre fija el día', w.length === 1 && w[0][0] === 'r1' && w[0][1].dia_semana === 'J',
+  ok('mover a día libre fija el día',
+     w.length === 1 && w[0][0] === 'r1' && String(dias(w, 'r1')) === 'J',
      JSON.stringify(w));
 
   // --- soltar donde ya hay otra: intercambio ---
   w = await soltar('r1', '2026-10-16');       // Push (L) sobre Lower (V)
-  const porId = Object.fromEntries(w.map(([id,row]) => [id, row.dia_semana]));
-  ok('día ocupado → se intercambian', w.length === 2 && porId.r1 === 'V' && porId.r3 === 'L',
-     JSON.stringify(porId));
+  ok('día ocupado → se intercambian',
+     w.length === 2 && String(dias(w, 'r1')) === 'V' && String(dias(w, 'r3')) === 'L',
+     JSON.stringify(w));
 
   // --- arrastrar una "sugerida" la fija ---
   w = await soltar('r2', '2026-10-17');       // Pull (sin día fijo) → sábado
-  ok('arrastrar una sugerida la fija', w.length === 1 && w[0][1].dia_semana === 'S', JSON.stringify(w));
+  ok('arrastrar una sugerida la fija', w.length === 1 && String(dias(w, 'r2')) === 'S',
+     JSON.stringify(w));
+
+  // --- lo que ANTES no se podía ni guardar: una rutina en dos días ---
+  // Es el caso real de Andrea, Amauri y Diana: A-B-A-B. Si arrastro el lunes
+  // de una rutina que va lunes Y miércoles, el miércoles tiene que quedarse
+  // donde está. Con el modelo viejo (un día por rutina) el miércoles se
+  // perdía en silencio.
+  _ent.rutinasCache.find(x => x.id === 'r1').dias_semana = ['L', 'X'];
+  w = await soltar('r1', '2026-10-15');       // saco el lunes → jueves
+  ok('mover un día conserva los otros', String(dias(w, 'r1')) === 'X,J', JSON.stringify(w));
+
+  _ent.rutinasCache.find(x => x.id === 'r1').dias_semana = ['L', 'X'];
+  w = await soltar('r1', '2026-10-16');       // saco el lunes sobre Lower (V)
+  ok('intercambio conservando el otro día',
+     String(dias(w, 'r1')) === 'X,V' && String(dias(w, 'r3')) === 'L',
+     JSON.stringify(w));
+
+  delete _ent.rutinasCache.find(x => x.id === 'r1').dias_semana;
 
   // --- soltar en su propio día no escribe ---
   w = await soltar('r1', '2026-10-19');       // Push ya es lunes

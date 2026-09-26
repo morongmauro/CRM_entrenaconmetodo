@@ -362,15 +362,23 @@ const HERRAMIENTAS_RUTINAS = [
   {
     name: 'editar_rutina',
     description:
-      'PROPONE cambiarle a una rutina el nombre, el día de la semana o la duración. IMPORTANTE: ' +
-      'una rutina ocupa UN solo día. Si el coach quiere la misma rutina dos veces por semana, eso ' +
-      'es duplicar_rutina, no esto.',
+      'PROPONE cambiarle a una rutina el nombre, los días de la semana o la duración. Una rutina ' +
+      'puede caer en VARIOS días. Para los días hay dos formas, y NO se mezclan: ' +
+      '(a) `dias_semana` deja la rutina EXACTAMENTE en esos días, borrando los demás — úsalo ' +
+      'cuando el coach da la lista completa ("esta va lunes y jueves"); ' +
+      '(b) `agregar_dias` / `quitar_dias` tocan solo esos días y respetan el resto — úsalo ' +
+      'cuando el coach habla de un cambio suelto ("quítale el martes", "ponla también el viernes", ' +
+      '"pásala del martes al viernes" = quitar_dias="martes" + agregar_dias="viernes"). ' +
+      'Ante la duda usa (b): equivocarse con (a) le borra días al cliente sin avisar. ' +
+      'Duplicar es solo para cuando quiere DOS rutinas distintas que arrancan iguales.',
     input_schema: {
       type: 'object',
       properties: {
         nombre: { type: 'string' }, rutina: { type: 'string' },
         nuevo_nombre: { type: 'string' },
-        dia_semana: { type: 'string', description: 'lunes…domingo, o L M X J V S D. Cadena vacía para quitarle el día fijo.' },
+        dias_semana: { type: 'string', description: 'La lista COMPLETA de días: "lunes", "lunes, jueves", "L,X,V". Reemplaza los que tenga. Cadena vacía para dejarla sin días fijos.' },
+        agregar_dias: { type: 'string', description: 'Días a AÑADIR, conservando los que ya tiene. No combinar con dias_semana.' },
+        quitar_dias: { type: 'string', description: 'Días a QUITAR, conservando los demás. No combinar con dias_semana.' },
         duracion_min: { type: 'integer' },
         fase: { type: 'string' },
       },
@@ -394,12 +402,14 @@ const HERRAMIENTAS_RUTINAS = [
   },
   {
     name: 'duplicar_rutina',
-    description: 'PROPONE crear una copia de una rutina con sus mismos ejercicios, opcionalmente con otro nombre y otro día. Para cuando la misma sesión se repite en la semana.',
+    description: 'PROPONE crear una copia de una rutina con sus mismos ejercicios, opcionalmente con otro nombre y otros días. Para cuando el coach quiere DOS rutinas que arrancan iguales. Si lo que quiere es la MISMA rutina repetida en la semana, eso es editar_rutina con varios días, que no duplica nada.',
     input_schema: {
       type: 'object',
       properties: {
         nombre: { type: 'string' }, rutina: { type: 'string' },
-        nuevo_nombre: { type: 'string' }, dia_semana: { type: 'string' }, fase: { type: 'string' },
+        nuevo_nombre: { type: 'string' },
+        dias_semana: { type: 'string', description: 'Uno o varios días separados por comas.' },
+        fase: { type: 'string' },
       },
       required: ['rutina'],
     },

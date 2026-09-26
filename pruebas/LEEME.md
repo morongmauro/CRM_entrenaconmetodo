@@ -118,3 +118,66 @@ que cambian lo que se enseña:
   para que no parezca que el CRM está roto.
 - **Un registro pelado** (sin minutos ni kilómetros): el caso que produce
   `NaN` en cuanto alguien divide sin comprobar.
+
+## reparto-dias.mjs
+
+El reparto de rutinas sobre la semana, sin DOM y sin red.
+
+Comprueba dos cosas a la vez: que una rutina puede caer en **varios días**
+(el caso A-B-A-B de Andrea, Amauri y Diana, que con el modelo viejo no se
+podía ni guardar), y que el CRM y la app del cliente reparten **igual** —
+son dos ficheros con la misma lógica escrita dos veces, y si se separan el
+coach ve una semana y el cliente otra.
+
+```
+node pruebas/reparto-dias.mjs
+```
+
+## agente-calendario.mjs
+
+`editar_rutina` del agente, que es por donde pasan todas las frases del tipo
+«quítale el martes» o «pon el Upper lunes, miércoles y viernes».
+
+Hay **dos formas** de tocar los días y confundirlas borra días sin avisar:
+`dias_semana` deja la rutina exactamente en esos días, mientras que
+`agregar_dias` / `quitar_dias` tocan solo esos y respetan el resto. La prueba
+cubre las dos, que no se mezclen, los choques con otra rutina, los días mal
+escritos, y que **nada se guarde** hasta que pulses Aplicar.
+
+```
+node pruebas/agente-calendario.mjs
+```
+
+## records.mjs
+
+El récord personal y la detección de "hoy batiste algo".
+
+Es el número que el cliente ve más grande de toda la app, así que tiene que
+ser el que de verdad levantó. Cubre las dos trampas fáciles: mezclar el peso
+de un día con las reps de otro («60 kg × 12» cuando hizo 60×8 y 40×12), y
+contar la sesión de hoy como récord anterior, que haría salir la celebración
+siempre. También los ejercicios sin peso, donde el récord son las reps.
+
+```
+node pruebas/records.mjs
+```
+
+## circuitos-vueltas.mjs
+
+Cómo se reparte una rutina en tramos y vueltas.
+
+El bug que esto no debe permitir otra vez: un circuito de 3 vueltas salía con
+**una** fila por ejercicio, así que no había dónde marcar la segunda vuelta ni
+la tercera. Y un circuito se recorre A→B→A→B→A→B, no A tres veces y luego B.
+
+```
+node pruebas/circuitos-vueltas.mjs
+```
+
+## Nota sobre eventos-fechas.mjs
+
+Esa prueba compara las tres implementaciones de "en qué días cae un evento"
+(CRM, SQL y API) contra una base PostgreSQL, pero **no siembra sus propios
+datos**: espera una base `evtest` ya cargada. Si la corres en limpio, las
+comparaciones contra SQL fallan por falta de filas, no por un fallo real.
+Las dos implementaciones JS sí se comparan entre sí sin base.
