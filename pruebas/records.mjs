@@ -37,11 +37,22 @@ const ctx = vm.createContext({
     return [];
   },
 });
-vm.runInContext(
-  trozo('const TOPE_SESIONES', 'const TOPE_HISTORIAL = 12;') + '\n'
+// La conversión kg/lb vive en _entreno.js (la comparten la API y el cron).
+const entreno = readFileSync(`${RAIZ}mealtracker/api/_entreno.js`, 'utf8');
+const trozoDe = (texto, desde, hasta) => {
+  const i = texto.indexOf(desde), j = texto.indexOf(hasta, i);
+  if (i < 0 || j < 0) throw new Error(`No encontré "${desde}" — ¿se renombró?`);
+  return texto.slice(i, j + hasta.length);
+};
+vm.runInContext((''
+  + trozoDe(entreno, 'const LB_A_KG', "return unidad === 'lb' ? n * LB_A_KG : n;\n};") + '\n'
+  + trozo('function marcaDe(', '\n}') + '\n'
+  + trozo('function superaMarca(', '\n}') + '\n'
+  + trozo('const TOPE_SESIONES', 'const TOPE_HISTORIAL = 12;') + '\n'
   + trozo('async function ultimasSeries(', '\n  return out;\n}') + '\n'
   + trozo('function recordsBatidos(', '\n  return batidos;\n}') + '\n'
-  + 'globalThis.ultimasSeries = ultimasSeries; globalThis.recordsBatidos = recordsBatidos;',
+  + 'globalThis.ultimasSeries = ultimasSeries; globalThis.recordsBatidos = recordsBatidos;'
+  ).replace(/^export /gm, ''),   // son módulos ES; aquí se evalúan sueltos
   ctx,
 );
 
@@ -207,6 +218,19 @@ console.log('\n── Qué batió hoy ──');
   const b = ctx.recordsBatidos({ e1: { peso: 60, reps: 8 } },
     [{ ejercicio_id: 'e1', reps: 0, peso: 100 }]);
   ok('una serie con 0 reps no bate nada', b.length === 0, JSON.stringify(b));
+}
+
+console.log('\n── Libras y kilos se comparan en kg ──');
+{
+  SESIONES = [{ id: 'a', fecha: '2026-09-01' }, { id: 'b', fecha: '2026-09-08' }];
+  SERIES = [
+    { sesion_id: 'a', ejercicio_id: 'e1', serie_num: 1, reps: 8, peso: 60, unidad: 'kg' },
+    { sesion_id: 'b', ejercicio_id: 'e1', serie_num: 1, reps: 8, peso: 120, unidad: 'lb' },   // 54,4 kg
+  ];
+  const r = (await ctx.ultimasSeries('c1', ['e1'])).e1;
+  ok('120 lb no le gana a 60 kg aunque el número sea mayor', r.record.peso === 60 && r.record.unidad === 'kg', JSON.stringify(r.record));
+  const b = ctx.recordsBatidos({ e1: r.record }, [{ ejercicio_id: 'e1', reps: 8, peso: 140, unidad: 'lb' }]);
+  ok('140 lb (63,5 kg) sí bate los 60 kg', b.length === 1 && b[0].unidad === 'lb', JSON.stringify(b));
 }
 
 console.log(fallos ? `\n${fallos} FALLO(S)\n` : '\nTodo bien.\n');

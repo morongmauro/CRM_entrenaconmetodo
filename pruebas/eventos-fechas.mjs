@@ -30,13 +30,9 @@ vm.runInContext(
 const evtFechasDe = ctxCrm.evtFechasDe;
 
 // ── API del cliente ──
-const api = `${raiz}/../mealtracker/api/training.js`;
-const ctxApi = vm.createContext({ console });
-vm.runInContext(
-  "const DIAS = ['L','M','X','J','V','S','D'];\n"
-  + trozo(api, 'function expandirEventos(', '\n// ════')
-  + '\nglobalThis.expandirEventos = expandirEventos;', ctxApi);
-const expandirEventos = ctxApi.expandirEventos;
+// expandirEventos vive en mealtracker/api/_entreno.js (lo comparten la API y
+// el cron de avisos). Es un módulo ES: se importa tal cual.
+const { expandirEventos } = await import(`${raiz}/../mealtracker/api/_entreno.js`);
 
 const psql = (sql, db = 'evtest') =>
   execFileSync('psql', ['-h', '/tmp', '-U', 'postgres', '-d', db, '-tAc', sql],

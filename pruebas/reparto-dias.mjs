@@ -40,16 +40,10 @@ vm.runInContext(
 );
 
 // ---------- El reparto de la app del cliente ----------
-const apiSrc = readFileSync(`${RAIZ}mealtracker/api/training.js`, 'utf8');
-const ctxApi = vm.createContext({ console });
-vm.runInContext(
-  `const DIAS = ['L','M','X','J','V','S','D'];\n`
-  + trozo(apiSrc, 'const diasDeRutina = (r) => {', '\n};')
-  + '\n'
-  + trozo(apiSrc, 'function repartirPorDia(fase, rutinas) {', '\n  return porDia;\n}')
-  + '\nglobalThis.repartirAPI = repartirPorDia;',
-  ctxApi,
-);
+// Vive en mealtracker/api/_entreno.js (lo comparten la API y el cron de
+// avisos). Es un módulo ES: se importa tal cual, sin recortar texto.
+const { repartirPorDia } = await import(`${RAIZ}mealtracker/api/_entreno.js`);
+const ctxApi = { repartirAPI: repartirPorDia };
 
 // ---------- Comprobación ----------
 let fallos = 0;

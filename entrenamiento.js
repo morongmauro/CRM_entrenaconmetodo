@@ -337,14 +337,29 @@ const entDb = {
     return data || [];
   },
 
+  // Por TANDAS y por PÁGINAS. Supabase corta cada respuesta en 1.000 filas
+  // sin avisar: un cliente constante (60 sesiones × 20 series) ya pasa de eso,
+  // y las lecturas se calculaban con la mitad de su historial. Y una lista de
+  // cientos de ids en la URL (la Bandeja lee a todos los clientes) revienta el
+  // largo máximo de la petición: se parte en tandas de 80.
   async seriesDeSesiones(sesionIds) {
     if (!sesionIds || !sesionIds.length) return [];
-    const { data, error } = await sb.from('series_log')
-      .select('sesion_id, ejercicio_id, serie_num, reps, peso, unidad, lado, rir, completada, notas, ejercicios(nombre)')
-      .in('sesion_id', sesionIds)
-      .order('serie_num');
-    if (error) return [];
-    return data || [];
+    const TANDA = 80, PAGINA = 1000;
+    const out = [];
+    for (let i = 0; i < sesionIds.length; i += TANDA) {
+      const ids = sesionIds.slice(i, i + TANDA);
+      for (let desde = 0; ; desde += PAGINA) {
+        const { data, error } = await sb.from('series_log')
+          .select('id, sesion_id, ejercicio_id, serie_num, reps, peso, unidad, lado, rir, completada, notas, ejercicios(nombre)')
+          .in('sesion_id', ids)
+          .order('sesion_id').order('serie_num').order('id')
+          .range(desde, desde + PAGINA - 1);
+        if (error) return out;
+        out.push(...(data || []));
+        if (!data || data.length < PAGINA) break;
+      }
+    }
+    return out;
   },
 
   // Las dos funciones del servidor: la última vez que lo hizo, y su récord.
@@ -2760,9 +2775,24 @@ window.verEntrenamientoCliente = (clienteId) => {
 const ENT_ESTANCADO_DIAS = 28;     // sin subir peso en 4 semanas = mirarlo
 const ENT_ESTANCADO_MIN_SES = 3;   // con menos de 3 registros no es un patrón
 
-// El peso más alto que movió en cada sesión, por ejercicio.
-// Se usa el MÁXIMO de la sesión, no el promedio: si hizo 60×10 y luego 50×12
-// como back-off, lo que dice si progresó es el 60.
+// La MEJOR MARCA de cada sesión, por ejercicio.
+//
+// Antes se miraba solo el peso más alto, y eso daba por estancado a quien
+// progresaba por repeticiones: 60×8 → 60×10 → 60×12 es la progresión de
+// manual (doble progresión) y salía como "60 kg desde hace un mes". Ahora cada
+// serie se resume en su 1RM estimado (Epley: kg × (1 + reps/30)), que sube
+// tanto si carga más como si hace más reps con lo mismo.
+//
+// Todo en kg: una serie en libras se convierte para comparar. Lo que se
+// ENSEÑA es la serie tal cual la marcó ("60 kg × 12", "50 lb × 10").
+//
+// Se usa la mejor serie de la sesión, no el promedio: si hizo 60×10 y luego
+// 50×12 como back-off, lo que dice si progresó es la mejor.
+const ENT_LB_KG = 0.45359237;
+function entE1rm(pesoKg, reps) {
+  const r = Number(reps);
+  return pesoKg * (1 + (Number.isFinite(r) && r > 0 ? Math.min(r, 20) : 1) / 30);
+}
 function entSeriesPorEjercicio(sesiones, series) {
   const fechaDe = {};
   for (const s of sesiones) fechaDe[s.id] = s.fecha;
@@ -2773,11 +2803,15 @@ function entSeriesPorEjercicio(sesiones, series) {
     if (!Number.isFinite(peso) || peso <= 0) continue;
     const fecha = fechaDe[l.sesion_id];
     if (!fecha) continue;
+    const unidad = l.unidad === 'lb' ? 'lb' : 'kg';
+    const kg = unidad === 'lb' ? peso * ENT_LB_KG : peso;
+    const reps = Number(l.reps) || null;
+    const e1 = entE1rm(kg, reps);
     const id = l.ejercicio_id;
-    const e = porEj.get(id) || { id, nombre: l.ejercicios?.nombre || 'ejercicio', unidad: l.unidad || 'kg', sesiones: new Map() };
+    const e = porEj.get(id) || { id, nombre: l.ejercicios?.nombre || 'ejercicio', unidad, sesiones: new Map() };
     const prev = e.sesiones.get(fecha);
-    if (!prev || peso > prev.peso) {
-      e.sesiones.set(fecha, { fecha, peso, reps: Number(l.reps) || null });
+    if (!prev || e1 > prev.e1) {
+      e.sesiones.set(fecha, { fecha, peso, reps, unidad, kg, e1 });
     }
     porEj.set(id, e);
   }
@@ -2796,24 +2830,27 @@ function entLecturasDatos(sesiones, series) {
   const estancados = [];
   const progresando = [];
   const nuevos = [];
+  const marca = (x) => `${x.peso} ${x.unidad}${x.reps ? ` × ${x.reps}` : ''}`;
   for (const e of ejercicios) {
     const p = e.puntos;
     if (p.length < ENT_ESTANCADO_MIN_SES) { nuevos.push({ ...e, veces: p.length }); continue; }
-    const maximo = Math.max(...p.map(x => x.peso));
-    // Cuándo alcanzó ese máximo por PRIMERA vez: desde ahí no ha subido.
-    const primeraVezEnMax = p.find(x => x.peso === maximo);
+    const maximo = Math.max(...p.map(x => x.e1));
+    // Cuándo alcanzó esa mejor marca por PRIMERA vez: desde ahí no la supera.
+    // (±0.5% de margen: 60×8 y 60×8 otro día son la misma marca.)
+    const primeraVezEnMax = p.find(x => x.e1 >= maximo * 0.995);
     const diasEnMax = dias(primeraVezEnMax.fecha, hoy);
     const sesionesDesde = p.filter(x => x.fecha >= primeraVezEnMax.fecha).length;
-    const primero = p[0].peso, ultimo = p[p.length - 1].peso;
+    const primero = p[0], ultimo = p[p.length - 1];
 
     if (diasEnMax >= ENT_ESTANCADO_DIAS && sesionesDesde >= ENT_ESTANCADO_MIN_SES) {
-      estancados.push({ ...e, maximo, diasEnMax, sesionesDesde, desde: primeraVezEnMax.fecha });
-    } else if (ultimo > primero) {
-      progresando.push({ ...e, de: primero, a: ultimo, subida: Math.round((ultimo - primero) * 10) / 10, veces: p.length });
+      estancados.push({ ...e, maximo, marca: marca(primeraVezEnMax), diasEnMax, sesionesDesde, desde: primeraVezEnMax.fecha });
+    } else if (ultimo.e1 > primero.e1 * 1.005) {
+      progresando.push({ ...e, de: marca(primero), a: marca(ultimo),
+        subidaPct: Math.round((ultimo.e1 / primero.e1 - 1) * 100), veces: p.length });
     }
   }
   estancados.sort((a, b) => b.diasEnMax - a.diasEnMax);
-  progresando.sort((a, b) => (b.subida / b.de) - (a.subida / a.de));
+  progresando.sort((a, b) => b.subidaPct - a.subidaPct);
 
   const completadas = sesiones.filter(s => s.estado === 'completada');
   const sinTerminar = sesiones.filter(s => s.estado && s.estado !== 'completada');
@@ -2883,13 +2920,13 @@ async function entPintarLecturas(cliente) {
 
   if (d.estancados.length) {
     const e = d.estancados[0];
-    push('idea', `${e.nombre} lleva ${e.diasEnMax} días en el mismo peso`,
-      `${e.maximo} ${e.unidad} desde ${fmt.fecha(e.desde)}, en ${e.sesionesDesde} sesiones. ${d.estancados.length > 1 ? `Y no es el único: hay ${d.estancados.length} así.` : ''}`,
-      `${e.maximo} ${e.unidad}`);
+    push('idea', `${e.nombre} lleva ${e.diasEnMax} días sin superar su mejor marca`,
+      `${e.marca} desde ${fmt.fecha(e.desde)}, en ${e.sesionesDesde} sesiones: ni más peso ni más reps. ${d.estancados.length > 1 ? `Y no es el único: hay ${d.estancados.length} así.` : ''}`,
+      e.marca);
   }
   if (d.progresando.length) {
     const p = d.progresando[0];
-    push('bien', `Subió en ${p.nombre}`, `De ${p.de} a ${p.a} ${p.unidad} en ${p.veces} sesiones. Eso se le dice.`, `+${p.subida} ${p.unidad}`);
+    push('bien', `Subió en ${p.nombre}`, `De ${p.de} a ${p.a} en ${p.veces} sesiones. Eso se le dice.`, `+${p.subidaPct}%`);
   }
 
   const T = {
@@ -2927,8 +2964,8 @@ async function entPintarLecturas(cliente) {
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-      ${tabla('🟰 Llevan tiempo en el mismo peso',
-        `Sin subir en ${ENT_ESTANCADO_DIAS} días o más, con al menos ${ENT_ESTANCADO_MIN_SES} sesiones de por medio. No siempre hay que cambiarlos — pero hay que saberlo.`,
+      ${tabla('🟰 Llevan tiempo sin superar su mejor marca',
+        `Ni más peso ni más reps en ${ENT_ESTANCADO_DIAS} días o más, con al menos ${ENT_ESTANCADO_MIN_SES} sesiones de por medio. No siempre hay que cambiarlos — pero hay que saberlo.`,
         d.estancados.slice(0, 8).map(e => `
           <div class="flex items-center justify-between gap-2 py-1.5" style="border-bottom:1px solid #f1f5f9">
             <div class="min-w-0">
@@ -2936,7 +2973,7 @@ async function entPintarLecturas(cliente) {
               <div class="text-[11px] text-slate-400">${e.sesionesDesde} sesiones desde ${fmt.fecha(e.desde)}</div>
             </div>
             <div class="text-right flex-shrink-0">
-              <div class="text-sm font-bold text-amber-700">${e.maximo} ${e.unidad}</div>
+              <div class="text-sm font-bold text-amber-700">${escapeHtml(e.marca)}</div>
               <div class="text-[11px] text-slate-400">${e.diasEnMax} días</div>
             </div>
           </div>`))}
@@ -2946,9 +2983,9 @@ async function entPintarLecturas(cliente) {
           <div class="flex items-center justify-between gap-2 py-1.5" style="border-bottom:1px solid #f1f5f9">
             <div class="min-w-0">
               <div class="text-sm font-semibold text-slate-800 truncate">${escapeHtml(p.nombre)}</div>
-              <div class="text-[11px] text-slate-400">${p.de} → ${p.a} ${p.unidad} · ${p.veces} sesiones</div>
+              <div class="text-[11px] text-slate-400">${escapeHtml(p.de)} → ${escapeHtml(p.a)} · ${p.veces} sesiones</div>
             </div>
-            <div class="text-sm font-bold text-emerald-700 flex-shrink-0">+${p.subida} ${p.unidad}</div>
+            <div class="text-sm font-bold text-emerald-700 flex-shrink-0">+${p.subidaPct}%</div>
           </div>`))}
 
       ${tabla('🗣️ Lo que escribió al terminar', 'Sus notas de las últimas sesiones. Aquí es donde avisa de una molestia antes de que sea lesión.',
