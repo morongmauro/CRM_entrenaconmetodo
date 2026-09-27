@@ -30,7 +30,7 @@ const _ent = {
   ejercicios: null,
   musculos: null,          // se lee de la tabla `musculos`: una sola fuente
                            // de verdad con el SVG del cuerpo y con la app.
-  filtros: { q: '', tipo: '', segmento: '', patron: '', musculo: '', equipo: '' },
+  filtros: { q: '', tipo: '', segmento: '', patron: '', musculo: '', equipo: '', video: '' },
   // Constructor
   rutinaId: null,
   rutina: null,
@@ -427,6 +427,10 @@ function entFiltrar(lista) {
     if (f.segmento && e.segmento !== f.segmento) return false;
     if (f.patron && e.patron !== f.patron) return false;
     if (f.equipo && !(e.equipo || []).includes(f.equipo)) return false;
+    // Todo ejercicio debe llevar video: este filtro saca los que faltan.
+    const tieneVideo = (e.video_fuente || 'ninguno') !== 'ninguno';
+    if (f.video === 'sin' && tieneVideo) return false;
+    if (f.video === 'con' && !tieneVideo) return false;
     if (f.musculo) {
       const ms = [...(e.musculos_primarios || []), ...(e.musculos_secundarios || [])];
       if (!ms.includes(f.musculo)) return false;
@@ -458,13 +462,19 @@ function entIconoVideo(e) {
   return '<span class="tag tag-gray">sin video</span>';
 }
 
-// Nombre en inglés (el original de Trainerize, guardado en `alias`), chico y
-// en gris bajo el español: hay traducciones que suenan raras y el original
-// ayuda a reconocer el ejercicio. Solo si dice algo distinto al español.
-function entNombreIngles(e, clase = 'text-[11px] text-slate-400') {
-  const a = String((e && e.alias) || '').trim();
-  if (!a || normalizeName(a) === normalizeName(e.nombre || '')) return '';
-  return `<div class="${clase} truncate">${escapeHtml(a)}</div>`;
+// Los dos nombres del ejercicio: manda el INGLÉS (el original de Trainerize,
+// guardado en `alias`), grande y en negro; el español va chico y en gris
+// debajo. Hay traducciones que suenan raras y el original se reconoce mejor.
+// Sin alias, o si dice lo mismo, solo el que haya.
+function entNombres(e) {
+  const es = (e && e.nombre) || 'Ejercicio';
+  const en = String((e && e.alias) || '').trim();
+  if (!en || normalizeName(en) === normalizeName(es)) return { grande: es, chico: '' };
+  return { grande: en, chico: es };
+}
+function entNombreChico(e, clase = 'text-[11px] text-slate-400') {
+  const c = entNombres(e).chico;
+  return c ? `<div class="${clase} truncate">${escapeHtml(c)}</div>` : '';
 }
 
 function entTarjetaEjercicio(e, opts = {}) {
@@ -482,8 +492,8 @@ function entTarjetaEjercicio(e, opts = {}) {
                   : '<span class="text-2xl">🏋️</span>'}
         </div>
         <div class="min-w-0 flex-1">
-          <div class="font-bold text-slate-900 text-sm truncate">${escapeHtml(e.nombre)}</div>
-          ${entNombreIngles(e)}
+          <div class="font-bold text-slate-900 text-sm truncate">${escapeHtml(entNombres(e).grande)}</div>
+          ${entNombreChico(e)}
           <div class="text-xs text-slate-500 mb-1">
             ${entLabel(ENT_TIPOS, e.tipo)} · ${entLabel(ENT_SEGMENTOS, e.segmento)}
           </div>
@@ -510,12 +520,13 @@ function entBarraFiltros(prefijo = 'flt') {
     <div class="card mb-4">
       <input id="${prefijo}-q" placeholder="Buscar por nombre…" value="${escapeHtml(f.q)}"
              class="w-full mb-2" oninput="entSetFiltro('q', this.value)">
-      <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
+      <div class="grid grid-cols-2 md:grid-cols-6 gap-2">
         <select onchange="entSetFiltro('tipo', this.value)">${entOpciones(ENT_TIPOS, f.tipo, 'Todo tipo')}</select>
         <select onchange="entSetFiltro('segmento', this.value)">${entOpciones(ENT_SEGMENTOS, f.segmento, 'Todo segmento')}</select>
         <select onchange="entSetFiltro('patron', this.value)">${entOpciones(ENT_PATRONES, f.patron, 'Todo patrón')}</select>
         <select onchange="entSetFiltro('musculo', this.value)">${entOpciones(musOpts, f.musculo, 'Todo músculo')}</select>
         <select onchange="entSetFiltro('equipo', this.value)">${entOpciones(ENT_EQUIPO, f.equipo, 'Todo equipo')}</select>
+        <select onchange="entSetFiltro('video', this.value)">${entOpciones([['sin', 'Sin video'], ['con', 'Con video']], f.video || '', 'Con y sin video')}</select>
       </div>
       <div class="mt-2 flex items-center justify-between">
         <span id="${prefijo}-count" class="text-xs text-slate-500"></span>
@@ -542,7 +553,7 @@ window.entSetFiltro = (k, v) => {
 };
 
 window.entLimpiarFiltros = () => {
-  _ent.filtros = { q: '', tipo: '', segmento: '', patron: '', musculo: '', equipo: '' };
+  _ent.filtros = { q: '', tipo: '', segmento: '', patron: '', musculo: '', equipo: '', video: '' };
   if (_ent.tab === 'rutinas' && _ent.rutinaId) entPintarConstructor(); else entVistaEjercicios();
 };
 
@@ -597,8 +608,8 @@ window.entVerFicha = async (id) => {
       })
     : '';
 
-  openModal(modalShell(escapeHtml(e.nombre), `
-    ${entNombreIngles(e, 'text-sm text-slate-400 -mt-2 mb-2')}
+  openModal(modalShell(escapeHtml(entNombres(e).grande), `
+    ${entNombreChico(e, 'text-sm text-slate-400 -mt-2 mb-2')}
     <div class="text-xs text-slate-500 mb-4">
       ${entLabel(ENT_TIPOS, e.tipo)} · ${entLabel(ENT_SEGMENTOS, e.segmento)} ·
       ${entLabel(ENT_PATRONES, e.patron)} · ${entLabel(ENT_NIVELES, e.nivel)}
@@ -720,6 +731,9 @@ window.entEditarEjercicio = async (id) => {
                     data-vf="${id2}" onclick="entVideoFuente('${id2}')">${lab}</button>`).join('')}
       </div>
       <div id="ej-video-panel"></div>
+      <a class="text-xs underline text-slate-500 mt-1 inline-block" target="_blank" rel="noopener"
+         href="https://www.youtube.com/@proetejercicioterapeutico5675/search?query=${encodeURIComponent(e.nombre || '')}">
+        Buscar este ejercicio en PROET Ejercicio Terapéutico ↗</a>
     </div>
 
     <div class="sec-title">Lo que ve el cliente</div>
@@ -1244,8 +1258,8 @@ function entFilaRutina(re, i, total, bloques) {
           <div class="ent-agarre" title="Arrastra para cambiar el orden">⠿</div>
           ${mini ? `<div class="ent-fila-fig">${mini}</div>` : ''}
           <div class="min-w-0">
-            <div class="font-bold text-sm text-slate-900">${i + 1}. ${escapeHtml(e.nombre || 'Ejercicio')}</div>
-            ${entNombreIngles(e)}
+            <div class="font-bold text-sm text-slate-900">${i + 1}. ${escapeHtml(entNombres(e).grande)}</div>
+            ${entNombreChico(e)}
             <div class="text-xs text-slate-500">${entLabel(ENT_TIPOS, e.tipo)} · ${entChipMusculos(e)}</div>
             ${sinTexto ? `
               <button class="ent-aviso" onclick="entEditarEjercicio('${e.id}')"
@@ -2361,8 +2375,8 @@ function entResumenEjerciciosHTML(ejs, rutina) {
             return `
               <tr>
                 <td class="text-slate-400">${i + 1}</td>
-                <td class="font-medium text-slate-800">${escapeHtml(e.nombre || 'Ejercicio')}
-                  ${entNombreIngles(e)}
+                <td class="font-medium text-slate-800">${escapeHtml(entNombres(e).grande)}
+                  ${entNombreChico(e)}
                   ${re.notas ? `<div class="text-[11px] text-slate-500">${escapeHtml(re.notas)}</div>` : ''}</td>
                 <td>${re.series ?? '—'}</td>
                 <td>${escapeHtml(re.reps || '—')}</td>
