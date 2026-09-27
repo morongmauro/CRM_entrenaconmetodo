@@ -26,7 +26,13 @@
 
 const EVT_TIPOS = [
   ['actividad', '🏊 Actividad',  '#0e7490'],   // natación, fútbol, caminata
-  ['medicion',  '⚖️ Medición',   '#7c3aed'],   // pesarse, medidas, fotos
+  // Lo que el cliente REGISTRA: le sale en su calendario con su botón
+  // («Registrar peso», «Ya me medí», «Ya envié mis fotos») y te llega un
+  // aviso al teléfono y a la Bandeja cuando lo marca.
+  ['medidas',   '📏 Medición corporal',   '#7c3aed'],
+  ['peso',      '⚖️ Peso',                '#6d28d9'],
+  ['fotos',     '📸 Registro fotográfico', '#9333ea'],
+  ['medicion',  '⚖️ Medición (general)',  '#7c3aed'],   // el tipo de antes; se sigue leyendo
   ['cita',      '📅 Cita',       '#b45309'],   // consulta, control médico
   ['nota',      '📌 Nota',       '#475569'],   // recordatorio sin acción
   ['descanso',  '😴 Descanso',   '#65a30d'],   // día libre a propósito

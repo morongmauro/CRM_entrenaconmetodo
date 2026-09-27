@@ -445,8 +445,8 @@ const HERRAMIENTAS_RUTINAS = [
         titulo: { type: 'string', description: 'Cómo se llama: "Natación", "Medición de peso".' },
         tipo: {
           type: 'string',
-          enum: ['actividad', 'medicion', 'cita', 'nota', 'descanso'],
-          description: 'actividad = lo hace; medicion = lo registra; cita; nota = recordatorio; descanso = día libre a propósito.',
+          enum: ['actividad', 'medidas', 'peso', 'fotos', 'medicion', 'cita', 'nota', 'descanso'],
+          description: 'actividad = lo hace; medidas = medición corporal; peso = pesarse; fotos = registro fotográfico (las tres las marca el cliente y le llega aviso al coach); medicion = medición general; cita; nota = recordatorio; descanso = día libre a propósito.',
         },
         dias: { type: 'string', description: 'Se repite estos días: "lunes, miércoles". Necesita que el cliente tenga una fase.' },
         fecha: { type: 'string', description: 'O un solo día, en AAAA-MM-DD. Excluyente con "dias".' },

@@ -5558,6 +5558,7 @@ function celdaAvisoApp(c) {
   return `<td class="px-2 text-center">
     <span class="inline-flex flex-col items-center leading-tight" title="${escapeHtml(`Le cobra: ${meses}. ${v.motivo || ''}`)}">
       <span class="status-pill status-end" style="background:#fee2e2;color:#991b1b">📣 ${v.meses_deuda || 1} mes${(v.meses_deuda || 1) > 1 ? 'es' : ''}</span>
+      ${v.bloqueo ? `<span class="text-[10px] font-semibold mt-0.5" style="color:#991b1b" title="Pasaron más de 5 días del corte: su app está bloqueada hasta que marques el pago.">🔒 app bloqueada · ${v.dias_vencido} días</span>` : `<span class="text-[10px] text-slate-500 mt-0.5">aviso · día ${v.dias_vencido || 1} de 5</span>`}
       <span class="text-[10px] ${v.visto ? 'text-slate-500' : 'text-amber-600'} mt-0.5">${escapeHtml(visto)}</span>
     </span>
   </td>`;

@@ -47,6 +47,15 @@ const bdjFecha = (ymd) => new Date(ymd + 'T00:00:00').toLocaleDateString('es-CO'
 
 // Lo que te escriben va primero; después lo que pide actuar; al final los
 // patrones que conviene mirar con calma.
+// Los eventos del calendario que el cliente REGISTRA (tipo del evento → cómo
+// se cuenta en la bandeja). `medicion` es el tipo viejo, antes de separarlos.
+const BDJ_REGISTRO = {
+  medidas:  { icono: '📏', titulo: 'Hizo su medición corporal', corto: 'Medición corporal', detalle: 'pídele los números si no te los mandó' },
+  medicion: { icono: '📏', titulo: 'Hizo su medición', corto: 'Medición', detalle: null },
+  peso:     { icono: '⚖️', titulo: 'Se pesó', corto: 'Peso', detalle: null },
+  fotos:    { icono: '📸', titulo: 'Envió su registro fotográfico', corto: 'Fotos', detalle: 'míralas en tu WhatsApp' },
+};
+
 const BDJ_PRIORIDAD = { nota: 0, cierre: 0, salto: 1, medida: 1, rpe: 2, sinentreno: 2, sincomida: 3, prot: 3, estanc: 4 };
 
 // ═════════════════════════════════════════════════════════════════════
@@ -128,6 +137,20 @@ function bdjArmar(d) {
         m.peso != null ? `${bdjNum(m.peso, 1)} kg${dif(m.peso, prev && prev.peso, 'kg')}` : null,
         m.grasa_pct != null ? `${bdjNum(m.grasa_pct, 1)}% grasa${dif(m.grasa_pct, prev && prev.grasa_pct, 'pts')}` : null,
       ].filter(Boolean).join(' · ') + ' — mira en Composición si la meta sigue vigente.',
+    });
+  });
+
+  // ── 4b. Lo que le pusiste en el calendario y marcó hecho: medición
+  //        corporal, peso, registro fotográfico ──
+  (d.registros || []).forEach(r => {
+    const tipo = r.eventos?.tipo;
+    if (!BDJ_REGISTRO[tipo] || r.estado === 'saltado' || r.fecha < bdjSumarDias(hoy, -13)) return;
+    const q = BDJ_REGISTRO[tipo];
+    add(atencion, {
+      id: `registro:${r.id}`, tipo: 'medida', cliente_id: r.cliente_id, fecha: r.fecha, icono: q.icono,
+      titulo: q.titulo,
+      detalle: [r.valor != null && tipo === 'peso' ? `${bdjNum(r.valor, 1)} kg` : null, r.nota ? `«${r.nota}»` : null, q.detalle]
+        .filter(Boolean).join(' · '),
     });
   });
 
@@ -263,6 +286,11 @@ function bdjArmar(d) {
         + (m.origen === 'cliente' ? ' (desde su app)' : ''),
     });
   });
+  (d.registros || []).forEach(r => {
+    const q = BDJ_REGISTRO[r.eventos?.tipo];
+    if (!q || r.estado === 'saltado' || !enVista(r.fecha)) return;
+    fila(r.fecha, r.cliente_id).chips.push({ tipo: 'medida', tono: 'neutro', icono: q.icono, texto: q.corto + (r.valor != null && r.eventos.tipo === 'peso' ? ` · ${bdjNum(r.valor, 1)} kg` : '') });
+  });
   (d.notas || []).forEach(n => {
     const f = n.fecha || String(n.created_at || '').slice(0, 10);
     if (!enVista(f)) return;
@@ -345,13 +373,14 @@ async function bdjCargar(forzar = false) {
       }
     };
 
-    const [clientes, fases, sesiones, notas, mediciones, actividades] = await Promise.all([
+    const [clientes, fases, sesiones, notas, mediciones, actividades, registros] = await Promise.all([
       db.clientes.list(),
       leer('fases', sb.from('fases').select('id,cliente_id,fecha_inicio,semanas,dias_semana,estado,visible_cliente').eq('estado', 'activa').eq('visible_cliente', true)),
       leerTodo('sesiones', () => sb.from('sesiones').select('*').gte('fecha', desdeSeries).order('fecha', { ascending: false }).order('id')),
       leer('notas_entreno', sb.from('notas_entreno').select('*, ejercicios(nombre)').gte('fecha', desde).order('created_at', { ascending: false }).limit(500)),
       leerTodo('mediciones', () => sb.from('mediciones_corporales').select('*').gte('fecha', bdjSumarDias(hoy, -120)).order('fecha').order('id')),
       leerTodo('actividades', () => sb.from('actividades').select('*').gte('fecha', desde).order('fecha').order('id')),
+      leer('evento_registros', sb.from('evento_registros').select('*, eventos(tipo,titulo)').gte('fecha', desde).order('fecha')),
     ]);
     const rutIds = [...new Set(sesiones.map(s => s.rutina_id).concat(notas.map(n => n.rutina_id)).filter(Boolean))];
     const rutinas = [];
@@ -392,7 +421,7 @@ async function bdjCargar(forzar = false) {
     _bdj.datos = bdjArmar({
       hoy, clientes, fases, rutinas, sesiones, series,
       notas: notas.map(n => ({ ...n, ejercicio_nombre: n.ejercicios?.nombre || null })),
-      mediciones, actividades, comida,
+      mediciones, actividades, comida, registros,
       lecturas: typeof entLecturasDatos === 'function' ? entLecturasDatos : null,
     });
     _bdj.datos.avisos = avisos;

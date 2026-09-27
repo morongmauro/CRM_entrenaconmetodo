@@ -65,6 +65,12 @@ const b = ctx.bdjArmar({
     { id: 'n1', cliente_id: 'eva', fecha: '2026-10-14', rutina_id: 'push', texto: 'No tengo esta máquina', ejercicio_nombre: 'Prensa', leida_en: null },
     { id: 'n2', cliente_id: 'eva', fecha: '2026-10-10', texto: 'vieja', leida_en: '2026-10-11T00:00:00Z' },
   ],
+  registros: [
+    { id: 'rg1', cliente_id: 'eva', fecha: '2026-10-13', estado: 'hecho', valor: 71.4, eventos: { tipo: 'peso', titulo: 'Pesarse' } },
+    { id: 'rg2', cliente_id: 'caro', fecha: '2026-10-12', estado: 'hecho', eventos: { tipo: 'fotos', titulo: 'Fotos de progreso' } },
+    { id: 'rg3', cliente_id: 'ana', fecha: '2026-10-12', estado: 'hecho', eventos: { tipo: 'medidas', titulo: 'Medición' } },
+    { id: 'rg4', cliente_id: 'ana', fecha: '2026-10-12', estado: 'hecho', eventos: { tipo: 'actividad', titulo: 'Natación' } },
+  ],
   mediciones: [
     { id: 'm0', cliente_id: 'eva', fecha: '2026-09-10', peso: 70, grasa_pct: 25 },
     { id: 'm1', cliente_id: 'eva', fecha: '2026-10-13', peso: 68.6, grasa_pct: 24, origen: 'cliente' },
@@ -93,6 +99,11 @@ ok('proteína corta la semana', de('beto', 'prot:') && /63%/.test(de('beto', 'pr
 ok('estancado: Ana (60×8 seis semanas)', de('ana', 'estanc:') && /60 kg × 8/.test(de('ana', 'estanc:').detalle), de('ana', 'estanc:')?.detalle);
 ok('NO estancado: Beto sube reps con el mismo peso', !de('beto', 'estanc:'));
 ok('rutina enviada y 7 días sin entrenar (Dani: lo importado no cuenta)', !!de('dani', 'sinentreno:'));
+ok('se pesó (evento del calendario) con su peso', de('eva', 'registro:rg1') && /71,4 kg/.test(de('eva', 'registro:rg1').detalle), de('eva', 'registro:rg1')?.detalle);
+ok('envió sus fotos', de('caro', 'registro:rg2') && de('caro', 'registro:rg2').titulo === 'Envió su registro fotográfico');
+ok('hizo su medición corporal', !!de('ana', 'registro:rg3'));
+ok('una actividad marcada no entra como medición', !de('ana', 'registro:rg4'));
+ok('el día a día lo cuenta', b.dias.find(x => x.fecha === '2026-10-12').filas.find(f => f.cliente === 'Caro').chips.some(c => c.texto === 'Fotos'));
 ok('un cliente finalizado no aparece', !b.atencion.some(a => a.cliente_id === 'ex'));
 
 console.log('── Para felicitar ──');

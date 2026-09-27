@@ -740,7 +740,7 @@ const RUT_HERRAMIENTAS = {
     const nums = semanas
       ? (Array.isArray(semanas) ? semanas : String(semanas).split(/[,\s]+/)).map(Number).filter(n => n > 0)
       : [];
-    const t = ['actividad', 'medicion', 'cita', 'nota', 'descanso'].includes(tipo) ? tipo : 'actividad';
+    const t = ['actividad', 'medidas', 'peso', 'fotos', 'medicion', 'cita', 'nota', 'descanso'].includes(tipo) ? tipo : 'actividad';
 
     const cuando = codigos.length
       ? `${codigos.map(d => entLabel(ENT_DIAS, d)).join(', ')}${nums.length ? ` · semanas ${nums.join(', ')}` : ' · todas las semanas'} de "${f.nombre}"`
