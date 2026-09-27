@@ -458,6 +458,15 @@ function entIconoVideo(e) {
   return '<span class="tag tag-gray">sin video</span>';
 }
 
+// Nombre en inglés (el original de Trainerize, guardado en `alias`), chico y
+// en gris bajo el español: hay traducciones que suenan raras y el original
+// ayuda a reconocer el ejercicio. Solo si dice algo distinto al español.
+function entNombreIngles(e, clase = 'text-[11px] text-slate-400') {
+  const a = String((e && e.alias) || '').trim();
+  if (!a || normalizeName(a) === normalizeName(e.nombre || '')) return '';
+  return `<div class="${clase} truncate">${escapeHtml(a)}</div>`;
+}
+
 function entTarjetaEjercicio(e, opts = {}) {
   // El preview sale del video que TENGA el ejercicio: la miniatura de
   // YouTube, o el fotograma capturado al subir el archivo. `poster_url` gana
@@ -474,6 +483,7 @@ function entTarjetaEjercicio(e, opts = {}) {
         </div>
         <div class="min-w-0 flex-1">
           <div class="font-bold text-slate-900 text-sm truncate">${escapeHtml(e.nombre)}</div>
+          ${entNombreIngles(e)}
           <div class="text-xs text-slate-500 mb-1">
             ${entLabel(ENT_TIPOS, e.tipo)} · ${entLabel(ENT_SEGMENTOS, e.segmento)}
           </div>
@@ -588,6 +598,7 @@ window.entVerFicha = async (id) => {
     : '';
 
   openModal(modalShell(escapeHtml(e.nombre), `
+    ${entNombreIngles(e, 'text-sm text-slate-400 -mt-2 mb-2')}
     <div class="text-xs text-slate-500 mb-4">
       ${entLabel(ENT_TIPOS, e.tipo)} · ${entLabel(ENT_SEGMENTOS, e.segmento)} ·
       ${entLabel(ENT_PATRONES, e.patron)} · ${entLabel(ENT_NIVELES, e.nivel)}
@@ -1234,6 +1245,7 @@ function entFilaRutina(re, i, total, bloques) {
           ${mini ? `<div class="ent-fila-fig">${mini}</div>` : ''}
           <div class="min-w-0">
             <div class="font-bold text-sm text-slate-900">${i + 1}. ${escapeHtml(e.nombre || 'Ejercicio')}</div>
+            ${entNombreIngles(e)}
             <div class="text-xs text-slate-500">${entLabel(ENT_TIPOS, e.tipo)} · ${entChipMusculos(e)}</div>
             ${sinTexto ? `
               <button class="ent-aviso" onclick="entEditarEjercicio('${e.id}')"
@@ -2350,6 +2362,7 @@ function entResumenEjerciciosHTML(ejs, rutina) {
               <tr>
                 <td class="text-slate-400">${i + 1}</td>
                 <td class="font-medium text-slate-800">${escapeHtml(e.nombre || 'Ejercicio')}
+                  ${entNombreIngles(e)}
                   ${re.notas ? `<div class="text-[11px] text-slate-500">${escapeHtml(re.notas)}</div>` : ''}</td>
                 <td>${re.series ?? '—'}</td>
                 <td>${escapeHtml(re.reps || '—')}</td>
