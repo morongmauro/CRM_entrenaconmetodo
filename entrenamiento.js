@@ -2444,6 +2444,7 @@ function entTarjetaFase(f, rutinas) {
             ? `<button class="btn btn-secondary btn-sm" onclick="entRetirarFase('${f.id}')" title="Deja de mostrársela en su app. No se borra nada.">↩ Retirar</button>`
             : `<button class="btn btn-primary btn-sm" onclick="entEnviarFase('${f.id}')" ${rutinas.length ? '' : 'disabled title="Añade al menos una rutina antes de enviarla"'}>📤 Enviar al cliente</button>`}
           <button class="btn btn-ghost btn-sm" onclick="entEditarFase('${f.id}')">Editar</button>
+          ${f.cliente_id ? `<button class="btn btn-secondary btn-sm" onclick="entDuplicarCiclo('${f.id}')" title="Crea el ciclo siguiente con las mismas rutinas y tus días; lo que movió el cliente te lo pregunta">⧉ Duplicar ciclo</button>` : ''}
           <button class="btn btn-ghost btn-sm" onclick="entCopiarFaseA('${f.id}')">Copiar a…</button>
           <button class="btn btn-ghost btn-sm" onclick="entBorrarFase('${f.id}')">Borrar</button>
         </div>

@@ -1,0 +1,30 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<style>body{font-family:system-ui,sans-serif;margin:0;padding:20px}.hidden{display:none}.chip.active{background:#1f1f1f;color:#fff}</style></head><body>
+<div id="ent-body"></div>
+<div id="modal" class="hidden"><div id="modal-content"></div></div>
+<script src="../../musculos-figura.js"></script>
+<script>
+const $ = (s, c = document) => c.querySelector(s);
+const $$ = (s, c = document) => Array.from(c.querySelectorAll(s));
+function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function normalizeName(s){return String(s||'').toLowerCase();}
+window.toasts=[]; function toast(m){toasts.push(m);}
+const fmt = { hoy: () => '2026-10-26', fechaCorta: (s) => s };
+const modal=$('#modal'), modalContent=$('#modal-content');
+function openModal(h){modalContent.innerHTML=h;modal.classList.remove('hidden');}
+function closeModal(){modal.classList.add('hidden');modalContent.innerHTML='';}
+function modalShell(t,b,f=''){return `<h3>${t}</h3><div>${b}</div><div class="pie">${f}</div>`;}
+// Lecturas de movimientos, sesiones y actividades: una cadena falsa que filtra por igualdad.
+window.TABLAS = { rutina_movimientos: [], sesiones: [], actividades: [] };
+function cadena(t){ const f=[]; const q={ select(){return q;}, eq(c,v){f.push(r=>r[c]===v);return q;}, gte(c,v){f.push(r=>r[c]>=v);return q;}, lte(c,v){f.push(r=>r[c]<=v);return q;}, order(){return q;},
+  then(a,b){ return Promise.resolve({data:(TABLAS[t]||[]).filter(r=>f.every(g=>g(r))),error:null}).then(a,b);} }; return q; }
+const sb = { from: cadena };
+const db = { clientes: { list: async () => [] } };
+const routes = {};
+const navBtn = document.createElement('button'); navBtn.dataset.route = 'clientes'; document.body.appendChild(navBtn);
+</script>
+<script src="../../entrenamiento.js"></script>
+<script src="../../eventos.js"></script>
+<script src="../../entreno-ciclos.js"></script>
+</body></html>
