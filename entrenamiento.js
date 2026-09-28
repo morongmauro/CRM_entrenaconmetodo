@@ -77,7 +77,7 @@ const ENT_EQUIPO = [
   ['peso_corporal', 'Peso corporal'], ['barra', 'Barra'], ['mancuerna', 'Mancuernas'],
   ['kettlebell', 'Kettlebell'], ['polea', 'Polea'], ['maquina', 'Máquina'],
   ['smith', 'Máquina Smith'],
-  ['banda', 'Banda'], ['trx', 'TRX / anillas'], ['balon', 'Balón medicinal'],
+  ['banda', 'Banda'], ['trx', 'TRX / anillas'], ['balon', 'Balón medicinal'], ['lastre', 'Lastre / chaleco'],
   ['banco', 'Banco'], ['caja', 'Cajón'], ['cuerda', 'Cuerda'],
 ];
 const ENT_LUGARES = [['gym', 'Gimnasio'], ['casa', 'Casa'], ['aire_libre', 'Aire libre']];
