@@ -504,6 +504,7 @@ function entTarjetaEjercicio(e, opts = {}) {
         <div>${entIconoVideo(e)}</div>
         <div class="flex gap-1">
           <button class="btn btn-ghost btn-sm" onclick="entVerFicha('${e.id}')" title="Ver la ficha como la recibe el cliente">👁 Ficha</button>
+          ${opts.agregar ? '' : `<button class="btn btn-ghost btn-sm" onclick="entVideoRapido('${e.id}')" title="Cambiar el video: propuestas o tu link">🎬 Video</button>`}
           ${opts.agregar
             ? `<button class="btn btn-primary btn-sm" onclick="entAgregarARutina('${e.id}')">+ Añadir</button>`
             : `<button class="btn btn-ghost btn-sm" onclick="entEditarEjercicio('${e.id}')">Editar</button>`}
@@ -568,7 +569,10 @@ async function entVistaEjercicios() {
   body.innerHTML = `
     <div class="flex justify-between items-center mb-3">
       <div class="text-sm text-slate-600">${todos.length} ejercicio${todos.length === 1 ? '' : 's'} en la galería</div>
-      <button class="btn btn-primary btn-sm" onclick="entEditarEjercicio()">+ Nuevo ejercicio</button>
+      <div class="flex gap-2">
+        <button class="btn btn-secondary btn-sm" onclick="entRevisarVideos()" title="Recorre los ejercicios filtrados, uno a uno, con sus propuestas de video">🎬 Revisar videos uno a uno</button>
+        <button class="btn btn-primary btn-sm" onclick="entEditarEjercicio()">+ Nuevo ejercicio</button>
+      </div>
     </div>
     ${entBarraFiltros('flt')}
     ${lista.length === 0 ? `
@@ -847,6 +851,8 @@ window.entValidarYoutube = (url) => {
   const v = _ent._video;
   v.url = url;
   v.ref = entYoutubeId(url) || '';
+  const ini = typeof entYoutubeInicio === 'function' ? entYoutubeInicio(url) : null;
+  if (ini != null && $('#ej-video-inicio')) $('#ej-video-inicio').value = ini;
   const est = $('#ej-yt-estado');
   if (!est) return;
   est.textContent = v.ref ? `✓ Video reconocido (${v.ref})` : (url ? '✗ No reconozco ese link de YouTube' : 'Pega el link y se valida solo.');

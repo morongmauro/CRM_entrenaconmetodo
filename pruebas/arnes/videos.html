@@ -1,0 +1,61 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<style>body{font-family:system-ui,sans-serif;background:#f1f5f9;margin:0;padding:20px}.hidden{display:none}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.3);overflow:auto}#modal-box{background:#fff;margin:20px auto;max-width:64rem}
+img{max-width:100%}.grid{display:grid;gap:12px}</style></head><body>
+<div id="ent-body"></div>
+<div id="modal" class="hidden"><div id="modal-box"><div id="modal-content"></div></div></div>
+<script src="../../musculos-figura.js"></script>
+<script>
+// ── Lo mínimo de app.js + un Supabase en memoria ──
+const $ = (s, c = document) => c.querySelector(s);
+const $$ = (s, c = document) => Array.from(c.querySelectorAll(s));
+function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function normalizeName(s){return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim();}
+window.toasts=[]; function toast(m){toasts.push(m);}
+const fmt = { hoy: () => '2026-10-14', fechaCorta: (s) => s };
+const modal=$('#modal'), modalContent=$('#modal-content');
+function openModal(h){modalContent.innerHTML=h;modal.classList.remove('hidden');}
+function closeModal(){modal.classList.add('hidden');modalContent.innerHTML='';}
+function modalShell(t,b,f=''){return `<h3>${t}</h3><div>${b}</div><div class="pie">${f}</div>`;}
+window.DB = {
+  ejercicios: [
+    { id:'e1', nombre:'Elevación lateral con mancuernas', alias:'Dumbbell Lateral Raise', tipo:'fuerza', archivado:false, video_fuente:'youtube', video_ref:'U3Atcn3wFjY', video_url:'https://www.youtube.com/watch?v=U3Atcn3wFjY', musculos_primarios:[], musculos_secundarios:[] },
+    { id:'e2', nombre:'Flexión de brazos', alias:'Push Up', tipo:'fuerza', archivado:false, video_fuente:'ninguno', musculos_primarios:[], musculos_secundarios:[] },
+    { id:'e3', nombre:'Dominada', alias:'Pull Up', tipo:'fuerza', archivado:false, video_fuente:'archivo', video_path:'x.mp4', musculos_primarios:[], musculos_secundarios:[] },
+  ],
+  ejercicio_video_propuestas: [
+    { ejercicio_id:'e1', orden:1, ref:'iK22GwXJji0', titulo:'Right/Wrong Dumbbell Lateral Raise', canal:'V Shred', duracion_seg:8, habla:false, vertical:true },
+    { ejercicio_id:'e1', orden:2, ref:'XPPfnSEATJA', titulo:'How to do a Dumbbell Lateral Raise', canal:'NASM', duracion_seg:19, habla:false, vertical:false },
+    { ejercicio_id:'e1', orden:3, ref:'xT31s-Y0l_0', titulo:'Dumbbell Lateral Raise', canal:'ArielYu_Fit', duracion_seg:19, habla:true, vertical:true },
+    { ejercicio_id:'e1', orden:4, ref:'U3Atcn3wFjY', titulo:'(el mismo que ya tiene)', canal:'x', duracion_seg:30, habla:false, vertical:false },
+    { ejercicio_id:'e2', orden:1, ref:'IODxDxX7oi4', titulo:'Push Up', canal:'y', duracion_seg:20, habla:false, vertical:false },
+  ],
+  escrituras: [],
+  sinTablaPropuestas: false,
+};
+function consulta(tabla){
+  const q = { filtros:[], _row:null,
+    select(){return q;}, order(){return q;},
+    eq(c,v){ q.filtros.push([c,v]); return q; },
+    update(row){ q._row=row; return q; },
+    then(res, rej){
+      if (tabla==='ejercicio_video_propuestas' && DB.sinTablaPropuestas) return Promise.resolve({data:null,error:{message:'relation does not exist'}}).then(res,rej);
+      if (q._row){
+        const filas = DB[tabla].filter(r=>q.filtros.every(([c,v])=>r[c]===v));
+        filas.forEach(r=>Object.assign(r,q._row)); DB.escrituras.push([tabla,q.filtros,q._row]);
+        return Promise.resolve({error:null}).then(res,rej);
+      }
+      const data = DB[tabla].filter(r=>q.filtros.every(([c,v])=>r[c]===v)).map(r=>({...r}));
+      return Promise.resolve({data,error:null}).then(res,rej);
+    } };
+  return q;
+}
+const sb = { from: consulta, storage: { from: () => ({ createSignedUrls: async () => ({ data: [] }) }) } };
+const db = { clientes: { list: async () => [] } };
+const routes = {};
+const navBtn = document.createElement('button'); navBtn.dataset.route = 'clientes'; document.body.appendChild(navBtn);
+</script>
+<script src="../../entrenamiento.js"></script>
+<script src="../../entreno-videos.js"></script>
+</body></html>
