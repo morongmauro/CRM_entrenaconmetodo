@@ -377,7 +377,7 @@ async function bdjCargar(forzar = false) {
       db.clientes.list(),
       leer('fases', sb.from('fases').select('id,cliente_id,fecha_inicio,semanas,dias_semana,estado,visible_cliente').eq('estado', 'activa').eq('visible_cliente', true)),
       leerTodo('sesiones', () => sb.from('sesiones').select('*').gte('fecha', desdeSeries).order('fecha', { ascending: false }).order('id')),
-      leer('notas_entreno', sb.from('notas_entreno').select('*, ejercicios(nombre)').gte('fecha', desde).order('created_at', { ascending: false }).limit(500)),
+      leer('notas_entreno', sb.from('notas_entreno').select('*, ejercicios(nombre, alias)').gte('fecha', desde).order('created_at', { ascending: false }).limit(500)),
       leerTodo('mediciones', () => sb.from('mediciones_corporales').select('*').gte('fecha', bdjSumarDias(hoy, -120)).order('fecha').order('id')),
       leerTodo('actividades', () => sb.from('actividades').select('*').gte('fecha', desde).order('fecha').order('id')),
       leer('evento_registros', sb.from('evento_registros').select('*, eventos(tipo,titulo)').gte('fecha', desde).order('fecha')),
@@ -420,7 +420,7 @@ async function bdjCargar(forzar = false) {
 
     _bdj.datos = bdjArmar({
       hoy, clientes, fases, rutinas, sesiones, series,
-      notas: notas.map(n => ({ ...n, ejercicio_nombre: n.ejercicios?.nombre || null })),
+      notas: notas.map(n => ({ ...n, ejercicio_nombre: n.ejercicios ? entNombres(n.ejercicios).grande : null })),
       mediciones, actividades, comida, registros,
       lecturas: typeof entLecturasDatos === 'function' ? entLecturasDatos : null,
     });

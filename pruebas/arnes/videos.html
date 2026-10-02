@@ -31,6 +31,15 @@ window.DB = {
     { ejercicio_id:'e1', orden:4, ref:'U3Atcn3wFjY', titulo:'(el mismo que ya tiene)', canal:'x', duracion_seg:30, habla:false, vertical:false },
     { ejercicio_id:'e2', orden:1, ref:'IODxDxX7oi4', titulo:'Push Up', canal:'y', duracion_seg:20, habla:false, vertical:false },
   ],
+  // Quién usa qué: Ana (activa) tiene e3 y e2 en su rutina activa; Beto
+  // (activo) solo e3; Ex (finalizado) tiene e1, que entonces no cuenta.
+  clientes: [ { id:'ana', estado:'activo' }, { id:'beto', estado:'activo' }, { id:'ex', estado:'finalizado' } ],
+  fases: [ { id:'fa', cliente_id:'ana', estado:'activa' }, { id:'fb', cliente_id:'beto', estado:'activa' },
+           { id:'fx', cliente_id:'ex', estado:'activa' }, { id:'fv', cliente_id:'ana', estado:'terminada' } ],
+  rutinas: [ { id:'ra', fase_id:'fa', archivada:false }, { id:'rb', fase_id:'fb', archivada:false },
+             { id:'rx', fase_id:'fx', archivada:false }, { id:'rv', fase_id:'fv', archivada:false } ],
+  rutina_ejercicios: [ { rutina_id:'ra', ejercicio_id:'e3' }, { rutina_id:'ra', ejercicio_id:'e2' },
+                       { rutina_id:'rb', ejercicio_id:'e3' }, { rutina_id:'rx', ejercicio_id:'e1' }, { rutina_id:'rv', ejercicio_id:'e1' } ],
   escrituras: [],
   sinTablaPropuestas: false,
 };
@@ -38,15 +47,16 @@ function consulta(tabla){
   const q = { filtros:[], _row:null,
     select(){return q;}, order(){return q;},
     eq(c,v){ q.filtros.push([c,v]); return q; },
+    in(c,vs){ q.filtros.push([c,(x)=>vs.includes(x)]); return q; },
     update(row){ q._row=row; return q; },
     then(res, rej){
       if (tabla==='ejercicio_video_propuestas' && DB.sinTablaPropuestas) return Promise.resolve({data:null,error:{message:'relation does not exist'}}).then(res,rej);
       if (q._row){
-        const filas = DB[tabla].filter(r=>q.filtros.every(([c,v])=>r[c]===v));
+        const filas = DB[tabla].filter(r=>q.filtros.every(([c,v])=>typeof v==='function'?v(r[c]):r[c]===v));
         filas.forEach(r=>Object.assign(r,q._row)); DB.escrituras.push([tabla,q.filtros,q._row]);
         return Promise.resolve({error:null}).then(res,rej);
       }
-      const data = DB[tabla].filter(r=>q.filtros.every(([c,v])=>r[c]===v)).map(r=>({...r}));
+      const data = DB[tabla].filter(r=>q.filtros.every(([c,v])=>typeof v==='function'?v(r[c]):r[c]===v)).map(r=>({...r}));
       return Promise.resolve({data,error:null}).then(res,rej);
     } };
   return q;

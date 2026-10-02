@@ -113,6 +113,7 @@ async function rutBuscarEjercicio(texto) {
   return todos.find(e => normalizeName(e.nombre) === n)
       || todos.find(e => e.alias && normalizeName(e.alias) === n)
       || todos.find(e => normalizeName(e.nombre).includes(n))
+      || todos.find(e => e.alias && normalizeName(e.alias).includes(n))
       || todos.map(e => ({ e, s: similitudNombre(e.nombre, texto) }))
           .filter(x => x.s >= 75).sort((a, b) => b.s - a.s)[0]?.e
       || null;
@@ -292,7 +293,8 @@ const RUT_HERRAMIENTAS = {
         const e = re.ejercicios || {};
         return {
           posicion: i + 1,
-          ejercicio: e.nombre,
+          ejercicio: entNombres(e).grande,
+          en_espanol: entNombres(e).chico || null,
           patron: entLabel(ENT_PATRONES, e.patron),
           musculos: (e.musculos_primarios || []).join(', ') || null,
           equipo: (e.equipo || []).join(', ') || null,
@@ -310,7 +312,7 @@ const RUT_HERRAMIENTAS = {
   async buscar_ejercicios({ q, patron, segmento, musculo, equipo, lugar, nivel, limite = 25 } = {}) {
     let lista = await entDb.ejercicios();
     const n = (v) => normalizeName(String(v || ''));
-    if (q) lista = lista.filter(e => n(e.nombre).includes(n(q)) || n(e.alias).includes(n(q)));
+    if (q) lista = lista.filter(e => n(e.nombre).includes(n(q)) || n(e.alias).includes(n(q)) || n(e.busqueda).includes(n(q)));
     if (patron) lista = lista.filter(e => e.patron === patron);
     if (segmento) lista = lista.filter(e => e.segmento === segmento);
     if (nivel) lista = lista.filter(e => e.nivel === nivel);
@@ -322,7 +324,8 @@ const RUT_HERRAMIENTAS = {
       total_encontrados: lista.length,
       mostrando: Math.min(lista.length, limite),
       ejercicios: lista.slice(0, limite).map(e => ({
-        nombre: e.nombre,
+        nombre: entNombres(e).grande,
+        en_espanol: entNombres(e).chico || null,
         patron: entLabel(ENT_PATRONES, e.patron),
         segmento: entLabel(ENT_SEGMENTOS, e.segmento),
         musculos_primarios: (e.musculos_primarios || []).join(', ') || null,

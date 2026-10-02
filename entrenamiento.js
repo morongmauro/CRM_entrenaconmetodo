@@ -30,7 +30,7 @@ const _ent = {
   ejercicios: null,
   musculos: null,          // se lee de la tabla `musculos`: una sola fuente
                            // de verdad con el SVG del cuerpo y con la app.
-  filtros: { q: '', tipo: '', segmento: '', patron: '', musculo: '', equipo: '', video: '' },
+  filtros: { q: '', tipo: '', segmento: '', patron: '', musculo: '', equipo: '', video: '', uso: '' },
   // Constructor
   rutinaId: null,
   rutina: null,
@@ -151,7 +151,8 @@ const entDb = {
     const { data, error } = await sb.from('ejercicios').select('*')
       .eq('archivado', false).order('nombre');
     if (error) { toast(error.message); return []; }
-    _ent.ejercicios = data || [];
+    // En orden por el nombre que se ve grande (el inglés de Trainerize).
+    _ent.ejercicios = (data || []).sort((a, b) => entNombres(a).grande.localeCompare(entNombres(b).grande, 'es', { sensitivity: 'base' }));
     return _ent.ejercicios;
   },
   async guardarEjercicio(row, id) {
@@ -242,6 +243,33 @@ const entDb = {
     return _ent.posters;
   },
 
+  // Qué ejercicios están usando tus clientes AHORA: los de las rutinas no
+  // archivadas de una fase activa de un cliente activo. → Map(id → nº de
+  // clientes). Sirve para priorizar videos (filtro «Los que usan mis clientes»).
+  async ejerciciosEnUso(force = false) {
+    if (_ent.enUso && !force) return _ent.enUso;
+    const enUso = new Map();
+    const { data: clis } = await sb.from('clientes').select('id, estado');
+    const activos = new Set((clis || []).filter(c => String(c.estado || 'activo').toLowerCase() === 'activo').map(c => c.id));
+    const { data: fases } = await sb.from('fases').select('id, cliente_id').eq('estado', 'activa');
+    const faseCli = new Map((fases || []).filter(f => activos.has(f.cliente_id)).map(f => [f.id, f.cliente_id]));
+    if (faseCli.size) {
+      const { data: ruts } = await sb.from('rutinas').select('id, fase_id').in('fase_id', [...faseCli.keys()]).eq('archivada', false);
+      const rutCli = new Map((ruts || []).map(r => [r.id, faseCli.get(r.fase_id)]));
+      if (rutCli.size) {
+        const { data: res } = await sb.from('rutina_ejercicios').select('rutina_id, ejercicio_id').in('rutina_id', [...rutCli.keys()]);
+        const quien = new Map();
+        (res || []).forEach(re => {
+          if (!quien.has(re.ejercicio_id)) quien.set(re.ejercicio_id, new Set());
+          quien.get(re.ejercicio_id).add(rutCli.get(re.rutina_id));
+        });
+        quien.forEach((set, id) => enUso.set(id, set.size));
+      }
+    }
+    _ent.enUso = enUso;
+    return enUso;
+  },
+
   // Fases
   async fases(clienteId) {
     const q = sb.from('fases').select('*').order('orden');
@@ -310,7 +338,7 @@ const entDb = {
   async ejerciciosDeRutinas(rutinaIds) {
     if (!rutinaIds || !rutinaIds.length) return {};
     const { data, error } = await sb.from('rutina_ejercicios')
-      .select('*, ejercicios(id, nombre, patron, segmento, tipo, equipo, descripcion, musculos_primarios, musculos_secundarios, unilateral)')
+      .select('*, ejercicios(id, nombre, alias, patron, segmento, tipo, equipo, descripcion, musculos_primarios, musculos_secundarios, unilateral)')
       .in('rutina_id', rutinaIds).order('orden');
     if (error) { toast(error.message); return {}; }
     const porRutina = {};
@@ -350,7 +378,7 @@ const entDb = {
       const ids = sesionIds.slice(i, i + TANDA);
       for (let desde = 0; ; desde += PAGINA) {
         const { data, error } = await sb.from('series_log')
-          .select('id, sesion_id, ejercicio_id, serie_num, reps, peso, unidad, lado, rir, completada, notas, ejercicios(nombre)')
+          .select('id, sesion_id, ejercicio_id, serie_num, reps, peso, unidad, lado, rir, completada, notas, ejercicios(nombre, alias)')
           .in('sesion_id', ids)
           .order('sesion_id').order('serie_num').order('id')
           .range(desde, desde + PAGINA - 1);
@@ -420,6 +448,10 @@ window.entTab = (t) => { _ent.tab = t; routes.entrenamiento(); };
 // mientras escribes en vez de pegarle a Supabase en cada tecla.
 
 function entFiltrar(lista) {
+  return entOrdenarPorUso(entFiltrarSinOrden(lista));
+}
+
+function entFiltrarSinOrden(lista) {
   const f = _ent.filtros;
   const q = normalizeName(f.q || '');
   return lista.filter(e => {
@@ -431,16 +463,25 @@ function entFiltrar(lista) {
     const tieneVideo = (e.video_fuente || 'ninguno') !== 'ninguno';
     if (f.video === 'sin' && tieneVideo) return false;
     if (f.video === 'con' && !tieneVideo) return false;
+    // Los que usan tus clientes ahora (se ignora mientras no se haya cargado).
+    if (f.uso === 'clientes' && _ent.enUso && !_ent.enUso.has(e.id)) return false;
     if (f.musculo) {
       const ms = [...(e.musculos_primarios || []), ...(e.musculos_secundarios || [])];
       if (!ms.includes(f.musculo)) return false;
     }
     if (q) {
-      const heno = normalizeName(`${e.nombre} ${e.alias || ''} ${e.descripcion || ''}`);
+      const heno = normalizeName(`${e.nombre} ${e.alias || ''} ${e.busqueda || ''} ${e.descripcion || ''}`);
       if (!heno.includes(q)) return false;
     }
     return true;
   });
+}
+
+// Con «Los que usan mis clientes», primero los que usan más clientes: son los
+// videos que más gente ve.
+function entOrdenarPorUso(lista) {
+  if (_ent.filtros.uso !== 'clientes' || !_ent.enUso) return lista;
+  return [...lista].sort((a, b) => (_ent.enUso.get(b.id) || 0) - (_ent.enUso.get(a.id) || 0));
 }
 
 function entChipMusculos(e) {
@@ -462,15 +503,22 @@ function entIconoVideo(e) {
   return '<span class="tag tag-gray">sin video</span>';
 }
 
-// Los dos nombres del ejercicio: manda el INGLÉS (el original de Trainerize,
-// guardado en `alias`), grande y en negro; el español va chico y en gris
-// debajo. Hay traducciones que suenan raras y el original se reconoce mejor.
+// Los dos nombres del ejercicio, iguales en TODAS las fichas: `alias` es el
+// nombre exacto de Trainerize (inglés) y `nombre` su traducción. Manda el
+// inglés, grande y en negro; el español va chico y en gris debajo. Las
+// palabras de búsqueda de Trainerize viven aparte, en `busqueda`.
 // Sin alias, o si dice lo mismo, solo el que haya.
 function entNombres(e) {
   const es = (e && e.nombre) || 'Ejercicio';
   const en = String((e && e.alias) || '').trim();
   if (!en || normalizeName(en) === normalizeName(es)) return { grande: es, chico: '' };
   return { grande: en, chico: es };
+}
+// ¿La tabla ya tiene la columna `busqueda`? (carga/nombres-ingles-espanol.sql)
+// Sin ella, el formulario no la muestra ni la manda: guardar no falla.
+function entTieneBusqueda() {
+  const una = (_ent.ejercicios || [])[0];
+  return !!una && Object.prototype.hasOwnProperty.call(una, 'busqueda');
 }
 function entNombreChico(e, clase = 'text-[11px] text-slate-400') {
   const c = entNombres(e).chico;
@@ -494,6 +542,7 @@ function entTarjetaEjercicio(e, opts = {}) {
         <div class="min-w-0 flex-1">
           <div class="font-bold text-slate-900 text-sm truncate">${escapeHtml(entNombres(e).grande)}</div>
           ${entNombreChico(e)}
+          ${_ent.enUso && _ent.enUso.get(e.id) ? `<span class="tag tag-blue" title="Clientes con este ejercicio en su rutina activa">👥 ${_ent.enUso.get(e.id)} ${_ent.enUso.get(e.id) === 1 ? 'cliente' : 'clientes'}</span>` : ''}
           <div class="text-xs text-slate-500 mb-1">
             ${entLabel(ENT_TIPOS, e.tipo)} · ${entLabel(ENT_SEGMENTOS, e.segmento)}
           </div>
@@ -529,6 +578,9 @@ function entBarraFiltros(prefijo = 'flt') {
         <select onchange="entSetFiltro('equipo', this.value)">${entOpciones(ENT_EQUIPO, f.equipo, 'Todo equipo')}</select>
         <select onchange="entSetFiltro('video', this.value)">${entOpciones([['sin', 'Sin video'], ['con', 'Con video']], f.video || '', 'Con y sin video')}</select>
       </div>
+      <div class="mt-2">
+        <select onchange="entSetFiltro('uso', this.value)" title="Los de las rutinas activas de tus clientes activos">${entOpciones([['clientes', '👥 Los que usan mis clientes ahora']], f.uso || '', 'Toda la galería')}</select>
+      </div>
       <div class="mt-2 flex items-center justify-between">
         <span id="${prefijo}-count" class="text-xs text-slate-500"></span>
         <button class="btn btn-ghost btn-sm" onclick="entLimpiarFiltros()">Limpiar filtros</button>
@@ -554,7 +606,7 @@ window.entSetFiltro = (k, v) => {
 };
 
 window.entLimpiarFiltros = () => {
-  _ent.filtros = { q: '', tipo: '', segmento: '', patron: '', musculo: '', equipo: '', video: '' };
+  _ent.filtros = { q: '', tipo: '', segmento: '', patron: '', musculo: '', equipo: '', video: '', uso: '' };
   if (_ent.tab === 'rutinas' && _ent.rutinaId) entPintarConstructor(); else entVistaEjercicios();
 };
 
@@ -562,6 +614,7 @@ async function entVistaEjercicios() {
   const body = $('#ent-body');
   if (!body) return;
   const todos = await entDb.ejercicios();
+  if (_ent.filtros.uso) await entDb.ejerciciosEnUso();
   const lista = entFiltrar(todos);
   // Firmar solo las miniaturas que se van a ver, no toda la biblioteca.
   await entDb.firmarPosters(lista.map(e => e.poster_path).filter(Boolean));
@@ -692,8 +745,9 @@ window.entEditarEjercicio = async (id) => {
     id ? 'Editar ejercicio' : 'Nuevo ejercicio',
     `
     <div class="grid md:grid-cols-2 gap-3 mb-4">
-      <div><label>Nombre *</label><input id="ej-nombre" value="${escapeHtml(e.nombre || '')}" placeholder="Press banca con barra"></div>
-      <div><label>Otro nombre (para buscarlo)</label><input id="ej-alias" value="${escapeHtml(e.alias || '')}" placeholder="RDL, peso muerto rumano"></div>
+      <div><label>Nombre en inglés (el de Trainerize) · se ve grande</label><input id="ej-alias" value="${escapeHtml(e.alias || '')}" placeholder="Barbell Bench Press"></div>
+      <div><label>Nombre en español * · se ve debajo</label><input id="ej-nombre" value="${escapeHtml(e.nombre || '')}" placeholder="Press banca con barra"></div>
+      ${entTieneBusqueda() ? `<div class="md:col-span-2"><label>Otras palabras para buscarlo</label><input id="ej-busqueda" value="${escapeHtml(e.busqueda || '')}" placeholder="RDL, bench, pecho plano"></div>` : ''}
     </div>
 
     <div class="sec-title">Clasificación · son los filtros de la galería</div>
@@ -950,6 +1004,7 @@ window.entGuardarEjercicio = async (id) => {
   const row = {
     nombre,
     alias: val('#ej-alias') || null,
+    ...(entTieneBusqueda() ? { busqueda: val('#ej-busqueda') || null } : {}),
     descripcion: val('#ej-descripcion') || null,
     claves_tecnicas: val('#ej-claves').split('\n').map(s => s.trim()).filter(Boolean),
     notas_coach: val('#ej-notas') || null,
@@ -1120,7 +1175,7 @@ async function entPintarConstructor() {
   // y cuáles evita ir fila por fila buscando el triángulo amarillo.
   const sinTexto = r.ejercicios
     .filter(re => !String(re.ejercicios?.descripcion || '').trim())
-    .map(re => re.ejercicios?.nombre || 'Ejercicio');
+    .map(re => entNombres(re.ejercicios || {}).grande);
 
   body.innerHTML = `
     <div class="card mb-4">
@@ -2842,7 +2897,7 @@ function entSeriesPorEjercicio(sesiones, series) {
     const reps = Number(l.reps) || null;
     const e1 = entE1rm(kg, reps);
     const id = l.ejercicio_id;
-    const e = porEj.get(id) || { id, nombre: l.ejercicios?.nombre || 'ejercicio', unidad, sesiones: new Map() };
+    const e = porEj.get(id) || { id, nombre: l.ejercicios ? entNombres(l.ejercicios).grande : 'ejercicio', unidad, sesiones: new Map() };
     const prev = e.sesiones.get(fecha);
     if (!prev || e1 > prev.e1) {
       e.sesiones.set(fecha, { fecha, peso, reps, unidad, kg, e1 });

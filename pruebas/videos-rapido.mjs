@@ -78,6 +78,27 @@ ok('un video subido se avisa que se reemplaza', (await p.locator('text=Tiene un 
 await p.evaluate(() => { document.getElementById('ent-body').innerHTML = entTarjetaEjercicio(DB.ejercicios[0]); });
 ok('cada tarjeta de la galería trae «🎬 Video»', (await p.locator('#ent-body button', { hasText: '🎬 Video' }).count()) === 1);
 
+// 7. «Los que usan mis clientes»: solo los de rutinas activas de clientes activos,
+//    primero el que usan más clientes, y la revisión uno a uno los respeta.
+await p.evaluate(() => { _ent.filtros.video = ''; _ent.filtros.uso = 'clientes'; return entDb.ejerciciosEnUso(true); });
+const enUso = await p.evaluate(() => entFiltrar(DB.ejercicios).map(e => [e.id, _ent.enUso.get(e.id)]));
+ok('en uso: solo los de rutinas activas de clientes activos, el más usado primero', JSON.stringify(enUso) === JSON.stringify([['e3', 2], ['e2', 1]]), JSON.stringify(enUso));
+await p.evaluate(() => { document.getElementById('ent-body').innerHTML = entTarjetaEjercicio(DB.ejercicios[2]); });
+ok('la tarjeta dice cuántos clientes lo usan', (await p.locator('#ent-body', { hasText: '👥 2 clientes' }).count()) === 1);
+// e2 ya tiene video (se eligió arriba) y e3 tiene uno subido: con «Sin video»
+// no queda ninguno; al quitarle el video a e2, aparece.
+await p.evaluate(() => { _ent.filtros.video = 'sin'; });
+const sinAntes = await p.evaluate(() => entFiltrar(DB.ejercicios).map(e => e.id));
+await p.evaluate(() => { DB.ejercicios[1].video_fuente = 'ninguno'; });
+const sinDespues = await p.evaluate(() => entFiltrar(DB.ejercicios).map(e => e.id));
+ok('combinado con «Sin video»: los que faltan y usan tus clientes', JSON.stringify(sinAntes) === '[]' && JSON.stringify(sinDespues) === '["e2"]', JSON.stringify([sinAntes, sinDespues]));
+await p.evaluate(() => { DB.ejercicios[1].video_fuente = 'youtube'; });
+await p.evaluate(() => { _ent.filtros.video = ''; return entRevisarVideos(); });
+ok('revisar uno a uno recorre solo los que usan tus clientes', (await p.locator('text=1 de 2').count()) === 1
+  && (await p.getAttribute('[data-video-rapido]', 'data-video-rapido')) === 'e3');
+await p.evaluate(() => { _ent.filtros.uso = ''; });
+ok('sin el filtro, vuelve toda la galería', (await p.evaluate(() => entFiltrar(DB.ejercicios).length)) === 3);
+
 ok('sin errores de JavaScript', errores.length === 0, errores.join(' | '));
 await b.close();
 console.log(mal ? `\n${mal} fallo(s)` : `\n${n}/${n} bien`);

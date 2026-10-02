@@ -21,8 +21,11 @@ const ctx = vm.createContext({
   fmt: { hoy: () => HOY, fecha: (s) => s, fechaCorta: (s) => s },
   routes: {},
 });
+const app = readFileSync(`${raiz}app.js`, 'utf8');
 vm.runInContext(
-  trozo(ent, 'const ENT_ESTANCADO_DIAS', 'slice(0, 5),\n  };\n}')
+  trozo(app, 'function normalizeName(', '\n}')
+  + '\n' + trozo(ent, 'function entNombres(e) {', '\n}')
+  + '\n' + trozo(ent, 'const ENT_ESTANCADO_DIAS', 'slice(0, 5),\n  };\n}')
   + '\n' + readFileSync(`${raiz}bandeja.js`, 'utf8')
   + '\nglobalThis.bdjArmar = bdjArmar; globalThis.entLecturasDatos = entLecturasDatos;',
   ctx,
@@ -36,7 +39,7 @@ const ok = (n, c, extra = '') => { if (!c) fallos++; console.log(`${c ? '✔' : 
 const sesiones = [], series = [];
 ['2026-08-26', '2026-09-02', '2026-09-09', '2026-09-16', '2026-09-23', '2026-09-30'].forEach((f, i) => {
   sesiones.push({ id: `a${i}`, cliente_id: 'ana', rutina_id: 'push', fecha: f, estado: 'completada', origen: 'cliente', rpe: 7 });
-  series.push({ sesion_id: `a${i}`, ejercicio_id: 'press', serie_num: 1, reps: 8, peso: 60, unidad: 'kg', ejercicios: { nombre: 'Press banca' } });
+  series.push({ sesion_id: `a${i}`, ejercicio_id: 'press', serie_num: 1, reps: 8, peso: 60, unidad: 'kg', ejercicios: { nombre: 'Press banca', alias: 'Barbell Bench Press' } });
   sesiones.push({ id: `b${i}`, cliente_id: 'beto', rutina_id: 'push', fecha: f, estado: 'completada', origen: 'cliente', rpe: 7 });
   series.push({ sesion_id: `b${i}`, ejercicio_id: 'press', serie_num: 1, reps: 8 + Math.min(i, 4), peso: 60, unidad: 'kg', ejercicios: { nombre: 'Press banca' } });
 });
@@ -122,6 +125,9 @@ const beto12 = dia('2026-10-12').filas.find(f => f.cliente === 'Beto');
 ok('la comida con su meta, en ámbar si faltó proteína', beto12 && beto12.chips.some(c => c.tipo === 'comida' && c.tono === 'ojo' && /100 \/ 160 g/.test(c.texto)),
   JSON.stringify(beto12?.chips));
 ok('lo importado no sale como actividad del día', !dia('2026-10-12').filas.some(f => f.cliente === 'Dani' && f.chips.some(c => /Lower ✓/.test(c.texto))));
+
+// El nombre que sale es el de Trainerize (inglés), igual que en la galería.
+ok('el ejercicio estancado se nombra en inglés (el de Trainerize)', JSON.stringify(b).includes('Barbell Bench Press') && !JSON.stringify(b).includes('Press banca lleva'), JSON.stringify(b).match(/[^"]*lleva[^"]*/)?.[0]);
 
 console.log(fallos ? `\n${fallos} FALLO(S)\n` : '\nTodo bien.\n');
 process.exit(fallos ? 1 : 0);
