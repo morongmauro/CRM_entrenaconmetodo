@@ -745,7 +745,7 @@ window.entEditarEjercicio = async (id) => {
     id ? 'Editar ejercicio' : 'Nuevo ejercicio',
     `
     <div class="grid md:grid-cols-2 gap-3 mb-4">
-      <div><label>Nombre en inglés (el de Trainerize) · se ve grande</label><input id="ej-alias" value="${escapeHtml(e.alias || '')}" placeholder="Barbell Bench Press"></div>
+      <div><label>Nombre en inglés (original) · se ve grande</label><input id="ej-alias" value="${escapeHtml(e.alias || '')}" placeholder="Barbell Bench Press"></div>
       <div><label>Nombre en español * · se ve debajo</label><input id="ej-nombre" value="${escapeHtml(e.nombre || '')}" placeholder="Press banca con barra"></div>
       ${entTieneBusqueda() ? `<div class="md:col-span-2"><label>Otras palabras para buscarlo</label><input id="ej-busqueda" value="${escapeHtml(e.busqueda || '')}" placeholder="RDL, bench, pecho plano"></div>` : ''}
     </div>
