@@ -2122,7 +2122,10 @@ function lineChart(series, xLabels = [], opts = {}) {
   // ilegibles. Con un viewBox de 380 la escala es casi 1:1 y se lee igual que
   // en el computador.
   const estrecho = typeof window !== 'undefined' && window.innerWidth && window.innerWidth < 700;
-  const w = opts.width || (estrecho ? 380 : 640);
+  // En pantalla ancha, al revés: con 640 la gráfica crecía a lo alto hasta
+  // ocupar media pantalla. Un lienzo más ancho la deja apaisada.
+  const ancho = typeof window !== 'undefined' && window.innerWidth >= 1500;
+  const w = opts.width || (estrecho ? 380 : ancho ? 1000 : 640);
   const h = opts.height || 250;
   const unidad = opts.unidad || '';
   const dec = opts.decimales ?? (['kcal', 'g', 'ml'].includes(unidad) ? 0 : 1);
@@ -3854,7 +3857,7 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
         </details>
 
         <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider px-1 pt-2">Timeline · ${segs.length} semana(s)</h4>
-        <div class="space-y-3">
+        <div class="space-y-3 em-timeline">
           ${segs.length === 0 ? '<div class="card text-sm text-slate-500 text-center py-8">Sin registros aún. <button class="text-emerald-600 font-semibold" onclick="abrirNuevoSeguimiento(\''+cliente.id+'\')">+ Crear el primero</button></div>' : segs.map(s => seguimientoCard(s, coachPorSeg[s.id] || [])).join('')}
         </div>
       </div>
@@ -7951,6 +7954,7 @@ routes.negocio = async () => {
       <p class="text-sm text-slate-500">Indicadores del coaching · ${_pagosYear}</p>
     </div>
 
+    <div class="em-par-kpis">
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
       <div class="card">
         <div class="text-xs font-semibold text-slate-500 uppercase mb-1">Cobrado este mes</div>
@@ -7995,6 +7999,7 @@ routes.negocio = async () => {
         <div class="text-xs text-slate-500 mt-1">próximos pagos</div>
       </div>
     </div>
+    </div>
 
     ${(() => {
       // Compliance global últimas 8 semanas
@@ -8018,6 +8023,7 @@ routes.negocio = async () => {
         return activos.length > 0 ? Math.round((con / activos.length) * 100) : 0;
       });
       return `
+      <div class="em-par-graficas">
       <div class="card mb-6">
         <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
           <h3 class="font-bold text-slate-900">Tendencia de cumplimiento · 8 semanas (%)</h3>
@@ -8029,7 +8035,7 @@ routes.negocio = async () => {
         ${lineChart([
           { label: 'Entreno', color: '#3b82f6', points: promPorSem('score_entreno', 'adherencia_entreno') },
           { label: 'Alimentación', color: '#10b981', points: promPorSem('score_alim_metas', 'adherencia_alimentacion') },
-        ], labelsSem, { height: 220, escalaFija: true, yMin: 0, yMax: 100, unidad: '%', decimales: 0, area: false })}
+        ], labelsSem, { width: 640, height: 220, escalaFija: true, yMin: 0, yMax: 100, unidad: '%', decimales: 0, area: false })}
       </div>
 
       <div class="card mb-6">
@@ -8039,7 +8045,8 @@ routes.negocio = async () => {
         </div>
         ${lineChart([
           { label: 'Cumplimiento', color: '#f59e0b', points: pctCumplimiento },
-        ], labelsSem, { height: 210, escalaFija: true, yMin: 0, yMax: 100, unidad: '%', decimales: 0 })}
+        ], labelsSem, { width: 640, height: 210, escalaFija: true, yMin: 0, yMax: 100, unidad: '%', decimales: 0 })}
+      </div>
       </div>
       `;
     })()}
@@ -8161,6 +8168,10 @@ routes.ajustes = async () => {
   view.innerHTML = `
     <h2 class="text-2xl font-bold text-slate-900 mb-5">Ajustes</h2>
 
+    <!-- En el computador, dos columnas: lo corto a la izquierda y los agentes
+         (lo largo) a la derecha. En el teléfono, una debajo de la otra. -->
+    <div class="em-ajustes">
+    <div class="em-ajustes-col">
     <div class="card max-w-xl mb-4">
       <h3 class="font-bold text-slate-900 mb-4">Conversión USD → COP</h3>
       <div>
@@ -8203,7 +8214,9 @@ routes.ajustes = async () => {
         <button class="btn btn-secondary" onclick="abrirSyncMealtracker()">🔗 Revisar / vincular manualmente</button>
       </div>` : ''}
     </div>
+    </div>
 
+    <div class="em-ajustes-col">
     <div class="card max-w-xl mb-4" id="ajustes-agentes">
       <h3 class="font-bold text-slate-900 mb-1">🤖 Cómo quieres que trabajen tus agentes</h3>
       <p class="text-xs text-slate-500 mb-4">
@@ -8250,7 +8263,10 @@ routes.ajustes = async () => {
       </div>
     </div>
 
-    <div class="flex gap-2 max-w-xl">
+    </div>
+    </div>
+
+    <div class="flex gap-2 max-w-xl em-ajustes-botones">
       <button class="btn btn-primary" onclick="guardarAjustes()">Guardar ajustes</button>
       <button class="btn btn-danger ml-auto" id="lo">Cerrar sesión</button>
     </div>

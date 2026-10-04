@@ -92,7 +92,7 @@ let mal = 0;
 const ok = (nombre, c, extra = '') => { if (!c) mal++; console.log(`  ${c ? 'ok ' : 'MAL'}  ${nombre}${c ? '' : '  ' + extra}`); };
 
 async function abrir(ancho, alto) {
-  const ctx = await b.newContext({ viewport: { width: ancho, height: alto }, deviceScaleFactor: 2 });
+  const ctx = await b.newContext({ viewport: { width: ancho, height: alto }, deviceScaleFactor: ancho > 1500 ? 1 : 2 });
   const p = await ctx.newPage();
   const errores = [];
   p.on('pageerror', e => errores.push(e.message));
@@ -113,7 +113,8 @@ async function abrir(ancho, alto) {
 }
 
 const SECCIONES = ['dashboard', 'seguimiento', 'pagos', 'pendientes', 'clientes', 'nutricion', 'negocio', 'ajustes'];
-for (const [ancho, alto, tag] of [[1440, 900, 'escritorio'], [390, 844, 'telefono']]) {
+const TAMANOS = process.env.SOLO_ANCHO ? [[Number(process.env.SOLO_ANCHO), 1080, 'ancho']] : [[1440, 900, 'escritorio'], [390, 844, 'telefono']];
+for (const [ancho, alto, tag] of TAMANOS) {
   const { ctx, p, errores } = await abrir(ancho, alto);
   const extra = await p.evaluate(() => [...document.querySelectorAll('#main-nav [data-view]')].map(x => x.dataset.view));
   for (const s of [...new Set([...SECCIONES, ...extra])]) {
@@ -121,7 +122,8 @@ for (const [ancho, alto, tag] of [[1440, 900, 'escritorio'], [390, 844, 'telefon
     if (!(await btn.count())) continue;
     await btn.first().click();
     await p.waitForTimeout(900);
-    await p.screenshot({ path: path.join(CAPTURAS, `crm-${tag}-${s}.png`), fullPage: tag === 'escritorio' });
+    await p.screenshot({ path: path.join(CAPTURAS, `crm-${tag}-${s}.png`), fullPage: tag !== 'telefono' });
+    if (tag === 'ancho') console.log(`  alto ${s}: ${await p.evaluate(() => document.documentElement.scrollHeight)}`);
     if (tag === 'telefono') ok(`${tag} · ${s}: sin scroll de lado`, await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   }
   ok(`${tag}: sin errores de JavaScript`, errores.length === 0, errores.slice(0, 3).join(' | '));

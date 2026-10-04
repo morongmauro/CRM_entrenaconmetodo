@@ -181,3 +181,39 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--app-ink) !impo
 /* ─── Gráficas limpias: solo se rotula el último punto, como en el Dash.
    Los valores de los puntos intermedios siguen al pasar el dedo/mouse. ─── */
 #view svg text[fill="#5A5A5A"][paint-order="stroke"] { display: none; }
+
+/* ─── Vista ancha: el CRM se usa sobre todo en el computador ───────────
+   Antes todo quedaba en una columna de 1.400 px como máximo, centrada: en
+   una pantalla grande sobraban los costados y las secciones se apilaban
+   hacia abajo. Ahora el contenido usa el ancho (hasta 1.800 px) y lo que
+   iba en fila india pasa a columnas. En el teléfono y la tableta no cambia
+   nada: allí sigue una debajo de la otra. */
+@media (min-width: 1280px) {
+  .em-topbar, .em-shell { max-width: 112rem !important; }
+  .em-topbar { padding-left: 2rem; padding-right: 2rem; }
+  .em-shell { padding: 1.5rem 2rem; gap: 1.75rem; }
+
+  /* Ajustes: lo corto a la izquierda, los agentes a la derecha */
+  .em-ajustes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 1rem; align-items: start; }
+  .em-ajustes .card.max-w-xl, .em-ajustes-botones { max-width: none !important; }
+
+  /* Seguimiento: las semanas en dos columnas (en doble pantalla, una) */
+  .em-timeline { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; align-items: start; }
+  .em-timeline > * { margin-top: 0 !important; }
+  body.split-on .em-timeline { display: block; }
+  body.split-on .em-timeline > * + * { margin-top: .75rem !important; }
+
+  /* Seguimiento: la lista de clientes más angosta, la ficha más ancha */
+  #seg-content > .grid-cols-12 > aside.lg\:col-span-4 { grid-column: span 3 / span 3 !important; position: sticky; top: 1.5rem; }
+  #seg-content > .grid-cols-12 > .lg\:col-span-8 { grid-column: span 9 / span 9 !important; }
+  body.split-on #seg-content > .grid-cols-12 > aside.lg\:col-span-4 { grid-column: span 4 / span 4 !important; position: static; }
+  body.split-on #seg-content > .grid-cols-12 > .lg\:col-span-8 { grid-column: span 8 / span 8 !important; }
+
+  /* Mi negocio: las dos gráficas lado a lado */
+  .em-par-graficas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+}
+@media (min-width: 1600px) {
+  /* Listas de tarjetas (clientes, pagos…): cuatro por fila */
+  #view .grid.sm\:grid-cols-2.lg\:grid-cols-3 { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+  .em-timeline { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
