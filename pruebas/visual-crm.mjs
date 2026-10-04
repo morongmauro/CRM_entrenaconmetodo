@@ -83,6 +83,9 @@ function datos(hoyISO) {
     clientes, pagos, seguimientos, pendientes, mediciones_corporales,
     settings: [{ user_id: 'coach-1', usd_cop_rate: 4000, nombre_coach: 'Mauro' }],
     metas_historial: [], nutricion_insights: [], ia_uso: [], push_pago_log: [], fases: [], rutinas: [], sesiones: [],
+    comunidad_posts: [{ id: 'cp1', user_id: 'coach-1', texto: 'Esta semana: 3 entrenos y 8 horas de sueño.', fijado: true, publicado_en: hoyISO + 'T12:00:00Z', borrado_en: null }],
+    comunidad_reacciones: [{ post_id: 'cp1', cliente_id: 'c0', tipo: 'fuego' }, { post_id: 'cp1', cliente_id: 'c1', tipo: 'fuerza' }],
+    comunidad_vistas: [{ post_id: 'cp1', cliente_id: 'c0' }, { post_id: 'cp1', cliente_id: 'c1' }, { post_id: 'cp1', cliente_id: 'c2' }],
   };
 }
 
@@ -125,6 +128,16 @@ for (const [ancho, alto, tag] of TAMANOS) {
     await p.screenshot({ path: path.join(CAPTURAS, `crm-${tag}-${s}.png`), fullPage: tag !== 'telefono' });
     if (tag === 'ancho') console.log(`  alto ${s}: ${await p.evaluate(() => document.documentElement.scrollHeight)}`);
     if (tag === 'telefono') ok(`${tag} · ${s}: sin scroll de lado`, await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+  }
+  if (tag !== 'telefono') {
+    // Comunidad: el alcance de lo publicado y publicar algo nuevo
+    await p.locator('#main-nav [data-view="comunidad"]').click(); await p.waitForTimeout(700);
+    ok(`${tag} · comunidad: alcance (3 de 7 la vieron) y reacciones`, /3<\/strong> de 7 la vieron/.test(await p.locator('[data-com-post="cp1"] [data-com-alcance]').innerHTML()));
+    ok(`${tag} · comunidad: el menú tiene su ícono`, (await p.locator('#main-nav [data-view="comunidad"] svg').count()) === 1);
+    await p.fill('#com-texto', 'Reto de la semana: 10.000 pasos diarios.');
+    await p.click('#com-publicar'); await p.waitForTimeout(800);
+    ok(`${tag} · comunidad: publicar la deja en la lista`, (await p.locator('[data-com-post]').count()) === 2 && /10\.000 pasos/.test(await p.locator('#com-lista').innerText()));
+    await p.screenshot({ path: path.join(CAPTURAS, `crm-${tag}-comunidad-publicada.png`), fullPage: true });
   }
   ok(`${tag}: sin errores de JavaScript`, errores.length === 0, errores.slice(0, 3).join(' | '));
   await ctx.close();

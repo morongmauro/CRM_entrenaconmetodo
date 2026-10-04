@@ -217,3 +217,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--app-ink) !impo
   #view .grid.sm\:grid-cols-2.lg\:grid-cols-3 { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
   .em-timeline { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+
+/* Comunidad: el formulario a la izquierda y lo publicado a la derecha */
+.em-com-grid { display: grid; gap: 1rem; }
+@media (min-width: 1100px) { .em-com-grid { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr); align-items: start; } #com-nuevo { position: sticky; top: 1.5rem; } }
