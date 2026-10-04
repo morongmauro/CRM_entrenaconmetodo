@@ -221,3 +221,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--app-ink) !impo
 /* Comunidad: el formulario a la izquierda y lo publicado a la derecha */
 .em-com-grid { display: grid; gap: 1rem; }
 @media (min-width: 1100px) { .em-com-grid { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr); align-items: start; } #com-nuevo { position: sticky; top: 1.5rem; } }
+/* Comunidad: el numerito rojo del menú (comentarios y reacciones nuevos) */
+#main-nav .nav-item[data-view="comunidad"] { position: relative; }
+.em-com-aviso { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 6px; border-radius: 99px;
+  background: #D2483B; color: #fff; font-size: 11px; font-weight: 800; line-height: 1; vertical-align: middle; }

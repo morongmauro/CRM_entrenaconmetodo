@@ -84,7 +84,9 @@ function datos(hoyISO) {
     settings: [{ user_id: 'coach-1', usd_cop_rate: 4000, nombre_coach: 'Mauro' }],
     metas_historial: [], nutricion_insights: [], ia_uso: [], push_pago_log: [], fases: [], rutinas: [], sesiones: [],
     comunidad_posts: [{ id: 'cp1', user_id: 'coach-1', texto: 'Esta semana: 3 entrenos y 8 horas de sueño.', fijado: true, publicado_en: hoyISO + 'T12:00:00Z', borrado_en: null }],
-    comunidad_reacciones: [{ post_id: 'cp1', cliente_id: 'c0', tipo: 'fuego' }, { post_id: 'cp1', cliente_id: 'c1', tipo: 'fuerza' }],
+    comunidad_reacciones: [{ post_id: 'cp1', cliente_id: 'c0', tipo: 'fuego', creado_en: new Date().toISOString() }, { post_id: 'cp1', cliente_id: 'c1', tipo: 'fuerza', creado_en: '2020-01-01T00:00:00Z' }],
+    comunidad_comentarios: [{ id: 'k1', post_id: 'cp1', cliente_id: 'c0', texto: '¡Vamos con todo!', creado_en: new Date().toISOString(), borrado_en: null },
+      { id: 'k2', post_id: 'cp1', cliente_id: 'c1', texto: 'Comentario que no gusta', creado_en: new Date().toISOString(), borrado_en: null }],
     comunidad_vistas: [{ post_id: 'cp1', cliente_id: 'c0' }, { post_id: 'cp1', cliente_id: 'c1' }, { post_id: 'cp1', cliente_id: 'c2' }],
   };
 }
@@ -131,7 +133,23 @@ for (const [ancho, alto, tag] of TAMANOS) {
   }
   if (tag !== 'telefono') {
     // Comunidad: el alcance de lo publicado y publicar algo nuevo
+    // El recorrido de arriba ya pasó por Comunidad: se vuelve a «sin ver».
+    await p.locator('#main-nav [data-view="dashboard"]').click(); await p.waitForTimeout(500);
+    await p.evaluate(async () => { localStorage.removeItem('com:vistoEn:v1'); await comContarNuevos(); });
+    ok(`${tag} · comunidad: el menú avisa lo nuevo (2 comentarios + 1 reacción)`, (await p.locator('#main-nav [data-view="comunidad"] .em-com-aviso').innerText().catch(() => '')) === '3');
     await p.locator('#main-nav [data-view="comunidad"]').click(); await p.waitForTimeout(700);
+    ok(`${tag} · comunidad: «Lo nuevo» con los comentarios y la reacción, y el aviso se va`, (await p.locator('#com-lo-nuevo [data-com-nuevo="comentario"]').count()) === 2
+      && (await p.locator('#com-lo-nuevo [data-com-nuevo="reaccion"]').count()) === 1 && (await p.locator('#main-nav .em-com-aviso').count()) === 0);
+    p.once('dialog', d => d.accept());
+    await p.locator('[data-com-comentario="k2"] button').click(); await p.waitForTimeout(700);
+    ok(`${tag} · comunidad: borrar un comentario`, (await p.locator('[data-com-comentario="k2"]').count()) === 0 && (await p.locator('[data-com-comentario="k1"]').count()) === 1);
+    await p.fill('[data-com-post="cp1"] [data-com-responder]', 'Así se hace');
+    await p.locator('[data-com-post="cp1"] [data-com-responder]').press('Enter'); await p.waitForTimeout(700);
+    ok(`${tag} · comunidad: responder como coach`, /Tú \(coach\)[\s\S]*Así se hace/.test(await p.locator('[data-com-post="cp1"] [data-com-comentarios]').innerText()));
+    await p.locator('[data-com-post="cp1"] [data-com-editar]').click(); await p.waitForTimeout(500);
+    await p.fill('#com-edit-cp1', 'Esta semana: 4 entrenos y 8 horas de sueño.');
+    await p.locator('[data-com-post="cp1"] [data-com-guardar]').click(); await p.waitForTimeout(700);
+    ok(`${tag} · comunidad: editar la publicación`, /4 entrenos/.test(await p.locator('[data-com-post="cp1"] [data-com-texto]').innerText()) && /editada/.test(await p.locator('[data-com-post="cp1"]').innerText()));
     ok(`${tag} · comunidad: alcance (3 de 7 la vieron) y reacciones`, /3<\/strong> de 7 la vieron/.test(await p.locator('[data-com-post="cp1"] [data-com-alcance]').innerHTML()));
     ok(`${tag} · comunidad: el menú tiene su ícono`, (await p.locator('#main-nav [data-view="comunidad"] svg').count()) === 1);
     await p.fill('#com-texto', 'Reto de la semana: 10.000 pasos diarios.');
