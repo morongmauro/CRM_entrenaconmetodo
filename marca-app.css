@@ -1,0 +1,183 @@
+/* =====================================================
+   CRM EntrenaConMétodo · MARCA DE LA APP (visual nueva)
+   =====================================================
+   Para que el CRM se sienta la misma app que usan los clientes: la letra
+   (Figtree), el fondo, las tarjetas, los botones en grafito, los colores de
+   cada módulo y las gráficas con su estilo.
+
+   Va DESPUÉS de marca.css y solo cambia lo visual: ningún id, clase ni
+   comportamiento del JS. Los colores con significado (verde = bien, ámbar =
+   ojo, rojo = mal) se mantienen; solo pasan a los tonos de la app.
+
+   Colores de la app (src/theme.js del Meal Tracker):
+     fondo #EDECE5 · grafito #1F1F1F · texto suave #6B6B6B
+     entreno azul #3C7BD6 · comida verde #46965A · aprendizaje naranja #EE8434
+     dash amarillo #E0A21A
+   ===================================================== */
+
+@font-face {
+  font-family: 'Figtree';
+  src: url('/fonts/figtree.woff2') format('woff2');
+  font-weight: 300 900;
+  font-display: swap;
+}
+
+:root {
+  --app-bg: #EDECE5;
+  --app-surface: #FFFFFF;
+  --app-ink: #1F1F1F;
+  --app-muted: #6B6B6B;
+  --app-faint: #9A9893;
+  --app-line: rgba(31,31,31,0.08);
+  --app-entreno: #3C7BD6;
+  --app-comida: #46965A;
+  --app-aprende: #EE8434;
+  --app-dash: #E0A21A;
+  --app-bien: #2F9E5B;
+  --app-ojo: #D98A12;
+  --app-mal: #D2483B;
+  --app-violeta: #7A64D8;
+  --app-sombra: 0 1px 2px rgba(40,40,30,0.04), 0 6px 16px rgba(60,60,40,0.06);
+  --app-sombra-alta: 0 2px 6px rgba(40,40,30,0.05), 0 14px 32px rgba(60,60,40,0.09);
+
+  /* Los tokens de marca.css pasan al grafito: así los focos, chips y
+     acentos que usaban el oliva quedan en el color de la app. */
+  --em-olive: #1F1F1F;
+  --em-olive-light: #6B6B6B;
+  --em-olive-dark: #000000;
+  --em-olive-soft: rgba(31,31,31,0.06);
+  --em-olive-chip: rgba(31,31,31,0.18);
+  --brand-olive: #1F1F1F;
+  --brand-olive-dark: #000000;
+  --em-bg: var(--app-bg);
+  --em-text: var(--app-ink);
+  --em-text-soft: var(--app-muted);
+  --em-text-mute: var(--app-faint);
+}
+
+/* ─── Letra: Figtree en todo, también títulos (adiós Bebas e Inter) ─── */
+html, body, input, textarea, select, button, svg text,
+.em-display, #app-screen > header h1, #login-screen h1, .em-brand-text h1, .em-footer-brand {
+  font-family: 'Figtree', ui-sans-serif, system-ui, -apple-system, sans-serif !important;
+}
+.em-display, #app-screen > header h1, #login-screen h1, .em-brand-text h1 {
+  font-weight: 800 !important;
+  letter-spacing: -0.02em !important;
+}
+.em-brand-text h1 { font-size: 1.12rem !important; }
+#view h1, #view h2, #view h3 { letter-spacing: -0.02em; }
+#view h1, #view h2 { font-weight: 800 !important; }
+
+/* Sin MAYÚSCULAS forzadas: en la app los rótulos van en minúscula normal.
+   Los números y las siglas que ya vienen escritas en mayúscula se quedan. */
+#app-screen .uppercase, #app-screen label, #app-screen th, #app-screen .sec-title, #app-screen .seg-pillar-title {
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+#app-screen .sec-title { font-size: 0.82rem !important; font-weight: 750 !important; color: var(--app-muted) !important; }
+#app-screen label { font-size: 0.8rem !important; font-weight: 650 !important; color: var(--app-muted) !important; }
+#app-screen th { font-size: 0.8rem !important; color: var(--app-muted) !important; }
+
+/* ─── Fondo: el gris cálido de la app, con las manchas de los módulos ─── */
+html { background-color: var(--app-bg) !important; }
+body::before {
+  opacity: .5 !important;
+  background:
+    radial-gradient(42% 30% at 96% 0%,   rgba(60,123,214,0.16), transparent 70%),
+    radial-gradient(40% 30% at 0% 18%,   rgba(70,150,90,0.14), transparent 70%),
+    radial-gradient(38% 28% at 60% 4%,   rgba(224,162,26,0.12), transparent 70%),
+    radial-gradient(44% 32% at 100% 70%, rgba(238,132,52,0.12), transparent 72%),
+    radial-gradient(50% 36% at 30% 96%,  rgba(60,123,214,0.10), transparent 72%) !important;
+}
+
+/* ─── Cabecera y menú ─── */
+#app-screen > header, .glass { background: rgba(237,236,229,0.86) !important; }
+.em-nav .nav-item {
+  display: flex !important; align-items: center; gap: 10px;
+  font-weight: 600 !important; color: var(--app-muted) !important;
+}
+.em-nav .nav-item .em-ico { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: none; opacity: .9; }
+.em-nav .nav-item .em-ico svg { width: 20px; height: 20px; }
+.em-nav .nav-item:hover { background: rgba(31,31,31,0.06) !important; color: var(--app-ink) !important; }
+.em-nav .nav-item.active { background: var(--app-ink) !important; color: #fff !important; }
+.em-nav .nav-item.active .em-ico { opacity: 1; }
+@media (max-width: 1023px) {
+  .em-side { background: rgba(237,236,229,0.94) !important; }
+  .em-nav .nav-item { gap: 7px; }
+}
+@media (min-width: 1024px) {
+  .em-side { background: rgba(255,255,255,0.62) !important; box-shadow: var(--app-sombra) !important; border: none !important; }
+}
+
+/* ─── Tarjetas: blancas, radio 20 y la sombra suave de la app ─── */
+.card, #view .bg-white.rounded-2xl, #view .bg-white.rounded-xl {
+  background: var(--app-surface) !important;
+  border: none !important;
+  border-radius: 20px !important;
+  box-shadow: var(--app-sombra) !important;
+}
+.card-hover:hover { box-shadow: var(--app-sombra-alta) !important; }
+.em-kpi-ico { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 999px; background: rgba(31,31,31,0.06); color: var(--app-ink); }
+.em-kpi-ico svg { width: 20px; height: 20px; }
+
+/* ─── Botones: el principal en grafito, como en la app ─── */
+.btn-primary {
+  background-color: var(--app-ink) !important;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.16) !important;
+}
+.btn-primary:hover { background-color: #000 !important; }
+.btn { font-weight: 700 !important; }
+.chip:hover { border-color: rgba(31,31,31,0.2) !important; }
+input:focus, textarea:focus, select:focus { border-color: var(--app-ink) !important; box-shadow: 0 0 0 3px rgba(31,31,31,0.10) !important; }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--app-ink) !important; }
+
+/* ─── Pie ─── */
+.em-footer-brand { font-weight: 800 !important; letter-spacing: 0.02em !important; }
+.em-footer::before, .em-footer > :first-child::before { background: var(--app-ink) !important; }
+
+/* ─── Colores: los de Tailwind pasan a los tonos de la app ─── */
+.text-emerald-600, .text-emerald-700, .text-green-600, .text-green-700 { color: var(--app-bien) !important; }
+.text-amber-600, .text-amber-700, .text-orange-600 { color: var(--app-ojo) !important; }
+.text-red-600, .text-rose-600 { color: var(--app-mal) !important; }
+.bg-emerald-500 { background-color: var(--app-bien) !important; }
+
+/* ─── Gráficas: los colores de cada módulo y trazo como en el Dash ───
+   Se reasignan por el color que trae cada serie, sin tocar el código que las
+   dibuja: azul = entreno, verde = comida/bien, ámbar = dash, violeta = otro. */
+#view svg [stroke="#3b82f6"], #view svg [stroke="#2563eb"] { stroke: var(--app-entreno); }
+#view svg [fill="#3b82f6"], #view svg [fill="#2563eb"] { fill: var(--app-entreno); }
+#view svg [stroke="#10b981"], #view svg [stroke="#059669"] { stroke: var(--app-comida); }
+#view svg [fill="#10b981"], #view svg [fill="#059669"] { fill: var(--app-comida); }
+#view svg [stroke="#f59e0b"], #view svg [stroke="#d97706"] { stroke: var(--app-dash); }
+#view svg [fill="#f59e0b"], #view svg [fill="#d97706"] { fill: var(--app-dash); }
+#view svg [stroke="#8b5cf6"] { stroke: var(--app-violeta); }
+#view svg [fill="#8b5cf6"] { fill: var(--app-violeta); }
+#view svg [stroke="#0f172a"] { stroke: var(--app-ink); }
+#view svg [fill="#0f172a"] { fill: var(--app-ink); }
+#view svg stop[stop-color="#3b82f6"], #view svg stop[stop-color="#2563eb"] { stop-color: var(--app-entreno); }
+#view svg stop[stop-color="#10b981"], #view svg stop[stop-color="#059669"] { stop-color: var(--app-comida); }
+#view svg stop[stop-color="#f59e0b"] { stop-color: var(--app-dash); }
+#view svg stop[stop-color="#8A9558"] { stop-color: var(--app-ink); }
+#view svg polyline { stroke-width: 2.6; }
+#view svg line[stroke="#e6e2d8"] { stroke: rgba(31,31,31,0.07); }
+#view svg text { font-family: 'Figtree', ui-sans-serif, system-ui, sans-serif; }
+/* Las barras de progreso de Tailwind en los tonos de la app */
+#view .bg-emerald-500, #view .bg-green-500 { background-color: var(--app-comida) !important; }
+#view .bg-blue-500 { background-color: var(--app-entreno) !important; }
+#view .bg-amber-400, #view .bg-amber-500 { background-color: var(--app-dash) !important; }
+#view .bg-orange-500 { background-color: var(--app-aprende) !important; }
+
+/* ─── Tamaños: un poco más grandes, como en la app (lectura cómoda) ─── */
+#app-screen .text-xs { font-size: 0.8rem !important; line-height: 1.15rem; }
+#app-screen .text-sm { font-size: 0.92rem !important; line-height: 1.35rem; }
+#app-screen .text-\[10px\], #app-screen .text-\[11px\] { font-size: 0.74rem !important; }
+#view h1 { font-size: 1.75rem !important; line-height: 1.15; }
+
+/* ─── Bloques oscuros (resumen de Pagos, fila de totales): grafito ─── */
+#view .from-slate-900 { background-image: none !important; background-color: var(--app-ink) !important; }
+#view .bg-slate-900, #view tr.bg-slate-900 td, #view tr.bg-slate-900 th { background-color: var(--app-ink) !important; }
+#view .text-slate-300 { color: rgba(255,255,255,0.72) !important; }
+
+/* ─── Gráficas limpias: solo se rotula el último punto, como en el Dash.
+   Los valores de los puntos intermedios siguen al pasar el dedo/mouse. ─── */
+#view svg text[fill="#5A5A5A"][paint-order="stroke"] { display: none; }

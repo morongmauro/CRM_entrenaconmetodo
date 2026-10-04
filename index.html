@@ -9,7 +9,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Entrena con Método · CRM</title>
   <link rel="manifest" href="/manifest.json" />
-  <meta name="theme-color" content="#F7F4ED" />
+  <meta name="theme-color" content="#EDECE5" />
   <!-- Logo de marca (la M dentro del anillo). El SVG manda en navegadores
        modernos; el PNG es el respaldo y el ícono de iOS al "Agregar a inicio". -->
   <link rel="icon" type="image/svg+xml" href="/icons/logo.svg" />
@@ -22,7 +22,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="preload" href="/fonts/figtree.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css" />
   <!-- Ajustes para el teléfono. DESPUÉS de styles.css: anula reglas suyas,
        y todo va dentro de media queries, así que en escritorio no cambia nada. -->
@@ -31,8 +31,11 @@
        radios y sombras para que el CRM se vea como el Meal Tracker y el
        Centro de Recursos. No cambia ninguna clase que use el JS. -->
   <link rel="stylesheet" href="/marca.css" />
+  <!-- Marca de la app (visual nueva): la letra, colores, tarjetas y gráficas
+       del Meal Tracker para que el CRM se sienta la misma app. La última. -->
+  <link rel="stylesheet" href="/marca-app.css" />
   <script>
-    tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter','system-ui','sans-serif'] } } } }
+    tailwind.config = { theme: { extend: { fontFamily: { sans: ['Figtree','system-ui','sans-serif'] } } } }
   </script>
 </head>
 <body class="bg-slate-100 text-slate-800 min-h-screen">
@@ -161,5 +164,7 @@
   <!-- Agente de rutinas. DESPUÉS de entrenamiento.js (usa su capa de datos y
        su calendario) y de asistente.js (usa su motor de conversación). -->
   <script src="/asistente-rutinas.js"></script>
+  <!-- Íconos de línea en el menú y en el inicio (en vez de emojis). -->
+  <script src="/marca-app.js"></script>
 </body>
 </html>

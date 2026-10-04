@@ -3977,14 +3977,14 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
         <div class="flex items-baseline justify-between mb-2 flex-wrap gap-2">
           <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider">Scores últimas 8 semanas (%)</h4>
           <div>
-            ${legendDot('#10b981', 'Entreno')}
-            ${legendDot('#3b82f6', 'Alimentación')}
+            ${legendDot('#3b82f6', 'Entreno')}
+            ${legendDot('#10b981', 'Alimentación')}
             ${legendDot('#0f172a', 'Global')}
           </div>
         </div>
         ${lineChart([
-          { label: 'Entreno', color: '#10b981', points: ptsEnt },
-          { label: 'Alimentación', color: '#3b82f6', points: ptsAli },
+          { label: 'Entreno', color: '#3b82f6', points: ptsEnt },
+          { label: 'Alimentación', color: '#10b981', points: ptsAli },
           { label: 'Global', color: '#0f172a', points: ptsGlob },
         ], labels, { height: 200, escalaFija: true, yMin: 0, yMax: 100, unidad: '%', decimales: 0, area: false })}
       </div>` : ''}
@@ -4653,8 +4653,8 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
   const chartSerie = (key, color, label) => ({ label, color, points: chartSegs.map(x => x[key] != null ? x[key] : null) });
   const tendenciaChart = chartSegs.length >= 2
     ? lineChart([
-        chartSerie('score_entreno', '#10b981', 'Entreno'),
-        chartSerie('score_alim_metas', '#3b82f6', 'Alim · metas'),
+        chartSerie('score_entreno', '#3b82f6', 'Entreno'),
+        chartSerie('score_alim_metas', '#10b981', 'Alim · metas'),
         chartSerie('score_alim_registro', '#8b5cf6', 'Alim · registro'),
       ], chartLabels, { escalaFija: true, yMin: 0, yMax: 100, unidad: '%', decimales: 0, height: 190, area: false })
     : '<p class="text-xs text-slate-400 text-center py-4">Necesitas 2+ semanas registradas para ver la tendencia.</p>';
@@ -4874,7 +4874,7 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
       <div>
         <div class="seg-section-title flex items-center justify-between">
           <span>📈 Tendencia de cumplimiento</span>
-          <span class="flex" style="text-transform:none;letter-spacing:normal">${legendDot('#10b981', 'Entreno')}${legendDot('#3b82f6', 'Alim · metas')}${legendDot('#8b5cf6', 'Alim · registro')}</span>
+          <span class="flex" style="text-transform:none;letter-spacing:normal">${legendDot('#3b82f6', 'Entreno')}${legendDot('#10b981', 'Alim · metas')}${legendDot('#8b5cf6', 'Alim · registro')}</span>
         </div>
         <div class="bg-slate-50 rounded-xl p-3">${tendenciaChart}</div>
       </div>
@@ -8010,8 +8010,11 @@ routes.negocio = async () => {
         const vals = regs.map(s => s[scoreCampo] != null ? s[scoreCampo] : (s[adhCampo] != null ? s[adhCampo] * 10 : null)).filter(v => v !== null);
         return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
       });
+      // Solo cuentan los ACTIVOS: un cliente en pausa que igual reportó
+      // empujaba el porcentaje por encima de 100 %.
+      const idsActivos = new Set(activos.map(c => c.id));
       const pctCumplimiento = sems.map(sem => {
-        const con = new Set(allSegs.filter(s => s.semana === sem).map(s => s.cliente_id)).size;
+        const con = new Set(allSegs.filter(s => s.semana === sem && idsActivos.has(s.cliente_id)).map(s => s.cliente_id)).size;
         return activos.length > 0 ? Math.round((con / activos.length) * 100) : 0;
       });
       return `
@@ -8019,13 +8022,13 @@ routes.negocio = async () => {
         <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
           <h3 class="font-bold text-slate-900">Tendencia de cumplimiento · 8 semanas (%)</h3>
           <div>
-            ${legendDot('#10b981', 'Entreno')}
-            ${legendDot('#3b82f6', 'Alimentación')}
+            ${legendDot('#3b82f6', 'Entreno')}
+            ${legendDot('#10b981', 'Alimentación')}
           </div>
         </div>
         ${lineChart([
-          { label: 'Entreno', color: '#10b981', points: promPorSem('score_entreno', 'adherencia_entreno') },
-          { label: 'Alimentación', color: '#3b82f6', points: promPorSem('score_alim_metas', 'adherencia_alimentacion') },
+          { label: 'Entreno', color: '#3b82f6', points: promPorSem('score_entreno', 'adherencia_entreno') },
+          { label: 'Alimentación', color: '#10b981', points: promPorSem('score_alim_metas', 'adherencia_alimentacion') },
         ], labelsSem, { height: 220, escalaFija: true, yMin: 0, yMax: 100, unidad: '%', decimales: 0, area: false })}
       </div>
 
