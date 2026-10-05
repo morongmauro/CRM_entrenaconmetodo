@@ -55,9 +55,16 @@ async function entPonerVideo(id, ref, inicio = null) {
     video_fuente: 'youtube', video_ref: ref,
     video_url: `https://www.youtube.com/watch?v=${ref}${inicio ? `&t=${inicio}s` : ''}`,
     video_inicio_seg: inicio || null, video_path: null, poster_path: null,
+    // Elegido por el coach: ningún SQL de carga lo vuelve a pisar.
+    video_elegido_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
-  const { error } = await sb.from('ejercicios').update(row).eq('id', id);
+  let { error } = await sb.from('ejercicios').update(row).eq('id', id);
+  // Sin la migración de videos protegidos todavía: se guarda igual, sin la marca.
+  if (error && /video_elegido_at/.test(error.message || '')) {
+    delete row.video_elegido_at;
+    ({ error } = await sb.from('ejercicios').update(row).eq('id', id));
+  }
   if (error) { toast(error.message); return false; }
   // Se actualiza en memoria: la galería de atrás se repinta con la miniatura
   // nueva sin volver a leer los 300 ejercicios.
@@ -218,7 +225,14 @@ window.entDeshacerVideo = async () => {
   const id = _vid.cola[_vid.pos];
   const antes = _vid.previo[id];
   if (!antes) return;
-  const { error } = await sb.from('ejercicios').update({ ...antes, updated_at: new Date().toISOString() }).eq('id', id);
+  // También es una elección del coach: lleva la marca, si no el guardián de la
+  // base de datos dejaría el video nuevo puesto.
+  const fila = { ...antes, video_elegido_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  let { error } = await sb.from('ejercicios').update(fila).eq('id', id);
+  if (error && /video_elegido_at/.test(error.message || '')) {
+    delete fila.video_elegido_at;
+    ({ error } = await sb.from('ejercicios').update(fila).eq('id', id));
+  }
   if (error) return toast(error.message);
   const e = (_ent.ejercicios || []).find(x => x.id === id);
   if (e) Object.assign(e, antes);

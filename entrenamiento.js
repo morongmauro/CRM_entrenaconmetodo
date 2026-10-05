@@ -156,9 +156,13 @@ const entDb = {
     return _ent.ejercicios;
   },
   async guardarEjercicio(row, id) {
-    const q = id ? sb.from('ejercicios').update(row).eq('id', id)
-                 : sb.from('ejercicios').insert(row);
-    const { error } = await q;
+    const enviar = (r) => (id ? sb.from('ejercicios').update(r).eq('id', id) : sb.from('ejercicios').insert(r));
+    let { error } = await enviar(row);
+    // Sin la migración de videos protegidos todavía: se guarda igual, sin la marca.
+    if (error && 'video_elegido_at' in row && /video_elegido_at/.test(error.message || '')) {
+      const { video_elegido_at, ...sinMarca } = row;
+      ({ error } = await enviar(sinMarca));
+    }
     if (error) { toast(error.message); return false; }
     _ent.ejercicios = null;
     return true;
@@ -1024,6 +1028,14 @@ window.entGuardarEjercicio = async (id) => {
     video_inicio_seg: v.fuente === 'youtube' ? (Number(val('#ej-video-inicio')) || null) : null,
     updated_at: new Date().toISOString(),
   };
+
+  // Si el video cambió (o es un ejercicio nuevo con video), queda marcado como
+  // ELEGIDO por el coach: ningún SQL de carga lo vuelve a pisar
+  // (ver entrenamientoecm/carga/migracion-videos-protegidos.sql).
+  const antes = id ? (_ent.ejercicios || []).find(x => x.id === id) : null;
+  const campos = ['video_fuente', 'video_ref', 'video_url', 'video_inicio_seg', 'video_path', 'poster_path'];
+  const cambioVideo = antes ? campos.some(k => (antes[k] ?? null) !== (row[k] ?? null)) : (id ? true : row.video_fuente !== 'ninguno');
+  if (cambioVideo) row.video_elegido_at = new Date().toISOString();
 
   if (v.fuente === 'youtube' && !v.ref) { toast('El link de YouTube no es válido'); return; }
   if (v.fuente === 'archivo' && !v.path) { toast('Falta subir el archivo de video'); return; }
