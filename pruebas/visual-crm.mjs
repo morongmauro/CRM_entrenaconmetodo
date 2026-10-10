@@ -50,6 +50,7 @@ function datos(hoyISO) {
     monto: i === 7 ? 120 : 280000 + i * 20000, moneda: i === 7 ? 'USD' : 'COP', dia_pago: [5, 10, 15, 20, 1, 28, 12, 3][i],
     fecha_inicio: `2026-0${1 + (i % 8)}-0${1 + (i % 9)}`, estado: i === 6 ? 'pausa' : 'activo', canal_adquisicion: ['instagram', 'referido', 'web'][i % 3],
     tags: i % 3 ? ['online'] : ['online', 'presencial'], dias_gracia: 3, created_at: '2026-01-01T00:00:00Z',
+    email: `cliente${i}@correo.com`, app_clave_hash: i === 0 ? 'scrypt$sal$hash' : null, app_clave_at: i === 0 ? '2026-09-20T10:00:00Z' : null,
   }));
   const pagos = [], seguimientos = [], pendientes = [];
   for (const c of clientes) {
@@ -167,6 +168,16 @@ for (const [ancho, alto, tag] of TAMANOS) {
     ok(`${tag} · comunidad: publicar la deja en la lista`, (await p.locator('[data-com-post]').count()) === 2 && /10\.000 pasos/.test(await p.locator('#com-lista').innerText()));
     await p.screenshot({ path: path.join(CAPTURAS, `crm-${tag}-comunidad-publicada.png`), fullPage: true });
   }
+  // Contraseña de la app: en la ficha se ve si la creó y se puede reiniciar.
+  await p.evaluate(() => window.verCliente('c0')); await p.waitForTimeout(900);
+  const claveTxt = await p.locator('[data-clave-app]').innerText().catch(() => '');
+  ok(`${tag} · ficha: dice si ya creó la contraseña de la app`, /creada/.test(claveTxt), claveTxt);
+  p.once('dialog', d => d.accept());
+  await p.locator('[data-reiniciar-clave]').click().catch(() => {}); await p.waitForTimeout(900);
+  ok(`${tag} · ficha: «Reiniciar contraseña» la borra sin tocar nada más`, await p.evaluate(() => {
+    const c = (window.TABLAS_FALSAS.clientes || []).find(x => x.id === 'c0');
+    return !!c && c.app_clave_hash === null && c.nombre === 'Ana Pérez' && c.email === 'cliente0@correo.com';
+  }) && /aún no la crea/.test(await p.locator('[data-clave-app]').innerText().catch(() => '')));
   ok(`${tag}: sin errores de JavaScript`, errores.length === 0, errores.slice(0, 3).join(' | '));
   await ctx.close();
 }

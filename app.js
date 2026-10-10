@@ -7376,6 +7376,22 @@ window.eliminarCliente = async (id) => {
   refrescarVista('clientes');
 };
 
+// Si un cliente olvida su contraseña de la app: se borra (nadie la puede
+// ver, solo existe cifrada) y la vuelve a crear al abrir la app con el
+// correo de su ficha. No toca ningún dato; su sesión vieja deja de valer.
+window.reiniciarClaveApp = async (id) => {
+  invalidarCache('clientes');
+  const c = await db.clientes.get(id);
+  if (!c) return;
+  const correo = c.email ? `\n\nPara crear la nueva le pedirá su correo: ${c.email}` : '';
+  if (!confirm(`¿Reiniciar la contraseña de la app de ${c.nombre}?\n\nNo se borra nada de su información. Al abrir la app creará una contraseña nueva.${correo}`)) return;
+  const { error } = await sb.from('clientes').update({ app_clave_hash: null, app_clave_at: null }).eq('id', id);
+  if (error) { toast('⚠️ No se pudo reiniciar la contraseña'); return; }
+  invalidarCache('clientes');
+  toast(`🔑 Listo: ${c.nombre.split(' ')[0]} ya puede crear su contraseña nueva`);
+  verCliente(id);
+};
+
 window.verCliente = async (id) => {
   const _tok = abrirModalCargando('Cliente');
   const [c, segs, pends, pagos, meds, metas] = await Promise.all([
@@ -7425,7 +7441,11 @@ window.verCliente = async (id) => {
         <button class="btn btn-secondary btn-sm" onclick="nuevoPendiente('${c.id}')">+ Pendiente</button>
         <button class="btn btn-secondary btn-sm" onclick="nuevaMedicion('${c.id}')">+ Medición corporal</button>
         <button class="btn btn-secondary btn-sm" onclick="enviarPushManual('${c.id}')">📲 Push al teléfono</button>
+        ${c.app_clave_hash ? `<button class="btn btn-secondary btn-sm" data-reiniciar-clave onclick="reiniciarClaveApp('${c.id}')">🔑 Reiniciar contraseña de la app</button>` : ''}
       </div>
+      <div data-clave-app class="text-xs text-slate-500">🔑 Contraseña de la app: ${c.app_clave_hash
+        ? `creada${c.app_clave_at ? ` el ${fmt.fecha(String(c.app_clave_at).slice(0, 10))}` : ''}`
+        : 'aún no la crea (la crea él al abrir la app, con su correo de aquí)'}</div>
 
       ${streakF > 1 || streakC > 1 || streakGlobal > 1 ? `
       <div class="flex gap-2 flex-wrap">
