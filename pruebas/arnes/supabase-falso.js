@@ -34,7 +34,7 @@
       single() { uno = 'single'; return q; },
       maybeSingle() { uno = 'maybe'; return q; },
       insert(f) { accion = 'insert'; cuerpo = f; return q; },
-      upsert(f) { accion = 'upsert'; cuerpo = f; return q; },
+      upsert(f, o) { accion = 'upsert'; cuerpo = f; opts = { ...opts, onConflict: o && o.onConflict }; return q; },
       update(f) { accion = 'update'; cuerpo = f; return q; },
       delete() { accion = 'delete'; return q; },
       then(ok, mal) { return Promise.resolve().then(ejecutar).then(ok, mal); },
@@ -46,7 +46,9 @@
       let data;
       if (accion === 'insert' || accion === 'upsert') {
         const filas = (Array.isArray(cuerpo) ? cuerpo : [cuerpo]).map(f => ({ id: id(), created_at: new Date().toISOString(), ...f }));
-        filas.forEach(f => { const i = t.findIndex(r => r.id === f.id); if (i >= 0) t[i] = { ...t[i], ...f }; else t.push(f); });
+        // upsert con onConflict: la fila que ya tiene esa columna se actualiza.
+        const clave = accion === 'upsert' && opts.onConflict;
+        filas.forEach(f => { const i = t.findIndex(r => (clave ? r[clave] === f[clave] : r.id === f.id)); if (i >= 0) t[i] = { ...t[i], ...f, id: t[i].id }; else t.push(f); });
         data = filas;
       } else if (accion === 'update') {
         data = t.filter(pasa); data.forEach(r => Object.assign(r, cuerpo));

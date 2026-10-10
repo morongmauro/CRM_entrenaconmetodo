@@ -152,6 +152,16 @@ for (const [ancho, alto, tag] of TAMANOS) {
     ok(`${tag} · comunidad: editar la publicación`, /4 entrenos/.test(await p.locator('[data-com-post="cp1"] [data-com-texto]').innerText()) && /editada/.test(await p.locator('[data-com-post="cp1"]').innerText()));
     ok(`${tag} · comunidad: alcance (3 de 7 la vieron) y reacciones`, /3<\/strong> de 7 la vieron/.test(await p.locator('[data-com-post="cp1"] [data-com-alcance]').innerHTML()));
     ok(`${tag} · comunidad: el menú tiene su ícono`, (await p.locator('#main-nav [data-view="comunidad"] svg').count()) === 1);
+    // El mensaje de bienvenida: se crea y se edita (uno solo).
+    await p.fill('#com-bv-titulo', 'Bienvenido al equipo');
+    await p.fill('#com-bv-texto', 'Aquí compartimos retos y avances.');
+    await p.click('#com-bv-guardar'); await p.waitForTimeout(700);
+    await p.fill('#com-bv-texto', 'Aquí compartimos retos, avances y dudas.');
+    await p.click('#com-bv-guardar'); await p.waitForTimeout(700);
+    ok(`${tag} · comunidad: el mensaje de bienvenida se guarda y se edita (uno solo)`, await p.evaluate(() => {
+      const t = window.TABLAS_FALSAS.comunidad_bienvenida || [];
+      return t.length === 1 && t[0].user_id === 'coach-1' && t[0].titulo === 'Bienvenido al equipo' && t[0].texto === 'Aquí compartimos retos, avances y dudas.' && t[0].activa === true;
+    }) && (await p.inputValue('#com-bv-texto')) === 'Aquí compartimos retos, avances y dudas.');
     await p.fill('#com-texto', 'Reto de la semana: 10.000 pasos diarios.');
     await p.click('#com-publicar'); await p.waitForTimeout(800);
     ok(`${tag} · comunidad: publicar la deja en la lista`, (await p.locator('[data-com-post]').count()) === 2 && /10\.000 pasos/.test(await p.locator('#com-lista').innerText()));

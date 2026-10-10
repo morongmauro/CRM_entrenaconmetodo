@@ -49,7 +49,10 @@ async function comCargar() {
     comentarios = comentarios.filter(c => !c.borrado_en);
   }
   const { data: clientes } = await sb.from('clientes').select('id,nombre,estado');
-  return { posts: posts || [], reacciones, vistas, comentarios, clientes: clientes || [] };
+  // La bienvenida (comunidad_bienvenida): sin la tabla, la tarjeta lo dice.
+  const bv = await sb.from('comunidad_bienvenida').select('titulo,texto,activa,editado_en').limit(1);
+  return { posts: posts || [], reacciones, vistas, comentarios, clientes: clientes || [],
+    bienvenida: bv.error ? { sinTabla: true } : ((bv.data || [])[0] || null) };
 }
 
 const comFecha = (iso) => {
@@ -99,6 +102,18 @@ routes.comunidad = async () => {
           </div>
           ${nuevos.length ? `<div class="space-y-3">${nuevos.slice(0, 30).map(n => `<div class="pt-3" style="border-top:1px solid #f1f5f9">${n.html}</div>`).join('')}</div>`
             : '<div class="text-sm text-slate-500">Nada nuevo. Cuando alguien comente o reaccione, te aparece aquí.</div>'}
+        </div>
+        <div class="card" id="com-bienvenida">
+          <h3 class="font-bold text-slate-900">Mensaje de bienvenida</h3>
+          <p class="text-xs text-slate-500 mt-1 mb-3">Le sale a cada persona la primera vez que entra a la app nueva (una sola vez), en una ventana con el fondo de la marca y el botón «Ver la comunidad».</p>
+          ${d.bienvenida && d.bienvenida.sinTabla ? `<div class="text-sm text-slate-600">Falta preparar la base: corre <strong>carga/migracion-comunidad-bienvenida.sql</strong> en Supabase (SQL Editor) y vuelve a entrar.</div>` : `
+          <input id="com-bv-titulo" maxlength="80" class="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold" placeholder="Título (ej.: Bienvenido a la comunidad)" value="${escapeHtml((d.bienvenida && d.bienvenida.titulo) || '')}">
+          <textarea id="com-bv-texto" rows="5" maxlength="1200" class="w-full border border-slate-200 rounded-xl p-3 text-sm mt-2" placeholder="Lo que quieres decirles al entrar por primera vez.">${escapeHtml((d.bienvenida && d.bienvenida.texto) || '')}</textarea>
+          <label class="flex items-center gap-2 mt-2 text-sm"><input type="checkbox" id="com-bv-activa" ${!d.bienvenida || d.bienvenida.activa !== false ? 'checked' : ''}> Mostrarla a quien entre por primera vez</label>
+          <div class="flex items-center gap-3 mt-3">
+            <button class="btn btn-primary btn-sm" id="com-bv-guardar" onclick="comGuardarBienvenida()">${d.bienvenida ? 'Guardar cambios' : 'Guardar bienvenida'}</button>
+            ${d.bienvenida ? `<span class="text-xs text-slate-500">Última edición: ${comFecha(d.bienvenida.editado_en)}</span>` : ''}
+          </div>`}
         </div>
         <div class="card" id="com-nuevo">
           <h3 class="font-bold text-slate-900 mb-3">Nueva publicación</h3>
@@ -186,6 +201,19 @@ window.comPublicar = async () => {
   routes.comunidad();
 };
 window.comEditar = (id) => { _com.editando = id; routes.comunidad(); };
+// La bienvenida: una por coach (se crea la primera vez y después se edita).
+window.comGuardarBienvenida = async () => {
+  const titulo = (document.getElementById('com-bv-titulo').value || '').trim() || 'Bienvenido a la comunidad';
+  const texto = (document.getElementById('com-bv-texto').value || '').trim();
+  if (!texto) { toast('Escribe el mensaje de bienvenida'); return; }
+  const { data: { user } } = await sb.auth.getUser();
+  const { error } = await sb.from('comunidad_bienvenida').upsert({
+    user_id: user && user.id, titulo, texto, activa: document.getElementById('com-bv-activa').checked, editado_en: new Date().toISOString(),
+  }, { onConflict: 'user_id' });
+  if (error) { toastError('No se pudo guardar: ' + (error.message || 'error')); return; }
+  toast('Bienvenida guardada. Le sale a quien entre por primera vez.');
+  routes.comunidad();
+};
 window.comGuardarEdicion = async (id) => {
   const el = document.getElementById('com-edit-' + id);
   const texto = ((el && el.value) || '').trim();
