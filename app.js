@@ -4997,6 +4997,10 @@ window.aplicarPlantilla = (nivel) => {
   $('#sg-avances').value = txt;
 };
 
+// La marca de las semanas que se registran solas (la misma de
+// NOTA_AUTO en api/_semana.js del Meal Tracker).
+const NOTA_AUTO_SEMANA = 'Semana registrada sola con lo que marcó en su app. Corrígela si sabes algo que la app no.';
+
 window.guardarSeguimiento = async (cliente_id, semana, id) => {
   const seg = {
     fuerza_planeados: $('#sg-fp')?.value ? Number($('#sg-fp').value) : null,
@@ -5024,7 +5028,10 @@ window.guardarSeguimiento = async (cliente_id, semana, id) => {
     avances: $('#sg-avances').value || null,
     pendientes_semana: $('#sg-pend').value || null,
     estado_animo: $('#sg-animo')?.value || null,
-    notas: $('#sg-notas').value || null,
+    // Si era una semana registrada sola (api/_semana.js del Meal Tracker),
+    // al guardarla se le quita la marca: desde aquí es del coach y el
+    // sistema ya no la vuelve a tocar.
+    notas: String($('#sg-notas').value || '').replace(NOTA_AUTO_SEMANA, '').trim() || null,
     lesion_estado_semana: $('#sg-lesion-est')?.value || null,
     lesion_actualizacion: $('#sg-lesion-txt')?.value || null,
     estado: 'hecho',
