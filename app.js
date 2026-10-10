@@ -6201,15 +6201,15 @@ async function fetchInstalacionesMT() {
   if (mtApiBase()) {
     const res = await mtApiGet('/api/coach-data?action=list');
     if (res && Array.isArray(res.clients)) {
-      filas = res.clients.map(c => ({ name: c.name, pwa: c.pwa_installed_at || null, push: c.push_enabled_at || null }));
+      filas = res.clients.map(c => ({ name: c.name, pwa: c.pwa_installed_at || null, push: c.push_enabled_at || null, nueva: c.app_nueva_at || null }));
     }
   }
   // Modo directo (anon key)
   if (!filas) {
     const mt = mtClient();
     if (mt) {
-      const { data } = await mt.from('user_data').select('name,pwa:data->pwa_installed_at,push:data->push_enabled_at');
-      if (Array.isArray(data)) filas = data.map(r => ({ name: r.name, pwa: r.pwa || null, push: r.push || null }));
+      const { data } = await mt.from('user_data').select('name,pwa:data->pwa_installed_at,push:data->push_enabled_at,nueva:data->app_nueva_at');
+      if (Array.isArray(data)) filas = data.map(r => ({ name: r.name, pwa: r.pwa || null, push: r.push || null, nueva: r.nueva || null }));
     }
   }
   if (!filas) return null;
@@ -6220,7 +6220,8 @@ async function fetchInstalacionesMT() {
     const n = normalizeName(f.name || '');
     if (!n) continue;
     const prev = porNombre.get(n);
-    if (!prev) { porNombre.set(n, { pwa: f.pwa, push: f.push }); continue; }
+    if (!prev) { porNombre.set(n, { pwa: f.pwa, push: f.push, nueva: f.nueva }); continue; }
+    if (f.nueva && (!prev.nueva || String(f.nueva) < String(prev.nueva))) prev.nueva = f.nueva;
     if (f.pwa && (!prev.pwa || String(f.pwa) < String(prev.pwa))) prev.pwa = f.pwa;
     if (f.push && (!prev.push || String(f.push) < String(prev.push))) prev.push = f.push;
   }
@@ -6242,19 +6243,22 @@ async function cargarPanelInstalaciones(clientes) {
     el2.innerHTML = '<div class="text-xs text-amber-600">No se pudo consultar el Mealtracker (revisa la conexión en Ajustes).</div>';
     return;
   }
-  const conApp = [], sinApp = [];
+  const conApp = [], sinApp = [], enNueva = [], sinMudar = [];
   for (const c of clientes) {
     const d = mapa.get(normalizeName(c.nombre || ''));
-    if (d && d.pwa) conApp.push({ c, pwa: d.pwa, push: d.push });
+    if (d && d.pwa) conApp.push({ c, pwa: d.pwa, push: d.push, nueva: d.nueva });
     else sinApp.push(c);
+    if (d && d.nueva) enNueva.push(c); else sinMudar.push(c);
   }
   conApp.sort((a, b) => String(b.pwa).localeCompare(String(a.pwa)));
   el2.innerHTML = `
     <div class="text-xs text-slate-500 mb-2">${conApp.length} de ${clientes.length} clientes ya abrieron la app desde su pantalla de inicio.</div>
+    <div data-app-nueva class="text-xs text-slate-500 mb-2">✨ <span class="font-semibold text-slate-600">${enNueva.length} de ${clientes.length}</span> ya se pasaron a la app nueva${enNueva.length && sinMudar.length ? ` · <span class="text-slate-400">faltan: ${sinMudar.map(c => escapeHtml(c.nombre)).join(' · ')}</span>` : ''}.</div>
     ${conApp.length ? `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
-      ${conApp.map(({ c, pwa, push }) => `
+      ${conApp.map(({ c, pwa, push, nueva }) => `
         <div class="flex items-center gap-2 text-xs bg-emerald-50/60 border border-emerald-100 rounded-lg px-2 py-1.5 cursor-pointer" onclick="verCliente('${c.id}')" title="Abrió la app instalada por primera vez el ${fmt.fecha(String(pwa).slice(0, 10))}">
           <span class="flex-1 min-w-0 font-medium text-slate-700 truncate">📲 ${escapeHtml(c.nombre)}${c.estado !== 'activo' ? ` <span class="text-slate-400 font-normal">(${c.estado})</span>` : ''}</span>
+          ${nueva ? '<span class="flex-shrink-0" title="Ya se pasó a la app nueva">✨</span>' : ''}
           <span class="text-slate-400 flex-shrink-0">${fmt.fechaCorta(String(pwa).slice(0, 10))}</span>
           ${push ? '<span class="flex-shrink-0" title="También tiene los recordatorios push activados">🔔</span>' : '<span class="flex-shrink-0 opacity-40" title="Aún sin activar los recordatorios push">🔕</span>'}
         </div>`).join('')}
