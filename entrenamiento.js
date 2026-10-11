@@ -247,29 +247,57 @@ const entDb = {
     return _ent.posters;
   },
 
-  // Qué ejercicios están usando tus clientes AHORA: los de las rutinas no
-  // archivadas de una fase activa de un cliente activo. → Map(id → nº de
+  // Qué ejercicios están usando tus clientes AHORA → Map(id → nº de
   // clientes). Sirve para priorizar videos (filtro «Los que usan mis clientes»).
+  //
+  // «Ahora» es el CICLO VIGENTE de cada cliente activo: la fase cuyas fechas
+  // incluyen hoy, la que está activa o publicada, y si no hay ninguna así, la
+  // más reciente. Antes solo contaba las fases en estado «activa», y como
+  // casi todas las importadas de Trainerize siguen en borrador, el filtro
+  // salía con unos 39 ejercicios cuando tus clientes usan cerca de 200.
   async ejerciciosEnUso(force = false) {
     if (_ent.enUso && !force) return _ent.enUso;
     const enUso = new Map();
     const { data: clis } = await sb.from('clientes').select('id, estado');
     const activos = new Set((clis || []).filter(c => String(c.estado || 'activo').toLowerCase() === 'activo').map(c => c.id));
-    const { data: fases } = await sb.from('fases').select('id, cliente_id').eq('estado', 'activa');
-    const faseCli = new Map((fases || []).filter(f => activos.has(f.cliente_id)).map(f => [f.id, f.cliente_id]));
-    if (faseCli.size) {
-      const { data: ruts } = await sb.from('rutinas').select('id, fase_id').in('fase_id', [...faseCli.keys()]).eq('archivada', false);
-      const rutCli = new Map((ruts || []).map(r => [r.id, faseCli.get(r.fase_id)]));
-      if (rutCli.size) {
-        const { data: res } = await sb.from('rutina_ejercicios').select('rutina_id, ejercicio_id').in('rutina_id', [...rutCli.keys()]);
-        const quien = new Map();
+    const { data: fases } = await sb.from('fases')
+      .select('id, cliente_id, estado, fecha_inicio, semanas, visible_cliente, orden, created_at')
+      .not('cliente_id', 'is', null);
+    const hoy = fmt.hoy();
+    const porCli = new Map();
+    (fases || []).filter(f => activos.has(f.cliente_id) && f.estado !== 'archivada')
+      .forEach(f => { if (!porCli.has(f.cliente_id)) porCli.set(f.cliente_id, []); porCli.get(f.cliente_id).push(f); });
+    const faseCli = new Map();
+    porCli.forEach((lista, cli) => {
+      const fin = (f) => f.fecha_inicio ? evtSumarDias(f.fecha_inicio, (Number(f.semanas) || 4) * 7 - 1) : null;
+      let vigentes = lista.filter(f => f.estado === 'activa' || f.visible_cliente
+        || (f.fecha_inicio && f.fecha_inicio <= hoy && fin(f) >= hoy));
+      if (!vigentes.length) {
+        vigentes = [[...lista].sort((a, b) => String(b.fecha_inicio || '').localeCompare(String(a.fecha_inicio || ''))
+          || (b.orden || 0) - (a.orden || 0) || String(b.created_at || '').localeCompare(String(a.created_at || '')))[0]];
+      }
+      vigentes.forEach(f => faseCli.set(f.id, cli));
+    });
+    // Por tandas: cientos de ids en una sola URL revientan el largo máximo.
+    const tandas = (ids, n = 80) => { const t = []; for (let i = 0; i < ids.length; i += n) t.push(ids.slice(i, i + n)); return t; };
+    const rutCli = new Map();
+    for (const ids of tandas([...faseCli.keys()])) {
+      const { data: ruts } = await sb.from('rutinas').select('id, fase_id, archivada').in('fase_id', ids);
+      (ruts || []).filter(r => !r.archivada).forEach(r => rutCli.set(r.id, faseCli.get(r.fase_id)));
+    }
+    const quien = new Map();
+    for (const ids of tandas([...rutCli.keys()])) {
+      for (let desde = 0; ; desde += 1000) {
+        const { data: res } = await sb.from('rutina_ejercicios').select('rutina_id, ejercicio_id')
+          .in('rutina_id', ids).order('id').range(desde, desde + 999);
         (res || []).forEach(re => {
           if (!quien.has(re.ejercicio_id)) quien.set(re.ejercicio_id, new Set());
           quien.get(re.ejercicio_id).add(rutCli.get(re.rutina_id));
         });
-        quien.forEach((set, id) => enUso.set(id, set.size));
+        if (!res || res.length < 1000) break;
       }
     }
+    quien.forEach((set, id) => enUso.set(id, set.size));
     _ent.enUso = enUso;
     return enUso;
   },
@@ -546,7 +574,7 @@ function entTarjetaEjercicio(e, opts = {}) {
         <div class="min-w-0 flex-1">
           <div class="font-bold text-slate-900 text-sm truncate">${escapeHtml(entNombres(e).grande)}</div>
           ${entNombreChico(e)}
-          ${_ent.enUso && _ent.enUso.get(e.id) ? `<span class="tag tag-blue" title="Clientes con este ejercicio en su rutina activa">👥 ${_ent.enUso.get(e.id)} ${_ent.enUso.get(e.id) === 1 ? 'cliente' : 'clientes'}</span>` : ''}
+          ${_ent.enUso && _ent.enUso.get(e.id) ? `<span class="tag tag-blue" title="Clientes con este ejercicio en su ciclo actual">👥 ${_ent.enUso.get(e.id)} ${_ent.enUso.get(e.id) === 1 ? 'cliente' : 'clientes'}</span>` : ''}
           <div class="text-xs text-slate-500 mb-1">
             ${entLabel(ENT_TIPOS, e.tipo)} · ${entLabel(ENT_SEGMENTOS, e.segmento)}
           </div>
@@ -583,7 +611,7 @@ function entBarraFiltros(prefijo = 'flt') {
         <select onchange="entSetFiltro('video', this.value)">${entOpciones([['sin', 'Sin video'], ['con', 'Con video']], f.video || '', 'Con y sin video')}</select>
       </div>
       <div class="mt-2">
-        <select onchange="entSetFiltro('uso', this.value)" title="Los de las rutinas activas de tus clientes activos">${entOpciones([['clientes', '👥 Los que usan mis clientes ahora']], f.uso || '', 'Toda la galería')}</select>
+        <select onchange="entSetFiltro('uso', this.value)" title="Los del ciclo actual de tus clientes activos">${entOpciones([['clientes', '👥 Los que usan mis clientes ahora']], f.uso || '', 'Toda la galería')}</select>
       </div>
       <div class="mt-2 flex items-center justify-between">
         <span id="${prefijo}-count" class="text-xs text-slate-500"></span>
@@ -1210,7 +1238,7 @@ async function entPintarConstructor() {
       </div>
     </div>
 
-    <div class="grid lg:grid-cols-2 gap-4">
+    <div class="grid lg:grid-cols-2 ${r.cliente_id ? 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_360px]' : ''} gap-4">
       <div class="order-2 lg:order-1">
         <div class="text-sm font-bold text-slate-700 mb-2">Galería · toca “Añadir” para meterlo a la rutina</div>
         ${r.bloques.length ? `
@@ -1233,8 +1261,15 @@ async function entPintarConstructor() {
         <div class="text-sm font-bold text-slate-700 mb-2">La rutina</div>
         ${entRenderRutina(r)}
       </div>
+
+      ${r.cliente_id ? `
+        <!-- Asistencia: su historial al lado (entreno-asistencia.js). -->
+        <div id="asi-panel" class="order-3 lg:col-span-2 xl:col-span-1 xl:max-h-[calc(100vh-120px)] xl:overflow-y-auto xl:sticky xl:top-4">
+          <div class="card text-xs text-slate-400">Leyendo su historial…</div>
+        </div>` : ''}
     </div>
   `;
+  if (r.cliente_id && typeof asiMontarConstructor === 'function') asiMontarConstructor(r);
   const c = $('#cons-count');
   if (c) c.textContent = `${galeria.length} de ${todos.length}`;
 }

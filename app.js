@@ -7440,6 +7440,7 @@ window.verCliente = async (id) => {
   // Journey: pinta lo guardado ya, y los pasos auto se completan async
   _journeyCtx = { id: c.id, journey: (c.journey && typeof c.journey === 'object') ? { ...c.journey } : {} };
   setTimeout(() => { renderJourneyList(); autollenarJourney(c, segs, meds); cargarPanelCentro(c); }, 80);
+  setTimeout(() => { if (typeof asiPintarCompara === 'function') asiPintarCompara(c, 'tz-compara-ficha', segs); }, 90);
   openModal(modalShell(escapeHtml(c.nombre), `
     <div class="space-y-4">
       <div class="flex gap-2 flex-wrap">
@@ -7552,6 +7553,9 @@ window.verCliente = async (id) => {
           ${metaDiasEntreno(c) ? `<div><span class="text-slate-500">Fuerza:</span> <strong>${metaDiasEntreno(c)} días/semana</strong>${(c.dias_entreno || []).length ? ` (${c.dias_entreno.join(' · ')})` : ''}</div>` : ''}
           ${c.actividades_complementarias ? `<div><span class="text-slate-500">Complementarias:</span> <strong>${escapeHtml(c.actividades_complementarias)}</strong> <span class="text-xs text-slate-400">(suman bonus al score, sin meta fija)</span></div>` : ''}
         </div>` : ''}
+
+      <!-- Trainerize al lado de lo tuyo (entreno-asistencia.js) -->
+      <div id="tz-compara-ficha"></div>
 
       <!-- 6. CONDICIONES MÉDICAS / LESIONES -->
       ${c.restricciones_lesiones || c.patologias || c.lesion_actual || c.suplementos ? `
