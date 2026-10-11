@@ -138,6 +138,20 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
   const esperado = new Set(fixture.rutina_ejercicios.filter(x => fixture.rutinas.find(r => r.id === x.rutina_id)?.fase_id === rutVieja.fase_id).map(x => x.ejercicio_id)).size;
   ok(`${tag} · galería «usan mis clientes»: cuenta el ciclo vigente en borrador (${enUso} de ${esperado})`, enUso === esperado);
 
+  // 6. La galería con los 3 niveles: ahora → antes → toda, con cuántos faltan.
+  await p.evaluate(() => { closeModal(); _ent.tab = 'ejercicios'; return navigate('entrenamiento'); });
+  await p.waitForSelector('[data-niveles]', { timeout: 10000 }).catch(() => {});
+  const niveles = await p.locator('[data-niveles] [data-nivel]').allInnerTexts();
+  const antesEsperado = new Set(fixture.rutina_ejercicios.map(x => x.ejercicio_id).concat(fixture.series_log.map(x => x.ejercicio_id)));
+  const nAntes = [...antesEsperado].filter(id => !fixture.rutina_ejercicios.some(x => x.ejercicio_id === id && fixture.rutinas.find(r => r.id === x.rutina_id)?.fase_id === rutVieja.fase_id)).length;
+  ok(`${tag} · galería: 3 niveles con su número (ahora ${esperado} · antes ${nAntes})`, niveles.length === 3
+    && new RegExp(`\\b${esperado}\\b ejercicios`).test(niveles[0]) && new RegExp(`\\b${nAntes}\\b ejercicios`).test(niveles[1]), JSON.stringify(niveles));
+  await p.locator('[data-niveles] [data-nivel="clientes"]').click();
+  await p.waitForTimeout(500);
+  const f = await p.evaluate(() => [_ent.filtros.uso, _ent.filtros.video, $('#flt-count').textContent]);
+  ok(`${tag} · galería: tocar «Los usan ahora» deja solo los que faltan de ese nivel`, f[0] === 'clientes' && f[1] === 'sin', JSON.stringify(f));
+  await p.screenshot({ path: path.join(CAPTURAS, `galeria-niveles-${tag}.png`), fullPage: false });
+
   ok(`${tag} · sin errores de JavaScript`, errores.length === 0, errores.join(' | '));
   await ctx.close();
 }

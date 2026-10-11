@@ -96,7 +96,18 @@ await p.evaluate(() => { DB.ejercicios[1].video_fuente = 'youtube'; });
 await p.evaluate(() => { _ent.filtros.video = ''; return entRevisarVideos(); });
 ok('revisar uno a uno recorre solo los que usan tus clientes', (await p.locator('text=1 de 2').count()) === 1
   && (await p.getAttribute('[data-video-rapido]', 'data-video-rapido')) === 'e3');
-await p.evaluate(() => { _ent.filtros.uso = ''; });
+// 8. Segundo nivel: los que usaron antes (ciclo terminado de Ana, cliente que
+//    ya no está) y hoy nadie tiene → solo e1. Y los contadores de los 3 niveles.
+await p.evaluate(() => { _ent.filtros.uso = 'antes'; return entDb.niveles(true); });
+const antes = await p.evaluate(() => entFiltrar(DB.ejercicios).map(e => e.id));
+ok('nivel 2: los usados antes que hoy nadie tiene', JSON.stringify(antes) === '["e1"]', JSON.stringify(antes));
+await p.evaluate(() => { _ent.ejercicios = DB.ejercicios; document.getElementById('ent-body').innerHTML = entBarraFiltros('flt') + entTarjetaEjercicio(DB.ejercicios[0]); });
+const cajas = await p.locator('[data-niveles] [data-nivel]').allInnerTexts();
+ok('los 3 niveles con su número (2 · 1 · 3)', cajas.length === 3 && /\b2\b ejercicios/.test(cajas[0]) && /\b1\b ejercicios/.test(cajas[1]) && /\b3\b ejercicios/.test(cajas[2]), JSON.stringify(cajas));
+ok('la tarjeta del nivel 2 dice «Usado antes»', (await p.locator('#ent-body', { hasText: 'Usado antes' }).count()) === 1);
+const opciones = await p.locator('[data-niveles]').evaluate(n => [...n.parentElement.querySelectorAll('select')].pop().innerText);
+ok('el desplegable trae los números', /ahora \(2\)/i.test(opciones) && /antes.*\(1\)/i.test(opciones) && /galería \(3\)/i.test(opciones), opciones);
+await p.evaluate(() => { _ent.filtros.uso = ''; _ent.filtros.video = ''; });
 ok('sin el filtro, vuelve toda la galería', (await p.evaluate(() => entFiltrar(DB.ejercicios).length)) === 3);
 
 ok('sin errores de JavaScript', errores.length === 0, errores.join(' | '));

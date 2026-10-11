@@ -104,7 +104,7 @@ window.entVideoRapido = async (id, cola = null) => {
 // «Revisar videos uno a uno»: la lista tal como la dejan los filtros.
 window.entRevisarVideos = async () => {
   const todos = await entDb.ejercicios();
-  if (_ent.filtros.uso) await entDb.ejerciciosEnUso();
+  if (_ent.filtros.uso) await entDb.niveles();
   const lista = entFiltrar(todos);
   if (!lista.length) return toast('No hay ejercicios con esos filtros');
   entVideoRapido(lista[0].id, lista.map(e => e.id));

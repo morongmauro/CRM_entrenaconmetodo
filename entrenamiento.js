@@ -338,6 +338,38 @@ const entDb = {
     return enUso;
   },
 
+  // Qué ejercicios han usado tus clientes ALGUNA VEZ → Set de ids: los de
+  // cualquier rutina de cualquier ciclo (también los terminados, archivados y
+  // de clientes que ya no están) y los que tienen series registradas. Es el
+  // segundo nivel del filtro, detrás de «Ahora».
+  async ejerciciosUsados(force = false) {
+    if (_ent.usados && !force) return _ent.usados;
+    const usados = new Set();
+    const paginas = async (consulta, cada) => {
+      for (let desde = 0; ; desde += 1000) {
+        const { data } = await consulta().range(desde, desde + 999);
+        (data || []).forEach(cada);
+        if (!data || data.length < 1000) break;
+      }
+    };
+    const fasesCli = new Set();
+    await paginas(() => sb.from('fases').select('id, cliente_id').order('id'), f => { if (f.cliente_id) fasesCli.add(f.id); });
+    const rutCli = new Set();
+    await paginas(() => sb.from('rutinas').select('id, fase_id, cliente_id').order('id'),
+      r => { if (r.cliente_id || fasesCli.has(r.fase_id)) rutCli.add(r.id); });
+    await paginas(() => sb.from('rutina_ejercicios').select('rutina_id, ejercicio_id').order('id'),
+      re => { if (rutCli.has(re.rutina_id)) usados.add(re.ejercicio_id); });
+    await paginas(() => sb.from('series_log').select('ejercicio_id').order('id'),
+      sl => { if (sl.ejercicio_id) usados.add(sl.ejercicio_id); });
+    _ent.usados = usados;
+    return usados;
+  },
+
+  // Los dos niveles juntos (el filtro y sus contadores necesitan ambos).
+  async niveles(force = false) {
+    await Promise.all([this.ejerciciosEnUso(force), this.ejerciciosUsados(force)]);
+  },
+
   // Fases
   async fases(clienteId) {
     const q = sb.from('fases').select('*').order('orden');
@@ -536,8 +568,12 @@ function entFiltrarSinOrden(lista) {
     const tieneVideo = (e.video_fuente || 'ninguno') !== 'ninguno';
     if (f.video === 'sin' && tieneVideo) return false;
     if (f.video === 'con' && !tieneVideo) return false;
-    // Los que usan tus clientes ahora (se ignora mientras no se haya cargado).
+    // Niveles de uso (se ignoran mientras no se hayan cargado):
+    //   «clientes» → en el ciclo actual de algún cliente activo;
+    //   «antes»    → lo usaron alguna vez, pero hoy nadie lo tiene.
     if (f.uso === 'clientes' && _ent.enUso && !_ent.enUso.has(e.id)) return false;
+    if (f.uso === 'antes' && _ent.usados && _ent.enUso
+      && (!_ent.usados.has(e.id) || _ent.enUso.has(e.id))) return false;
     if (f.musculo) {
       const ms = [...(e.musculos_primarios || []), ...(e.musculos_secundarios || [])];
       if (!ms.includes(f.musculo)) return false;
@@ -613,7 +649,8 @@ function entTarjetaEjercicio(e, opts = {}) {
         <div class="min-w-0 flex-1">
           <div class="font-bold text-slate-900 text-sm truncate">${escapeHtml(entNombres(e).grande)}</div>
           ${entNombreChico(e)}
-          ${_ent.enUso && _ent.enUso.get(e.id) ? `<span class="tag tag-blue" title="Clientes con este ejercicio en su ciclo actual">👥 ${_ent.enUso.get(e.id)} ${_ent.enUso.get(e.id) === 1 ? 'cliente' : 'clientes'}</span>` : ''}
+          ${_ent.enUso && _ent.enUso.get(e.id) ? `<span class="tag tag-blue" title="Clientes con este ejercicio en su ciclo actual">👥 ${_ent.enUso.get(e.id)} ${_ent.enUso.get(e.id) === 1 ? 'cliente' : 'clientes'} ahora</span>`
+            : _ent.usados && _ent.usados.has(e.id) ? '<span class="tag tag-gray" title="Lo usó algún cliente en un ciclo anterior; hoy nadie lo tiene">🕘 Usado antes</span>' : ''}
           <div class="text-xs text-slate-500 mb-1">
             ${entLabel(ENT_TIPOS, e.tipo)} · ${entLabel(ENT_SEGMENTOS, e.segmento)}
           </div>
@@ -650,8 +687,9 @@ function entBarraFiltros(prefijo = 'flt') {
         <select onchange="entSetFiltro('video', this.value)">${entOpciones([['sin', 'Sin video'], ['con', 'Con video']], f.video || '', 'Con y sin video')}</select>
       </div>
       <div class="mt-2">
-        <select onchange="entSetFiltro('uso', this.value)" title="Los del ciclo actual de tus clientes activos">${entOpciones([['clientes', '👥 Los que usan mis clientes ahora']], f.uso || '', 'Toda la galería')}</select>
+        <select onchange="entSetFiltro('uso', this.value)" title="1º lo que usan hoy, 2º lo que usaron antes, 3º toda la galería">${entOpciones(entNivelesOpciones(), f.uso || '', entNivelEtiqueta('', '📚 3 · Toda la galería'))}</select>
       </div>
+      ${entNivelesResumen()}
       <div class="mt-2 flex items-center justify-between">
         <span id="${prefijo}-count" class="text-xs text-slate-500"></span>
         <button class="btn btn-ghost btn-sm" onclick="entLimpiarFiltros()">Limpiar filtros</button>
@@ -662,6 +700,60 @@ function entBarraFiltros(prefijo = 'flt') {
 
 // El repintado conserva el foco y el cursor del buscador: sin esto, escribir
 // "press" repinta en cada letra y el cursor se va al inicio en la segunda.
+// ---------- Niveles de uso: ahora → antes → toda la galería ----------
+// Cuántos hay en cada nivel y cuántos de esos siguen sin video, para saber
+// exactamente cuánto falta (y empezar por lo que tus clientes ven hoy).
+function entNivelesCuenta() {
+  const todos = (_ent.ejercicios || []).filter(e => !e.archivado);
+  const sinVideo = (e) => (e.video_fuente || 'ninguno') === 'ninguno';
+  const de = (lista) => ({ n: lista.length, sin: lista.filter(sinVideo).length });
+  const ahora = _ent.enUso ? todos.filter(e => _ent.enUso.has(e.id)) : null;
+  const antes = _ent.enUso && _ent.usados ? todos.filter(e => _ent.usados.has(e.id) && !_ent.enUso.has(e.id)) : null;
+  return { clientes: ahora && de(ahora), antes: antes && de(antes), '': de(todos) };
+}
+
+function entNivelEtiqueta(nivel, texto) {
+  const c = entNivelesCuenta()[nivel];
+  return c ? `${texto} (${c.n})` : texto;
+}
+
+function entNivelesOpciones() {
+  return [
+    ['clientes', entNivelEtiqueta('clientes', '👥 1 · Los usan ahora')],
+    ['antes', entNivelEtiqueta('antes', '🕘 2 · Los usaron antes (hoy no)')],
+  ];
+}
+
+function entNivelesResumen() {
+  const c = entNivelesCuenta();
+  if (!c.clientes) return '';
+  const f = _ent.filtros;
+  const caja = (nivel, icono, titulo, x) => {
+    const marcado = (f.uso || '') === nivel && f.video === 'sin';
+    return `
+      <button type="button" data-nivel="${nivel}" onclick="entIrNivel('${nivel}')"
+              class="text-left rounded-lg border px-3 py-2 ${marcado ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'}"
+              title="Ver los que faltan de este nivel">
+        <div class="text-[11px] text-slate-500">${icono} ${titulo}</div>
+        <div class="text-sm"><b class="text-slate-900">${x.n}</b> ejercicios · <b class="${x.sin ? 'text-red-600' : 'text-green-600'}">${x.sin ? `${x.sin} sin video` : 'todos con video'}</b></div>
+      </button>`;
+  };
+  return `
+    <div class="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2" data-niveles>
+      ${caja('clientes', '👥', '1 · Los usan ahora', c.clientes)}
+      ${c.antes ? caja('antes', '🕘', '2 · Los usaron antes', c.antes) : ''}
+      ${caja('', '📚', '3 · Toda la galería', c[''])}
+    </div>`;
+}
+
+// Un clic en un nivel: ese nivel + «Sin video», lo que falta por buscar.
+window.entIrNivel = (nivel) => {
+  _ent.filtros.uso = nivel;
+  _ent.filtros.video = 'sin';
+  const repintar = _ent.tab === 'rutinas' && _ent.rutinaId ? entPintarConstructor : entVistaEjercicios;
+  repintar();
+};
+
 window.entSetFiltro = (k, v) => {
   _ent.filtros[k] = v;
   const activo = document.activeElement;
@@ -685,7 +777,8 @@ async function entVistaEjercicios() {
   const body = $('#ent-body');
   if (!body) return;
   const todos = await entDb.ejercicios();
-  if (_ent.filtros.uso) await entDb.ejerciciosEnUso();
+  // Los niveles de uso siempre: sus contadores dicen cuántos videos faltan.
+  await entDb.niveles();
   const lista = entFiltrar(todos);
   // Firmar solo las miniaturas que se van a ver, no toda la biblioteca.
   await entDb.firmarPosters(lista.map(e => e.poster_path).filter(Boolean));
