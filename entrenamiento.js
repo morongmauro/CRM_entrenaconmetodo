@@ -127,6 +127,43 @@ function entYoutubeId(url) {
 // Miniatura de YouTube sin costo ni request extra a la API.
 const entYoutubeThumb = (ref) => ref ? `https://i.ytimg.com/vi/${ref}/mqdefault.jpg` : null;
 
+// ─── La imagen del preview: una de las 4 que da YouTube ─────────────────
+// YouTube no deja sacar un cuadro de cualquier segundo: por video da la
+// portada y 3 cuadros automáticos (más o menos al 25 %, 50 % y 75 %). El
+// coach elige una y queda en `poster_url`. Se guarda el CUADRO, no solo la
+// URL: si después le cambias el video, se usa el mismo cuadro del video nuevo
+// (la app hace lo mismo en entrenoDatos.js › miniatura).
+const ENT_CUADROS_YT = [['mqdefault', 'Portada'], ['mq1', '¼ del video'], ['mq2', 'Mitad'], ['mq3', '¾ del video']];
+const entCuadroYt = (url) => (/^https:\/\/i\.ytimg\.com\/vi\/[^/]+\/(mqdefault|mq[123])\.jpg$/.exec(url || '') || [])[1] || null;
+const entUrlCuadro = (ref, cuadro) => ref && cuadro ? `https://i.ytimg.com/vi/${ref}/${cuadro}.jpg` : null;
+
+// Lo que se ve de preview en la galería, la rutina y la ficha.
+function entMiniatura(e) {
+  if (!e) return null;
+  const cuadro = entCuadroYt(e.poster_url);
+  if (e.poster_url && !cuadro) return e.poster_url;
+  if (e.video_fuente === 'youtube' && e.video_ref) return entUrlCuadro(e.video_ref, cuadro || 'mqdefault');
+  return e.poster_path ? _ent.posters[e.poster_path] : null;
+}
+
+// Las 4 imágenes para elegir. `accion` es la función que recibe el cuadro.
+function entHtmlCuadros(ref, elegido, accion) {
+  if (!ref) return '';
+  return `
+    <div class="grid grid-cols-4 gap-2" data-cuadros>
+      ${ENT_CUADROS_YT.map(([k, lab]) => `
+        <button type="button" data-cuadro="${k}" ${elegido === k ? 'data-elegido' : ''} onclick="${accion}('${k}')"
+                class="block rounded-lg overflow-hidden bg-slate-100 text-left"
+                style="border:2px solid ${elegido === k ? '#1D1D1F' : 'transparent'}" title="Usar esta imagen de preview">
+          <img src="${entUrlCuadro(ref, k)}" class="w-full object-cover" style="aspect-ratio:16/9" alt="" loading="lazy">
+          <span class="block text-[11px] text-center py-0.5 ${elegido === k ? 'font-bold text-slate-900' : 'text-slate-500'}">${lab}${elegido === k ? ' ✓' : ''}</span>
+        </button>`).join('')}
+    </div>
+    <div class="text-[11px] text-slate-400 mt-1">${elegido
+      ? 'Esta es la que se ve en la galería, en la rutina y en la app del cliente. Tócala otra vez para volver a la automática.'
+      : 'Sin elegir: se usa la automática (en la app nueva, la de la mitad). YouTube solo da estas 4.'}</div>`;
+}
+
 // URL firmada para un video subido a Storage. El bucket es privado, así que
 // el material no queda indexable; la firma dura una hora.
 async function entVideoFirmado(path) {
@@ -261,8 +298,7 @@ const entDb = {
     const { data: clis } = await sb.from('clientes').select('id, estado');
     const activos = new Set((clis || []).filter(c => String(c.estado || 'activo').toLowerCase() === 'activo').map(c => c.id));
     const { data: fases } = await sb.from('fases')
-      .select('id, cliente_id, estado, fecha_inicio, semanas, visible_cliente, orden, created_at')
-      .not('cliente_id', 'is', null);
+      .select('id, cliente_id, estado, fecha_inicio, semanas, visible_cliente, orden, created_at');
     const hoy = fmt.hoy();
     const porCli = new Map();
     (fases || []).filter(f => activos.has(f.cliente_id) && f.estado !== 'archivada')
@@ -561,9 +597,7 @@ function entTarjetaEjercicio(e, opts = {}) {
   // El preview sale del video que TENGA el ejercicio: la miniatura de
   // YouTube, o el fotograma capturado al subir el archivo. `poster_url` gana
   // si algún día quieres poner una imagen a mano.
-  const thumb = e.poster_url
-    || (e.video_fuente === 'youtube' ? entYoutubeThumb(e.video_ref) : null)
-    || (e.poster_path ? _ent.posters[e.poster_path] : null);
+  const thumb = entMiniatura(e);
   return `
     <div class="card card-hover p-3">
       <div class="flex gap-3">
@@ -685,9 +719,7 @@ window.entVerFicha = async (id) => {
   if (!e) return toast('No encuentro ese ejercicio');
   await entDb.musculos();   // llena _ent.musculos para los nombres del dibujo
 
-  const thumb = e.poster_url
-    || (e.video_fuente === 'youtube' ? entYoutubeThumb(e.video_ref) : null)
-    || (e.poster_path ? _ent.posters[e.poster_path] : null);
+  const thumb = entMiniatura(e);
   const claves = e.claves_tecnicas || [];
   const figura = typeof figuraMusculos === 'function'
     ? figuraMusculos({
@@ -853,6 +885,8 @@ window.entEditarEjercicio = async (id) => {
     path: e.video_path || '',
     poster: e.poster_path || '',
     inicio: e.video_inicio_seg || '',
+    cuadro: entCuadroYt(e.poster_url),
+    posterPropio: e.poster_url && !entCuadroYt(e.poster_url) ? e.poster_url : null,
   };
   entPintarPanelVideo();
 };
@@ -905,7 +939,8 @@ function entPintarPanelVideo() {
       </div>
       <div class="mt-2"><label>Empezar en el segundo (opcional)</label>
         <input id="ej-video-inicio" type="number" min="0" value="${escapeHtml(String(v.inicio || ''))}" placeholder="0"></div>
-      ${ref ? `<img src="${entYoutubeThumb(ref)}" class="mt-2 rounded-lg w-48" alt="">` : ''}
+      <div class="mt-3"><label>Imagen del preview</label>
+        <div id="ej-cuadros">${ref ? entHtmlCuadros(ref, v.cuadro, 'entElegirCuadro') : '<div class="text-[11px] text-slate-400">Pega el link y aquí eliges la imagen.</div>'}</div></div>
     `;
   } else if (v.fuente === 'archivo') {
     panel.innerHTML = `
@@ -933,10 +968,21 @@ function entPintarPanelVideo() {
   }
 }
 
+// Solo se repinta la fila de imágenes: repintar el panel entero borraría el
+// segundo de inicio que estés escribiendo.
+window.entElegirCuadro = (k) => {
+  const v = _ent._video;
+  v.cuadro = v.cuadro === k ? null : k;
+  const caja = $('#ej-cuadros');
+  if (caja) caja.innerHTML = entHtmlCuadros(v.ref || entYoutubeId(v.url), v.cuadro, 'entElegirCuadro');
+};
+
 window.entValidarYoutube = (url) => {
   const v = _ent._video;
   v.url = url;
   v.ref = entYoutubeId(url) || '';
+  const cuadros = $('#ej-cuadros');
+  if (cuadros) cuadros.innerHTML = v.ref ? entHtmlCuadros(v.ref, v.cuadro, 'entElegirCuadro') : '<div class="text-[11px] text-slate-400">Pega el link y aquí eliges la imagen.</div>';
   const ini = typeof entYoutubeInicio === 'function' ? entYoutubeInicio(url) : null;
   if (ini != null && $('#ej-video-inicio')) $('#ej-video-inicio').value = ini;
   const est = $('#ej-yt-estado');
@@ -1054,6 +1100,8 @@ window.entGuardarEjercicio = async (id) => {
     video_path: v.fuente === 'archivo' ? (v.path || null) : null,
     poster_path: v.fuente === 'archivo' ? (v.poster || null) : null,
     video_inicio_seg: v.fuente === 'youtube' ? (Number(val('#ej-video-inicio')) || null) : null,
+    // La imagen del preview elegida (YouTube) o la que ya tuviera puesta a mano.
+    poster_url: v.fuente === 'youtube' && v.cuadro ? entUrlCuadro(v.ref, v.cuadro) : (v.posterPropio || null),
     updated_at: new Date().toISOString(),
   };
 

@@ -45,7 +45,7 @@ window.DB = {
 };
 function consulta(tabla){
   const q = { filtros:[], _row:null,
-    select(){return q;}, order(){return q;},
+    select(){return q;}, order(){return q;}, range(){return q;},
     eq(c,v){ q.filtros.push([c,v]); return q; },
     in(c,vs){ q.filtros.push([c,(x)=>vs.includes(x)]); return q; },
     update(row){ q._row=row; return q; },

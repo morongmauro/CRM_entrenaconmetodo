@@ -160,6 +160,8 @@ function entPintarVideoRapido() {
         <div>
           <div class="sec-title">Video actual</div>
           ${bloqueActual}
+          ${actual ? `<div class="mt-2"><div class="text-[11px] font-bold text-slate-600 mb-1">Imagen del preview</div>
+            <div id="vr-cuadros">${entHtmlCuadros(actual, entCuadroYt(e.poster_url), 'entVrCuadro')}</div></div>` : ''}
           ${previo ? `<button class="btn btn-ghost btn-sm mt-2" onclick="entDeshacerVideo()">↩ Volver al que tenía antes</button>` : ''}
         </div>
         <div>
@@ -188,6 +190,21 @@ function entPintarVideoRapido() {
      <button class="btn btn-ghost" onclick="entCerrarVideoRapido()">Cerrar</button>`
   ), { wide: true });
 }
+
+// Elegir la imagen del preview aquí mismo: se guarda al tocarla. Solo toca
+// `poster_url` (no es cambiar el video, así que no lleva la marca de elegido).
+window.entVrCuadro = async (k) => {
+  const id = _vid.cola[_vid.pos];
+  const e = (_ent.ejercicios || []).find(x => x.id === id);
+  if (!e || e.video_fuente !== 'youtube' || !e.video_ref) return;
+  const nuevo = entCuadroYt(e.poster_url) === k ? null : entUrlCuadro(e.video_ref, k);
+  const { error } = await sb.from('ejercicios').update({ poster_url: nuevo, updated_at: new Date().toISOString() }).eq('id', id);
+  if (error) return toast(error.message);
+  e.poster_url = nuevo;
+  const caja = $('#vr-cuadros');
+  if (caja) caja.innerHTML = entHtmlCuadros(e.video_ref, entCuadroYt(nuevo), 'entVrCuadro');
+  toast(nuevo ? '✓ Imagen del preview guardada' : 'Vuelve a la imagen automática');
+};
 
 window.entVrValidar = (url) => {
   const ref = entYoutubeId(url), ini = entYoutubeInicio(url);
