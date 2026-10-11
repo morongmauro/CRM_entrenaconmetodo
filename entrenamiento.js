@@ -486,6 +486,7 @@ routes.entrenamiento = async () => {
     ['ejercicios', '🏋️ Ejercicios'],
     ['rutinas', '📋 Rutinas'],
     ['clientes', '👥 Clientes'],
+    ['ciclos', '🗓️ Ciclos'],
   ];
 
   view.innerHTML = `
@@ -493,6 +494,8 @@ routes.entrenamiento = async () => {
       <h2 class="text-xl font-bold text-slate-900">Entrenamiento</h2>
       <p class="text-sm text-slate-500">Arma la galería de ejercicios, construye rutinas y asígnalas por fases.</p>
     </div>
+    <!-- Aviso de ciclos por vencer (ciclos-vencen.js); vacío si no hay nada. -->
+    ${_ent.tab !== 'ciclos' ? '<div id="cic-aviso"></div>' : ''}
     <div class="flex gap-2 mb-5 overflow-x-auto pb-1">
       ${tabs.map(([id, lab]) => `
         <button class="chip ${_ent.tab === id ? 'active' : ''}" onclick="entTab('${id}')">${lab}</button>
@@ -501,8 +504,10 @@ routes.entrenamiento = async () => {
     <div id="ent-body"></div>
   `;
 
+  if (typeof cicAviso === 'function' && _ent.tab !== 'ciclos') cicAviso('cic-aviso');
   if (_ent.tab === 'ejercicios') await entVistaEjercicios();
   else if (_ent.tab === 'rutinas') await entVistaRutinas();
+  else if (_ent.tab === 'ciclos' && typeof cicVista === 'function') await cicVista();
   else await entVistaClientes();
 };
 

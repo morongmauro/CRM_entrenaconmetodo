@@ -3216,6 +3216,8 @@ routes.dashboard = async () => {
       <p class="text-sm text-slate-500">${new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })} · semana ${semana.split('-W')[1]} · 1 USD = COP ${_settings.usd_cop_rate.toLocaleString('es-CO')}</p>
     </div>
 
+    <!-- Ciclos por vencer (ciclos-vencen.js) -->
+    <div id="cic-aviso-inicio"></div>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
       <div class="card">
         <div class="flex items-center justify-between mb-2"><span class="text-xs font-semibold text-slate-500 uppercase">Activos</span><span class="text-lg">👥</span></div>
@@ -3345,6 +3347,7 @@ routes.dashboard = async () => {
 
     </div>
   `;
+  if (typeof cicAviso === 'function') cicAviso('cic-aviso-inicio');
 };
 
 // ═══════════════════════════════════════════════════════════════════════
