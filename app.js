@@ -229,16 +229,16 @@ async function fetchRemindersMT(mtId) {
   if (mtApiBase()) {
     const res = await mtApiGet(`/api/coach-data?action=reminders&user_id=${encodeURIComponent(mtId)}`);
     if (res && Array.isArray(res.reminders)) {
-      return { list: res.reminders, device: { pwa: res.pwa_installed_at || null, push: res.push_enabled_at || null, upd: res.mt_updated_at || null } };
+      return { list: res.reminders, device: { pwa: res.pwa_installed_at || null, push: res.push_enabled_at || null, upd: res.mt_updated_at || null, pwaNueva: res.pwa_nueva_at || null } };
     }
   }
   const mt = mtClient();
   if (mt) {
     const { data: row } = await mt.from('user_data')
-      .select('rem:data->coach_reminders,pwa:data->pwa_installed_at,push:data->push_enabled_at,upd:updated_at')
+      .select('rem:data->coach_reminders,pwa:data->pwa_installed_at,push:data->push_enabled_at,pwaNueva:data->pwa_nueva_at,upd:updated_at')
       .eq('user_id', mtId).maybeSingle();
     if (row && Array.isArray(row.rem)) {
-      return { list: row.rem, device: { pwa: row.pwa || null, push: row.push || null, upd: row.upd || null } };
+      return { list: row.rem, device: { pwa: row.pwa || null, push: row.push || null, upd: row.upd || null, pwaNueva: row.pwaNueva || null } };
     }
   }
   return { list: [], device: null };
@@ -274,6 +274,7 @@ function renderRemindersMT() {
     } else {
       const d = _mtRem.device;
       dev.innerHTML = [
+        d.pwaNueva ? `<span class="tag" style="background:#dbeafe;color:#1e40af" title="Tiene la app NUEVA (entrenaconmetodoapp) en su pantalla de inicio desde el ${fmt.fecha(String(d.pwaNueva).slice(0, 10))}">✨ app nueva instalada</span>` : '',
         d.pwa
           ? `<span class="tag tag-green" title="Abrió la app instalada (pantalla de inicio) el ${fmt.fecha(String(d.pwa).slice(0, 10))}">📲 instalada</span>`
           : `<span class="tag" style="background:#f1f5f9;color:#94a3b8" title="Aún no ha abierto la app desde la pantalla de inicio — quizás no la ha agregado">sin instalar</span>`,
@@ -6271,15 +6272,15 @@ async function fetchInstalacionesMT() {
   if (mtApiBase()) {
     const res = await mtApiGet('/api/coach-data?action=list');
     if (res && Array.isArray(res.clients)) {
-      filas = res.clients.map(c => ({ name: c.name, pwa: c.pwa_installed_at || null, push: c.push_enabled_at || null, nueva: c.app_nueva_at || null }));
+      filas = res.clients.map(c => ({ name: c.name, pwa: c.pwa_installed_at || null, push: c.push_enabled_at || null, nueva: c.app_nueva_at || null, pwaNueva: c.pwa_nueva_at || null }));
     }
   }
   // Modo directo (anon key)
   if (!filas) {
     const mt = mtClient();
     if (mt) {
-      const { data } = await mt.from('user_data').select('name,pwa:data->pwa_installed_at,push:data->push_enabled_at,nueva:data->app_nueva_at');
-      if (Array.isArray(data)) filas = data.map(r => ({ name: r.name, pwa: r.pwa || null, push: r.push || null, nueva: r.nueva || null }));
+      const { data } = await mt.from('user_data').select('name,pwa:data->pwa_installed_at,push:data->push_enabled_at,nueva:data->app_nueva_at,pwaNueva:data->pwa_nueva_at');
+      if (Array.isArray(data)) filas = data.map(r => ({ name: r.name, pwa: r.pwa || null, push: r.push || null, nueva: r.nueva || null, pwaNueva: r.pwaNueva || null }));
     }
   }
   if (!filas) return null;
@@ -6290,8 +6291,9 @@ async function fetchInstalacionesMT() {
     const n = normalizeName(f.name || '');
     if (!n) continue;
     const prev = porNombre.get(n);
-    if (!prev) { porNombre.set(n, { pwa: f.pwa, push: f.push, nueva: f.nueva }); continue; }
+    if (!prev) { porNombre.set(n, { pwa: f.pwa, push: f.push, nueva: f.nueva, pwaNueva: f.pwaNueva }); continue; }
     if (f.nueva && (!prev.nueva || String(f.nueva) < String(prev.nueva))) prev.nueva = f.nueva;
+    if (f.pwaNueva && (!prev.pwaNueva || String(f.pwaNueva) < String(prev.pwaNueva))) prev.pwaNueva = f.pwaNueva;
     if (f.pwa && (!prev.pwa || String(f.pwa) < String(prev.pwa))) prev.pwa = f.pwa;
     if (f.push && (!prev.push || String(f.push) < String(prev.push))) prev.push = f.push;
   }
@@ -6314,16 +6316,37 @@ async function cargarPanelInstalaciones(clientes) {
     return;
   }
   const conApp = [], sinApp = [], enNueva = [], sinMudar = [];
+  // La cuenta de la APP NUEVA (entrenaconmetodoapp): instalada en la pantalla
+  // de inicio desde ahí / la abrió pero no la instaló / sigue en la vieja.
+  const nuevaInstalada = [], nuevaSinInstalar = [];
   for (const c of clientes) {
     const d = mapa.get(normalizeName(c.nombre || ''));
-    if (d && d.pwa) conApp.push({ c, pwa: d.pwa, push: d.push, nueva: d.nueva });
+    if (d && d.pwa) conApp.push({ c, pwa: d.pwa, push: d.push, nueva: d.nueva, pwaNueva: d.pwaNueva });
     else sinApp.push(c);
     if (d && d.nueva) enNueva.push(c); else sinMudar.push(c);
+    if (d && d.pwaNueva) nuevaInstalada.push({ c, f: d.pwaNueva, push: d.push });
+    else if (d && d.nueva) nuevaSinInstalar.push({ c, f: d.nueva });
   }
   conApp.sort((a, b) => String(b.pwa).localeCompare(String(a.pwa)));
+  nuevaInstalada.sort((a, b) => String(b.f).localeCompare(String(a.f)));
+  const nombres = (l) => l.map(x => `<span class="cursor-pointer hover:underline" onclick="verCliente('${(x.c || x).id}')">${escapeHtml((x.c || x).nombre)}</span>`).join(' · ');
   el2.innerHTML = `
-    <div class="text-xs text-slate-500 mb-2">${conApp.length} de ${clientes.length} clientes ya abrieron la app desde su pantalla de inicio.</div>
-    <div data-app-nueva class="text-xs text-slate-500 mb-2">✨ <span class="font-semibold text-slate-600">${enNueva.length} de ${clientes.length}</span> ya se pasaron a la app nueva${enNueva.length && sinMudar.length ? ` · <span class="text-slate-400">faltan: ${sinMudar.map(c => escapeHtml(c.nombre)).join(' · ')}</span>` : ''}.</div>
+    <div data-app-nueva-panel class="rounded-xl border border-blue-100 bg-blue-50/50 p-3 mb-3">
+      <div class="text-sm font-bold text-slate-800">✨ App nueva (entrenaconmetodoapp) en su pantalla de inicio:
+        <span data-cuenta-app-nueva class="text-blue-700">${nuevaInstalada.length} de ${clientes.length}</span></div>
+      ${nuevaInstalada.length ? `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 mt-2">
+        ${nuevaInstalada.map(({ c, f, push }) => `
+          <div class="flex items-center gap-2 text-xs bg-white border border-blue-100 rounded-lg px-2 py-1.5 cursor-pointer" onclick="verCliente('${c.id}')" title="La abrió instalada desde la dirección nueva el ${fmt.fecha(String(f).slice(0, 10))}">
+            <span class="flex-1 min-w-0 font-medium text-slate-700 truncate">📲 ${escapeHtml(c.nombre)}</span>
+            <span class="text-slate-400 flex-shrink-0">${fmt.fechaCorta(String(f).slice(0, 10))}</span>
+            ${push ? '<span class="flex-shrink-0" title="Recordatorios push activados">🔔</span>' : '<span class="flex-shrink-0 opacity-40" title="Sin recordatorios push">🔕</span>'}
+          </div>`).join('')}
+      </div>` : ''}
+      ${nuevaSinInstalar.length ? `<div data-app-nueva-sin-instalar class="text-xs text-slate-600 mt-2"><span class="font-semibold">Abrieron la app nueva pero aún no la instalan (${nuevaSinInstalar.length}):</span> ${nombres(nuevaSinInstalar)}</div>` : ''}
+      ${sinMudar.length ? `<div data-app-vieja class="text-xs text-slate-500 mt-1"><span class="font-semibold">Siguen en la app vieja (${sinMudar.length}):</span> ${nombres(sinMudar)}</div>` : ''}
+      <div class="text-[11px] text-slate-400 mt-2">Se actualiza solo: cada cliente cuenta en cuanto abre la app nueva desde su pantalla de inicio (quien ya la tenía instalada, al abrirla la próxima vez).</div>
+    </div>
+    <div class="text-xs text-slate-500 mb-2">${conApp.length} de ${clientes.length} clientes han abierto alguna vez la app desde su pantalla de inicio (vieja o nueva).</div>
     ${conApp.length ? `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
       ${conApp.map(({ c, pwa, push, nueva }) => `
         <div class="flex items-center gap-2 text-xs bg-emerald-50/60 border border-emerald-100 rounded-lg px-2 py-1.5 cursor-pointer" onclick="verCliente('${c.id}')" title="Abrió la app instalada por primera vez el ${fmt.fecha(String(pwa).slice(0, 10))}">
