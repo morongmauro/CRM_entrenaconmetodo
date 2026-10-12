@@ -1972,6 +1972,20 @@ function actBono(s) {
   return Math.min(ACT_TOPE, dias * 2);
 }
 
+// Lo que el coach le programó (cardio, caminata, deporte) y no marcó, en días
+// que ya pasaron: resta POQUITO. −0,5 cada uno, máximo −5. Hacerlo suma de 1 a
+// 3 por día (tope +10): siempre suma más de lo que resta. Lo cuenta solo la
+// semana automática (actividad_extra._coach, mealtracker/api/_semana.js);
+// las semanas viejas no lo traen y no cambian. La misma regla de la app
+// (penalSinMarcar en mealtracker/api/_actividad.js).
+const ACT_PENAL_PUNTO = 0.5, ACT_PENAL_TOPE = 5;
+function actPenal(s) {
+  const c = actParse(s?.actividad_extra)?._coach;
+  if (!c) return 0;
+  const faltan = Math.max(0, (Number(c.programadas) || 0) - (Number(c.hechas) || 0));
+  return Math.min(ACT_PENAL_TOPE, faltan * ACT_PENAL_PUNTO);
+}
+
 // El campo puede llegar como objeto (jsonb) o como texto, según por dónde
 // entre. Se acepta lo que venga y se ignora lo que no se entienda.
 function actParse(v) {
@@ -2000,7 +2014,7 @@ function calcScores(s, cliente) {
   const scoreFuerza = pctSafe(s.fuerza_ejecutados, s.fuerza_planeados);
   const bonoComp = actBono(s);
   let score_entreno = null;
-  if (scoreFuerza !== null) score_entreno = Math.min(100, scoreFuerza + bonoComp);
+  if (scoreFuerza !== null) score_entreno = Math.max(0, Math.min(100, scoreFuerza + bonoComp - actPenal(s)));
   else if (s.cardio_planeados) score_entreno = pctSafe(s.cardio_ejecutados, s.cardio_planeados); // semanas viejas sin dato de fuerza
 
   // Alimentación metas
@@ -4943,6 +4957,7 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
   window._segPrev = semanaPrev;
   window._segCliente = cliente;
   window._segId = s.id || null;
+  window._segCoach = actParse(s.actividad_extra)?._coach || null;
   setTimeout(() => { recalcScores(); renderPendEditPreview(); renderPendCoachSeg(); }, 0);
   // Recordatorios visibles en la app del cliente (async, no bloquea el modal)
   cargarRemindersMT(cliente);
@@ -4970,6 +4985,10 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
 function leerActividadExtra() {
   const out = {};
   let algo = false;
+  // Lo del coach programado/marcado que trajo la semana automática se
+  // conserva al editarla a mano (es lo que resta poquito).
+  const coach = window._segCoach;
+  if (coach && coach.programadas) { out._coach = coach; algo = true; }
   ACTIVIDADES_EXTRA.forEach(a => {
     const el = $(`#sg-act-${a.id}`);
     const n = Math.max(0, Math.min(7, Number(el?.value) || 0));
@@ -5003,7 +5022,8 @@ window.recalcScores = () => {
   const cLabel = $('#sg-c-pct');
   if (cLabel) {
     const tope = bono >= ACT_TOPE ? ' (tope)' : '';
-    cLabel.textContent = bono ? `+${bono} pts${tope}` : '';
+    const penal = actPenal(seg);
+    cLabel.textContent = [bono ? `+${bono} pts${tope}` : '', penal ? `−${penal} sin marcar` : ''].filter(Boolean).join(' · ');
   }
 
   const card = (titulo, valor, color) => `
