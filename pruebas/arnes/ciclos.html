@@ -18,6 +18,7 @@ function modalShell(t,b,f=''){return `<h3>${t}</h3><div>${b}</div><div class="pi
 // Lecturas de movimientos, sesiones y actividades: una cadena falsa que filtra por igualdad.
 window.TABLAS = { rutina_movimientos: [], sesiones: [], actividades: [] };
 function cadena(t){ const f=[]; const q={ select(){return q;}, eq(c,v){f.push(r=>r[c]===v);return q;}, gte(c,v){f.push(r=>r[c]>=v);return q;}, lte(c,v){f.push(r=>r[c]<=v);return q;}, order(){return q;},
+  maybeSingle(){ return Promise.resolve({data:(TABLAS[t]||[]).filter(r=>f.every(g=>g(r)))[0]||null,error:null}); },
   insert(rows){ (TABLAS[t] = TABLAS[t] || []).push(...[].concat(rows).map((r,i)=>({ id: 'nuevo'+(TABLAS[t].length+i), ...r }))); return Promise.resolve({ data: null, error: null }); },
   then(a,b){ return Promise.resolve({data:(TABLAS[t]||[]).filter(r=>f.every(g=>g(r))),error:null}).then(a,b);} }; return q; }
 const sb = { from: cadena };

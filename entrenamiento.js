@@ -3492,12 +3492,13 @@ window.entConfirmarCopiarRutina = async (rutinaId) => {
   routes.entrenamiento();
 };
 
-// Copiar una fase COMPLETA (con todas sus rutinas) a otro cliente.
+// Copiar una fase COMPLETA a otro cliente: rutinas con sus días, y el
+// cardio, deportes y eventos del calendario (entreno-ciclos.js, cicloCopiarAOtro).
 window.entCopiarFaseA = async (faseId) => {
-  openModal(modalShell('Copiar fase completa a…', `
+  openModal(modalShell('Copiar ciclo completo a…', `
     <p class="text-sm text-slate-600 mb-3">
-      Se copian la fase y <b>todas sus rutinas</b>. No se copia el historial:
-      las sesiones ya entrenadas siguen siendo del cliente original.
+      Se copia el ciclo como se ve en el calendario: las rutinas de fuerza con sus días,
+      y el cardio y los deportes con los suyos. Queda en <b>borrador</b> para que lo revises.
     </p>
     <div class="mb-3"><label>Cliente destino</label>
       <select id="cf-cliente">
@@ -3508,42 +3509,46 @@ window.entCopiarFaseA = async (faseId) => {
       <div><label>Fecha de inicio</label><input id="cf-inicio" type="date"></div>
       <div><label>Nombre nuevo (opcional)</label><input id="cf-nombre" placeholder="Igual que la original"></div>
     </div>
+    <div id="cp-previa"></div>
   `, `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-primary" onclick="entConfirmarCopiarFase('${faseId}')">Copiar fase</button>`));
+      <button class="btn btn-primary" onclick="entConfirmarCopiarFase('${faseId}')">Copiar ciclo</button>`), { wide: true });
+  cicloPrevia(faseId);
 };
 
 window.entConfirmarCopiarFase = async (faseId) => {
-  const nueva = await entDb.copiarFase(
+  const aviso = await cicloCopiarAOtro(
     faseId,
     $('#cf-cliente')?.value || null,
     $('#cf-inicio')?.value || null,
     $('#cf-nombre')?.value.trim() || null,
   );
-  if (!nueva) return;
+  if (!aviso) return;
   closeModal();
-  toast('✓ Fase copiada');
+  toast(aviso);
   entVistaClientes();
 };
 
-// Importar hacia ESTE cliente: el mismo copiar_fase, pero mirado al revés —
-// eliges de quién traerla en vez de a quién mandarla. Es como se piensa al
-// armar el proceso de alguien nuevo.
+// Importar hacia ESTE cliente: lo mismo, pero mirado al revés — eliges de
+// quién traerlo en vez de a quién mandarlo. Es como se piensa al armar el
+// proceso de alguien nuevo.
 window.entImportarFase = async () => {
   const clientes = (await db.clientes.list()).filter(c => c.id !== _ent.clienteId);
-  openModal(modalShell('Importar fase de otro cliente', `
-    <p class="text-sm text-slate-600 mb-3">Trae una fase con todas sus rutinas hacia este cliente.</p>
+  openModal(modalShell('Importar ciclo de otro cliente', `
+    <p class="text-sm text-slate-600 mb-3">Trae un ciclo como se ve en su calendario: las rutinas de fuerza con sus días,
+      y el cardio y los deportes con los suyos. Queda en <b>borrador</b> para que lo revises.</p>
     <div class="mb-3"><label>Traer de</label>
       <select id="if-cliente" onchange="entCargarFasesOrigen(this.value)">
         <option value="">— Plantillas de fase —</option>
         ${clientes.map(c => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join('')}
       </select></div>
-    <div class="mb-3"><label>Fase</label><select id="if-fase"><option value="">Elige primero el origen</option></select></div>
+    <div class="mb-3"><label>Ciclo</label><select id="if-fase" onchange="cicloPrevia(this.value)"><option value="">Elige primero el origen</option></select></div>
     <div class="grid grid-cols-2 gap-3">
       <div><label>Fecha de inicio</label><input id="if-inicio" type="date"></div>
       <div><label>Nombre nuevo (opcional)</label><input id="if-nombre" placeholder="Igual que la original"></div>
     </div>
+    <div id="cp-previa"></div>
   `, `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-primary" onclick="entConfirmarImportar()">Importar</button>`));
+      <button class="btn btn-primary" onclick="entConfirmarImportar()">Importar</button>`), { wide: true });
   entCargarFasesOrigen('');
 };
 
@@ -3554,19 +3559,20 @@ window.entCargarFasesOrigen = async (clienteId) => {
   sel.innerHTML = fases.length
     ? fases.map(f => `<option value="${f.id}">${escapeHtml(f.nombre)} · ${f.semanas || '?'} sem</option>`).join('')
     : '<option value="">— no hay fases ahí —</option>';
+  cicloPrevia(sel.value || null);
 };
 
 window.entConfirmarImportar = async () => {
   const faseId = $('#if-fase')?.value;
-  if (!faseId) { toast('Elige una fase para importar'); return; }
-  const nueva = await entDb.copiarFase(
+  if (!faseId) { toast('Elige un ciclo para importar'); return; }
+  const aviso = await cicloCopiarAOtro(
     faseId, _ent.clienteId,
     $('#if-inicio')?.value || null,
     $('#if-nombre')?.value.trim() || null,
   );
-  if (!nueva) return;
+  if (!aviso) return;
   closeModal();
-  toast('✓ Fase importada');
+  toast(aviso);
   entVistaClientes();
 };
 
