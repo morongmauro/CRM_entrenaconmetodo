@@ -25,7 +25,7 @@
 
 // ---------- Estado de la sección ----------
 const _ent = {
-  tab: 'ejercicios',
+  tab: 'clientes',
   // Galería
   ejercicios: null,
   musculos: null,          // se lee de la tabla `musculos`: una sola fuente
@@ -545,7 +545,7 @@ const entDb = {
 // Al refrescar la página se vuelve al mismo sitio de Entrenamiento: la
 // pestaña, el cliente y su ciclo, el mes del calendario y la rutina que
 // estaba abierta en el constructor. Solo en esta pestaña del navegador.
-const ENT_RECORDAR = ['tab', 'clienteId', 'subtab', 'faseId', 'rutinaId', 'rutinaAbierta', 'mes', 'mesa'];
+const ENT_RECORDAR = ['tab', 'clienteId', 'subtab', 'faseId', 'rutinaId', 'rutinaAbierta', 'mes', 'mesa', 'volver'];
 function entGuardarEstado() {
   try { sessionStorage.setItem('crm:ent', JSON.stringify(Object.fromEntries(ENT_RECORDAR.map(k => [k, _ent[k] ?? null])))); } catch (e) {}
 }
@@ -562,23 +562,28 @@ routes.entrenamiento = async () => {
   cargando('Cargando entrenamiento…');
   await entDb.musculos();
 
+  // Todo empieza por el cliente: ahí están su calendario, sus rutinas y sus
+  // ciclos. Lo demás son herramientas: qué ciclos vencen, las plantillas y
+  // la galería para corregir ejercicios.
   const tabs = [
-    ['ejercicios', '🏋️ Ejercicios'],
-    ['rutinas', '📋 Rutinas'],
     ['clientes', '👥 Clientes'],
-    ['ciclos', '🗓️ Ciclos'],
+    ['ciclos', '🗓️ Ciclos por vencer'],
+    ['rutinas', '📋 Plantillas de rutinas'],
+    ['ejercicios', '🏋️ Galería de ejercicios'],
   ];
+  // Editando la rutina de un cliente, la pestaña que se ve es la del cliente.
+  const pestana = _ent.rutinaId && _ent.volver && _ent.volver.tab === 'clientes' ? 'clientes' : _ent.tab;
 
   view.innerHTML = `
     <div class="mb-4">
       <h2 class="text-xl font-bold text-slate-900">Entrenamiento</h2>
-      <p class="text-sm text-slate-500">Arma la galería de ejercicios, construye rutinas y asígnalas por fases.</p>
+      <p class="text-sm text-slate-500">Elige un cliente y arma ahí su calendario, sus rutinas y sus ciclos.</p>
     </div>
     <!-- Aviso de ciclos por vencer (ciclos-vencen.js); vacío si no hay nada. -->
     ${_ent.tab !== 'ciclos' ? '<div id="cic-aviso"></div>' : ''}
     <div class="flex gap-2 mb-5 overflow-x-auto pb-1">
       ${tabs.map(([id, lab]) => `
-        <button class="chip ${_ent.tab === id ? 'active' : ''}" onclick="entTab('${id}')">${lab}</button>
+        <button class="chip ${pestana === id ? 'active' : ''}" data-ent-tab="${id}" onclick="entTab('${id}')">${lab}</button>
       `).join('')}
     </div>
     <div id="ent-body"></div>
@@ -591,7 +596,13 @@ routes.entrenamiento = async () => {
   else await entVistaClientes();
 };
 
-window.entTab = (t) => { _ent.tab = t; routes.entrenamiento(); };
+window.entTab = (t) => {
+  // Salir de una rutina abierta al cambiar de pestaña (si no, «Clientes»
+  // volvería a abrir el constructor).
+  if (_ent.rutinaId) { _ent.rutinaId = null; _ent.rutina = null; _ent.volver = null; }
+  _ent.tab = t;
+  routes.entrenamiento();
+};
 
 // =====================================================
 // PESTAÑA 1 · GALERÍA DE EJERCICIOS
@@ -1383,6 +1394,14 @@ window.entArchivarEjercicio = async (id) => {
 // PESTAÑA 2 · RUTINAS (biblioteca + constructor)
 // =====================================================
 
+// Unir o separar plantillas de la biblioteca (lo nuevo queda como plantilla).
+window.entMezclaPlantillas = async () => {
+  const plantillas = await entDb.plantillas();
+  openModal(modalShell('Unir o separar plantillas', '<div id="mz-modal"></div>',
+    '<button class="btn btn-secondary" onclick="closeModal(); routes.entrenamiento()">Cerrar</button>'), { wide: true });
+  if (typeof mzAbrir === 'function') mzAbrir({ caja: '#mz-modal', fuentes: plantillas, faseId: null, clienteId: null });
+};
+
 async function entVistaRutinas() {
   if (_ent.rutinaId) return entPintarConstructor();
 
@@ -1396,7 +1415,10 @@ async function entVistaRutinas() {
         <div class="text-sm font-bold text-slate-700">Biblioteca de rutinas</div>
         <div class="text-xs text-slate-500">Plantillas reutilizables. Se copian a la fase de un cliente sin perder el original.</div>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="entNuevaRutina()">+ Nueva rutina</button>
+      <div class="flex gap-1 flex-wrap">
+        ${plantillas.length > 1 ? '<button class="btn btn-secondary btn-sm" data-mezcla-plantillas onclick="entMezclaPlantillas()">🔀 Unir o separar</button>' : ''}
+        <button class="btn btn-primary btn-sm" onclick="entNuevaRutina()">+ Nueva rutina</button>
+      </div>
     </div>
     ${plantillas.length === 0 ? `
       <div class="card text-center text-slate-500 py-8">
@@ -1459,11 +1481,12 @@ window.entCrearRutina = async (faseId, clienteId) => {
   });
   if (!r) return;
   closeModal();
-  _ent.tab = 'rutinas';
   entAbrirConstructor(r.id);
 };
 
 window.entAbrirConstructor = async (id) => {
+  // Desde un cliente, «Volver» regresa a ese cliente (a la misma subpestaña).
+  if (!_ent.rutinaId) _ent.volver = _ent.tab === 'clientes' && _ent.clienteId ? { tab: 'clientes', subtab: _ent.subtab } : null;
   _ent.rutinaId = id;
   _ent.tab = 'rutinas';
   // Desde otra sección (la ficha del cliente, el inicio): se entra a
@@ -1492,6 +1515,7 @@ window.entCerrarConstructor = () => {
   _ent.rutinaId = null;
   _ent.rutina = null;
   _ent.bloqueDestino = '';
+  if (_ent.volver) { _ent.tab = _ent.volver.tab; if (_ent.volver.subtab) _ent.subtab = _ent.volver.subtab; _ent.volver = null; }
   routes.entrenamiento();
 };
 
@@ -1697,7 +1721,7 @@ function entCabConstructorHTML(r) {
     <div class="card mb-4">
       <div class="flex justify-between items-start gap-3 flex-wrap">
         <div class="min-w-0">
-          <button class="btn btn-ghost btn-sm mb-1" onclick="entCerrarConstructor()">← Volver</button>
+          <button class="btn btn-ghost btn-sm mb-1" data-volver onclick="entCerrarConstructor()">← ${_ent.volver && _ent.volver.tab === 'clientes' ? 'Volver al cliente' : 'Volver'}</button>
           <div class="font-bold text-lg text-slate-900">${escapeHtml(r.nombre)}</div>
           <div class="text-xs text-slate-500">${_ent.consContexto || ''} · ${r.ejercicios.length} ejercicio${r.ejercicios.length === 1 ? '' : 's'}</div>
           ${entTiempoCabHTML(r)}
@@ -1769,6 +1793,7 @@ function entTarjetaCons(e) {
         <div class="min-w-0 whitespace-nowrap">${entIconoVideo(e)}</div>
         <div class="flex gap-1 flex-shrink-0">
           <button class="btn btn-ghost btn-sm" onclick="entVerFicha('${e.id}')" title="Ver la ficha">👁</button>
+          <button class="btn btn-ghost btn-sm" data-editar-ej onclick="entEditarEjercicio('${e.id}')" title="Editar el ejercicio (nombre, video, músculos, descripción) sin salir de la rutina">✎</button>
           <button class="btn btn-primary btn-sm" onclick="entAgregarARutina('${e.id}')">+ Añadir</button>
         </div>
       </div>
@@ -2575,17 +2600,28 @@ async function entVistaClientes() {
     || (_ent.clienteId && c.id === _ent.clienteId));
 
   if (!_ent.clienteId) {
+    // El estado del ciclo de cada uno (ciclos-vencen.js): lo urgente primero.
+    let estado = {};
+    try { if (typeof cicDatos === 'function') estado = Object.fromEntries((await cicDatos()).map(f => [f.cliente.id, f])); } catch (e) {}
+    const peso = (c) => (estado[c.id] ? estado[c.id].orden : 9);
+    const lista = clientes.slice().sort((a, b) => peso(a) - peso(b) || String(a.nombre).localeCompare(String(b.nombre)));
     body.innerHTML = `
-      <div class="text-sm text-slate-600 mb-3">Elige un cliente para ver y armar sus fases de entrenamiento.</div>
+      <div class="text-sm text-slate-600 mb-3">Elige un cliente: ahí armas su calendario, sus rutinas y sus ciclos. Arriba, los que necesitan algo.</div>
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-        ${clientes.map(c => `
-          <div class="card card-hover cursor-pointer" onclick="entVerCliente('${c.id}')">
+        ${lista.map(c => {
+          const e = estado[c.id];
+          const t = e && typeof CIC_TONO !== 'undefined' ? CIC_TONO[e.tono] : null;
+          return `
+          <div class="card card-hover cursor-pointer" data-cliente-ent="${c.id}" onclick="entVerCliente('${c.id}')">
             <div class="font-bold text-slate-900">${escapeHtml(c.nombre)}</div>
             <div class="text-xs text-slate-500">
               ${c.objetivo ? escapeHtml(c.objetivo) : 'Sin objetivo definido'}
               ${(c.dias_entreno || []).length ? ` · ${c.dias_entreno.join(' ')}` : ''}
             </div>
-          </div>`).join('')}
+            ${e && t ? `<div class="text-xs font-semibold mt-1.5 flex items-center gap-1.5" style="color:${t.tinta}" data-ciclo-tono="${e.tono}">
+              <span style="width:8px;height:8px;border-radius:99px;background:${t.punto};flex:none"></span>${escapeHtml(e.texto)}</div>` : ''}
+          </div>`;
+        }).join('')}
       </div>
       ${clientes.length === 0 ? '<div class="card text-center text-slate-500 py-8">No hay clientes activos.</div>' : ''}
     `;
@@ -2633,6 +2669,25 @@ async function entVistaClientes() {
       </div>
     </div>`;
 
+  // Su ciclo: si vence pronto, ya venció o no está enviado, se dice aquí
+  // arriba con el botón para resolverlo (ciclos-vencen.js).
+  let avisoCiclo = '';
+  try {
+    if (typeof cicEstado === 'function' && typeof CIC_TONO !== 'undefined') {
+      const e = cicEstado(fases.filter(f => f.estado !== 'archivada'), fmt.hoy());
+      if (e.tono === 'rojo' || e.tono === 'ambar') {
+        const t = CIC_TONO[e.tono];
+        const base = e.actual || e.ultima;
+        const boton = e.accion === 'Envíaselo' && (e.siguiente && !e.siguiente.visible_cliente ? e.siguiente : e.actual)
+          ? `<button class="btn btn-primary btn-sm" onclick="entEnviarFase('${(e.siguiente && !e.siguiente.visible_cliente ? e.siguiente : e.actual).id}')">📤 Envíaselo</button>`
+          : e.accion === 'Arma el siguiente' && base ? `<button class="btn btn-primary btn-sm" onclick="entDuplicarCiclo('${base.id}')">⧉ Arma el siguiente</button>` : '';
+        avisoCiclo = `<div class="rounded-2xl border p-3 mb-3 flex items-center gap-3 flex-wrap" data-aviso-ciclo-cliente style="background:${t.fondo};border-color:${t.punto}55">
+          <span style="width:10px;height:10px;border-radius:99px;background:${t.punto};flex:none"></span>
+          <span class="flex-1 min-w-0 text-sm font-semibold" style="color:${t.tinta}">${escapeHtml(e.texto)}</span>${boton}</div>`;
+      }
+    }
+  } catch (err) { avisoCiclo = ''; }
+
   if (fases.length === 0) {
     body.innerHTML = cabecera + `
       <div class="card text-center text-slate-500 py-8">
@@ -2659,10 +2714,11 @@ async function entVistaClientes() {
     ['rutinas', `📋 Rutinas${rutinas.length ? ` (${rutinas.length})` : ''}`],
     ['sesiones', '✅ Lo que entrenó'],
     ['lecturas', '🔎 Lecturas'],
-    ['fases', '🗂️ Fases'],
+    ['fases', '🗂️ Ciclos'],
+    ['mezcla', '🔀 Unir y separar'],
   ];
 
-  body.innerHTML = cabecera + selectorFase + `
+  body.innerHTML = cabecera + avisoCiclo + selectorFase + `
     <div class="bg-slate-100 rounded-xl p-1 flex gap-1 mb-4 overflow-x-auto">
       ${subtabs.map(([id, lab]) => `
         <button class="px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap ${_ent.subtab === id ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}"
@@ -2672,6 +2728,7 @@ async function entVistaClientes() {
       : _ent.subtab === 'rutinas'  ? entListaRutinasHTML(fase, rutinas, ejerciciosPorRutina)
       : _ent.subtab === 'sesiones' ? '<div id="ent-sesiones" class="card text-sm text-slate-400">Leyendo lo que registró…</div>'
       : _ent.subtab === 'lecturas' ? '<div id="ent-lecturas" class="card text-sm text-slate-400">Calculando…</div>'
+      : _ent.subtab === 'mezcla' ? '<div id="ent-mezcla"></div>'
       : fases.map(f => entTarjetaFase(f, rutinasPorFase[f.id] || [])).join('')}
 
     <!-- El agente de rutinas se monta aquí si asistente-rutinas.js está
@@ -2683,6 +2740,7 @@ async function entVistaClientes() {
   if (_ent.subtab === 'calendario') entPintarCalendario(cliente, fase, rutinas, ejerciciosPorRutina);
   if (_ent.subtab === 'sesiones') entPintarSesiones(cliente);
   if (_ent.subtab === 'lecturas') entPintarLecturas(cliente);
+  if (_ent.subtab === 'mezcla' && typeof mzAbrir === 'function') mzAbrir({ caja: '#ent-mezcla', fuentes: rutinas, faseId: fase?.id || null, clienteId: cliente?.id || null });
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -3467,7 +3525,7 @@ function entListaRutinasHTML(fase, rutinas, ejerciciosPorRutina) {
       </div>`;
   }
 
-  return rutinas.map(r => {
+  return (rutinas.length > 1 ? `<div class="flex justify-end mb-2"><button class="btn btn-ghost btn-sm" data-ir-mezcla onclick="entSubtab('mezcla')" title="Push + Pull → Upper, Upper + Lower → Full Body, o al revés">🔀 Unir o separar rutinas</button></div>` : '') + rutinas.map(r => {
     const ejs = ejerciciosPorRutina[r.id] || [];
     const abierta = _ent.rutinaAbierta === r.id;
     const series = ejs.reduce((a, e) => a + (e.series || 0), 0);
