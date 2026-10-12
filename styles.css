@@ -743,3 +743,14 @@ summary.list-none { list-style: none; }
 
 /* Calendario del CRM: lo que el cliente ya marcó de lo que le pusiste */
 .ent-chip-hecho { color: #2F7F45; font-weight: 800; }
+
+/* La ✕ de cada actividad del calendario: aparece al pasar por encima (en
+   teléfono, siempre) y quita solo ese día. */
+.ent-chip-evento { position: relative; cursor: grab; }
+.ent-chip-quitar {
+  margin-left: auto; flex: none; border: 0; background: transparent; color: #94a3b8;
+  font-size: 0.6rem; line-height: 1; padding: 0 0.1rem; cursor: pointer; opacity: 0;
+}
+.ent-chip-evento:hover .ent-chip-quitar, .ent-chip-quitar:focus-visible { opacity: 1; }
+.ent-chip-quitar:hover { color: #dc2626; }
+@media (hover: none) { .ent-chip-quitar { opacity: 1; } }

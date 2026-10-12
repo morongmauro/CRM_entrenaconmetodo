@@ -83,19 +83,26 @@ const evtColor = (e) => e.color || (EVT_TIPOS.find(x => x[0] === e.tipo) || EVT_
 // este archivo no se haya subido, y tenerlas de este lado hacía que un solo
 // archivo que faltara se llevara por delante toda la sección.
 
+// Días quitados a mano de un evento que se repite (`fechas_excluidas`,
+// carga/migracion-eventos-excluir.sql). Sin la columna, ninguno.
+const evtQuitados = (ev) => new Set((ev?.fechas_excluidas || []).map(f => String(f).slice(0, 10)));
+
 // En qué días concretos cae un evento. Espejo de `evento_fechas` en SQL.
 function evtFechasDe(ev, fase) {
   if (ev.fecha) return [String(ev.fecha).slice(0, 10)];
   const dias = ev.dias_semana || [];
   if (!dias.length || !fase?.fecha_inicio || !fase?.semanas) return [];
 
+  // Los días que le quitaste (o moviste) a la serie no cuentan.
+  const quitados = evtQuitados(ev);
   const fechas = [];
   for (let semana = 1; semana <= fase.semanas; semana++) {
     if (ev.semanas && ev.semanas.length && !ev.semanas.includes(semana)) continue;
     for (const codigo of dias) {
       const off = EVT_CODIGO_DIA.indexOf(codigo);
       if (off < 0) continue;
-      fechas.push(evtSumarDias(fase.fecha_inicio, (semana - 1) * 7 + off));
+      const f = evtSumarDias(fase.fecha_inicio, (semana - 1) * 7 + off);
+      if (!quitados.has(f)) fechas.push(f);
     }
   }
   return fechas.sort();
@@ -144,7 +151,58 @@ const evtDb = {
     if (error) { toast(error.message); return false; }
     return true;
   },
+  async crearVarios(rows) {
+    if (!rows.length) return [];
+    const { data, error } = await sb.from('eventos').insert(rows).select();
+    if (error) { toast(error.message); return null; }
+    return data || [];
+  },
+  // Que un evento que se repite deje de caer en esos días. La fila (y lo que
+  // el cliente ya marcó) se queda; solo se apunta qué días no van.
+  async quitarDias(ev, fechas) {
+    const lista = [...new Set([...evtQuitados(ev), ...fechas])].sort();
+    const { error } = await sb.from('eventos').update({ fechas_excluidas: lista }).eq('id', ev.id);
+    if (error) {
+      toast(/fechas_excluidas/.test(error.message || '')
+        ? 'Para quitar un solo día de algo que se repite falta correr carga/migracion-eventos-excluir.sql en Supabase'
+        : error.message);
+      return false;
+    }
+    ev.fechas_excluidas = lista;
+    return true;
+  },
 };
+
+// ¿Ya lo marcó el cliente ese día? Lo que marcó es su historial: no se borra.
+const evtHecho = (ev, fecha) => !!(typeof _ent !== 'undefined' && _ent.eventosHechos && _ent.eventosHechos.has(`${ev.id}:${fecha}`));
+const evtMarcados = (ev) => (typeof _ent !== 'undefined' && _ent.eventosHechos)
+  ? [..._ent.eventosHechos].filter(k => k.startsWith(ev.id + ':')).map(k => k.slice(ev.id.length + 1)) : [];
+const evtRepite = (ev) => !ev.fecha && (ev.dias_semana || []).length > 0;
+
+// Quitar UN día de un evento: si es de un solo día se borra la fila; si se
+// repite, ese día deja de caer. Devuelve 'ok' | 'hecho' | 'error'.
+async function evtQuitarUnDia(ev, fecha) {
+  if (evtHecho(ev, fecha)) return 'hecho';
+  if (!evtRepite(ev)) return (await evtDb.borrar(ev.id)) ? 'ok' : 'error';
+  return (await evtDb.quitarDias(ev, [fecha])) ? 'ok' : 'error';
+}
+
+// Copia de un evento para otro día (lo que se mueve de una serie).
+const evtCopiaDia = (ev, fecha, fase) => ({
+  cliente_id: ev.cliente_id, fase_id: ev.fase_id || fase?.id || null, tipo: ev.tipo, titulo: ev.titulo,
+  detalle: ev.detalle ?? null, hora: ev.hora ?? null, duracion_min: ev.duracion_min ?? null, color: ev.color ?? null,
+  visible_cliente: ev.visible_cliente ?? null, fecha, dias_semana: [], semanas: null,
+});
+
+// Mover UN día: el de un solo día cambia de fecha; el de una serie sale de
+// ese día y queda como evento suelto en el nuevo.
+async function evtMoverUnDia(ev, desde, hasta, fase) {
+  if (desde === hasta) return 'igual';
+  if (evtHecho(ev, desde)) return 'hecho';
+  if (!evtRepite(ev)) return (await evtDb.actualizar(ev.id, { fecha: hasta })) ? 'ok' : 'error';
+  if (!(await evtDb.quitarDias(ev, [desde]))) return 'error';
+  return (await evtDb.crear(evtCopiaDia(ev, hasta, fase))) ? 'ok' : 'error';
+}
 
 // =====================================================
 // EDITOR
@@ -161,7 +219,8 @@ window.evtEditar = (ev, ctx) => {
   const esNuevo = !e.id;
   const fase = ctx.fase;
   const repite = !e.fecha && (e.dias_semana || []).length > 0;
-  const modo = esNuevo ? (fase ? 'repite' : 'fecha') : (repite ? 'repite' : 'fecha');
+  // Si se abre desde un día concreto, arranca en «un solo día» con esa fecha.
+  const modo = esNuevo ? (fase && !e.fecha ? 'repite' : 'fecha') : (repite ? 'repite' : 'fecha');
 
   openModal(modalShell(esNuevo ? 'Nuevo evento' : 'Editar evento', `
     <div class="grid md:grid-cols-2 gap-3 mb-3">
@@ -350,12 +409,202 @@ window.evtGuardar = async (id) => {
 };
 
 window.evtBorrar = async (id) => {
-  if (!confirm('¿Borrar este evento del calendario?')) return;
   const ctx = _evt.ctx || {};
-  if (!(await evtDb.borrar(id))) return;
+  const ev = (typeof _ent !== 'undefined' && _ent.eventosCache || []).find(x => x.id === id) || { id };
+  const marcados = evtMarcados(ev);
+  if (marcados.length && evtRepite(ev)) {
+    // Borrar la fila se llevaría lo que ya marcó. Se quitan los días que
+    // faltan y lo hecho se queda en su historial.
+    if (!confirm(`Ya marcó ${marcados.length} día(s) de «${ev.titulo}». Se quitan los días que faltan (desde hoy) y lo que hizo se conserva. ¿Seguir?`)) return;
+    const fases = Object.fromEntries((_ent.fases || []).map(f => [f.id, f]));
+    const hoy = fmt.hoy();
+    const quedan = evtFechasDe(ev, fases[ev.fase_id] || ctx.fase).filter(f => f >= hoy && !marcados.includes(f));
+    if (!(await evtDb.quitarDias(ev, quedan))) return;
+  } else if (marcados.length) {
+    return toast('Ese día ya lo marcó como hecho: queda en su historial');
+  } else {
+    if (!confirm(evtRepite(ev) ? `¿Borrar «${ev.titulo}» de TODOS sus días?` : '¿Borrar este evento del calendario?')) return;
+    if (!(await evtDb.borrar(id))) return;
+  }
   closeModal();
   toast('Evento borrado');
   ctx.alGuardar?.();
 };
 
 window.evtNuevo = (ctx, prefill = {}) => evtEditar(prefill, ctx);
+
+// =====================================================
+// EN LOTE · añadir o quitar actividades entre dos fechas
+// =====================================================
+// «Caminata de lunes a viernes del 13 al 31.» «Quita las caminatas de la
+// semana que está de viaje.» Se elige qué, entre qué fechas y qué días de la
+// semana; antes de hacer nada dice cuántos días toca.
+//
+// Al añadir, si las fechas son semanas enteras de la fase, se guarda como UN
+// evento que se repite (así «Copiar este ciclo» lo lleva al siguiente); si
+// no, un evento por día. Al quitar, lo que el cliente ya marcó no se toca.
+const _lote = { accion: 'agregar' };
+
+const evtRango = (desde, hasta, dias) => {
+  const out = [];
+  if (!desde || !hasta || desde > hasta) return out;
+  for (let f = desde; f <= hasta && out.length < 400; f = evtSumarDias(f, 1)) {
+    if (dias.includes(evtCodigoDe(f))) out.push(f);
+  }
+  return out;
+};
+
+window.evtLote = (ctx, accion = 'agregar') => {
+  const fase = ctx.fase;
+  const fin = fase?.fecha_inicio && fase?.semanas ? evtSumarDias(fase.fecha_inicio, fase.semanas * 7 - 1) : '';
+  const hoy = fmt.hoy();
+  const desde = fase?.fecha_inicio && fase.fecha_inicio > hoy ? fase.fecha_inicio : hoy;
+  // Lo que ya tiene puesto, para elegir qué quitar.
+  const titulos = [...new Set((ctx.eventos || []).filter(e => e.tipo === 'actividad').map(e => e.titulo))].sort();
+  const otros = [...new Set((ctx.eventos || []).filter(e => e.tipo !== 'actividad').map(e => e.titulo))].sort();
+  _lote.ctx = ctx;
+  _lote.accion = accion;
+  openModal(modalShell('Actividades en lote', `
+    <div class="flex gap-2 mb-3" data-lote-accion>
+      <button type="button" class="chip ${accion === 'agregar' ? 'active' : ''}" data-lote="agregar" onclick="evtLoteAccion('agregar')">＋ Añadir</button>
+      <button type="button" class="chip ${accion === 'quitar' ? 'active' : ''}" data-lote="quitar" onclick="evtLoteAccion('quitar')">✕ Quitar</button>
+    </div>
+
+    <div id="lote-agregar" class="${accion === 'agregar' ? '' : 'hidden'}">
+      <input type="hidden" id="ev-tipo" value="actividad">
+      <div class="mb-2"><label>Qué actividad *</label>
+        <input id="ev-titulo" placeholder="Caminata" oninput="evtLoteVista()"></div>
+      <div id="ev-catalogo" class="mb-3"></div>
+      <div class="grid grid-cols-2 gap-3 mb-3">
+        <div><label>Duración (min)</label><input id="lote-duracion" type="number" min="0"></div>
+        <div><label>Hora (opcional)</label><input id="lote-hora" type="time"></div>
+      </div>
+      <div class="mb-3"><label>Detalle (lo lee el cliente)</label>
+        <textarea id="lote-detalle" rows="2" placeholder="Ritmo suave, 30 min"></textarea></div>
+    </div>
+
+    <div id="lote-quitar" class="${accion === 'quitar' ? '' : 'hidden'} mb-3">
+      <label>Qué quitar</label>
+      <select id="lote-que" onchange="evtLoteVista()">
+        <option value="*act">Todo el cardio y los deportes</option>
+        ${titulos.map(t => `<option value="t:${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('')}
+        ${otros.length ? `<optgroup label="Otros eventos">${otros.map(t => `<option value="t:${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('')}</optgroup>` : ''}
+      </select>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3 mb-2">
+      <div><label>Desde</label><input id="lote-desde" type="date" value="${desde}" onchange="evtLoteVista()"></div>
+      <div><label>Hasta</label><input id="lote-hasta" type="date" value="${fin || ''}" onchange="evtLoteVista()"></div>
+    </div>
+    <label>Qué días de la semana</label>
+    <div class="flex flex-wrap gap-1 mt-1 mb-3">
+      ${ENT_DIAS.map(([id, lab]) => `
+        <label class="tag-pill cursor-pointer"><input type="checkbox" class="lote-dia" value="${id}" checked onchange="evtLoteVista()"
+               style="margin-right:3px;vertical-align:middle">${lab}</label>`).join('')}
+    </div>
+    <div id="lote-vista" class="text-sm rounded-lg px-3 py-2" style="background:#f1f5f9;color:#334155"></div>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-primary" id="lote-ok" onclick="evtLoteHacer()">Hacer</button>
+  `));
+  evtPintarCatalogo();
+  // Al tocar una actividad del catálogo se actualiza también el resumen.
+  $('#ev-catalogo')?.addEventListener('click', () => setTimeout(evtLoteVista, 0));
+  evtLoteVista();
+};
+
+window.evtLoteAccion = (a) => {
+  _lote.accion = a;
+  $$('[data-lote]').forEach(b => b.classList.toggle('active', b.dataset.lote === a));
+  $('#lote-agregar')?.classList.toggle('hidden', a !== 'agregar');
+  $('#lote-quitar')?.classList.toggle('hidden', a !== 'quitar');
+  evtLoteVista();
+};
+
+// Qué va a pasar, antes de hacerlo.
+function evtLotePlan() {
+  const ctx = _lote.ctx || {};
+  const dias = $$('.lote-dia:checked').map(i => i.value);
+  const desde = $('#lote-desde')?.value, hasta = $('#lote-hasta')?.value;
+  const fechas = evtRango(desde, hasta, dias);
+  if (_lote.accion === 'agregar') return { fechas, dias, desde, hasta };
+  const que = $('#lote-que')?.value || '*act';
+  const fasesPorId = Object.fromEntries((ctx.fases || [ctx.fase]).filter(Boolean).map(f => [f.id, f]));
+  const enRango = new Set(fechas);
+  const quitar = [], marcados = [];
+  (ctx.eventos || []).filter(ev => que === '*act' ? ev.tipo === 'actividad' : ev.titulo === que.slice(2)).forEach(ev => {
+    const suyas = evtFechasDe(ev, fasesPorId[ev.fase_id]).filter(f => enRango.has(f));
+    const libres = suyas.filter(f => !evtHecho(ev, f));
+    if (suyas.length - libres.length) marcados.push(...suyas.filter(f => evtHecho(ev, f)));
+    if (libres.length) quitar.push({ ev, fechas: libres });
+  });
+  return { fechas, dias, desde, hasta, quitar, marcados, total: quitar.reduce((a, x) => a + x.fechas.length, 0) };
+}
+
+window.evtLoteVista = () => {
+  const caja = $('#lote-vista');
+  if (!caja) return;
+  const pl = evtLotePlan();
+  const corto = (f) => fmt.fechaCorta ? fmt.fechaCorta(f) : f;
+  if (_lote.accion === 'agregar') {
+    const t = ($('#ev-titulo')?.value || '').trim();
+    caja.innerHTML = pl.fechas.length
+      ? `Se añade <b>${escapeHtml(t || 'la actividad')}</b> en <b>${pl.fechas.length} día(s)</b>, del ${corto(pl.fechas[0])} al ${corto(pl.fechas.at(-1))}. Lo que ya tenga esos días se queda.`
+      : 'Elige fechas y días: no cae ningún día.';
+  } else {
+    caja.innerHTML = pl.total
+      ? `Se quitan <b>${pl.total} día(s)</b> (${pl.quitar.map(x => escapeHtml(x.ev.titulo)).filter((v, i, a) => a.indexOf(v) === i).join(', ')}).`
+        + (pl.marcados.length ? ` <span class="text-slate-500">${pl.marcados.length} que ya marcó como hechos se quedan.</span>` : '')
+      : 'No hay nada que quitar con esos filtros.' + (pl.marcados.length ? ` (${pl.marcados.length} día(s) ya los marcó: se quedan.)` : '');
+  }
+};
+
+window.evtLoteHacer = async () => {
+  const ctx = _lote.ctx || {};
+  const pl = evtLotePlan();
+  const btn = $('#lote-ok'); if (btn) btn.disabled = true;
+  try {
+    if (_lote.accion === 'agregar') {
+      const titulo = ($('#ev-titulo')?.value || '').trim();
+      if (!titulo) return toast('Elige o escribe la actividad');
+      if (!pl.fechas.length) return toast('Con esas fechas y días no cae ningún día');
+      const base = {
+        cliente_id: ctx.clienteId, tipo: 'actividad', titulo,
+        detalle: $('#lote-detalle')?.value.trim() || null, hora: $('#lote-hora')?.value || null,
+        duracion_min: $('#lote-duracion')?.value ? Number($('#lote-duracion').value) : null, visible_cliente: null,
+      };
+      const rows = evtLoteFilas(base, pl, ctx.fase, ctx.fases || []);
+      const hechos = await evtDb.crearVarios(rows);
+      if (!hechos) return;
+      toast(`${titulo}: ${pl.fechas.length} día(s) añadidos`);
+    } else {
+      if (!pl.total) return toast('No hay nada que quitar con esos filtros');
+      let n = 0;
+      for (const { ev, fechas } of pl.quitar) {
+        if (!evtRepite(ev)) { if (await evtDb.borrar(ev.id)) n += 1; continue; }
+        if (await evtDb.quitarDias(ev, fechas)) n += fechas.length; else return;
+      }
+      toast(`${n} día(s) quitados` + (pl.marcados.length ? ` · ${pl.marcados.length} ya marcados se quedan` : ''));
+    }
+    closeModal();
+    ctx.alGuardar?.();
+  } finally { if (btn) btn.disabled = false; }
+};
+
+// Las filas a crear: UN evento que se repite si las fechas son exactamente
+// sus días en semanas de la fase; si no, uno por día.
+function evtLoteFilas(base, pl, fase, fases) {
+  if (fase?.fecha_inicio && fase?.semanas) {
+    const semanaDe = (f) => Math.floor((evtDia(f) - evtDia(fase.fecha_inicio)) / 86400000 / 7) + 1;
+    const dentro = pl.fechas.every(f => semanaDe(f) >= 1 && semanaDe(f) <= fase.semanas);
+    if (dentro) {
+      const semanas = [...new Set(pl.fechas.map(semanaDe))].sort((a, b) => a - b);
+      const prueba = { ...base, fase_id: fase.id, fecha: null, dias_semana: pl.dias.slice(),
+                       semanas: semanas.length === fase.semanas ? null : semanas };
+      const fechas = evtFechasDe(prueba, fase);
+      if (fechas.length === pl.fechas.length && fechas.every((f, i) => f === pl.fechas[i])) return [prueba];
+    }
+  }
+  const faseDe = (f) => (fases || []).find(x => x.fecha_inicio && x.semanas && f >= x.fecha_inicio && f <= evtSumarDias(x.fecha_inicio, x.semanas * 7 - 1));
+  return pl.fechas.map(f => ({ ...base, fase_id: (faseDe(f) || fase)?.id || null, fecha: f, dias_semana: [], semanas: null }));
+}

@@ -24,7 +24,7 @@ const ctxCrm = vm.createContext({ console });
 vm.runInContext(
   trozo(`${raiz}/entrenamiento.js`, '// ---------- Fechas, en local ----------',
                                     '// En qué semana de la fase estamos hoy')
-  + trozo(`${raiz}/eventos.js`, '// En qué días concretos cae un evento.',
+  + trozo(`${raiz}/eventos.js`, '// Días quitados a mano de un evento que se repite',
                                 '// =====================================================\n// CAPA DE DATOS')
   + '\nglobalThis.evtFechasDe = evtFechasDe;', ctxCrm);
 const evtFechasDe = ctxCrm.evtFechasDe;
@@ -49,6 +49,10 @@ const casos = [
    { id: 'e2', fase_id: fase.id, dias_semana: ['V'], semanas: [1, 4], visible_cliente: null }],
   ['Cita suelta', '33333333-0000-0000-0000-000000000003',
    { id: 'e3', fecha: '2026-10-20', visible_cliente: null }],
+  // Caminata L-V con tres días quitados desde el CRM (✕ o arrastre).
+  ['Caminata L-V sin el 7, el 16 y el 26', '33333333-0000-0000-0000-000000000004',
+   { id: 'e4', fase_id: fase.id, dias_semana: ['L', 'M', 'X', 'J', 'V'], semanas: null, visible_cliente: null,
+     fechas_excluidas: ['2026-10-07', '2026-10-16', '2026-10-26'] }],
 ];
 
 let fallos = 0;

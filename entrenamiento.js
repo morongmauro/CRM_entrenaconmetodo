@@ -2602,6 +2602,7 @@ function entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina, sesio
         </div>
         <div class="flex gap-1 flex-wrap min-w-0">
           <button class="btn btn-ghost btn-sm" onclick="entNuevaActividad()" data-cal-actividad title="Caminadora, caminata, natación, tenis… del mismo catálogo que usa tu cliente">+ Cardio o deporte</button>
+          <button class="btn btn-ghost btn-sm" onclick="entActividadesLote()" data-cal-lote title="Añadir o quitar cardio y deportes entre dos fechas, por días de la semana">☰ En lote</button>
           <button class="btn btn-ghost btn-sm" onclick="entNuevoEvento()">+ Evento</button>
           <button class="btn btn-ghost btn-sm" onclick="entDuplicarCiclo('${fase.id}')" data-cal-copiar title="Crea el ciclo siguiente con estas rutinas, sus días, y el cardio y deportes que se repiten">⧉ Copiar este ciclo al siguiente</button>
           <button class="btn btn-secondary btn-sm" onclick="entEditarFase('${fase.id}')">Editar fase</button>
@@ -2682,12 +2683,18 @@ function entCeldaDia(f, ctx) {
   }
 
   const evs = eventosPorFecha ? (eventosPorFecha[f] || []) : [];
+  // Un día puede tener varias actividades: cada una es su propio chip, se
+  // arrastra a otro día y se quita con su ✕ (solo ESE día si se repite).
   evs.forEach(ev => {
+    const hecho = _ent.eventosHechos && _ent.eventosHechos.has(`${ev.id}:${f}`);
     trozos.push(`
-      <div class="ent-chip ent-chip-evento" style="--evc:${evtColor(ev)}"
-           onclick="event.stopPropagation(); entEditarEvento('${ev.id}')"
-           title="${escapeHtml(evtLabel(ev.tipo))}${ev.detalle ? ' · ' + escapeHtml(ev.detalle) : ''}">
-        <span class="ent-chip-txt">${_ent.eventosHechos && _ent.eventosHechos.has(`${ev.id}:${f}`) ? '<span class="ent-chip-hecho" title="Lo marcó como hecho">✓</span> ' : ''}${ev.hora ? `${String(ev.hora).slice(0, 5)} ` : ''}${escapeHtml(ev.titulo)}</span>
+      <div class="ent-chip ent-chip-evento" style="--evc:${evtColor(ev)}" draggable="true" data-evento="${ev.id}"
+           ondragstart="entEvDragStart(event)" ondragend="entCalDragEnd(event)"
+           onclick="event.stopPropagation(); entDiaPanel('${f}')"
+           title="${escapeHtml(evtLabel(ev.tipo))}${ev.detalle ? ' · ' + escapeHtml(ev.detalle) : ''}&#10;Arrástrala a otro día para moverla">
+        <span class="ent-chip-txt">${hecho ? '<span class="ent-chip-hecho" title="Lo marcó como hecho">✓</span> ' : ''}${ev.hora ? `${String(ev.hora).slice(0, 5)} ` : ''}${escapeHtml(ev.titulo)}</span>
+        ${hecho ? '' : `<button type="button" class="ent-chip-quitar" data-quitar-evento="${ev.id}" title="Quitar de este día"
+                onclick="event.stopPropagation(); entQuitarEventoDia('${ev.id}', '${f}')">✕</button>`}
       </div>`);
   });
 
@@ -2704,8 +2711,8 @@ function entCeldaDia(f, ctx) {
   return `
     <div class="${clases.join(' ')}" data-fecha="${f}"
          ondragover="entCalDragOver(event)" ondrop="entCalDrop(event)"
-         onclick="entNuevoEvento('${f}')"
-         title="Clic para añadir un evento este día">
+         onclick="entDiaPanel('${f}')"
+         title="Clic para ver y añadir lo de este día">
       <div class="ent-celda-cab">
         <span class="ent-celda-num">${dia}</span>
         ${semana && codigo === 'L' ? `<span class="ent-celda-sem">S${semana}</span>` : ''}
@@ -2795,10 +2802,11 @@ window.entCalDragEnd = (e) => {
   document.querySelectorAll('.ent-celda-destino').forEach(c => c.classList.remove('ent-celda-destino'));
   _ent.arrastrando = null;
   _ent.arrastrandoDesde = null;
+  _ent.arrastrandoEv = null;
 };
 
 window.entCalDragOver = (e) => {
-  if (!_ent.arrastrando) return;
+  if (!_ent.arrastrando && !_ent.arrastrandoEv) return;
   const celda = e.target.closest('.ent-celda');
   if (!celda || celda.classList.contains('ent-celda-off')) return;
   e.preventDefault();                       // sin esto el navegador no deja soltar
@@ -2808,6 +2816,7 @@ window.entCalDragOver = (e) => {
 };
 
 window.entCalDrop = async (e) => {
+  if (_ent.arrastrandoEv) return entEvDrop(e);
   const id = _ent.arrastrando;
   const celda = e.target.closest('.ent-celda');
   if (!id || !celda || celda.classList.contains('ent-celda-off')) return;
@@ -2873,9 +2882,92 @@ function entCtxEvento() {
   return {
     clienteId: _ent.clienteId,
     fase: _ent.faseCache,
+    fases: _ent.fases || (_ent.faseCache ? [_ent.faseCache] : []),
+    eventos: _ent.eventosCache || [],
     alGuardar: () => { _ent.eventosCache = null; entVistaClientes(); },
   };
 }
+
+window.entActividadesLote = () => {
+  if (!_ent.clienteId) return;
+  evtLote(entCtxEvento());
+};
+
+// ---------- Arrastrar una actividad a otro día ----------
+// Mueve ESE día: si se repite, sale de ese día y queda suelta en el nuevo.
+window.entEvDragStart = (e) => {
+  const chip = e.currentTarget;
+  _ent.arrastrandoEv = { id: chip.dataset.evento, desde: chip.closest('.ent-celda')?.dataset.fecha };
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', chip.dataset.evento);
+  chip.classList.add('ent-chip-arrastre');
+  document.querySelector('.ent-mes')?.classList.add('ent-mes-arrastrando');
+  e.stopPropagation();
+};
+
+async function entEvDrop(e) {
+  const a = _ent.arrastrandoEv;
+  const celda = e.target.closest('.ent-celda');
+  _ent.arrastrandoEv = null;
+  if (!a || !celda || celda.classList.contains('ent-celda-off')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const ev = (_ent.eventosCache || []).find(x => x.id === a.id);
+  const hasta = celda.dataset.fecha;
+  if (!ev || !a.desde || a.desde === hasta) return;
+  const r = await evtMoverUnDia(ev, a.desde, hasta, _ent.faseCache);
+  if (r === 'hecho') return toast('Ese día ya lo marcó como hecho: no se mueve');
+  if (r !== 'ok') return;
+  toast(`${ev.titulo} → ${fmt.fechaCorta(hasta)}`);
+  _ent.eventosCache = null;
+  entVistaClientes();
+}
+
+window.entQuitarEventoDia = async (id, fecha) => {
+  const ev = (_ent.eventosCache || []).find(x => x.id === id);
+  if (!ev) return;
+  const r = await evtQuitarUnDia(ev, fecha);
+  if (r === 'hecho') return toast('Ese día ya lo marcó como hecho: queda en su historial');
+  if (r !== 'ok') return;
+  toast(`${ev.titulo}: quitado el ${fmt.fechaCorta(fecha)}`);
+  _ent.eventosCache = null;
+  if ($('#modal-content [data-dia-panel]')) closeModal();
+  entVistaClientes();
+};
+
+// ---------- Lo de un día ----------
+// Todo lo que cae ese día, cada cosa con su ✕, y desde aquí se añade OTRA
+// (tocar una actividad ya puesta abría su edición y era fácil cambiarla por
+// otra en vez de sumar).
+window.entDiaPanel = (fecha) => {
+  if (!_ent.clienteId) return;
+  const evs = (_ent.eventosPorFecha || {})[fecha] || [];
+  const rutina = document.querySelector(`.ent-celda[data-fecha="${fecha}"] .ent-chip-rutina .ent-chip-txt`)?.textContent || '';
+  const filas = evs.map(ev => {
+    const hecho = _ent.eventosHechos && _ent.eventosHechos.has(`${ev.id}:${fecha}`);
+    const repite = !ev.fecha && (ev.dias_semana || []).length;
+    return `
+      <div class="flex items-center gap-2 py-2 border-b border-slate-100" data-dia-evento="${ev.id}">
+        <span style="width:8px;height:8px;border-radius:99px;background:${evtColor(ev)};flex:none"></span>
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-semibold text-slate-800">${ev.hora ? `${String(ev.hora).slice(0, 5)} · ` : ''}${escapeHtml(ev.titulo)}${hecho ? ' <span class="text-emerald-700">✓ hecho</span>' : ''}</div>
+          <div class="text-xs text-slate-500">${escapeHtml(evtLabel(ev.tipo))}${ev.duracion_min ? ` · ${ev.duracion_min} min` : ''}${repite ? ` · se repite ${(ev.dias_semana || []).join(' ')}` : ' · solo este día'}</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="closeModal(); entEditarEvento('${ev.id}')">Editar</button>
+        ${hecho ? '' : `<button class="btn btn-ghost btn-sm text-red-600" data-dia-quitar="${ev.id}" onclick="entQuitarEventoDia('${ev.id}', '${fecha}')">✕ Quitar ${repite ? 'este día' : ''}</button>`}
+      </div>`;
+  }).join('');
+  openModal(modalShell(`${fmt.fechaCorta(fecha)}`, `
+    <div data-dia-panel="${fecha}">
+      ${rutina ? `<div class="text-xs text-slate-500 mb-2">Rutina: <b class="text-slate-700">${escapeHtml(rutina)}</b></div>` : ''}
+      ${filas || '<p class="text-sm text-slate-500 py-2">No tiene cardio, deportes ni eventos.</p>'}
+      <div class="flex gap-2 flex-wrap mt-3">
+        <button class="btn btn-primary btn-sm" data-dia-agregar onclick="closeModal(); entNuevaActividad('${fecha}')">+ ${evs.length ? 'Otra actividad' : 'Cardio o deporte'} este día</button>
+        <button class="btn btn-ghost btn-sm" onclick="closeModal(); entNuevoEvento('${fecha}')">+ Evento este día</button>
+      </div>
+    </div>
+  `, `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>`));
+};
 
 // ---------- La segunda pasada: sesiones y eventos ----------
 // El armazón ya está en pantalla; esto rellena lo que hubo que ir a buscar.
@@ -2915,6 +3007,7 @@ async function entPintarCalendario(cliente, fase, rutinas, ejerciciosPorRutina) 
   // otra fase que cae en este mes tiene que verse igual.
   const fasesPorId = Object.fromEntries((_ent.fases || [fase]).map(f => [f.id, f]));
   const eventosPorFecha = evtPorFecha(_ent.eventosCache, fasesPorId);
+  _ent.eventosPorFecha = eventosPorFecha;
 
   // Si `entVistaClientes` se repintó mientras esperábamos (otro cliente, otra
   // fase), esto ya no es la pantalla vigente y escribir aquí la pisaría.
