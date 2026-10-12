@@ -2572,7 +2572,7 @@ function openModal(html, opts = {}) {
   modalBox.style.maxWidth = opts.wide ? '64rem' : '42rem';
   modal.classList.remove('hidden');
 }
-function closeModal() { modal.classList.add('hidden'); modalContent.innerHTML = ''; _modalSeq++; }
+function closeModal() { modal.classList.add('hidden'); modalContent.innerHTML = ''; _modalSeq++; try { sessionStorage.removeItem('crm:fichaCliente'); } catch (e) {} }
 
 // ── Abrir el modal SIN esperar a la red ─────────────────────────────────
 // Antes, tocar la tarjeta de un cliente disparaba 6 consultas y no aparecía
@@ -2651,7 +2651,40 @@ async function checkSession() {
   errorLogin('');
   loginScreen.classList.add('hidden');
   appScreen.classList.remove('hidden');
-  navigate('dashboard');
+  await volverDondeEstaba();
+}
+
+// ---------- Al refrescar, quedarse donde estabas ----------
+// La sección, la posición de la página y la ficha de cliente abierta se
+// recuerdan en ESTA pestaña (sessionStorage: muere al cerrarla). Lo de dentro
+// de Entrenamiento (pestaña, cliente, rutina abierta…) lo recuerda
+// entrenamiento.js.
+const VISTA_KEY = 'crm:vista';
+function recordarVista() {
+  try {
+    sessionStorage.setItem(VISTA_KEY, JSON.stringify({ vista: _currentView, y: Math.round(window.scrollY || 0) }));
+  } catch (e) {}
+}
+window.addEventListener('pagehide', recordarVista);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') recordarVista(); });
+
+async function volverDondeEstaba() {
+  let g = null, cliente = null;
+  try { g = JSON.parse(sessionStorage.getItem(VISTA_KEY) || 'null'); } catch (e) {}
+  try { cliente = sessionStorage.getItem('crm:fichaCliente'); } catch (e) {}
+  // Las secciones (entrenamiento.js y las demás) cargan después de este
+  // archivo: con la sesión guardada, esto puede llegar antes de que existan.
+  if (document.readyState === 'loading') await new Promise(r => document.addEventListener('DOMContentLoaded', r, { once: true }));
+  const vista = g && routes[g.vista] ? g.vista : 'dashboard';
+  await navigate(vista);
+  // La página se pinta en dos pasadas (lo que tarda llega después): se
+  // vuelve a la misma altura cuando ya hay dónde.
+  if (g && g.y > 0 && vista === g.vista) {
+    [0, 350, 900, 1800].forEach(ms => setTimeout(() => {
+      if (_currentView === vista && Math.abs(window.scrollY - g.y) > 4) window.scrollTo({ top: g.y, behavior: 'instant' });
+    }, ms));
+  }
+  if (cliente && typeof window.verCliente === 'function') window.verCliente(cliente);
 }
 
 $('#login-form').addEventListener('submit', async (e) => {
@@ -3068,6 +3101,7 @@ async function correrVista() {
 
 async function navigate(name) {
   _currentView = routes[name] ? name : 'dashboard';
+  try { sessionStorage.setItem(VISTA_KEY, JSON.stringify({ vista: _currentView, y: 0 })); } catch (e) {}
   // La doble pantalla ensancha el marco: fuera de Seguimiento se quita.
   document.body.classList.toggle('split-on', _split.on && _currentView === 'seguimiento');
   $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === _currentView));
@@ -7403,6 +7437,8 @@ window.reiniciarClaveApp = async (id) => {
 };
 
 window.verCliente = async (id) => {
+  // Si refrescas con la ficha abierta, se vuelve a abrir (ver volverDondeEstaba).
+  try { sessionStorage.setItem('crm:fichaCliente', id); } catch (e) {}
   const _tok = abrirModalCargando('Cliente');
   const [c, segs, pends, pagos, meds, metas] = await Promise.all([
     db.clientes.get(id),

@@ -126,6 +126,10 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   await p.waitForTimeout(700);
   const ev = await p.evaluate(() => TABLAS_FALSAS.eventos.at(-1));
   ok(`${tag} · se guarda en el calendario del cliente (martes y jueves, del ciclo)`, ev && ev.tipo === 'actividad' && ev.titulo === 'Caminadora con inclinación' && JSON.stringify(ev.dias_semana) === '["M","J"]' && ev.duracion_min === 15 && ev.cliente_id === 'c0', JSON.stringify(ev));
+  // Cuando el cliente lo marca con «Ya lo hice» (actividad ligada al evento), el calendario del CRM lo muestra con ✓.
+  await p.evaluate((idEv) => { (TABLAS_FALSAS.actividades = TABLAS_FALSAS.actividades || []).push({ id: 'a-cc', cliente_id: 'c0', user_id: 'coach-1', fecha: '2026-10-06', tipo: 'cinta', evento_id: idEv }); return entVistaClientes(); }, ev.id);
+  await p.waitForTimeout(800);
+  ok(`${tag} · lo que el cliente marcó sale con ✓ en tu calendario`, await p.locator('#ent-cal .ent-chip-hecho').count() === 1);
   // Deporte de un solo día: Tenis
   await p.locator('[data-cal-actividad]').click();
   await p.waitForSelector('#ev-catalogo [data-ev-act]', { timeout: 5000 });
@@ -150,6 +154,17 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
       return getComputedStyle(e).position !== 'fixed';
     }).slice(0, 6).map(e => `${e.tagName}.${String(e.className).slice(0, 50)}#${e.id} ${Math.round(e.getBoundingClientRect().right)}`) }));
   ok(`${tag} · sin scroll de lado`, ancho_.sw <= ancho_.w + 1, JSON.stringify(ancho_));
+  // Refrescar la página: se queda en el calendario de este cliente.
+  await p.evaluate(() => closeModal());
+  await p.evaluate(() => window.scrollTo(0, 300));
+  await p.waitForTimeout(200);
+  if (process.env.DBG) console.log('ANTES', await p.evaluate(() => JSON.stringify({ s: sessionStorage.getItem('crm:vista'), v: document.querySelector('.nav-item.active')?.dataset.view })));
+  await p.reload();
+  if (process.env.DBG) { await p.waitForTimeout(3000); console.log('DESPUES', await p.evaluate(() => JSON.stringify({ s: sessionStorage.getItem('crm:vista'), v: document.querySelector('.nav-item.active')?.dataset.view }))); }
+  await p.locator('#app-screen').waitFor({ state: 'visible', timeout: 20000 });
+  await p.waitForSelector('[data-cal-actividad]', { timeout: 15000 }).catch(() => {});
+  const tras = await p.evaluate(() => ({ vista: document.querySelector('.nav-item.active')?.dataset.view, cli: _ent.clienteId, tab: _ent.tab, cal: !!document.querySelector('[data-cal-actividad]'), y: Math.round(scrollY) }));
+  ok(`${tag} · al refrescar se queda en Entrenamiento, en el calendario del mismo cliente`, tras.vista === 'entrenamiento' && tras.cli === 'c0' && tras.tab === 'clientes' && tras.cal, JSON.stringify(tras));
   ok(`${tag} · sin errores de JavaScript`, a.errores.length === 0, a.errores.join(' | '));
   await a.ctx.close();
 }

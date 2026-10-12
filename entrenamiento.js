@@ -515,6 +515,22 @@ const entDb = {
 // =====================================================
 // VISTA PRINCIPAL
 // =====================================================
+// Al refrescar la página se vuelve al mismo sitio de Entrenamiento: la
+// pestaña, el cliente y su ciclo, el mes del calendario y la rutina que
+// estaba abierta en el constructor. Solo en esta pestaña del navegador.
+const ENT_RECORDAR = ['tab', 'clienteId', 'subtab', 'faseId', 'rutinaId', 'rutinaAbierta', 'mes'];
+function entGuardarEstado() {
+  try { sessionStorage.setItem('crm:ent', JSON.stringify(Object.fromEntries(ENT_RECORDAR.map(k => [k, _ent[k] ?? null])))); } catch (e) {}
+}
+(function entRestaurarEstado() {
+  try {
+    const e = JSON.parse(sessionStorage.getItem('crm:ent') || 'null');
+    if (e) ENT_RECORDAR.forEach(k => { if (e[k] != null) _ent[k] = e[k]; });
+  } catch (err) {}
+})();
+window.addEventListener('pagehide', entGuardarEstado);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') entGuardarEstado(); });
+
 routes.entrenamiento = async () => {
   cargando('Cargando entrenamiento…');
   await entDb.musculos();
@@ -1418,6 +1434,9 @@ window.entCrearRutina = async (faseId, clienteId) => {
 window.entAbrirConstructor = async (id) => {
   _ent.rutinaId = id;
   _ent.tab = 'rutinas';
+  // Desde otra sección (la ficha del cliente, el inicio): se entra a
+  // Entrenamiento de verdad, para que el menú y el refresco sepan dónde estás.
+  if (typeof _currentView !== 'undefined' && _currentView !== 'entrenamiento') return navigate('entrenamiento');
   await routes.entrenamiento();
 };
 
@@ -2668,7 +2687,7 @@ function entCeldaDia(f, ctx) {
       <div class="ent-chip ent-chip-evento" style="--evc:${evtColor(ev)}"
            onclick="event.stopPropagation(); entEditarEvento('${ev.id}')"
            title="${escapeHtml(evtLabel(ev.tipo))}${ev.detalle ? ' · ' + escapeHtml(ev.detalle) : ''}">
-        <span class="ent-chip-txt">${ev.hora ? `${String(ev.hora).slice(0, 5)} ` : ''}${escapeHtml(ev.titulo)}</span>
+        <span class="ent-chip-txt">${_ent.eventosHechos && _ent.eventosHechos.has(`${ev.id}:${f}`) ? '<span class="ent-chip-hecho" title="Lo marcó como hecho">✓</span> ' : ''}${ev.hora ? `${String(ev.hora).slice(0, 5)} ` : ''}${escapeHtml(ev.titulo)}</span>
       </div>`);
   });
 
@@ -2865,12 +2884,28 @@ async function entPintarCalendario(cliente, fase, rutinas, ejerciciosPorRutina) 
   if (!caja || !fase) return;
 
   const desde = fase.fecha_inicio || null;
-  const [sesiones, eventos] = await Promise.all([
+  const [sesiones, eventos, registros, hechasAct] = await Promise.all([
     entDb.sesiones(cliente.id, { desde, limite: 400 }),
     evtDb.lista(cliente.id),
+    evtDb.registros(cliente.id, desde),
+    // El cardio y los deportes que marcó con «Ya lo hice» (actividades
+    // ligadas al evento). Sin la columna evento_id, no hay marcas.
+    (async () => {
+      try {
+        let q = sb.from('actividades').select('evento_id, fecha').eq('cliente_id', cliente.id).not('evento_id', 'is', null);
+        if (desde) q = q.gte('fecha', desde);
+        const { data, error } = await q;
+        return error ? [] : (data || []);
+      } catch (e) { return []; }
+    })(),
   ]);
 
   _ent.eventosCache = eventos || [];
+  // Lo que ya marcó de lo que le pusiste: «evento:fecha».
+  _ent.eventosHechos = new Set([
+    ...(registros || []).filter(r => r.estado === 'hecho').map(r => `${r.evento_id}:${String(r.fecha).slice(0, 10)}`),
+    ...(hechasAct || []).filter(a => a.evento_id).map(a => `${a.evento_id}:${String(a.fecha).slice(0, 10)}`),
+  ]);
 
   const sesionesPorFecha = {};
   (sesiones || []).forEach(s => { (sesionesPorFecha[String(s.fecha).slice(0, 10)] ||= []).push(s); });

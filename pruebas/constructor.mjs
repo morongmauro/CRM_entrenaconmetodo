@@ -236,6 +236,11 @@ for (const [tag, ancho, alto] of [['ancho', 1600, 900], ['telefono', 390, 844]])
     await p.screenshot({ path: path.join(CAPTURAS, 'constructor-telefono.png'), fullPage: false });
   }
 
+  // Refrescar con una rutina abierta: vuelve al constructor de esa rutina.
+  await p.reload();
+  await p.locator('#app-screen').waitFor({ state: 'visible', timeout: 20000 });
+  await p.waitForSelector('#cons-rutina', { timeout: 15000 }).catch(() => {});
+  ok(`${tag} · al refrescar vuelve al constructor de la misma rutina`, await p.evaluate((id) => !!document.querySelector('#cons-rutina') && _ent.rutinaId === id, push.id));
   ok(`${tag} · sin errores de JavaScript`, a.errores.length === 0, a.errores.join(' | '));
   await a.ctx.close();
 }
