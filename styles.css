@@ -754,3 +754,5 @@ summary.list-none { list-style: none; }
 .ent-chip-evento:hover .ent-chip-quitar, .ent-chip-quitar:focus-visible { opacity: 1; }
 .ent-chip-quitar:hover { color: #dc2626; }
 @media (hover: none) { .ent-chip-quitar { opacity: 1; } }
+.ent-chip-rutina { position: relative; }
+.ent-chip-rutina:hover .ent-chip-quitar { opacity: 1; }

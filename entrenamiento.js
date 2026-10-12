@@ -2711,6 +2711,8 @@ function entCeldaDia(f, ctx) {
            onclick="event.stopPropagation(); entAbrirRutinaDesdeCalendario('${r.id}')"
            title="${escapeHtml(r.nombre)} · ${n} ejercicio${n === 1 ? '' : 's'}${slot.fijada ? '' : ' · día sugerido, no fijado'}&#10;Arrástrala a otro día para moverla">
         ${marca}<span class="ent-chip-txt">${escapeHtml(r.nombre)}</span>
+        <button type="button" class="ent-chip-quitar" data-quitar-rutina="${r.id}" title="Quitarla de todos los ${ENT_DIA_PLURAL[codigo] || codigo} del ciclo"
+                onclick="event.stopPropagation(); entQuitarRutinaDia('${r.id}', '${codigo}')">✕</button>
       </div>`);
   }
 
@@ -2799,6 +2801,7 @@ function entCalendarioPie(fase, sinDia, rutinas, faltaTabla) {
       <span><span class="ent-marca ent-marca-curso">◐</span> la empezó</span>
       <span><span class="ent-marca ent-marca-vacia">·</span> no registró nada</span>
       <span class="ent-leyenda-nota">
+        Toca un día para poner, cambiar o quitar su rutina de fuerza (vale para ese día de la semana en todo el ciclo), o la ✕ de la rutina para quitarla.
         Las rutinas se arrastran de un día a otro. Las <b>sugeridas</b> (borde punteado)
         no tienen día fijo: salen del reparto por orden sobre los días de la fase, y
         arrastrarlas las fija.
@@ -2920,6 +2923,44 @@ function entCtxEvento() {
   };
 }
 
+// ---------- Poner y quitar rutinas de fuerza desde el calendario ----------
+// Igual que el arrastre: por DÍA DE LA SEMANA. «Push los lunes» es todos los
+// lunes del ciclo; así se piensa el plan y así lo lee la app del cliente.
+const ENT_DIA_PLURAL = { L: 'lunes', M: 'martes', X: 'miércoles', J: 'jueves', V: 'viernes', S: 'sábados', D: 'domingos' };
+const entOrdenDias = (ds) => [...new Set(ds)].sort((a, b) => 'LMXJVSD'.indexOf(a) - 'LMXJVSD'.indexOf(b));
+
+window.entQuitarRutinaDia = async (rutinaId, codigo) => {
+  const rutinas = _ent.rutinasCache || [], fase = _ent.faseCache;
+  const r = rutinas.find(x => x.id === rutinaId);
+  if (!r || !fase) return;
+  if (!confirm(`¿Quitar ${r.nombre} de todos los ${ENT_DIA_PLURAL[codigo] || codigo} del ciclo?`)) return;
+  if (entDiasDe(r).includes(codigo)) {
+    await entDb.actualizarRutina(r.id, { dias_semana: entDiasDe(r).filter(d => d !== codigo), dia_semana: null });
+  }
+  // Que ese día quede libre de verdad: si ninguna rutina lo tiene, sale de los
+  // días de la fase (si no, otra rutina sin día se acomodaría ahí sola).
+  if (!rutinas.some(x => x.id !== r.id && entDiasDe(x).includes(codigo)) && (fase.dias_semana || []).includes(codigo)) {
+    await entDb.actualizarFase(fase.id, { dias_semana: (fase.dias_semana || []).filter(d => d !== codigo) });
+  }
+  toast(`${r.nombre}: ya no va los ${ENT_DIA_PLURAL[codigo] || codigo}`);
+  if ($('#modal-content [data-dia-panel]')) closeModal();
+  entVistaClientes();
+};
+
+window.entPonerRutinaDia = async (rutinaId, codigo) => {
+  const rutinas = _ent.rutinasCache || [], fase = _ent.faseCache;
+  const r = rutinas.find(x => x.id === rutinaId);
+  if (!r || !fase) return;
+  // Una rutina por día: la que estaba ahí deja ese día (sus otros días siguen).
+  const ocupan = rutinas.filter(x => x.id !== r.id && entDiasDe(x).includes(codigo));
+  for (const o of ocupan) await entDb.actualizarRutina(o.id, { dias_semana: entDiasDe(o).filter(d => d !== codigo), dia_semana: null });
+  await entDb.actualizarRutina(r.id, { dias_semana: entOrdenDias([...entDiasDe(r), codigo]), dia_semana: null });
+  if (!(fase.dias_semana || []).includes(codigo)) await entDb.actualizarFase(fase.id, { dias_semana: entOrdenDias([...(fase.dias_semana || []), codigo]) });
+  toast(`${r.nombre} → todos los ${ENT_DIA_PLURAL[codigo] || codigo}` + (ocupan.length ? ` (en lugar de ${ocupan.map(o => o.nombre).join(', ')})` : ''));
+  if ($('#modal-content [data-dia-panel]')) closeModal();
+  entVistaClientes();
+};
+
 window.entActividadesLote = () => {
   if (!_ent.clienteId) return;
   evtLote(entCtxEvento());
@@ -2974,7 +3015,30 @@ window.entQuitarEventoDia = async (id, fecha) => {
 window.entDiaPanel = (fecha) => {
   if (!_ent.clienteId) return;
   const evs = (_ent.eventosPorFecha || {})[fecha] || [];
-  const rutina = document.querySelector(`.ent-celda[data-fecha="${fecha}"] .ent-chip-rutina .ent-chip-txt`)?.textContent || '';
+  const celda = document.querySelector(`.ent-celda[data-fecha="${fecha}"]`);
+  const enFase = !!celda && !celda.classList.contains('ent-celda-off');
+  const codigo = evtCodigoDe(fecha);
+  const rutinas = _ent.rutinasCache || [];
+  const rutinaId = celda?.querySelector('.ent-chip-rutina')?.dataset.rutina || null;
+  const rutinaObj = rutinas.find(x => x.id === rutinaId) || null;
+  const plural = ENT_DIA_PLURAL[codigo] || codigo;
+  const fuerza = !enFase ? '' : `
+    <div data-dia-fuerza class="rounded-xl p-3 mb-3" style="background:#f1f5f9">
+      <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">Fuerza · todos los ${plural} del ciclo</div>
+      ${rutinaObj ? `
+        <div class="flex items-center gap-2 mb-2">
+          <div class="flex-1 min-w-0 text-sm font-bold text-slate-800 truncate">${escapeHtml(rutinaObj.nombre)}</div>
+          <button class="btn btn-ghost btn-sm" onclick="closeModal(); entAbrirRutinaDesdeCalendario('${rutinaObj.id}')">Abrir</button>
+          <button class="btn btn-ghost btn-sm text-red-600" data-dia-quitar-rutina onclick="entQuitarRutinaDia('${rutinaObj.id}', '${codigo}')">✕ Quitar</button>
+        </div>` : '<div class="text-sm text-slate-500 mb-2">Este día no tiene rutina de fuerza.</div>'}
+      ${rutinas.filter(x => x.id !== rutinaId).length ? `
+        <div class="flex gap-2 items-center">
+          <select id="dia-rutina" class="flex-1 min-w-0 text-sm">
+            ${rutinas.filter(x => x.id !== rutinaId).map(x => `<option value="${x.id}">${escapeHtml(x.nombre)}${entDiasDe(x).length ? ` · ${escapeHtml(entDiasTexto(x))}` : ''}</option>`).join('')}
+          </select>
+          <button class="btn btn-secondary btn-sm" data-dia-poner-rutina onclick="entPonerRutinaDia($('#dia-rutina').value, '${codigo}')">${rutinaObj ? 'Cambiar por esta' : 'Poner'}</button>
+        </div>` : (rutinas.length ? '' : '<div class="text-xs text-slate-500">Esta fase todavía no tiene rutinas: créalas en «Rutinas».</div>')}
+    </div>`;
   const filas = evs.map(ev => {
     const hecho = _ent.eventosHechos && _ent.eventosHechos.has(`${ev.id}:${fecha}`);
     const repite = !ev.fecha && (ev.dias_semana || []).length;
@@ -2991,7 +3055,8 @@ window.entDiaPanel = (fecha) => {
   }).join('');
   openModal(modalShell(`${fmt.fechaCorta(fecha)}`, `
     <div data-dia-panel="${fecha}">
-      ${rutina ? `<div class="text-xs text-slate-500 mb-2">Rutina: <b class="text-slate-700">${escapeHtml(rutina)}</b></div>` : ''}
+      ${fuerza}
+      <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">Cardio, deportes y eventos · solo este día</div>
       ${filas || '<p class="text-sm text-slate-500 py-2">No tiene cardio, deportes ni eventos.</p>'}
       <div class="flex gap-2 flex-wrap mt-3">
         <button class="btn btn-primary btn-sm" data-dia-agregar onclick="closeModal(); entNuevaActividad('${fecha}')">+ ${evs.length ? 'Otra actividad' : 'Cardio o deporte'} este día</button>
