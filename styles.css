@@ -479,6 +479,12 @@ summary.list-none { list-style: none; }
   border: 1px solid #cbd5e1; cursor: pointer;
 }
 .ent-chip-bloque-ic { color: #3C7BD6; font-weight: 800; flex-shrink: 0; }
+/* Lo que el cliente ve en su calendario y antes no salía aquí: lo que
+   registró por su cuenta, su corte de pago y el inicio/fin del ciclo. */
+.ent-chip-suya { background: transparent; color: #2F7F45; font-weight: 600; font-size: 0.6rem; }
+.ent-chip-pago { background: #FBF1DC; color: #8A6A12; font-weight: 700; font-size: 0.58rem; }
+.ent-chip-marca { background: transparent; color: #64748b; font-weight: 700; font-size: 0.56rem; letter-spacing: .01em; }
+.ent-chip-auto { color: #94a3b8; font-weight: 600; }
 
 /* Mientras se arrastra, los días donde SÍ se puede soltar se marcan. Sin
    esto no se sabe si el sitio donde estás soltando cuenta. */

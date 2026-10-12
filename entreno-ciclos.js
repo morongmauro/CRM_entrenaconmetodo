@@ -149,7 +149,9 @@ const CICLO_ETIQUETA = {
 // inicio). Con `conQuitados`, los días que le quitaste a una serie se corren
 // igual, para que el calendario quede idéntico.
 function cicloFilasEventos(eventos, { clienteId, faseNueva, corrimiento, semanas, conQuitados = false }) {
-  return (eventos || []).map(e => {
+  // Los que pone el sistema (composición y fotos al cierre) no se copian:
+  // el ciclo nuevo trae los suyos, en su última semana.
+  return (eventos || []).filter(e => !e.auto).map(e => {
     const fila = {
       cliente_id: clienteId, fase_id: faseNueva, tipo: e.tipo, titulo: e.titulo, detalle: e.detalle ?? null,
       hora: e.hora ?? null, duracion_min: e.duracion_min ?? null, visible_cliente: e.visible_cliente ?? null, color: e.color ?? null,
@@ -209,7 +211,7 @@ window.entDuplicarCiclo = async (faseId) => {
   _dc.sugerencias = cicloAnalizar({ rutinas: _dc.rutinas, movimientos, sesiones, actividades, semanas });
   _dc.aplicadas = {};
   _dc.semanas = semanas;
-  _dc.eventos = eventos || [];
+  _dc.eventos = (eventos || []).filter(e => !e.auto);
   _dc.copiarEv = Object.fromEntries(_dc.eventos.map(e => [e.id, true]));
 
   openModal(modalShell(`Duplicar «${escapeHtml(f.nombre)}»`, `
@@ -378,7 +380,7 @@ window.cicloPrevia = async (faseId) => {
   ]);
   if (!$('#cp-previa')) return;
   Object.assign(_cp, {
-    faseId, fase: fase || null, rutinas, eventos: eventos || [],
+    faseId, fase: fase || null, rutinas, eventos: (eventos || []).filter(e => !e.auto),
     copiarEv: Object.fromEntries((eventos || []).map(e => [e.id, !CICLO_NO_MARCAR.has(e.tipo)])),
   });
   cicloPreviaPintar();

@@ -2987,10 +2987,21 @@ function entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina, sesio
   const ultimo = evtISO(new Date(anio, mesNum, 0));
   const cierre = evtSumarDias(ultimo, 6 - evtOffsetDia(ultimo));
 
+  // Su fecha de corte, igual que se la muestra su app: el día de pago de su
+  // ficha (si el mes es más corto, el último día). Solo clientes activos.
+  const cortes = new Set();
+  const diaPago = Number(cliente?.dia_pago);
+  if (String(cliente?.estado || 'activo').toLowerCase() === 'activo' && diaPago >= 1 && diaPago <= 31) {
+    for (let k = -1; k <= 1; k++) {
+      const t = new Date(anio, mesNum - 1 + k, 1);
+      const ultimoDia = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+      cortes.add(evtISO(new Date(t.getFullYear(), t.getMonth(), Math.min(diaPago, ultimoDia))));
+    }
+  }
   const celdas = [];
   for (let f = arranque; f <= cierre; f = evtSumarDias(f, 1)) {
     celdas.push(entCeldaDia(f, { fase, finFase, hoy, mesNum, porDia, ejerciciosPorRutina,
-                                 sesionesPorFecha, eventosPorFecha, rutinaDe }));
+                                 sesionesPorFecha, eventosPorFecha, rutinaDe, corte: cortes.has(f) }));
   }
 
   const cabecera = `
@@ -3051,7 +3062,7 @@ function entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina, sesio
 // Una casilla del mes.
 function entCeldaDia(f, ctx) {
   const { fase, finFase, hoy, mesNum, porDia, ejerciciosPorRutina,
-          sesionesPorFecha, eventosPorFecha, rutinaDe } = ctx;
+          sesionesPorFecha, eventosPorFecha, rutinaDe, corte = false } = ctx;
   const dia = Number(f.slice(8, 10));
   const deOtroMes = Number(f.slice(5, 7)) !== mesNum;
   const dentroFase = !!fase.fecha_inicio && f >= fase.fecha_inicio && (!finFase || f <= finFase);
@@ -3079,6 +3090,9 @@ function entCeldaDia(f, ctx) {
   }
 
   const trozos = [];
+  // Lo que el cliente también ve ese día: inicio y fin del ciclo.
+  if (dentroFase && f === fase.fecha_inicio) trozos.push('<div class="ent-chip ent-chip-marca" data-cal-inicio title="Empieza el ciclo">⚑ Empieza el ciclo</div>');
+  if (dentroFase && finFase && f === finFase) trozos.push('<div class="ent-chip ent-chip-marca" data-cal-fin title="Último día del ciclo">⚑ Último día del ciclo</div>');
 
   if (slot) {
     const r = slot.r;
@@ -3112,11 +3126,20 @@ function entCeldaDia(f, ctx) {
            ondragstart="entEvDragStart(event)" ondragend="entCalDragEnd(event)"
            onclick="event.stopPropagation(); entDiaPanel('${f}')"
            title="${escapeHtml(evtLabel(ev.tipo))}${ev.detalle ? ' · ' + escapeHtml(ev.detalle) : ''}&#10;Arrástrala a otro día para moverla">
-        <span class="ent-chip-txt">${hecho ? '<span class="ent-chip-hecho" title="Lo marcó como hecho">✓</span> ' : ''}${ev.hora ? `${String(ev.hora).slice(0, 5)} ` : ''}${escapeHtml(ev.titulo)}</span>
+        <span class="ent-chip-txt">${hecho ? '<span class="ent-chip-hecho" title="Lo marcó como hecho">✓</span> ' : ''}${ev.hora ? `${String(ev.hora).slice(0, 5)} ` : ''}${escapeHtml(ev.titulo)}${(() => { const v = (_ent.registrosValor || {})[`${ev.id}:${f}`]; return v != null ? ` · <b>${String(v).replace('.', ',')} kg</b>` : ''; })()}${ev.auto ? ' <span class="ent-chip-auto" title="Lo puso el sistema: primer día de la última semana del ciclo">·auto</span>' : ''}</span>
         ${hecho ? '' : `<button type="button" class="ent-chip-quitar" data-quitar-evento="${ev.id}" title="Quitar de este día"
                 onclick="event.stopPropagation(); entQuitarEventoDia('${ev.id}', '${f}')">✕</button>`}
       </div>`);
   });
+
+  // El cardio y los deportes que registró por su cuenta (sin que se los
+  // pusieras): salen igual que en su calendario.
+  ((_ent.actividadesSuyas || {})[f] || []).forEach(a => trozos.push(`
+      <div class="ent-chip ent-chip-suya" data-actividad-suya="${a.id || ''}" title="La registró él por su cuenta">
+        <span class="ent-chip-txt">+ ${escapeHtml(a.titulo || (((typeof _evtCatalogo !== 'undefined' && _evtCatalogo) || (typeof EVT_CATALOGO_MINIMO !== 'undefined' ? EVT_CATALOGO_MINIMO : [])).find(c => c.slug === a.tipo)?.nombre || a.tipo) || 'Actividad')}${a.duracion_min ? ` · ${a.duracion_min} min` : ''}</span>
+      </div>`));
+  // Su fecha de corte (lo mismo que ve en su app).
+  if (corte) trozos.push('<div class="ent-chip ent-chip-pago" data-cal-corte title="Fecha de corte de su mensualidad">$ Corte de su mensualidad</div>');
 
   // Una sesión sin rutina asignada (el cliente entrenó por su cuenta) no
   // tendría dónde pintarse y se perdería. Se muestra igual.
@@ -3197,6 +3220,9 @@ function entCalendarioPie(fase, sinDia, rutinas, faltaTabla) {
       <span><span class="ent-marca ent-marca-no">✕</span> la saltó</span>
       <span><span class="ent-marca ent-marca-curso">◐</span> la empezó</span>
       <span><span class="ent-marca ent-marca-vacia">·</span> no registró nada</span>
+      <span><span class="ent-chip-quien">↔</span> lo movió o añadió él</span>
+      <span><span style="color:#2F7F45;font-weight:800">+</span> cardio o deporte por su cuenta</span>
+      <span><span style="color:#B8901C;font-weight:800">$</span> su fecha de corte</span>
       <span class="ent-leyenda-nota">
         Toca un día para poner, mover o quitar su fuerza y su cardio: <b>solo ese día</b> o <b>todos los lunes</b> (o el día que sea) del ciclo.
         Al arrastrar o tocar la ✕ también te pregunta. Para muchos días a la vez, «☰ En lote».
@@ -3484,15 +3510,19 @@ async function entPintarCalendario(cliente, fase, rutinas, ejerciciosPorRutina) 
     entDb.sesiones(cliente.id, { desde, limite: 400 }),
     evtDb.lista(cliente.id),
     evtDb.registros(cliente.id, desde),
-    // El cardio y los deportes que marcó con «Ya lo hice» (actividades
-    // ligadas al evento). Sin la columna evento_id, no hay marcas.
+    // Todo el cardio y los deportes que registró: lo que marcó con «Ya lo
+    // hice» (ligado a un evento tuyo) y lo que añadió por su cuenta. Así el
+    // calendario dice lo mismo que el suyo.
     (async () => {
-      try {
-        let q = sb.from('actividades').select('evento_id, fecha').eq('cliente_id', cliente.id).not('evento_id', 'is', null);
+      const leer = async (campos) => {
+        let q = sb.from('actividades').select(campos).eq('cliente_id', cliente.id);
         if (desde) q = q.gte('fecha', desde);
         const { data, error } = await q;
-        return error ? [] : (data || []);
-      } catch (e) { return []; }
+        if (error) throw error;
+        return data || [];
+      };
+      try { return await leer('id, evento_id, fecha, tipo, titulo, duracion_min'); }
+      catch (e) { try { return await leer('id, fecha, tipo, titulo, duracion_min'); } catch (e2) { return []; } }
     })(),
   ]);
 
@@ -3502,6 +3532,12 @@ async function entPintarCalendario(cliente, fase, rutinas, ejerciciosPorRutina) 
     ...(registros || []).filter(r => r.estado === 'hecho').map(r => `${r.evento_id}:${String(r.fecha).slice(0, 10)}`),
     ...(hechasAct || []).filter(a => a.evento_id).map(a => `${a.evento_id}:${String(a.fecha).slice(0, 10)}`),
   ]);
+
+  // Lo que registró al marcar (el peso que puso) y lo que hizo por su cuenta.
+  _ent.registrosValor = Object.fromEntries((registros || []).filter(r => r.estado === 'hecho' && r.valor != null)
+    .map(r => [`${r.evento_id}:${String(r.fecha).slice(0, 10)}`, r.valor]));
+  _ent.actividadesSuyas = {};
+  (hechasAct || []).filter(a => !a.evento_id).forEach(a => { (_ent.actividadesSuyas[String(a.fecha).slice(0, 10)] ||= []).push(a); });
 
   const sesionesPorFecha = {};
   (sesiones || []).forEach(s => { (sesionesPorFecha[String(s.fecha).slice(0, 10)] ||= []).push(s); });
@@ -3522,6 +3558,25 @@ async function entPintarCalendario(cliente, fase, rutinas, ejerciciosPorRutina) 
   if (!$('#ent-cal') || _ent.clienteId !== cliente.id) return;
   caja.innerHTML = entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina,
                                         sesionesPorFecha, eventosPorFecha, eventos === null, rutinaDe);
+  entCalVivo(cliente, fase, rutinas, ejerciciosPorRutina);
+}
+
+// En tiempo real: mientras miras el calendario de un cliente, se vuelve a
+// leer cada minuto (y al volver a la pestaña) lo que él marcó, movió o
+// registró. No se repinta si tienes un panel abierto o estás arrastrando.
+function entCalVivo(cliente, fase, rutinas, ejerciciosPorRutina) {
+  clearInterval(_ent.calTimer);
+  const tick = () => {
+    if (!$('#ent-cal') || _ent.clienteId !== cliente.id || _ent.faseCache?.id !== fase.id) { clearInterval(_ent.calTimer); return; }
+    if (document.visibilityState !== 'visible' || _ent.arrastrando || !document.getElementById('modal')?.classList.contains('hidden')) return;
+    entPintarCalendario(cliente, fase, rutinas, ejerciciosPorRutina).catch(() => {});
+  };
+  _ent.calTimer = setInterval(tick, 60000);
+  if (!_ent.calVisibilidad) {
+    _ent.calVisibilidad = true;
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && typeof _ent.calTick === 'function') _ent.calTick(); });
+  }
+  _ent.calTick = tick;
 }
 
 window.entAbrirRutinaDesdeCalendario = (rutinaId) => {
