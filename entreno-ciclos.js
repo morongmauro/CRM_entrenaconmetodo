@@ -203,7 +203,7 @@ window.entDuplicarCiclo = async (faseId) => {
   }
 
   _dc.fase = f;
-  _dc.rutinas = rutinas.map(r => ({ id: r.id, nombre: r.nombre, dia_orden: r.dia_orden, dias: entDiasDe(r) }));
+  _dc.rutinas = rutinas.map(r => ({ id: r.id, nombre: r.nombre, dia_orden: r.dia_orden, dias: entDiasDe(r), bloque: typeof entEsBloque === 'function' && entEsBloque(r) }));
   _dc.dias = Object.fromEntries(_dc.rutinas.map(r => [r.id, [...r.dias]]));
   _dc.sugerencias = cicloAnalizar({ rutinas: _dc.rutinas, movimientos, sesiones, actividades, semanas });
   _dc.aplicadas = {};
@@ -326,7 +326,9 @@ window.entDcGuardar = async () => {
     if (id) await entDb.actualizarRutina(id, { dias_semana: _dc.dias[r.id] || [] });
   }
   await entDb.actualizarFase(nueva, {
-    semanas, dias_semana: cicloOrden(Object.values(_dc.dias).flat()),
+    // Los días de entreno de la fase son los de la FUERZA: un bloque
+    // complementario diario no los vuelve siete.
+    semanas, dias_semana: cicloOrden(_dc.rutinas.filter(r => !r.bloque).flatMap(r => _dc.dias[r.id] || [])),
     estado: 'borrador', updated_at: new Date().toISOString(),
   });
   // El cardio, los deportes y los eventos: los que se repiten, con sus

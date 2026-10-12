@@ -472,6 +472,13 @@ summary.list-none { list-style: none; }
 .ent-chip-suelta {
   background: transparent; color: #94a3b8; font-style: italic; font-size: 0.6rem;
 }
+/* Bloque complementario (un recovery): debajo de la fuerza, más chico y con
+   borde fino. No compite con la rutina de fuerza del día. */
+.ent-chip-bloque {
+  background: #fff; color: #475569; font-weight: 600; font-size: 0.58rem;
+  border: 1px solid #cbd5e1; cursor: pointer;
+}
+.ent-chip-bloque-ic { color: #3C7BD6; font-weight: 800; flex-shrink: 0; }
 
 /* Mientras se arrastra, los días donde SÍ se puede soltar se marcan. Sin
    esto no se sabe si el sitio donde estás soltando cuenta. */

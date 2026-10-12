@@ -225,7 +225,7 @@ async function fzSemanalQuitar(r, codigo) {
   }
   // Que ese día quede libre de verdad: si ninguna rutina lo tiene, sale de los
   // días de la fase (si no, otra rutina sin día se acomodaría ahí sola).
-  if (fase && !rutinas.some(x => x.id !== r.id && entDiasDe(x).includes(codigo)) && (fase.dias_semana || []).includes(codigo)) {
+  if (fase && !rutinas.some(x => x.id !== r.id && (typeof entEsBloque !== 'function' || !entEsBloque(x)) && entDiasDe(x).includes(codigo)) && (fase.dias_semana || []).includes(codigo)) {
     fase.dias_semana = (fase.dias_semana || []).filter(d => d !== codigo);
     await entDb.actualizarFase(fase.id, { dias_semana: fase.dias_semana });
   }
@@ -234,7 +234,7 @@ async function fzSemanalQuitar(r, codigo) {
 async function fzSemanalPoner(r, codigo) {
   const rutinas = _ent.rutinasCache || [], fase = _ent.faseCache;
   // Una rutina por día: la que estaba ahí deja ese día (sus otros días siguen).
-  const ocupan = rutinas.filter(x => x.id !== r.id && entDiasDe(x).includes(codigo));
+  const ocupan = rutinas.filter(x => x.id !== r.id && (typeof entEsBloque !== 'function' || !entEsBloque(x)) && entDiasDe(x).includes(codigo));
   for (const o of ocupan) {
     const ds = entDiasDe(o).filter(d => d !== codigo);
     await entDb.actualizarRutina(o.id, { dias_semana: ds, dia_semana: null });
@@ -260,7 +260,7 @@ async function fzSemanalMover(r, desde, destino) {
     s.add(pon);
     return entOrdenDias([...s]);
   };
-  const ocupa = rutinas.find(x => x.id !== r.id && entDiasDe(x).includes(destino));
+  const ocupa = rutinas.find(x => x.id !== r.id && (typeof entEsBloque !== 'function' || !entEsBloque(x)) && entDiasDe(x).includes(destino));
   const nuevos = mover(entDiasDe(r), desde, destino);
   await entDb.actualizarRutina(r.id, { dias_semana: nuevos });
   if (ocupa && desde) {
@@ -354,7 +354,7 @@ window.fzPanelFuerza = (fecha) => {
   const delPlan = rd ? rd.base(fecha) : null;
   const quien = rd ? rd.quien(fecha) : null;
   const entreno = fzEntreno(fecha);
-  const opciones = (excluir) => rutinas.filter(x => x.id !== excluir).map(x => `<option value="${x.id}">${escapeHtml(x.nombre)}${entDiasDe(x).length ? ` · ${escapeHtml(entDiasTexto(x))}` : ''}</option>`).join('');
+  const opciones = (excluir) => rutinas.filter(x => x.id !== excluir && (typeof entEsBloque !== 'function' || !entEsBloque(x))).map(x => `<option value="${x.id}">${escapeHtml(x.nombre)}${entDiasDe(x).length ? ` · ${escapeHtml(entDiasTexto(x))}` : ''}</option>`).join('');
   const nota = quien === 'cliente' ? (rd.extra(fecha) ? 'La añadió tu cliente desde su app.' : 'Tu cliente la movió a este día desde su app.')
     : quien === 'coach' ? (r ? `Cambiado solo este día (el plan dice ${delPlan ? escapeHtml(delPlan.nombre) : 'descanso'}).` : `Quitada solo este día (el plan dice ${escapeHtml(delPlan?.nombre || '—')}).`)
     : '';
