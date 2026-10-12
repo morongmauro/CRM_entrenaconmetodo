@@ -2319,7 +2319,7 @@ async function entVistaClientes() {
         </div>
       </div>
       <div class="flex gap-1 flex-wrap">
-        <button class="btn btn-secondary btn-sm" onclick="entImportarFase()">⇄ Importar fase</button>
+        <button class="btn btn-secondary btn-sm" data-traer-btn onclick="entImportarFase()" title="Una rutina de fuerza o el ciclo completo, con su calendario">⇄ Traer de otro cliente</button>
         <button class="btn btn-primary btn-sm" onclick="entNuevaFase()">+ Nueva fase</button>
       </div>
     </div>`;
@@ -2597,7 +2597,7 @@ function entRutinaPorFecha(fase, rutinas) {
   return { porDia, sinDia };
 }
 
-function entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina, sesionesPorFecha, eventosPorFecha, faltaTabla) {
+function entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina, sesionesPorFecha, eventosPorFecha, faltaTabla, rutinaDe = null) {
   const { porDia, sinDia } = entRutinaPorFecha(fase, rutinas);
   const semanaHoy = entSemanaActual(fase);
   const finFase = entFechaFin(fase);
@@ -2615,7 +2615,7 @@ function entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina, sesio
   const celdas = [];
   for (let f = arranque; f <= cierre; f = evtSumarDias(f, 1)) {
     celdas.push(entCeldaDia(f, { fase, finFase, hoy, mesNum, porDia, ejerciciosPorRutina,
-                                 sesionesPorFecha, eventosPorFecha }));
+                                 sesionesPorFecha, eventosPorFecha, rutinaDe }));
   }
 
   const cabecera = `
@@ -2634,7 +2634,7 @@ function entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina, sesio
         </div>
         <div class="flex gap-1 flex-wrap min-w-0">
           <button class="btn btn-ghost btn-sm" onclick="entNuevaActividad()" data-cal-actividad title="Caminadora, caminata, natación, tenis… del mismo catálogo que usa tu cliente">+ Cardio o deporte</button>
-          <button class="btn btn-ghost btn-sm" onclick="entActividadesLote()" data-cal-lote title="Añadir o quitar cardio y deportes entre dos fechas, por días de la semana">☰ En lote</button>
+          <button class="btn btn-ghost btn-sm" onclick="entActividadesLote()" data-cal-lote title="Añadir, quitar o mover fuerza, cardio y deportes entre dos fechas, por días de la semana">☰ En lote</button>
           <button class="btn btn-ghost btn-sm" onclick="entNuevoEvento()">+ Evento</button>
           <button class="btn btn-ghost btn-sm" onclick="entDuplicarCiclo('${fase.id}')" data-cal-copiar title="Crea el ciclo siguiente con estas rutinas, sus días, y el cardio y deportes que se repiten">⧉ Copiar este ciclo al siguiente</button>
           <button class="btn btn-secondary btn-sm" onclick="entEditarFase('${fase.id}')">Editar fase</button>
@@ -2676,13 +2676,20 @@ function entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina, sesio
 // Una casilla del mes.
 function entCeldaDia(f, ctx) {
   const { fase, finFase, hoy, mesNum, porDia, ejerciciosPorRutina,
-          sesionesPorFecha, eventosPorFecha } = ctx;
+          sesionesPorFecha, eventosPorFecha, rutinaDe } = ctx;
   const dia = Number(f.slice(8, 10));
   const deOtroMes = Number(f.slice(5, 7)) !== mesNum;
   const dentroFase = !!fase.fecha_inicio && f >= fase.fecha_inicio && (!finFase || f <= finFase);
   const esHoy = f === hoy;
   const codigo = evtCodigoDe(f);
-  const slot = dentroFase ? porDia[codigo] : null;
+  let slot = dentroFase ? porDia[codigo] : null;
+  // Con los cambios de un solo día ya leídos, manda lo de ESA fecha.
+  let quien = null;
+  if (dentroFase && rutinaDe) {
+    const r = rutinaDe(f);
+    quien = rutinaDe.quien(f);
+    slot = r ? { r, fijada: slot && slot.r.id === r.id ? slot.fijada : true } : null;
+  }
 
   const clases = ['ent-celda'];
   if (deOtroMes) clases.push('ent-celda-fuera');
@@ -2705,14 +2712,14 @@ function entCeldaDia(f, ctx) {
     const ses = sesionesPorFecha ? (sesionesPorFecha[f] || []).find(x => x.rutina_id === r.id) : null;
     const marca = entMarcaSesion(ses, f, hoy, dentroFase);
     trozos.push(`
-      <div class="ent-chip ent-chip-rutina ${slot.fijada ? '' : 'ent-chip-sugerida'}"
-           draggable="true" data-rutina="${r.id}" data-dia="${codigo}"
+      <div class="ent-chip ent-chip-rutina ${slot.fijada ? '' : 'ent-chip-sugerida'} ${quien ? 'ent-chip-un-dia' : ''}"
+           draggable="true" data-rutina="${r.id}" data-dia="${codigo}" ${quien ? `data-cambio="${quien}"` : ''}
            ondragstart="entCalDragStart(event)" ondragend="entCalDragEnd(event)"
            onclick="event.stopPropagation(); entAbrirRutinaDesdeCalendario('${r.id}')"
-           title="${escapeHtml(r.nombre)} · ${n} ejercicio${n === 1 ? '' : 's'}${slot.fijada ? '' : ' · día sugerido, no fijado'}&#10;Arrástrala a otro día para moverla">
-        ${marca}<span class="ent-chip-txt">${escapeHtml(r.nombre)}</span>
-        <button type="button" class="ent-chip-quitar" data-quitar-rutina="${r.id}" title="Quitarla de todos los ${ENT_DIA_PLURAL[codigo] || codigo} del ciclo"
-                onclick="event.stopPropagation(); entQuitarRutinaDia('${r.id}', '${codigo}')">✕</button>
+           title="${escapeHtml(r.nombre)} · ${n} ejercicio${n === 1 ? '' : 's'}${slot.fijada ? '' : ' · día sugerido, no fijado'}${quien === 'coach' ? ' · solo este día (lo cambiaste tú)' : quien === 'cliente' ? ' · la movió o añadió tu cliente' : ''}&#10;Arrástrala a otro día para moverla">
+        ${marca}<span class="ent-chip-txt">${quien === 'cliente' ? '<span class="ent-chip-quien" title="La movió o añadió tu cliente">↔</span> ' : ''}${escapeHtml(r.nombre)}</span>
+        <button type="button" class="ent-chip-quitar" data-quitar-rutina="${r.id}" title="Quitar (este día o todos los ${ENT_DIA_PLURAL[codigo] || codigo})"
+                onclick="event.stopPropagation(); typeof fzQuitarRutina === 'function' ? fzQuitarRutina('${r.id}', '${f}') : entQuitarRutinaDia('${r.id}', '${codigo}')">✕</button>
       </div>`);
   }
 
@@ -2801,8 +2808,9 @@ function entCalendarioPie(fase, sinDia, rutinas, faltaTabla) {
       <span><span class="ent-marca ent-marca-curso">◐</span> la empezó</span>
       <span><span class="ent-marca ent-marca-vacia">·</span> no registró nada</span>
       <span class="ent-leyenda-nota">
-        Toca un día para poner, cambiar o quitar su rutina de fuerza (vale para ese día de la semana en todo el ciclo), o la ✕ de la rutina para quitarla.
-        Las rutinas se arrastran de un día a otro. Las <b>sugeridas</b> (borde punteado)
+        Toca un día para poner, mover o quitar su fuerza y su cardio: <b>solo ese día</b> o <b>todos los lunes</b> (o el día que sea) del ciclo.
+        Al arrastrar o tocar la ✕ también te pregunta. Para muchos días a la vez, «☰ En lote».
+        Las de borde de color cambiaron solo ese día; con ↔ las movió o añadió tu cliente. Las <b>sugeridas</b> (borde punteado)
         no tienen día fijo: salen del reparto por orden sobre los días de la fase, y
         arrastrarlas las fija.
       </span>
@@ -2824,6 +2832,7 @@ window.entCalDragStart = (e) => {
   // miércoles cuando la misma rutina está en los dos.
   const f = chip.closest('.ent-celda')?.dataset.fecha;
   _ent.arrastrandoDesde = f ? evtCodigoDe(f) : null;
+  _ent.arrastrandoFecha = f || null;
   e.dataTransfer.effectAllowed = 'move';
   // Firefox no inicia el arrastre si no se escribe algo en el dataTransfer.
   e.dataTransfer.setData('text/plain', chip.dataset.rutina);
@@ -2837,6 +2846,7 @@ window.entCalDragEnd = (e) => {
   document.querySelectorAll('.ent-celda-destino').forEach(c => c.classList.remove('ent-celda-destino'));
   _ent.arrastrando = null;
   _ent.arrastrandoDesde = null;
+  _ent.arrastrandoFecha = null;
   _ent.arrastrandoEv = null;
 };
 
@@ -2860,10 +2870,14 @@ window.entCalDrop = async (e) => {
 
   const destino = evtCodigoDe(celda.dataset.fecha);
   const desde = _ent.arrastrandoDesde;
+  const desdeFecha = _ent.arrastrandoFecha;
   const rutinas = _ent.rutinasCache || [];
   const r = rutinas.find(x => x.id === id);
   _ent.arrastrando = null;
   _ent.arrastrandoDesde = null;
+  _ent.arrastrandoFecha = null;
+  // ¿Solo ese día o todos los lunes? (entreno-dias.js)
+  if (r && typeof fzSoltarRutina === 'function') return fzSoltarRutina(r.id, desdeFecha, desde, celda.dataset.fecha);
   if (!r || desde === destino) return entVistaClientes();
 
   // Quita el día del que se sacó y añade el nuevo. Los demás días de esa
@@ -2988,6 +3002,7 @@ async function entEvDrop(e) {
   const ev = (_ent.eventosCache || []).find(x => x.id === a.id);
   const hasta = celda.dataset.fecha;
   if (!ev || !a.desde || a.desde === hasta) return;
+  if (typeof fzSoltarEvento === 'function') return fzSoltarEvento(ev, a.desde, hasta);
   const r = await evtMoverUnDia(ev, a.desde, hasta, _ent.faseCache);
   if (r === 'hecho') return toast('Ese día ya lo marcó como hecho: no se mueve');
   if (r !== 'ok') return;
@@ -2999,6 +3014,7 @@ async function entEvDrop(e) {
 window.entQuitarEventoDia = async (id, fecha) => {
   const ev = (_ent.eventosCache || []).find(x => x.id === id);
   if (!ev) return;
+  if (typeof fzQuitarEvento === 'function') return fzQuitarEvento(ev, fecha);
   const r = await evtQuitarUnDia(ev, fecha);
   if (r === 'hecho') return toast('Ese día ya lo marcó como hecho: queda en su historial');
   if (r !== 'ok') return;
@@ -3055,7 +3071,7 @@ window.entDiaPanel = (fecha) => {
   }).join('');
   openModal(modalShell(`${fmt.fechaCorta(fecha)}`, `
     <div data-dia-panel="${fecha}">
-      ${fuerza}
+      ${typeof fzPanelFuerza === 'function' ? fzPanelFuerza(fecha) : fuerza}
       <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">Cardio, deportes y eventos · solo este día</div>
       ${filas || '<p class="text-sm text-slate-500 py-2">No tiene cardio, deportes ni eventos.</p>'}
       <div class="flex gap-2 flex-wrap mt-3">
@@ -3105,12 +3121,16 @@ async function entPintarCalendario(cliente, fase, rutinas, ejerciciosPorRutina) 
   const fasesPorId = Object.fromEntries((_ent.fases || [fase]).map(f => [f.id, f]));
   const eventosPorFecha = evtPorFecha(_ent.eventosCache, fasesPorId);
   _ent.eventosPorFecha = eventosPorFecha;
+  _ent.sesionesPorFecha = sesionesPorFecha;
+  // Lo que cambió UN día (el coach o el cliente): mover, poner, quitar.
+  // Es lo mismo que ve la app (entreno-dias.js).
+  const rutinaDe = typeof fzPreparar === 'function' ? await fzPreparar(fase, rutinas) : null;
 
   // Si `entVistaClientes` se repintó mientras esperábamos (otro cliente, otra
   // fase), esto ya no es la pantalla vigente y escribir aquí la pisaría.
   if (!$('#ent-cal') || _ent.clienteId !== cliente.id) return;
   caja.innerHTML = entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina,
-                                        sesionesPorFecha, eventosPorFecha, eventos === null);
+                                        sesionesPorFecha, eventosPorFecha, eventos === null, rutinaDe);
 }
 
 window.entAbrirRutinaDesdeCalendario = (rutinaId) => {
@@ -3528,43 +3548,87 @@ window.entConfirmarCopiarFase = async (faseId) => {
   entVistaClientes();
 };
 
-// Importar hacia ESTE cliente: lo mismo, pero mirado al revés — eliges de
-// quién traerlo en vez de a quién mandarlo. Es como se piensa al armar el
-// proceso de alguien nuevo.
-window.entImportarFase = async () => {
+// TRAER DE OTRO CLIENTE hacia este: el ciclo completo (con su calendario) o
+// una sola rutina de fuerza a uno de sus ciclos. Es como se piensa al armar
+// el proceso de alguien: «a Bruno le sirve el Push de Ana».
+const _imp = { modo: 'ciclo' };
+window.entImportarFase = async (modo = 'ciclo') => {
   const clientes = (await db.clientes.list()).filter(c => c.id !== _ent.clienteId);
-  openModal(modalShell('Importar ciclo de otro cliente', `
-    <p class="text-sm text-slate-600 mb-3">Trae un ciclo como se ve en su calendario: las rutinas de fuerza con sus días,
-      y el cardio y los deportes con los suyos. Queda en <b>borrador</b> para que lo revises.</p>
-    <div class="mb-3"><label>Traer de</label>
-      <select id="if-cliente" onchange="entCargarFasesOrigen(this.value)">
-        <option value="">— Plantillas de fase —</option>
-        ${clientes.map(c => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join('')}
-      </select></div>
-    <div class="mb-3"><label>Ciclo</label><select id="if-fase" onchange="cicloPrevia(this.value)"><option value="">Elige primero el origen</option></select></div>
-    <div class="grid grid-cols-2 gap-3">
-      <div><label>Fecha de inicio</label><input id="if-inicio" type="date"></div>
-      <div><label>Nombre nuevo (opcional)</label><input id="if-nombre" placeholder="Igual que la original"></div>
+  const mios = await entDb.fases(_ent.clienteId);
+  _imp.modo = modo;
+  openModal(modalShell('Traer de otro cliente', `
+    <div data-traer>
+      <div class="flex gap-2 mb-3 flex-wrap">
+        <button type="button" class="chip ${modo === 'ciclo' ? 'active' : ''}" data-if-modo="ciclo" onclick="entImpModo('ciclo')">🗓️ El ciclo completo</button>
+        <button type="button" class="chip ${modo === 'rutina' ? 'active' : ''}" data-if-modo="rutina" onclick="entImpModo('rutina')">🏋️ Una rutina de fuerza</button>
+      </div>
+      <div class="mb-3"><label>Traer de</label>
+        <select id="if-cliente" onchange="entCargarFasesOrigen(this.value)">
+          <option value="">— Plantillas de fase —</option>
+          ${clientes.map(c => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join('')}
+        </select></div>
+      <div class="mb-3"><label>Ciclo</label><select id="if-fase" onchange="entImpFase(this.value)"><option value="">Elige primero el origen</option></select></div>
+
+      <div id="if-modo-rutina" class="${modo === 'rutina' ? '' : 'hidden'}">
+        <div class="mb-3"><label>Qué rutina</label><select id="if-rutina"></select></div>
+        <div class="mb-3"><label>A qué ciclo de este cliente</label>
+          <select id="if-destino">
+            ${mios.length ? mios.map(f => `<option value="${f.id}" ${f.id === _ent.faseId ? 'selected' : ''}>${escapeHtml(f.nombre)}${f.estado === 'activa' ? ' · activa' : ''}</option>`).join('') : '<option value="">— este cliente no tiene ciclos: crea uno primero —</option>'}
+          </select></div>
+        <label class="flex gap-2 items-start cursor-pointer" style="text-transform:none;letter-spacing:0;font-weight:400">
+          <input type="checkbox" id="if-dias" checked style="width:auto" class="mt-0.5">
+          <span class="text-sm text-slate-700">Con sus días de la semana (los que estén libres en el ciclo de destino). Si no, queda sin día y la pones tú en el calendario.</span>
+        </label>
+      </div>
+
+      <div id="if-modo-ciclo" class="${modo === 'ciclo' ? '' : 'hidden'}">
+        <p class="text-sm text-slate-600 mb-3">Trae el ciclo como se ve en su calendario: las rutinas de fuerza con sus días,
+          y el cardio y los deportes con los suyos. Queda en <b>borrador</b> para que lo revises.</p>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label>Fecha de inicio</label><input id="if-inicio" type="date"></div>
+          <div><label>Nombre nuevo (opcional)</label><input id="if-nombre" placeholder="Igual que la original"></div>
+        </div>
+        <div id="cp-previa"></div>
+      </div>
     </div>
-    <div id="cp-previa"></div>
   `, `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-primary" onclick="entConfirmarImportar()">Importar</button>`), { wide: true });
+      <button class="btn btn-primary" id="if-ok" onclick="entConfirmarImportar()">Traer</button>`), { wide: true });
   entCargarFasesOrigen('');
+};
+
+window.entImpModo = (m) => {
+  _imp.modo = m;
+  $$('[data-if-modo]').forEach(b => b.classList.toggle('active', b.dataset.ifModo === m));
+  $('#if-modo-rutina')?.classList.toggle('hidden', m !== 'rutina');
+  $('#if-modo-ciclo')?.classList.toggle('hidden', m !== 'ciclo');
 };
 
 window.entCargarFasesOrigen = async (clienteId) => {
   const sel = $('#if-fase');
   if (!sel) return;
   const fases = await entDb.fases(clienteId || null);
-  sel.innerHTML = fases.length
-    ? fases.map(f => `<option value="${f.id}">${escapeHtml(f.nombre)} · ${f.semanas || '?'} sem</option>`).join('')
-    : '<option value="">— no hay fases ahí —</option>';
-  cicloPrevia(sel.value || null);
+  // La activa primero: casi siempre es la que se quiere traer.
+  const orden = fases.slice().sort((a, b) => (b.estado === 'activa') - (a.estado === 'activa') || (b.orden || 0) - (a.orden || 0));
+  sel.innerHTML = orden.length
+    ? orden.map(f => `<option value="${f.id}">${escapeHtml(f.nombre)} · ${f.semanas || '?'} sem${f.estado === 'activa' ? ' · activa' : ''}</option>`).join('')
+    : '<option value="">— no hay ciclos ahí —</option>';
+  entImpFase(sel.value || null);
+};
+
+window.entImpFase = async (faseId) => {
+  if (typeof cicloPrevia === 'function') await cicloPrevia(faseId);
+  const sel = $('#if-rutina');
+  if (!sel) return;
+  const rutinas = faseId ? await entDb.rutinasDeFase(faseId) : [];
+  sel.innerHTML = rutinas.length
+    ? rutinas.map(r => `<option value="${r.id}">${escapeHtml(r.nombre)}${entDiasDe(r).length ? ` · ${escapeHtml(entDiasTexto(r))}` : ''}</option>`).join('')
+    : '<option value="">— ese ciclo no tiene rutinas —</option>';
 };
 
 window.entConfirmarImportar = async () => {
   const faseId = $('#if-fase')?.value;
-  if (!faseId) { toast('Elige un ciclo para importar'); return; }
+  if (!faseId) { toast('Elige un ciclo de dónde traer'); return; }
+  if (_imp.modo === 'rutina') return entImportarRutina(faseId);
   const aviso = await cicloCopiarAOtro(
     faseId, _ent.clienteId,
     $('#if-inicio')?.value || null,
@@ -3575,6 +3639,33 @@ window.entConfirmarImportar = async () => {
   toast(aviso);
   entVistaClientes();
 };
+
+// Una rutina de otro cliente a un ciclo de este. Con sus días, pero solo los
+// que estén libres: nunca dos rutinas el mismo día.
+async function entImportarRutina(faseOrigen) {
+  const rutinaId = $('#if-rutina')?.value, destino = $('#if-destino')?.value;
+  if (!rutinaId) return toast('Elige la rutina');
+  if (!destino) return toast('Este cliente no tiene ciclos: crea uno primero');
+  const origen = (await entDb.rutinasDeFase(faseOrigen)).find(r => r.id === rutinaId);
+  const hermanas = await entDb.rutinasDeFase(destino);
+  const nueva = await entDb.copiarRutina(rutinaId, destino, null);
+  if (!nueva) return;
+  const ocupados = new Set(hermanas.flatMap(entDiasDe));
+  const quiere = $('#if-dias')?.checked ? entDiasDe(origen || {}) : [];
+  const dias = quiere.filter(d => !ocupados.has(d));
+  await entDb.actualizarRutina(nueva, { dias_semana: dias, dia_semana: null, dia_orden: hermanas.length + 1 });
+  if (dias.length) {
+    const f = (await entDb.fases(_ent.clienteId)).find(x => x.id === destino);
+    const ds = [...new Set([...(f?.dias_semana || []), ...dias])].sort((a, b) => 'LMXJVSD'.indexOf(a) - 'LMXJVSD'.indexOf(b));
+    if (f && ds.length !== (f.dias_semana || []).length) await entDb.actualizarFase(destino, { dias_semana: ds });
+  }
+  const chocan = quiere.filter(d => ocupados.has(d));
+  closeModal();
+  toast(`✓ «${origen?.nombre || 'Rutina'}» traída` + (dias.length ? ` · ${dias.map(d => ENT_DIA_PLURAL[d]).join(', ')}` : ' · sin día (ponla en el calendario)')
+    + (chocan.length ? ` · ${chocan.map(d => ENT_DIA_PLURAL[d]).join(', ')} ya tenía${chocan.length === 1 ? '' : 'n'} rutina` : ''));
+  _ent.faseId = destino;
+  entVistaClientes();
+}
 
 // =====================================================
 // REGISTRO EN EL CRM

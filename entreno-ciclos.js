@@ -453,6 +453,32 @@ window.cicloCopiarAOtro = async (faseId, clienteDestino, inicio, nombre) => {
   } else if (!clienteDestino && elegidos.length) {
     avisoEv = ' · como plantilla lleva solo las rutinas y sus días';
   }
+  // Lo que cambiaste SOLO un día en la fuerza (mover, poner, quitar), corrido
+  // igual que la fecha de inicio. Lo que hizo el cliente original no viaja.
+  let nDia = 0;
+  if (clienteDestino && typeof fzDb !== 'undefined') {
+    const inicioNuevo = inicio || origen?.fecha_inicio || null;
+    const corr = origen?.fecha_inicio && inicioNuevo ? Math.round((Date.parse(inicioNuevo) - Date.parse(origen.fecha_inicio)) / 86400000) : null;
+    if (corr != null) {
+      const nuevoId = Object.fromEntries(copiadas.map(r => [r.origen_rutina_id, r.id]));
+      const correr = (f) => evtSumarDias(String(f).slice(0, 10), corr);
+      const c = await fzDb.cambios(faseId);
+      const base = { cliente_id: clienteDestino, fase_id: nueva };
+      // Movimientos y quitados uno por uno, en el orden en que pasaron: lo
+      // último que pasó es lo que vale (rutinaPorFecha).
+      const pasos = [
+        ...c.movimientos.filter(m => m.origen === 'coach' && nuevoId[m.rutina_id])
+          .map(m => ({ t: String(m.created_at || ''), tabla: 'rutina_movimientos', fila: { ...base, rutina_id: nuevoId[m.rutina_id], desde: correr(m.desde), hasta: correr(m.hasta), origen: 'coach' } })),
+        ...c.quitados.map(q => ({ t: String(q.created_at || ''), tabla: 'rutina_dias_quitados', fila: { ...base, rutina_id: q.rutina_id ? (nuevoId[q.rutina_id] || null) : null, fecha: correr(q.fecha) } })),
+      ].sort((x, y) => x.t.localeCompare(y.t));
+      c.extras.filter(x => x.origen === 'coach' && nuevoId[x.rutina_id])
+        .forEach(x => pasos.push({ tabla: 'rutina_extras', fila: { ...base, rutina_id: nuevoId[x.rutina_id], fecha: correr(x.fecha), origen: 'coach' } }));
+      for (const x of pasos) {
+        const { error } = await sb.from(x.tabla).insert(x.fila);
+        if (!error) nDia++;
+      }
+    }
+  }
   const nR = copiadas.length;
-  return `✓ Ciclo copiado en borrador · ${nR} rutina${nR === 1 ? '' : 's'} con sus días${nEv ? ` · ${nEv} de cardio y eventos` : ''}${avisoEv}`;
+  return `✓ Ciclo copiado en borrador · ${nR} rutina${nR === 1 ? '' : 's'} con sus días${nEv ? ` · ${nEv} de cardio y eventos` : ''}${nDia ? ` · ${nDia} cambio${nDia === 1 ? '' : 's'} de un solo día` : ''}${avisoEv}`;
 };

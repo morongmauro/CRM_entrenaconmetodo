@@ -37,6 +37,13 @@ const preparar = () => p.evaluate(() => {
   entDb.copiarFase = async (...a) => { ESCRITO.copias.push(a); return 'f9'; };
   entDb.actualizarRutina = async (id, row) => { ESCRITO.rutinas[id] = row; };
   window.entVistaClientes = async () => {};
+  // Lo que el coach cambió UN día (y algo que hizo Ana, que no viaja).
+  TABLAS.rutina_movimientos = [
+    { id: 'm1', fase_id: 'f1', rutina_id: 'r1', desde: '2026-10-05', hasta: '2026-10-07', origen: 'coach', created_at: '2026-09-30T10:00:00Z' },
+    { id: 'm2', fase_id: 'f1', rutina_id: 'r2', desde: '2026-10-06', hasta: '2026-10-08', origen: 'cliente', created_at: '2026-09-30T11:00:00Z' },
+  ];
+  TABLAS.rutina_dias_quitados = [{ id: 'q1', fase_id: 'f1', rutina_id: 'r2', fecha: '2026-10-09', created_at: '2026-09-30T09:00:00Z' }];
+  TABLAS.rutina_extras = [{ id: 'x1', fase_id: 'f1', rutina_id: 'r3', fecha: '2026-10-10', origen: 'coach' }, { id: 'x2', fase_id: 'f1', rutina_id: 'r1', fecha: '2026-10-11', origen: 'cliente' }];
   TABLAS.eventos = [
     { id: 'ev1', cliente_id: 'c1', fase_id: 'f1', tipo: 'actividad', titulo: 'Caminata', detalle: '30 min', duracion_min: 30, fecha: null, dias_semana: ['L', 'X', 'V'], semanas: null, fechas_excluidas: ['2026-10-07'] },
     { id: 'ev2', cliente_id: 'c1', fase_id: 'f1', tipo: 'actividad', titulo: 'Natación', fecha: null, dias_semana: ['S'], semanas: [1, 2] },
@@ -70,6 +77,11 @@ const peso = nuevos.find(e => e.tipo === 'peso');
 ok('el pesaje de un solo día se corre igual que el inicio (12-oct → 16-nov)', peso && peso.fecha === '2026-11-16' && peso.cliente_id === 'c2' && peso.visible_cliente === true, JSON.stringify(peso));
 ok('la cita médica (desmarcada) y lo de otro ciclo no se copian', nuevos.length === 3 && !nuevos.some(e => e.tipo === 'cita' || e.titulo === 'Tenis'), JSON.stringify(nuevos.map(e => e.titulo)));
 ok('lo de Ana no se toca', await p.evaluate(() => TABLAS.eventos.filter(e => e.cliente_id === 'c1').length === 5 && JSON.stringify(TABLAS.eventos[0].fechas_excluidas) === '["2026-10-07"]'));
+const dia = await p.evaluate(() => ({ m: TABLAS.rutina_movimientos.filter(x => x.fase_id === 'f9'), q: TABLAS.rutina_dias_quitados.filter(x => x.fase_id === 'f9'), x: TABLAS.rutina_extras.filter(x => x.fase_id === 'f9') }));
+ok('los cambios de un solo día del coach viajan corridos (+35 días) y con las rutinas nuevas; lo del cliente no',
+  dia.m.length === 1 && dia.m[0].desde === '2026-11-09' && dia.m[0].hasta === '2026-11-11' && dia.m[0].rutina_id === 'nr1' && dia.m[0].cliente_id === 'c2'
+  && dia.q.length === 1 && dia.q[0].fecha === '2026-11-13' && dia.q[0].rutina_id === 'nr2'
+  && dia.x.length === 1 && dia.x[0].fecha === '2026-11-14' && dia.x[0].rutina_id === 'nr3' && dia.x[0].origen === 'coach', JSON.stringify(dia));
 let aviso = await p.evaluate(() => toasts.at(-1));
 ok('el aviso dice qué copió', aviso.includes('3 rutinas con sus días') && aviso.includes('3 de cardio y eventos'), aviso);
 
@@ -109,6 +121,33 @@ await p.evaluate(() => entConfirmarCopiarFase('f1'));
 nuevos = await p.evaluate(() => TABLAS.eventos.filter(e => e.fase_id === 'f9'));
 aviso = await p.evaluate(() => toasts.at(-1));
 ok('como plantilla no crea eventos sin cliente y lo dice', nuevos.length === 0 && aviso.includes('como plantilla'), aviso);
+
+// ── Traer UNA rutina de fuerza de Ana al ciclo de Bruno ──
+await preparar();
+await p.evaluate(() => {
+  _ent.clienteId = 'c2'; _ent.faseId = 'fb';
+  window.FASEB = { id: 'fb', cliente_id: 'c2', nombre: 'Ciclo 1', semanas: 4, fecha_inicio: '2026-11-02', dias_semana: ['L', 'J'], estado: 'activa' };
+  entDb.fases = async (c) => c === 'c1' ? [FASE] : c === 'c2' ? [FASEB] : [];
+  // Bruno ya tiene Upper los martes.
+  const deB = [{ id: 'b1', nombre: 'Upper', dia_orden: 1, dias_semana: ['M'] }];
+  const rds = entDb.rutinasDeFase;
+  entDb.rutinasDeFase = async (id) => id === 'fb' ? deB : rds(id);
+  entDb.copiarRutina = async (...a) => { ESCRITO.copiaRutina = a; return 'nueva1'; };
+  entDb.actualizarFase = async (id, row) => { ESCRITO.fase = [id, row]; };
+});
+await p.evaluate(() => entImportarFase());
+ok('el botón ofrece traer el ciclo completo o una rutina', await p.locator('[data-if-modo="ciclo"]').count() === 1 && await p.locator('[data-if-modo="rutina"]').count() === 1);
+await p.locator('[data-if-modo="rutina"]').click();
+await p.selectOption('#if-cliente', 'c1');
+await p.waitForSelector('#if-rutina option[value="r2"]', { state: 'attached' });
+await p.selectOption('#if-rutina', 'r2');   // Lower: martes y viernes
+await p.evaluate(() => entConfirmarImportar());
+w = await p.evaluate(() => ESCRITO);
+ok('copia la rutina al ciclo de Bruno', JSON.stringify(w.copiaRutina) === JSON.stringify(['r2', 'fb', null]), JSON.stringify(w.copiaRutina));
+ok('con sus días libres: el viernes sí, el martes no (ya tenía Upper)', JSON.stringify(w.rutinas.nueva1) === JSON.stringify({ dias_semana: ['V'], dia_semana: null, dia_orden: 2 }), JSON.stringify(w.rutinas));
+ok('el viernes entra en los días del ciclo', w.fase && w.fase[0] === 'fb' && JSON.stringify(w.fase[1].dias_semana) === '["L","J","V"]', JSON.stringify(w.fase));
+aviso = await p.evaluate(() => toasts.at(-1));
+ok('el aviso dice qué día quedó y cuál chocaba', /viernes/.test(aviso) && /martes ya tenía rutina/.test(aviso), aviso);
 
 ok('sin errores de JavaScript', errores.length === 0, errores.join(' | '));
 await b.close();

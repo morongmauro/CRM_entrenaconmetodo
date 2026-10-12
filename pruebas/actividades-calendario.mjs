@@ -146,6 +146,10 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
 
   // 3. ✕ de la caminata el miércoles 15: solo ese día.
   await p.locator('.ent-celda[data-fecha="2026-10-15"] [data-quitar-evento]').first().click({ force: true });
+  // Como se repite, pregunta: ¿solo este día o todos los miércoles?
+  await p.waitForSelector('[data-fz-alcance]', { timeout: 5000 });
+  ok(`${tag} · la ✕ de algo que se repite pregunta: solo este día o todos los jueves`, await p.locator('[data-fz-todos]', { hasText: 'jueves' }).count() === 1);
+  await p.locator('[data-fz-solo]').click();
   await p.waitForTimeout(800);
   e = await evs(p);
   ok(`${tag} · la ✕ quita la caminata solo el 15 (la serie sigue)`, JSON.stringify(e.find(x => x.titulo === 'Caminata').fechas_excluidas) === '["2026-10-15"]'
@@ -154,6 +158,8 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   // 4. Arrastrar la caminata del viernes 16 al lunes 19 (que ya tiene la suya: quedan dos).
   await p.locator('.ent-celda[data-fecha="2026-10-19"]').scrollIntoViewIfNeeded();
   await p.locator('.ent-celda[data-fecha="2026-10-16"] .ent-chip-evento').first().dragTo(p.locator('.ent-celda[data-fecha="2026-10-19"]'));
+  await p.waitForSelector('[data-fz-alcance]', { timeout: 5000 });
+  await p.locator('[data-fz-solo]').click();
   await p.waitForTimeout(900);
   e = await evs(p);
   ok(`${tag} · arrastrar mueve ese día: sale el 16 y queda el 19 (junto a la del 19)`, e.find(x => x.titulo === 'Caminata').fechas_excluidas.includes('2026-10-16')
@@ -195,6 +201,35 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   e = await evs(p);
   const camB = e.find(x => x.id === cam.id);
   ok(`${tag} · borrar la serie con días hechos no borra la fila: deja solo lo hecho`, camB && (await chips(p, '2026-10-20')).every(t => !/Caminata/.test(t)) && (await chips(p, '2026-10-13')).some(t => /Caminata/.test(t)), JSON.stringify(camB));
+
+  // 8. MOVER en lote: natación de los martes. Solo la semana del 20 → jueves.
+  await p.evaluate((fid) => { TABLAS_FALSAS.eventos.push({ id: 'nat', cliente_id: 'c0', user_id: 'coach-1', fase_id: fid, tipo: 'actividad', titulo: 'Natación', fecha: null, dias_semana: ['M'], semanas: null, fechas_excluidas: [], created_at: '2026-10-12T00:00:00Z' }); }, c19.id);
+  await recargar(p);
+  await p.locator('[data-cal-lote]').click();
+  await p.waitForSelector('[data-lote="mover"]');
+  await p.locator('[data-lote="mover"]').click();
+  await p.selectOption('#lote-que', 't:Natación');
+  await p.fill('#lote-desde', '2026-10-19'); await p.fill('#lote-hasta', '2026-10-25');
+  await p.selectOption('#lote-de', 'M'); await p.selectOption('#lote-a', 'J');
+  ok(`${tag} · mover en lote dice cuántos días`, /Se mueven 1 día/.test(await p.locator('#lote-vista').innerText()), await p.locator('#lote-vista').innerText());
+  await p.locator('#lote-ok').click();
+  await p.waitForTimeout(900);
+  e = await evs(p);
+  ok(`${tag} · mover en lote, una semana: el martes 20 sale, el jueves 22 entra, el 27 sigue en martes`, e.find(x => x.id === 'nat').fechas_excluidas.includes('2026-10-20') && e.some(x => x.titulo === 'Natación' && x.fecha === '2026-10-22')
+    && (await chips(p, '2026-10-27')).some(t => /Natación/.test(t)) && (await chips(p, '2026-10-22')).some(t => /Natación/.test(t)), JSON.stringify(e.filter(x => x.titulo === 'Natación')));
+  // Todo el ciclo: la serie pasa a los jueves.
+  await p.locator('[data-cal-lote]').click();
+  await p.waitForSelector('[data-lote="mover"]');
+  await p.locator('[data-lote="mover"]').click();
+  await p.selectOption('#lote-que', 't:Natación');
+  await p.fill('#lote-desde', '2026-10-12'); await p.fill('#lote-hasta', '2026-11-15');
+  await p.selectOption('#lote-de', 'M'); await p.selectOption('#lote-a', 'J');
+  await p.locator('#lote-ok').click();
+  await p.waitForTimeout(900);
+  e = await evs(p);
+  const nat = e.find(x => x.id === 'nat');
+  ok(`${tag} · mover en lote, todo el ciclo: la natación queda los jueves (una sola el 22)`, JSON.stringify(nat.dias_semana) === '["J"]' && (await chips(p, '2026-10-29')).some(t => /Natación/.test(t))
+    && !(await chips(p, '2026-10-27')).some(t => /Natación/.test(t)) && (await chips(p, '2026-10-22')).filter(t => /Natación/.test(t)).length === 1, JSON.stringify(e.filter(x => x.titulo === 'Natación')));
 
   const anchoP = await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1);
   ok(`${tag} · sin scroll de lado`, anchoP);

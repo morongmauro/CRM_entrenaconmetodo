@@ -51,7 +51,7 @@ function tablas() {
     metas_historial: [], nutricion_insights: [], ia_uso: [], push_pago_log: [],
     fases: fixture.fases, rutinas: fixture.rutinas, rutina_ejercicios: re, rutina_bloques: fixture.rutina_bloques,
     sesiones: fixture.sesiones, series_log: sl, ejercicios: fixture.ejercicios, trainerize_resumen: fixture.trainerize_resumen,
-    eventos: [], evento_registros: [], rutina_movimientos: [],
+    eventos: [], evento_registros: [], rutina_movimientos: [], rutina_extras: [], rutina_dias_quitados: [],
     actividades_catalogo: [
       { slug: 'cinta', nombre: 'Caminadora', categoria: 'cardio', icono: '🏃', orden: 10, activo: true },
       { slug: 'escaladora', nombre: 'Escaladora', categoria: 'cardio', icono: '🪜', orden: 40, activo: true },
@@ -95,6 +95,7 @@ async function abrir(ancho, alto) {
 
 
 const c18 = fixture.fases.find(f => f.nombre === 'Ciclo 18');   // 7 sep, 5 semanas
+const c18fi = c18.fecha_inicio;
 const dias = (p, nombre) => p.evaluate((n) => {
   const r = TABLAS_FALSAS.rutinas.find(x => x.nombre === n && x.fase_id === _ent.faseCache.id);
   return JSON.stringify(r.dias_semana);
@@ -125,6 +126,9 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
     && (await chip(p, '2026-09-15')).some(t => /Push/.test(t)), `${await dias(p, 'Push Training')} ${await dias(p, 'Lower Body + Core Training')}`);
   // 3. La ✕ de la rutina en la casilla del miércoles 9: Push deja los miércoles y el día sale de la fase.
   await p.locator('.ent-celda[data-fecha="2026-09-09"] [data-quitar-rutina]').click({ force: true });
+  await p.waitForSelector('[data-fz-alcance]', { timeout: 5000 });
+  ok(`${tag} · la ✕ pregunta: solo este día o todos los miércoles`, await p.locator('[data-fz-solo]').count() === 1 && await p.locator('[data-fz-todos]', { hasText: 'miércoles' }).count() === 1);
+  await p.locator('[data-fz-todos]').click();
   await p.waitForTimeout(900);
   ok(`${tag} · la ✕ de la rutina la quita de todos los miércoles (y el miércoles queda libre)`, await dias(p, 'Push Training') === '["M"]' && !JSON.parse(await diasFase(p)).includes('X')
     && (await chip(p, '2026-09-16')).length === 0, `${await dias(p, 'Push Training')} ${await diasFase(p)}`);
@@ -137,6 +141,82 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   await p.waitForTimeout(900);
   ok(`${tag} · «Poner» deja Pull jueves y viernes, y el viernes cuenta como día de la fase`, await dias(p, 'Pull Training') === '["J","V"]' && JSON.parse(await diasFase(p)).includes('V')
     && (await chip(p, '2026-09-18')).some(t => /Pull/.test(t)), `${await dias(p, 'Pull Training')} ${await diasFase(p)}`);
+
+  // 5. SOLO UN DÍA. Lunes 14 (Upper): quitarla solo ese día.
+  const filas = (t) => p.evaluate((t) => JSON.stringify((TABLAS_FALSAS[t] || []).map(x => ({ ...x, id: undefined, created_at: undefined, user_id: undefined }))), t);
+  await p.locator('.ent-celda[data-fecha="2026-09-21"] .ent-celda-num').click();
+  await p.waitForSelector('[data-fz-quitar-solo]', { timeout: 5000 });
+  await p.locator('[data-fz-quitar-solo]').click();
+  await p.waitForTimeout(900);
+  ok(`${tag} · «Quitar solo este día»: el lunes 21 sin Upper, el 28 sigue con Upper y el plan no cambia`, (await chip(p, '2026-09-21')).length === 0 && (await chip(p, '2026-09-28')).some(t => /Upper/.test(t))
+    && await dias(p, 'Upper Body Training') === '["L"]' && JSON.parse(await filas('rutina_dias_quitados')).some(q => q.fecha === '2026-09-21'), await filas('rutina_dias_quitados'));
+  // 6. Ese mismo lunes: poner Pull solo ese día.
+  await p.locator('.ent-celda[data-fecha="2026-09-21"] .ent-celda-num').click();
+  await p.waitForSelector('[data-fz-poner-solo]', { timeout: 5000 });
+  ok(`${tag} · el panel dice que se cambió solo ese día y deja volver al plan`, /Quitada solo este día/.test(await p.locator('[data-dia-fuerza]').innerText()) && await p.locator('[data-fz-devolver]').count() === 1);
+  await p.selectOption('#dia-rutina-solo', { label: await p.locator('#dia-rutina-solo option', { hasText: 'Pull' }).innerText() });
+  await p.locator('[data-fz-poner-solo]').click();
+  await p.waitForTimeout(900);
+  ok(`${tag} · «Poner solo este día»: Pull el lunes 21 (como del coach) y nada más`, (await chip(p, '2026-09-21')).some(t => /Pull/.test(t)) && !(await chip(p, '2026-09-28')).some(t => /Pull/.test(t))
+    && JSON.parse(await filas('rutina_extras')).some(x => x.fecha === '2026-09-21' && x.origen === 'coach') && await dias(p, 'Pull Training') === '["J","V"]', await filas('rutina_extras'));
+  // 7. Arrastrar el Pull del jueves 24 al sábado 26 → solo ese día.
+  await p.locator('.ent-celda[data-fecha="2026-09-26"]').scrollIntoViewIfNeeded();
+  await p.locator('.ent-celda[data-fecha="2026-09-24"] .ent-chip-rutina').dragTo(p.locator('.ent-celda[data-fecha="2026-09-26"]'));
+  await p.waitForSelector('[data-fz-alcance]', { timeout: 5000 });
+  ok(`${tag} · arrastrar pregunta: solo este día o todos los jueves → sábados`, await p.locator('[data-fz-todos]', { hasText: 'jueves' }).count() === 1);
+  await p.locator('[data-fz-solo]').click();
+  await p.waitForTimeout(900);
+  const sab26 = await chip(p, '2026-09-26');
+  ok(`${tag} · solo ese día: el jueves 24 queda libre, el sábado 26 con Pull (y Lower, que estaba, pasa al jueves), el jueves 1 sigue con Pull`,
+    (await chip(p, '2026-09-24')).some(t => /Lower/.test(t)) && sab26.some(t => /Pull/.test(t)) && (await chip(p, '2026-10-01')).some(t => /Pull/.test(t))
+    && JSON.parse(await filas('rutina_movimientos')).some(m => m.desde === '2026-09-24' && m.hasta === '2026-09-26' && m.origen === 'coach'), JSON.stringify(sab26));
+  // 8. Lo ya entrenado no se mueve: el martes 8 lo entrenó.
+  await p.locator('.ent-celda[data-fecha="2026-09-08"] .ent-celda-num').click();
+  await p.waitForSelector('[data-dia-fuerza]', { timeout: 5000 });
+  ok(`${tag} · un día ya entrenado no ofrece cambiarlo solo ese día`, /ya entrenó/.test(await p.locator('[data-dia-fuerza]').innerText()) && await p.locator('[data-fz-solo-dia]').count() === 0);
+  await p.evaluate(() => closeModal());
+
+  // 9. EN LOTE · fuerza. Añadir Push los sábados del 3 al 11 de octubre (solo esas fechas).
+  const lote = async (que, accion) => {
+    await p.locator('[data-cal-lote]').click();
+    await p.waitForSelector('[data-lote-que="fuerza"]', { timeout: 5000 });
+    if (que === 'fuerza') await p.locator('[data-lote-que="fuerza"]').click();
+    await p.locator(`[data-lote="${accion}"]`).click();
+  };
+  const marcarDias = async (ds) => { for (const c of await p.locator('.lote-dia').all()) { const v = await c.getAttribute('value'); if (ds.includes(v)) await c.check(); else await c.uncheck(); } };
+  await lote('fuerza', 'agregar');
+  await p.selectOption('#lote-rutina', { label: 'Push Training' });
+  await p.fill('#lote-desde', '2026-10-03'); await p.fill('#lote-hasta', '2026-10-11');
+  await marcarDias(['S']);
+  await p.locator('#lote-desde').dispatchEvent('change');
+  ok(`${tag} · lote: dice cuántos días y que el sábado tenía otra rutina`, /2 día/.test(await p.locator('#lote-vista').innerText()) && /tenían otra rutina/.test(await p.locator('#lote-vista').innerText()), await p.locator('#lote-vista').innerText());
+  if (tag === 'ancho') await p.locator('#modal-content').screenshot({ path: path.join(CAPTURAS, 'rutinas-calendario-lote.png') }).catch(() => {});
+  await p.locator('#lote-ok').click();
+  await p.waitForTimeout(1200);
+  const ex = JSON.parse(await filas('rutina_extras'));
+  ok(`${tag} · lote añadir: Push el 3 y el 10 de octubre, el plan de los sábados no cambia`, ['2026-10-03', '2026-10-10'].every(f => ex.some(x => x.fecha === f && x.origen === 'coach'))
+    && await dias(p, 'Lower Body + Core Training') === '["S"]', await filas('rutina_extras'));
+  // 10. Mover en todo el ciclo: Upper de los lunes a los domingos (cambia el plan).
+  await lote('fuerza', 'mover');
+  await p.fill('#lote-desde', c18fi); await p.fill('#lote-hasta', '2026-10-11');
+  await p.selectOption('#lote-rutina', { label: 'Upper Body Training' });
+  await p.selectOption('#lote-de', 'L'); await p.selectOption('#lote-a', 'D');
+  ok(`${tag} · lote mover en todo el ciclo: lo dice como cambio del plan`, /todo el ciclo/.test(await p.locator('#lote-vista').innerText()), await p.locator('#lote-vista').innerText());
+  await p.locator('#lote-ok').click();
+  await p.waitForTimeout(1200);
+  ok(`${tag} · lote mover: Upper pasa a los domingos`, await dias(p, 'Upper Body Training') === '["D"]', await dias(p, 'Upper Body Training'));
+  // 11. Quitar Pull del 1 al 2 de octubre (solo esas fechas).
+  await lote('fuerza', 'quitar');
+  await p.selectOption('#lote-rutina', { label: 'Pull Training' });
+  await p.fill('#lote-desde', '2026-10-01'); await p.fill('#lote-hasta', '2026-10-02');
+  await marcarDias(['L', 'M', 'X', 'J', 'V', 'S', 'D']);
+  await p.locator('#lote-desde').dispatchEvent('change');
+  await p.locator('#lote-ok').click();
+  await p.waitForTimeout(1200);
+  const qs = JSON.parse(await filas('rutina_dias_quitados')).map(q => q.fecha);
+  ok(`${tag} · lote quitar: Pull fuera el 1 y el 2 de octubre, sigue en el plan`, qs.includes('2026-10-01') && qs.includes('2026-10-02') && await dias(p, 'Pull Training') === '["J","V"]', JSON.stringify(qs));
+
+  if (tag === 'ancho') await p.locator('.ent-mes-scroll').screenshot({ path: path.join(CAPTURAS, 'rutinas-calendario-un-dia.png') }).catch(() => {});
 
   const anchoP = await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1);
   ok(`${tag} · sin scroll de lado`, anchoP);

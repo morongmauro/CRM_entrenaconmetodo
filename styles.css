@@ -452,6 +452,10 @@ summary.list-none { list-style: none; }
 /* Punteado = el día no está fijado en la rutina, sale del reparto. */
 .ent-chip-sugerida { border-style: dashed; border-color: #b6bf94; background: #f5f7ef; }
 .ent-chip-arrastre { opacity: 0.4; }
+/* Cambiada solo ese día (por ti o por el cliente): una raya azul a la
+   izquierda. Con ↔ la movió o añadió el cliente desde su app. */
+.ent-chip-un-dia { box-shadow: inset 3px 0 0 #3C7BD6; }
+.ent-chip-quien { color: #3C7BD6; font-weight: 800; }
 /* LA FUERZA MANDA. El evento y la sesión suelta se ven, se tocan y se
    editan, pero NO compiten con la rutina: sin negrita, más pequeños y con
    el color reducido a un punto a la izquierda. Al planificar se mira "qué

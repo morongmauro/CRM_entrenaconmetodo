@@ -434,16 +434,19 @@ window.evtBorrar = async (id) => {
 window.evtNuevo = (ctx, prefill = {}) => evtEditar(prefill, ctx);
 
 // =====================================================
-// EN LOTE · añadir o quitar actividades entre dos fechas
+// EN LOTE · añadir, quitar o mover entre dos fechas
 // =====================================================
 // «Caminata de lunes a viernes del 13 al 31.» «Quita las caminatas de la
-// semana que está de viaje.» Se elige qué, entre qué fechas y qué días de la
-// semana; antes de hacer nada dice cuántos días toca.
+// semana que está de viaje.» «Pasa la fuerza de los lunes a los martes en
+// octubre.» Se elige qué (cardio y deportes, o fuerza), entre qué fechas y
+// qué días de la semana; antes de hacer nada dice cuántos días toca.
 //
-// Al añadir, si las fechas son semanas enteras de la fase, se guarda como UN
-// evento que se repite (así «Copiar este ciclo» lo lleva al siguiente); si
-// no, un evento por día. Al quitar, lo que el cliente ya marcó no se toca.
-const _lote = { accion: 'agregar' };
+// Al añadir cardio, si las fechas son semanas enteras de la fase, se guarda
+// como UN evento que se repite (así «Copiar este ciclo» lo lleva al
+// siguiente); si no, un evento por día. La fuerza, si el rango es el ciclo
+// entero, cambia el plan semanal; si no, fecha por fecha (entreno-dias.js).
+// Lo que el cliente ya marcó o entrenó no se toca.
+const _lote = { accion: 'agregar', que: 'act' };
 
 const evtRango = (desde, hasta, dias) => {
   const out = [];
@@ -454,23 +457,33 @@ const evtRango = (desde, hasta, dias) => {
   return out;
 };
 
-window.evtLote = (ctx, accion = 'agregar') => {
+window.evtLote = (ctx, accion = 'agregar', que = 'act') => {
   const fase = ctx.fase;
   const fin = fase?.fecha_inicio && fase?.semanas ? evtSumarDias(fase.fecha_inicio, fase.semanas * 7 - 1) : '';
   const hoy = fmt.hoy();
   const desde = fase?.fecha_inicio && fase.fecha_inicio > hoy ? fase.fecha_inicio : hoy;
-  // Lo que ya tiene puesto, para elegir qué quitar.
+  // Lo que ya tiene puesto, para elegir qué quitar o mover.
   const titulos = [...new Set((ctx.eventos || []).filter(e => e.tipo === 'actividad').map(e => e.titulo))].sort();
   const otros = [...new Set((ctx.eventos || []).filter(e => e.tipo !== 'actividad').map(e => e.titulo))].sort();
+  const rutinas = (typeof _ent !== 'undefined' && _ent.rutinasCache) || [];
+  const hayFuerza = typeof fzLotePlan === 'function';
   _lote.ctx = ctx;
   _lote.accion = accion;
-  openModal(modalShell('Actividades en lote', `
+  _lote.que = hayFuerza ? que : 'act';
+  const diaSel = (id, def) => `<select id="${id}" onchange="evtLoteVista()">${ENT_DIAS.map(([d, lab]) => `<option value="${d}" ${d === def ? 'selected' : ''}>${lab}</option>`).join('')}</select>`;
+  openModal(modalShell('Calendario en lote', `
+    ${hayFuerza ? `
+    <div class="flex gap-2 mb-2" data-lote-que-chips>
+      <button type="button" class="chip ${_lote.que === 'act' ? 'active' : ''}" data-lote-que="act" onclick="evtLoteQue('act')">🏃 Cardio y deportes</button>
+      <button type="button" class="chip ${_lote.que === 'fuerza' ? 'active' : ''}" data-lote-que="fuerza" onclick="evtLoteQue('fuerza')">🏋️ Fuerza</button>
+    </div>` : ''}
     <div class="flex gap-2 mb-3" data-lote-accion>
       <button type="button" class="chip ${accion === 'agregar' ? 'active' : ''}" data-lote="agregar" onclick="evtLoteAccion('agregar')">＋ Añadir</button>
       <button type="button" class="chip ${accion === 'quitar' ? 'active' : ''}" data-lote="quitar" onclick="evtLoteAccion('quitar')">✕ Quitar</button>
+      ${hayFuerza ? `<button type="button" class="chip ${accion === 'mover' ? 'active' : ''}" data-lote="mover" onclick="evtLoteAccion('mover')">⇄ Mover</button>` : ''}
     </div>
 
-    <div id="lote-agregar" class="${accion === 'agregar' ? '' : 'hidden'}">
+    <div id="lote-agregar" class="${accion === 'agregar' && _lote.que === 'act' ? '' : 'hidden'}">
       <input type="hidden" id="ev-tipo" value="actividad">
       <div class="mb-2"><label>Qué actividad *</label>
         <input id="ev-titulo" placeholder="Caminata" oninput="evtLoteVista()"></div>
@@ -483,8 +496,8 @@ window.evtLote = (ctx, accion = 'agregar') => {
         <textarea id="lote-detalle" rows="2" placeholder="Ritmo suave, 30 min"></textarea></div>
     </div>
 
-    <div id="lote-quitar" class="${accion === 'quitar' ? '' : 'hidden'} mb-3">
-      <label>Qué quitar</label>
+    <div id="lote-quitar" class="${accion !== 'agregar' && _lote.que === 'act' ? '' : 'hidden'} mb-3">
+      <label id="lote-que-label">${accion === 'mover' ? 'Qué mover' : 'Qué quitar'}</label>
       <select id="lote-que" onchange="evtLoteVista()">
         <option value="*act">Todo el cardio y los deportes</option>
         ${titulos.map(t => `<option value="t:${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('')}
@@ -492,15 +505,30 @@ window.evtLote = (ctx, accion = 'agregar') => {
       </select>
     </div>
 
+    <div id="lote-fuerza" class="${_lote.que === 'fuerza' ? '' : 'hidden'} mb-3">
+      <label>Qué rutina</label>
+      <select id="lote-rutina" onchange="evtLoteVista()">
+        <option value="" id="lote-rutina-todas">Cualquier rutina</option>
+        ${rutinas.map(r => `<option value="${r.id}">${escapeHtml(r.nombre)}</option>`).join('')}
+      </select>
+      ${rutinas.length ? '' : '<p class="text-xs text-slate-500 mt-1">Esta fase todavía no tiene rutinas.</p>'}
+    </div>
+
     <div class="grid grid-cols-2 gap-3 mb-2">
       <div><label>Desde</label><input id="lote-desde" type="date" value="${desde}" onchange="evtLoteVista()"></div>
       <div><label>Hasta</label><input id="lote-hasta" type="date" value="${fin || ''}" onchange="evtLoteVista()"></div>
     </div>
-    <label>Qué días de la semana</label>
-    <div class="flex flex-wrap gap-1 mt-1 mb-3">
-      ${ENT_DIAS.map(([id, lab]) => `
-        <label class="tag-pill cursor-pointer"><input type="checkbox" class="lote-dia" value="${id}" checked onchange="evtLoteVista()"
-               style="margin-right:3px;vertical-align:middle">${lab}</label>`).join('')}
+    <div id="lote-dias-caja" class="${accion === 'mover' ? 'hidden' : ''}">
+      <label>Qué días de la semana</label>
+      <div class="flex flex-wrap gap-1 mt-1 mb-3">
+        ${ENT_DIAS.map(([id, lab]) => `
+          <label class="tag-pill cursor-pointer"><input type="checkbox" class="lote-dia" value="${id}" checked onchange="evtLoteVista()"
+                 style="margin-right:3px;vertical-align:middle">${lab}</label>`).join('')}
+      </div>
+    </div>
+    <div id="lote-mover-caja" class="${accion === 'mover' ? '' : 'hidden'} grid grid-cols-2 gap-3 mb-3">
+      <div><label>Del</label>${diaSel('lote-de', 'L')}</div>
+      <div><label>Al</label>${diaSel('lote-a', 'M')}</div>
     </div>
     <div id="lote-vista" class="text-sm rounded-lg px-3 py-2" style="background:#f1f5f9;color:#334155"></div>
   `, `
@@ -510,15 +538,44 @@ window.evtLote = (ctx, accion = 'agregar') => {
   evtPintarCatalogo();
   // Al tocar una actividad del catálogo se actualiza también el resumen.
   $('#ev-catalogo')?.addEventListener('click', () => setTimeout(evtLoteVista, 0));
-  evtLoteVista();
+  evtLoteMostrar();
 };
 
-window.evtLoteAccion = (a) => {
-  _lote.accion = a;
+// Qué se ve según «qué» y «acción».
+function evtLoteMostrar() {
+  const a = _lote.accion, q = _lote.que;
   $$('[data-lote]').forEach(b => b.classList.toggle('active', b.dataset.lote === a));
-  $('#lote-agregar')?.classList.toggle('hidden', a !== 'agregar');
-  $('#lote-quitar')?.classList.toggle('hidden', a !== 'quitar');
+  $$('[data-lote-que]').forEach(b => b.classList.toggle('active', b.dataset.loteQue === q));
+  $('#lote-agregar')?.classList.toggle('hidden', !(a === 'agregar' && q === 'act'));
+  $('#lote-quitar')?.classList.toggle('hidden', !(a !== 'agregar' && q === 'act'));
+  $('#lote-fuerza')?.classList.toggle('hidden', q !== 'fuerza');
+  $('#lote-dias-caja')?.classList.toggle('hidden', a === 'mover');
+  $('#lote-mover-caja')?.classList.toggle('hidden', a !== 'mover');
+  const lab = $('#lote-que-label'); if (lab) lab.textContent = a === 'mover' ? 'Qué mover' : 'Qué quitar';
+  // Al añadir fuerza hay que decir cuál; al quitar o mover, puede ser cualquiera.
+  const todas = $('#lote-rutina-todas');
+  if (todas) {
+    todas.hidden = a === 'agregar';
+    const sel = $('#lote-rutina');
+    if (a === 'agregar' && sel && !sel.value && sel.options.length > 1) sel.selectedIndex = 1;
+  }
   evtLoteVista();
+}
+
+window.evtLoteAccion = (a) => { _lote.accion = a; evtLoteMostrar(); };
+window.evtLoteQue = (q) => { _lote.que = q; evtLoteMostrar(); };
+
+// Lo que eligió en la ventana, para la fuerza y para mover.
+const evtLoteFiltro = () => ({
+  accion: _lote.accion,
+  rutinaId: $('#lote-rutina')?.value || '',
+  desde: $('#lote-desde')?.value, hasta: $('#lote-hasta')?.value,
+  dias: $$('.lote-dia:checked').map(i => i.value),
+  de: $('#lote-de')?.value, a: $('#lote-a')?.value,
+});
+const evtLoteEventos = (ctx) => {
+  const que = $('#lote-que')?.value || '*act';
+  return (ctx.eventos || []).filter(ev => que === '*act' ? ev.tipo === 'actividad' : ev.titulo === que.slice(2));
 };
 
 // Qué va a pasar, antes de hacerlo.
@@ -528,11 +585,10 @@ function evtLotePlan() {
   const desde = $('#lote-desde')?.value, hasta = $('#lote-hasta')?.value;
   const fechas = evtRango(desde, hasta, dias);
   if (_lote.accion === 'agregar') return { fechas, dias, desde, hasta };
-  const que = $('#lote-que')?.value || '*act';
   const fasesPorId = Object.fromEntries((ctx.fases || [ctx.fase]).filter(Boolean).map(f => [f.id, f]));
   const enRango = new Set(fechas);
   const quitar = [], marcados = [];
-  (ctx.eventos || []).filter(ev => que === '*act' ? ev.tipo === 'actividad' : ev.titulo === que.slice(2)).forEach(ev => {
+  evtLoteEventos(ctx).forEach(ev => {
     const suyas = evtFechasDe(ev, fasesPorId[ev.fase_id]).filter(f => enRango.has(f));
     const libres = suyas.filter(f => !evtHecho(ev, f));
     if (suyas.length - libres.length) marcados.push(...suyas.filter(f => evtHecho(ev, f)));
@@ -544,6 +600,9 @@ function evtLotePlan() {
 window.evtLoteVista = () => {
   const caja = $('#lote-vista');
   if (!caja) return;
+  const ctx = _lote.ctx || {};
+  if (_lote.que === 'fuerza') { caja.innerHTML = fzLotePlan(evtLoteFiltro()).texto; return; }
+  if (_lote.accion === 'mover') { caja.innerHTML = fzLotePlanEventos(evtLoteFiltro(), evtLoteEventos(ctx)).texto; return; }
   const pl = evtLotePlan();
   const corto = (f) => fmt.fechaCorta ? fmt.fechaCorta(f) : f;
   if (_lote.accion === 'agregar') {
@@ -561,10 +620,20 @@ window.evtLoteVista = () => {
 
 window.evtLoteHacer = async () => {
   const ctx = _lote.ctx || {};
-  const pl = evtLotePlan();
   const btn = $('#lote-ok'); if (btn) btn.disabled = true;
   try {
-    if (_lote.accion === 'agregar') {
+    if (_lote.que === 'fuerza') {
+      const f = evtLoteFiltro();
+      if (!fzLotePlan(f).pasos.length) return toast('Con esos filtros no hay nada que cambiar');
+      const n = await fzLoteHacer(f);
+      toast(n ? `Fuerza: ${n} cambio(s) hechos` : 'No se pudo hacer el cambio');
+    } else if (_lote.accion === 'mover') {
+      const f = evtLoteFiltro(), evs = evtLoteEventos(ctx);
+      if (!fzLotePlanEventos(f, evs).pasos.length) return toast('Con esos filtros no hay nada que mover');
+      const n = await fzLoteHacerEventos(f, evs);
+      toast(`${n} día(s) movidos`);
+    } else if (_lote.accion === 'agregar') {
+      const pl = evtLotePlan();
       const titulo = ($('#ev-titulo')?.value || '').trim();
       if (!titulo) return toast('Elige o escribe la actividad');
       if (!pl.fechas.length) return toast('Con esas fechas y días no cae ningún día');
@@ -578,6 +647,7 @@ window.evtLoteHacer = async () => {
       if (!hechos) return;
       toast(`${titulo}: ${pl.fechas.length} día(s) añadidos`);
     } else {
+      const pl = evtLotePlan();
       if (!pl.total) return toast('No hay nada que quitar con esos filtros');
       let n = 0;
       for (const { ev, fechas } of pl.quitar) {
