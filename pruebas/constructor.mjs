@@ -230,6 +230,20 @@ for (const [tag, ancho, alto] of [['ancho', 1600, 900], ['telefono', 390, 844]])
     ok(`${tag} · galería, rutina y asistencia con scroll propio`, ['gal', 'rut', 'asi'].every(k => sc[k].ov === 'auto' && sc[k].alto <= sc.vh) && sc.gal.contenido > sc.gal.alto, JSON.stringify(sc));
     ok(`${tag} · bajar la galería no mueve la rutina ni la página`, sc.galTop > 0 && sc.rutQuieta && sc.mismaPagina, JSON.stringify(sc));
     await p.screenshot({ path: path.join(CAPTURAS, 'constructor-ancho.png') });
+    // MESA DE TRABAJO: toda la pantalla, tres columnas con scroll propio.
+    ok(`${tag} · el constructor muestra el tiempo estimado (total y por ejercicio)`, /≈ \d+ min/.test(await p.locator('[data-tiempo-total]').innerText()) && await p.locator('[data-tiempo-re]').count() > 0);
+    await p.locator('[data-mesa]').click();
+    await p.waitForTimeout(300);
+    const m = await p.evaluate(() => {
+      const w = document.getElementById('cons-wrap').getBoundingClientRect();
+      const col = (id) => document.getElementById(id).getBoundingClientRect();
+      return { w: [w.left, w.top, w.width, w.height], gal: col('cons-col-gal').left, rut: col('cons-col-rutina').left, asi: col('asi-panel').left, vw: innerWidth, vh: innerHeight };
+    });
+    ok(`${tag} · «Mesa de trabajo» ocupa toda la pantalla con galería | rutina | historial`, m.w[0] === 0 && m.w[1] === 0 && Math.round(m.w[2]) === m.vw && Math.round(m.w[3]) === m.vh && m.gal < m.rut && m.rut < m.asi, JSON.stringify(m));
+    await p.screenshot({ path: path.join(CAPTURAS, 'constructor-mesa.png') });
+    await p.keyboard.press('Escape');
+    await p.waitForTimeout(200);
+    ok(`${tag} · Esc sale de la mesa`, await p.evaluate(() => !document.getElementById('cons-wrap').classList.contains('ent-mesa')));
   } else {
     ok(`${tag} · sin scroll de lado`, await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     await p.evaluate(() => window.scrollTo(0, 0));

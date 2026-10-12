@@ -24,6 +24,10 @@ const r = await p.evaluate(() => {
   // Espiar la base: nos interesa QUÉ se escribiría, no escribirlo.
   let escrituras = [];
   entDb.actualizarRE = async (id, parche) => { escrituras.push([id, parche]); };
+  // Un circuito que queda con uno solo se deshace: se apunta, no se borra.
+  window.BORRADOS = [];
+  entDb.borrarBloque = async (id) => { BORRADOS.push(id); };
+  entDb.crearBloque = async (row) => ({ id: 'bnuevo', ...row });
   entPintarConstructor = async () => {};
   window.entPintarConstructor = entPintarConstructor;
 

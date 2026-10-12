@@ -545,7 +545,7 @@ const entDb = {
 // Al refrescar la página se vuelve al mismo sitio de Entrenamiento: la
 // pestaña, el cliente y su ciclo, el mes del calendario y la rutina que
 // estaba abierta en el constructor. Solo en esta pestaña del navegador.
-const ENT_RECORDAR = ['tab', 'clienteId', 'subtab', 'faseId', 'rutinaId', 'rutinaAbierta', 'mes'];
+const ENT_RECORDAR = ['tab', 'clienteId', 'subtab', 'faseId', 'rutinaId', 'rutinaAbierta', 'mes', 'mesa'];
 function entGuardarEstado() {
   try { sessionStorage.setItem('crm:ent', JSON.stringify(Object.fromEntries(ENT_RECORDAR.map(k => [k, _ent[k] ?? null])))); } catch (e) {}
 }
@@ -1472,7 +1472,23 @@ window.entAbrirConstructor = async (id) => {
   await routes.entrenamiento();
 };
 
+// MESA DE TRABAJO: el constructor a pantalla completa, sin el menú ni la
+// cabecera del CRM, con la galería, la rutina y el historial del cliente en
+// columnas que se desplazan cada una por su lado. Se queda puesta (también
+// al recargar) hasta que la quites.
+window.entMesa = (on = !_ent.mesa) => {
+  _ent.mesa = !!on;
+  $('#cons-wrap')?.classList.toggle('ent-mesa', _ent.mesa);
+  document.body.classList.toggle('ent-mesa-on', _ent.mesa);
+  const cab = $('#cons-cab');
+  if (cab && _ent.rutina) cab.innerHTML = entCabConstructorHTML(_ent.rutina);
+};
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && _ent.mesa && $('#cons-wrap') && $('#modal')?.classList.contains('hidden')) entMesa(false);
+});
+
 window.entCerrarConstructor = () => {
+  document.body.classList.remove('ent-mesa-on');
   _ent.rutinaId = null;
   _ent.rutina = null;
   _ent.bloqueDestino = '';
@@ -1513,9 +1529,10 @@ async function entPintarConstructor() {
   await entDb.firmarPosters(r.ejercicios.map(x => x.ejercicios?.poster_path).filter(Boolean));
 
   body.innerHTML = `
+    <div id="cons-wrap" class="${_ent.mesa ? 'ent-mesa' : ''}">
     <div id="cons-cab">${entCabConstructorHTML(r)}</div>
 
-    <div class="grid lg:grid-cols-2 ${r.cliente_id ? 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_360px]' : ''} gap-4 items-start">
+    <div class="ent-mesa-grid ${r.cliente_id ? '' : 'ent-mesa-sin-asi'} grid lg:grid-cols-2 ${r.cliente_id ? 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_360px]' : ''} gap-4 items-start">
       <div class="order-2 lg:order-1 ent-col" id="cons-col-gal">
         <div class="text-sm font-bold text-slate-700 mb-2">Galería · arrástralo a la rutina o toca “+ Añadir”</div>
         <div id="cons-destino">${entDestinoHTML(r)}</div>
@@ -1534,8 +1551,10 @@ async function entPintarConstructor() {
           <div class="card text-xs text-slate-400">Leyendo su historial…</div>
         </div>` : ''}
     </div>
+    </div>
   `;
   await entPintarGaleriaCons();
+  entLeerTiempoReal(r);
   if (r.cliente_id && typeof asiMontarConstructor === 'function') asiMontarConstructor(r);
   // Los números de los niveles (ahora / antes) se cargan detrás: no frenan
   // la apertura de la rutina.
@@ -1544,6 +1563,127 @@ async function entPintarConstructor() {
     document.querySelectorAll('#cons-filtros select[data-sel="uso"]').forEach(x => { x.innerHTML = entUsoOpciones(); });
     entPintarGaleriaCons();
   }).catch(() => {});
+}
+
+// =====================================================
+// CUÁNTO DURA · estimado mientras la armas
+// =====================================================
+// Para decidir si quitas o dejas un ejercicio hace falta saber cuánto pesa en
+// el reloj. Se cuenta como pasa en el gimnasio, no como en el papel:
+//   · cada serie: las reps × el tempo (sin tempo, ~3,5 s por rep: controlado)
+//     + ~20 s de prepararse (acomodar el peso, agarrar la barra, respirar);
+//     «30s» / «1 min» cuenta ese tiempo; AMRAP ~40 s; «c/lado» ×2;
+//   · el descanso entre series (el que pusiste; sin nada, 90 s);
+//   · ~75 s de cambio entre un ejercicio y el siguiente (ir a la máquina,
+//     cargar discos);
+//   · un circuito: cada vuelta recorre todos sus ejercicios (con su descanso
+//     entre ejercicios, o ~15 s de cambio) y descansa entre vueltas.
+// Si tu cliente ya la hizo, al lado sale lo que tardó de verdad (la mediana).
+const ENT_T = { seg_rep: 3.5, prep_serie: 20, descanso: 90, cambio: 75, cambio_circuito: 15, amrap: 40 };
+
+function entSegPorRep(tempo) {
+  const t = String(tempo || '').trim();
+  if (!t) return ENT_T.seg_rep;
+  const partes = t.split(/[-–/:]/).map(x => (/x/i.test(x) ? 1 : Number(x))).filter(n => Number.isFinite(n));
+  const suma = partes.reduce((a, n) => a + n, 0);
+  return suma > 0 && suma < 20 ? suma : ENT_T.seg_rep;
+}
+
+// Segundos de trabajo de UNA serie.
+function entSegTrabajo(re) {
+  const reps = String(re.reps ?? '').toLowerCase().trim();
+  const lados = /c\/?\s*l|lado|pierna|brazo/.test(reps) ? 2 : 1;
+  // «2-3 min» → 2,5 min; «30-45 s» → 37 s.
+  const prom = (m) => (m[2] ? (Number(m[1].replace(',', '.')) + Number(m[2].replace(',', '.'))) / 2 : Number(m[1].replace(',', '.')));
+  const min = reps.match(/(\d+(?:[.,]\d+)?)(?:\s*[-–a]\s*(\d+(?:[.,]\d+)?))?\s*min/);
+  if (min) return Math.round(prom(min) * 60) * lados;
+  const seg = reps.match(/(\d+)(?:\s*[-–a]\s*(\d+))?\s*(?:s\b|seg|sec|")/);
+  if (seg) return Math.round(prom(seg)) * lados;
+  if (/amrap|fallo|max/.test(reps)) return ENT_T.amrap;
+  const nums = (reps.match(/\d+/g) || []).map(Number).slice(0, 2);
+  const n = nums.length ? nums.reduce((a, x) => a + x, 0) / nums.length : 10;
+  return Math.max(10, Math.min(120, Math.round(n * entSegPorRep(re.tempo) * lados)));
+}
+
+// { total, porRE: { id: seg }, porBloque: { id: seg } } en segundos.
+function entEstimarTiempo(r) {
+  const porRE = {}, porBloque = {};
+  const bloques = Object.fromEntries((r?.bloques || []).map(b => [b.id, b]));
+  const tramos = [];
+  (r?.ejercicios || []).forEach(re => {
+    const ult = tramos[tramos.length - 1];
+    const b = re.bloque_id && bloques[re.bloque_id] ? re.bloque_id : null;
+    if (b && ult && ult.b === b) ult.items.push(re);
+    else tramos.push({ b, items: [re] });
+  });
+  let total = 0;
+  tramos.forEach((t, k) => {
+    const cambio = k === 0 ? 0 : ENT_T.cambio;
+    if (!t.b) {
+      t.items.forEach((re, i) => {
+        const series = Math.max(1, Number(re.series) || 1);
+        const desc = re.descanso_seg ?? ENT_T.descanso;
+        const seg = series * (entSegTrabajo(re) + ENT_T.prep_serie) + (series - 1) * desc + ((k === 0 && i === 0) ? 0 : ENT_T.cambio);
+        porRE[re.id] = seg;
+        total += seg;
+      });
+      return;
+    }
+    const b = bloques[t.b];
+    const vueltas = Math.max(1, Number(b.vueltas) || Math.max(...t.items.map(x => Number(x.series) || 1)));
+    const entre = b.descanso_entre_seg ?? ENT_T.cambio_circuito;
+    const porVuelta = t.items.reduce((a, re) => a + entSegTrabajo(re) + 10, 0) + (t.items.length - 1) * entre;
+    const seg = vueltas * porVuelta + (vueltas - 1) * (b.descanso_seg ?? 60) + cambio;
+    // Lo de cada ejercicio dentro del circuito: su parte de cada vuelta.
+    t.items.forEach(re => { porRE[re.id] = Math.round(vueltas * (entSegTrabajo(re) + 10 + entre)); });
+    porBloque[t.b] = (porBloque[t.b] || 0) + seg;
+    total += seg;
+  });
+  return { total, porRE, porBloque };
+}
+
+const entMin = (seg) => (seg < 60 ? `${Math.max(1, Math.round(seg))} s` : `${Math.round(seg / 60)} min`);
+
+function entTiempoCabHTML(r) {
+  const { total } = entEstimarTiempo(r);
+  if (!total) return '';
+  const real = _ent.tiempoReal && _ent.tiempoReal.rutinaId === r.id ? _ent.tiempoReal : null;
+  const plan = r.duracion_estimada_min;
+  return `
+    <div class="ent-tiempo" data-tiempo-total title="Series × (reps al tempo + preparación) + descansos + cambios entre ejercicios">
+      <span class="ent-tiempo-num">⏱ ≈ ${Math.round(total / 60)} min</span>
+      <span class="ent-tiempo-rango">entre ${Math.round(total * 0.9 / 60)} y ${Math.round(total * 1.15 / 60)} min</span>
+      ${real ? `<span class="ent-tiempo-real" title="Lo que tardó de verdad (mediana de ${real.n} sesión${real.n === 1 ? '' : 'es'} terminadas)">· real: ~${real.min} min (${real.n} vez${real.n === 1 ? '' : 'es'})</span>` : ''}
+      ${plan ? `<span class="ent-tiempo-rango">· pusiste ${plan} min</span>` : ''}
+    </div>`;
+}
+
+// Repinta solo los tiempos (al cambiar series, reps o descansos no hace falta
+// repintar la rutina entera).
+function entPintarTiempos() {
+  const r = _ent.rutina;
+  if (!r) return;
+  const t = entEstimarTiempo(r);
+  document.querySelectorAll('[data-tiempo-re]').forEach(el => { const s2 = t.porRE[el.dataset.tiempoRe]; el.textContent = s2 ? `≈ ${entMin(s2)}` : ''; });
+  document.querySelectorAll('[data-tiempo-bloque]').forEach(el => { const s2 = t.porBloque[el.dataset.tiempoBloque]; el.textContent = s2 ? ` · ≈ ${entMin(s2)}` : ''; });
+  const cab = document.querySelector('[data-tiempo-total]');
+  if (cab) cab.outerHTML = entTiempoCabHTML(r);
+}
+
+// Lo que tardó de verdad: las sesiones terminadas de esta rutina (y de la que
+// se copió), sin las que se cerraron solas.
+async function entLeerTiempoReal(r) {
+  try {
+    const ids = [r.id, r.origen_rutina_id].filter(Boolean);
+    let { data, error } = await sb.from('sesiones').select('duracion_seg, cerrada_auto').in('rutina_id', ids).eq('estado', 'completada');
+    if (error) ({ data } = await sb.from('sesiones').select('duracion_seg').in('rutina_id', ids).eq('estado', 'completada'));
+    const mins = (data || []).filter(x => !x.cerrada_auto && x.duracion_seg >= 600 && x.duracion_seg <= 3 * 3600)
+      .map(x => x.duracion_seg / 60).sort((a, b) => a - b);
+    if (!mins.length) return;
+    const m = mins.length % 2 ? mins[(mins.length - 1) / 2] : (mins[mins.length / 2 - 1] + mins[mins.length / 2]) / 2;
+    _ent.tiempoReal = { rutinaId: r.id, min: Math.round(m), n: mins.length };
+    if (_ent.rutina?.id === r.id) entPintarTiempos();
+  } catch (e) { /* sin sesiones, sin real */ }
 }
 
 function entCabConstructorHTML(r) {
@@ -1560,6 +1700,7 @@ function entCabConstructorHTML(r) {
           <button class="btn btn-ghost btn-sm mb-1" onclick="entCerrarConstructor()">← Volver</button>
           <div class="font-bold text-lg text-slate-900">${escapeHtml(r.nombre)}</div>
           <div class="text-xs text-slate-500">${_ent.consContexto || ''} · ${r.ejercicios.length} ejercicio${r.ejercicios.length === 1 ? '' : 's'}</div>
+          ${entTiempoCabHTML(r)}
           ${sinTexto.length ? `
             <div class="text-xs text-amber-700 mt-1">
               ⚠ ${sinTexto.length} sin descripción: el cliente los verá sin instrucciones
@@ -1567,6 +1708,7 @@ function entCabConstructorHTML(r) {
             </div>` : ''}
         </div>
         <div class="flex gap-1 flex-wrap">
+          <button class="btn ${_ent.mesa ? 'btn-primary' : 'btn-secondary'} btn-sm" data-mesa onclick="entMesa()" title="Toda la pantalla para armarla: galería, rutina y su historial lado a lado (Esc para salir)">${_ent.mesa ? '✕ Salir de la mesa' : '⛶ Mesa de trabajo'}</button>
           <button class="btn btn-ghost btn-sm" onclick="entNuevoBloque()">+ Bloque</button>
           <button class="btn btn-ghost btn-sm" onclick="entEditarDatosRutina()">Editar datos</button>
           <button class="btn btn-ghost btn-sm" onclick="entCopiarRutinaA('${r.id}')">Copiar a…</button>
@@ -1728,17 +1870,22 @@ function entEnvolverBloque(b, dentro, cuantos) {
          ondrop="entBloqueDrop(event)"
          style="border:1.5px solid #cbd5e1;background:#f8fafc;padding:0.6rem">
       <div class="flex justify-between items-start gap-2 mb-2">
-        <div class="min-w-0">
+        <div class="min-w-0 flex gap-2">
+          ${cuantos ? `<div class="ent-agarre" draggable="true" data-bloque-agarre title="Arrastra para mover el circuito entero"
+               ondragstart="entBloqueDragStart(event)" ondragend="entBloqueDragEnd(event)">⠿</div>` : ''}
+          <div class="min-w-0">
           <div class="flex items-center gap-1.5 flex-wrap">
             <span class="tag tag-violet">${escapeHtml(etq)}</span>
             <span class="font-bold text-sm text-slate-800">${escapeHtml(b.nombre || '')}</span>
           </div>
           <div class="text-xs text-slate-500 mt-0.5">
             ${partes.length ? escapeHtml(partes.join(' · ')) : 'Sin tiempos configurados'}
-            ${cuantos ? ` · ${cuantos} ejercicio${cuantos === 1 ? '' : 's'}` : ''}
+            ${cuantos ? ` · ${cuantos} ejercicio${cuantos === 1 ? '' : 's'}` : ''}<span class="ent-tiempo-re" data-tiempo-bloque="${b.id}">${cuantos && _ent.rutina ? (s2 => s2 ? ` · ≈ ${entMin(s2)}` : '')(entEstimarTiempo(_ent.rutina).porBloque[b.id]) : ''}</span>
+          </div>
           </div>
         </div>
         <div class="flex gap-0.5 flex-shrink-0">
+          ${cuantos ? `<button class="btn btn-ghost btn-sm" data-bloque-al-final onclick="entBloqueAlFinal('${b.id}')" title="Mandar el circuito al final de la rutina">⤓</button>` : ''}
           <button class="btn btn-ghost btn-sm" onclick="entEditarBloque('${b.id}')">Editar</button>
           <button class="btn btn-ghost btn-sm" onclick="entBorrarBloque('${b.id}')">✕</button>
         </div>
@@ -1776,7 +1923,8 @@ function entFilaRutina(re, i, total, bloques) {
           <div class="min-w-0">
             <div class="font-bold text-sm text-slate-900">${i + 1}. ${escapeHtml(entNombres(e).grande)}</div>
             ${entNombreChico(e)}
-            <div class="text-xs text-slate-500">${entLabel(ENT_TIPOS, e.tipo)} · ${entChipMusculos(e)}</div>
+            <div class="text-xs text-slate-500">${entLabel(ENT_TIPOS, e.tipo)} · ${entChipMusculos(e)}
+              <span class="ent-tiempo-re" data-tiempo-re="${re.id}" title="Lo que pesa en el reloj (series, descansos y el cambio al siguiente)">${_ent.rutina ? (s2 => s2 ? `≈ ${entMin(s2)}` : '')(entEstimarTiempo(_ent.rutina).porRE[re.id]) : ''}</span></div>
             ${sinTexto ? `
               <button class="ent-aviso" onclick="entEditarEjercicio('${e.id}')"
                       title="El cliente lo verá sin ninguna instrucción de cómo hacerlo">
@@ -1788,6 +1936,7 @@ function entFilaRutina(re, i, total, bloques) {
           <button class="btn btn-ghost btn-sm" onclick="entVerFicha('${e.id}')" title="Ver la ficha completa">👁</button>
           <button class="btn btn-ghost btn-sm" ${i === 0 ? 'disabled' : ''} onclick="entMoverRE('${re.id}', -1)">↑</button>
           <button class="btn btn-ghost btn-sm" ${i === total - 1 ? 'disabled' : ''} onclick="entMoverRE('${re.id}', 1)">↓</button>
+          <button class="btn btn-ghost btn-sm" data-al-final onclick="entAlFinal('${re.id}')" title="${re.bloque_id ? 'Mandarlo al final de su circuito' : 'Mandarlo al final de la rutina'}">⤓</button>
           <button class="btn btn-ghost btn-sm" onclick="entQuitarRE('${re.id}')">✕</button>
         </div>
       </div>
@@ -1857,14 +2006,17 @@ window.entGuardarRE = async (id, campo, valor) => {
   await entDb.actualizarRE(id, { [campo]: v });
   const idx = (_ent.rutina?.ejercicios || []).findIndex(x => x.id === id);
   if (idx >= 0) _ent.rutina.ejercicios[idx][campo] = v;
+  entPintarTiempos();
 };
 
 window.entQuitarRE = async (id) => {
   if (!_ent.rutina) return;
+  const deBloque = _ent.rutina.ejercicios.find(x => x.id === id)?.bloque_id || null;
   _ent.rutina.ejercicios = _ent.rutina.ejercicios.filter(x => x.id !== id);
   entRepintarRutina();
   const ok = await entDb.quitarRE(id);
   if (ok === false) return entRefrescarRutina();
+  if (deBloque) await entDeshacerSiSobra(deBloque);
   entRefrescarAsistencia();
 };
 
@@ -1887,13 +2039,24 @@ function entMarcarArrastre(on) {
   setTimeout(() => { const c = $('#cons-rutina'); if (c) c.classList.toggle('ent-arrastrando', on); }, 0);
 }
 function entLimpiarMarcas() {
-  document.querySelectorAll('.ent-fila-antes, .ent-fila-despues')
-    .forEach(f => f.classList.remove('ent-fila-antes', 'ent-fila-despues'));
+  document.querySelectorAll('.ent-fila-antes, .ent-fila-despues, .ent-fila-juntar')
+    .forEach(f => f.classList.remove('ent-fila-antes', 'ent-fila-despues', 'ent-fila-juntar'));
   document.querySelectorAll('.ent-bloque-destino, .ent-hueco-on')
     .forEach(f => f.classList.remove('ent-bloque-destino', 'ent-hueco-on'));
 }
-const entArrastra = () => _ent.arrastrandoRE || _ent.arrastrandoEj;
+const entArrastra = () => _ent.arrastrandoRE || _ent.arrastrandoEj || _ent.arrastrandoBloque;
 const entEfecto = () => (_ent.arrastrandoEj ? 'copy' : 'move');
+// Dónde cae sobre una fila: el tercio de arriba = antes, el de abajo =
+// después, y EL MEDIO = juntarlo con ese ejercicio en un circuito. Un
+// circuito entero arrastrado solo va antes o después.
+function entZona(e, fila) {
+  const caja = fila.getBoundingClientRect();
+  const rel = (e.clientY - caja.top) / (caja.height || 1);
+  const mismoBloque = _ent.arrastrandoRE && fila.dataset.bloque
+    && (_ent.rutina?.ejercicios || []).find(x => x.id === _ent.arrastrandoRE)?.bloque_id === fila.dataset.bloque;
+  if (!_ent.arrastrandoBloque && !mismoBloque && rel >= 0.3 && rel <= 0.7) return 'juntar';
+  return rel < 0.5 ? 'antes' : 'despues';
+}
 
 window.entReDragStart = (e) => {
   const fila = e.currentTarget;
@@ -1935,30 +2098,43 @@ window.entReDragOver = (e) => {
   if (!entArrastra()) return;
   const fila = e.currentTarget;
   if (_ent.arrastrandoRE && fila.dataset.re === _ent.arrastrandoRE) return;
+  if (_ent.arrastrandoBloque && fila.dataset.bloque === _ent.arrastrandoBloque) return;
   e.preventDefault();
   e.stopPropagation();
   e.dataTransfer.dropEffect = entEfecto();
-  // La mitad superior de la fila significa "antes", la inferior "después".
-  // Sin esta línea no se sabe dónde va a caer hasta que ya cayó.
-  const caja = fila.getBoundingClientRect();
-  const antes = (e.clientY - caja.top) < caja.height / 2;
+  // Arriba "antes", abajo "después", en medio "juntar en circuito". Sin la
+  // marca no se sabe dónde va a caer hasta que ya cayó.
+  const zona = entZona(e, fila);
   entLimpiarMarcas();
-  fila.classList.add(antes ? 'ent-fila-antes' : 'ent-fila-despues');
+  fila.classList.add(zona === 'antes' ? 'ent-fila-antes' : zona === 'despues' ? 'ent-fila-despues' : 'ent-fila-juntar');
 };
 
 window.entReDrop = async (e) => {
   const id = _ent.arrastrandoRE;
   const ej = _ent.arrastrandoEj;
+  const bl = _ent.arrastrandoBloque;
   const fila = e.currentTarget;
   const destinoId = fila.dataset.re;
+  const zona = entZona(e, fila);
   _ent.arrastrandoRE = null;
   _ent.arrastrandoEj = null;
+  _ent.arrastrandoBloque = null;
   entLimpiarMarcas();
+  if (bl && destinoId) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (fila.dataset.bloque === bl) return;
+    return entMoverBloqueJunto(bl, destinoId, zona === 'antes');
+  }
+  if ((ej || id) && destinoId && zona === 'juntar' && id !== destinoId) {
+    e.preventDefault();
+    e.stopPropagation();
+    return entJuntarEnCircuito(destinoId, { reId: id, ejId: ej });
+  }
   if (ej && destinoId) {
     e.preventDefault();
     e.stopPropagation();
-    const caja = fila.getBoundingClientRect();
-    const antes = (e.clientY - caja.top) < caja.height / 2;
+    const antes = zona === 'antes';
     let pos = (_ent.rutina?.ejercicios || []).findIndex(x => x.id === destinoId);
     if (pos < 0) return;
     if (!antes) pos++;
@@ -1967,10 +2143,7 @@ window.entReDrop = async (e) => {
   if (!id || !destinoId || id === destinoId) return;
   e.preventDefault();
   e.stopPropagation();
-
-  const caja = fila.getBoundingClientRect();
-  const antes = (e.clientY - caja.top) < caja.height / 2;
-  await entReordenarRE(id, destinoId, antes, fila.dataset.bloque || null);
+  await entReordenarRE(id, destinoId, zona === 'antes', fila.dataset.bloque || null);
 };
 
 // Soltar en un hueco: queda SUELTO en esa posición (fuera de cualquier
@@ -1991,12 +2164,21 @@ window.entHuecoDrop = async (e) => {
   const pos = Number(e.currentTarget.dataset.pos) || 0;
   const id = _ent.arrastrandoRE;
   const ej = _ent.arrastrandoEj;
+  const bl = _ent.arrastrandoBloque;
   _ent.arrastrandoRE = null;
   _ent.arrastrandoEj = null;
+  _ent.arrastrandoBloque = null;
   entLimpiarMarcas();
-  if (!id && !ej) return;
+  if (!id && !ej && !bl) return;
   e.preventDefault();
   e.stopPropagation();
+  if (bl) {
+    const lista = _ent.rutina?.ejercicios || [];
+    const sig = lista.slice(pos).find(x => x.bloque_id !== bl);
+    if (sig) return entMoverBloqueJunto(bl, sig.id, true);
+    const ult = [...lista].reverse().find(x => x.bloque_id !== bl);
+    return ult ? entMoverBloqueJunto(bl, ult.id, false) : null;
+  }
   if (ej) return entAgregarARutina(ej, { pos, bloque: null });
   const lista = _ent.rutina?.ejercicios || [];
   const sig = lista.slice(pos).find(x => x.id !== id);
@@ -2015,12 +2197,15 @@ async function entReordenarRE(id, destinoId, antes, bloqueDestino) {
   if (desde < 0) return;
 
   const [movido] = lista.splice(desde, 1);
+  const deBloque = movido.bloque_id || null;
   let hasta = lista.findIndex(x => x.id === destinoId);
   if (hasta < 0) return;
   if (!antes) hasta++;
   lista.splice(hasta, 0, movido);
 
   await entGuardarOrden(lista, { [id]: bloqueDestino || null });
+  // Lo sacaste de su circuito: si quedó con uno solo, el circuito se deshace.
+  if (deBloque && deBloque !== (bloqueDestino || null)) await entDeshacerSiSobra(deBloque);
 }
 
 // Deja la rutina con la lista en ESTE orden: se ve al instante y se guarda
@@ -2069,10 +2254,23 @@ window.entBloqueDrop = async (e) => {
   caja.classList.remove('ent-bloque-destino');
   const id = _ent.arrastrandoRE;
   const ej = _ent.arrastrandoEj;
+  const bl = _ent.arrastrandoBloque;
   const bloqueId = caja.dataset.bloque;
   _ent.arrastrandoRE = null;
   _ent.arrastrandoEj = null;
+  _ent.arrastrandoBloque = null;
   entLimpiarMarcas();
+  if (bl) {
+    // Un circuito soltado sobre otro: va antes o después de él, según la mitad.
+    e.preventDefault();
+    e.stopPropagation();
+    if (bl === bloqueId) return;
+    const dentro = (_ent.rutina?.ejercicios || []).filter(x => x.bloque_id === bloqueId);
+    if (!dentro.length) return;
+    const r = caja.getBoundingClientRect();
+    const antes = (e.clientY - r.top) < r.height / 2;
+    return entMoverBloqueJunto(bl, antes ? dentro[0].id : dentro[dentro.length - 1].id, antes);
+  }
   if (ej) {
     // Al final de ese bloque (o al final de la rutina si está vacío).
     e.preventDefault();
@@ -2110,6 +2308,117 @@ window.entMoverRE = async (id, delta) => {
   const nueva = lista.slice();
   [nueva[i], nueva[j]] = [nueva[j], nueva[i]];
   await entGuardarOrden(nueva);
+};
+
+// ---------- Circuitos por arrastre ----------
+// Soltar un ejercicio EN MEDIO de otro los junta: si el de abajo ya estaba en
+// un circuito, entra ahí; si estaba suelto, se crea una superserie con los
+// dos (las vueltas = las series del de destino, para que el cliente haga
+// A→B→A→B…). Sacarlo arrastrando (o con la ✕) deshace el circuito si queda
+// con uno solo.
+async function entJuntarEnCircuito(destinoId, { reId = null, ejId = null } = {}) {
+  const r = _ent.rutina;
+  if (!r) return;
+  const dest = r.ejercicios.find(x => x.id === destinoId);
+  if (!dest) return;
+  const origen = reId ? r.ejercicios.find(x => x.id === reId) : null;
+  let bloqueId = dest.bloque_id || null;
+  let nuevo = null;
+  if (!bloqueId) {
+    nuevo = await entDb.crearBloque({
+      rutina_id: _ent.rutinaId, tipo: 'superserie', nombre: null, orden: (r.bloques?.length || 0) + 1,
+      vueltas: Math.max(1, Number(dest.series) || 3), descanso_seg: dest.descanso_seg ?? 90, descanso_entre_seg: null,
+    });
+    if (!nuevo) return;
+    (r.bloques ||= []).push(nuevo);
+    bloqueId = nuevo.id;
+  }
+  // Va justo después del último del circuito (o del de destino).
+  const ultimoDe = (lista) => { let k = -1; lista.forEach((x, i) => { if (x.bloque_id === bloqueId || x.id === destinoId) k = i; }); return k; };
+  if (ejId) {
+    await entGuardarOrden(r.ejercicios.slice(), { [destinoId]: bloqueId });
+    await entAgregarARutina(ejId, { pos: ultimoDe(r.ejercicios) + 1, bloque: bloqueId });
+  } else if (origen) {
+    const deBloque = origen.bloque_id || null;
+    const lista = r.ejercicios.filter(x => x.id !== reId);
+    lista.splice(ultimoDe(lista) + 1, 0, origen);
+    await entGuardarOrden(lista, { [reId]: bloqueId, [destinoId]: bloqueId });
+    if (deBloque && deBloque !== bloqueId) await entDeshacerSiSobra(deBloque);
+  }
+  toast(nuevo ? 'Superserie creada: ajusta vueltas y descansos en «Editar»' : 'Añadido al circuito');
+}
+
+// Si a un circuito le queda un ejercicio (o ninguno) después de sacarle
+// otro, ya no es circuito: se deshace y lo que queda vuelve a estar suelto.
+async function entDeshacerSiSobra(bloqueId) {
+  const r = _ent.rutina;
+  if (!r || !bloqueId) return;
+  const quedan = r.ejercicios.filter(x => x.bloque_id === bloqueId);
+  if (quedan.length > 1) return;
+  await entDb.borrarBloque(bloqueId);
+  quedan.forEach(x => { x.bloque_id = null; });
+  r.bloques = (r.bloques || []).filter(b => b.id !== bloqueId);
+  if (_ent.bloqueDestino === bloqueId) _ent.bloqueDestino = '';
+  entRepintarRutina();
+  toast('El circuito quedó con un solo ejercicio: se deshizo');
+}
+
+// Mover un circuito ENTERO junto a un ejercicio (antes o después). Si ese
+// ejercicio está en otro circuito, va antes o después de ese circuito
+// completo: nunca en medio.
+async function entMoverBloqueJunto(bloqueId, refId, antes) {
+  const lista = (_ent.rutina?.ejercicios || []).slice();
+  const mueve = lista.filter(x => x.bloque_id === bloqueId);
+  if (!mueve.length) return;
+  const resto = lista.filter(x => x.bloque_id !== bloqueId);
+  const ref = resto.find(x => x.id === refId);
+  if (!ref) return;
+  let k;
+  if (ref.bloque_id) {
+    const idx = resto.map((x, i) => (x.bloque_id === ref.bloque_id ? i : -1)).filter(i => i >= 0);
+    k = antes ? idx[0] : idx[idx.length - 1] + 1;
+  } else {
+    k = resto.indexOf(ref) + (antes ? 0 : 1);
+  }
+  resto.splice(k, 0, ...mueve);
+  await entGuardarOrden(resto);
+}
+
+window.entBloqueDragStart = (e) => {
+  const caja = e.currentTarget.closest('[data-bloque]');
+  _ent.arrastrandoBloque = caja?.dataset.bloque || null;
+  _ent.arrastrandoRE = null;
+  _ent.arrastrandoEj = null;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', _ent.arrastrandoBloque || '');
+  e.stopPropagation();
+  caja?.classList.add('ent-fila-arrastre');
+  entMarcarArrastre(true);
+};
+window.entBloqueDragEnd = (e) => {
+  e.currentTarget.closest('[data-bloque]')?.classList.remove('ent-fila-arrastre');
+  entLimpiarMarcas();
+  entMarcarArrastre(false);
+  _ent.arrastrandoBloque = null;
+};
+
+// ⤓ Al final: para ordenar rápido, mandando abajo uno por uno en el orden
+// que quieres. Dentro de un circuito, al final de ese circuito.
+window.entAlFinal = async (id) => {
+  const lista = (_ent.rutina?.ejercicios || []).slice();
+  const i = lista.findIndex(x => x.id === id);
+  if (i < 0) return;
+  const [re] = lista.splice(i, 1);
+  if (re.bloque_id) {
+    let k = -1;
+    lista.forEach((x, j) => { if (x.bloque_id === re.bloque_id) k = j; });
+    lista.splice(k + 1, 0, re);
+  } else lista.push(re);
+  await entGuardarOrden(lista);
+};
+window.entBloqueAlFinal = async (bloqueId) => {
+  const lista = _ent.rutina?.ejercicios || [];
+  await entGuardarOrden([...lista.filter(x => x.bloque_id !== bloqueId), ...lista.filter(x => x.bloque_id === bloqueId)]);
 };
 
 window.entDestino = (id) => { _ent.bloqueDestino = id || ''; };

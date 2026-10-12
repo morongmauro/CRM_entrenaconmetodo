@@ -511,6 +511,12 @@ summary.list-none { list-style: none; }
 }
 .ent-fila-antes::before  { top: -0.35rem; }
 .ent-fila-despues::after { bottom: -0.35rem; }
+/* En medio de otra fila: se juntan en un circuito. */
+.ent-fila-juntar { outline: 2px dashed #3C7BD6; outline-offset: 2px; background: #EEF4FC !important; position: relative; }
+.ent-fila-juntar::after {
+  content: 'Suelta para juntarlos en un circuito'; position: absolute; right: .6rem; bottom: .4rem;
+  font-size: .7rem; font-weight: 700; color: #3C7BD6; background: #fff; border-radius: 99px; padding: .1rem .5rem;
+}
 
 .ent-agarre {
   color: #cbd5e1; font-size: 1rem; line-height: 1.1; cursor: grab;
@@ -760,3 +766,34 @@ summary.list-none { list-style: none; }
 @media (hover: none) { .ent-chip-quitar { opacity: 1; } }
 .ent-chip-rutina { position: relative; }
 .ent-chip-rutina:hover .ent-chip-quitar { opacity: 1; }
+
+/* Cuánto dura la rutina (constructor). */
+.ent-tiempo { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem; margin-top: .35rem; }
+.ent-tiempo-num { font-weight: 800; color: #1D1D1F; font-size: .95rem; }
+.ent-tiempo-rango { font-size: .72rem; color: #64748b; }
+.ent-tiempo-real { font-size: .75rem; font-weight: 700; color: #46965A; }
+.ent-tiempo-re { color: #3C7BD6; font-weight: 700; white-space: nowrap; }
+
+/* MESA DE TRABAJO · el constructor a pantalla completa. */
+.ent-mesa {
+  position: fixed; inset: 0; z-index: 35; background: #F5F5F7;
+  padding: 10px 16px 12px; display: flex; flex-direction: column; overflow: hidden;
+}
+.ent-mesa #cons-cab .card { margin-bottom: 10px; padding: .55rem .9rem; }
+.ent-mesa .ent-mesa-grid { flex: 1; min-height: 0; align-items: stretch !important; }
+.ent-mesa .ent-col, .ent-mesa .ent-col-xl {
+  position: static; top: auto; max-height: none; height: 100%; min-height: 0; overflow-y: auto;
+  padding-right: 4px; scrollbar-gutter: stable;
+}
+@media (min-width: 1024px) {
+  .ent-mesa .ent-mesa-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) 340px !important; }
+  .ent-mesa .ent-mesa-grid.ent-mesa-sin-asi { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) !important; }
+  .ent-mesa #cons-col-gal { order: 1; }
+  .ent-mesa #cons-col-rutina { order: 2; }
+  .ent-mesa #asi-panel { order: 3; grid-column: auto !important; }
+  .ent-mesa #cons-gal-lista { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)) !important; max-height: none; overflow: visible; }
+}
+@media (max-width: 1023px) {
+  .ent-mesa { overflow-y: auto; }
+  .ent-mesa .ent-col, .ent-mesa .ent-col-xl { height: auto; overflow: visible; }
+}
