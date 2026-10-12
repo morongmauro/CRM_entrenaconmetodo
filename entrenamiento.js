@@ -2581,8 +2581,10 @@ function entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina, sesio
           </div>
           ${fase.objetivo ? `<div class="text-xs text-slate-600 mt-1">🎯 ${escapeHtml(fase.objetivo)}</div>` : ''}
         </div>
-        <div class="flex gap-1 flex-shrink-0 flex-wrap">
+        <div class="flex gap-1 flex-wrap min-w-0">
+          <button class="btn btn-ghost btn-sm" onclick="entNuevaActividad()" data-cal-actividad title="Caminadora, caminata, natación, tenis… del mismo catálogo que usa tu cliente">+ Cardio o deporte</button>
           <button class="btn btn-ghost btn-sm" onclick="entNuevoEvento()">+ Evento</button>
+          <button class="btn btn-ghost btn-sm" onclick="entDuplicarCiclo('${fase.id}')" data-cal-copiar title="Crea el ciclo siguiente con estas rutinas, sus días, y el cardio y deportes que se repiten">⧉ Copiar este ciclo al siguiente</button>
           <button class="btn btn-secondary btn-sm" onclick="entEditarFase('${fase.id}')">Editar fase</button>
         </div>
       </div>
@@ -2833,6 +2835,13 @@ window.entCalDrop = async (e) => {
 window.entNuevoEvento = (fecha = null) => {
   if (!_ent.clienteId) return;
   evtEditar(fecha ? { fecha } : {}, entCtxEvento());
+};
+
+// Cardio o deporte: el editor de eventos ya abierto en «Actividad», con el
+// catálogo del cliente para elegir con un toque.
+window.entNuevaActividad = (fecha = null) => {
+  if (!_ent.clienteId) return;
+  evtEditar(fecha ? { tipo: 'actividad', fecha } : { tipo: 'actividad' }, entCtxEvento());
 };
 
 window.entEditarEvento = (id) => {

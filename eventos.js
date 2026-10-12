@@ -38,6 +38,43 @@ const EVT_TIPOS = [
   ['descanso',  '😴 Descanso',   '#65a30d'],   // día libre a propósito
 ];
 
+// El MISMO catálogo de actividades con que el cliente registra en su app
+// (tabla actividades_catalogo). Así lo que le pones tú y lo que él marca se
+// llaman igual, y la app sabe qué actividad es cuando le da «Ya lo hice».
+// Sin la tabla, una lista mínima de respaldo.
+const EVT_CATALOGO_MINIMO = [
+  { slug: 'cinta', nombre: 'Caminadora', categoria: 'cardio', icono: '🏃' },
+  { slug: 'eliptica', nombre: 'Elíptica', categoria: 'cardio', icono: '🌀' },
+  { slug: 'escaladora', nombre: 'Escaladora', categoria: 'cardio', icono: '🪜' },
+  { slug: 'bici_estatica', nombre: 'Bicicleta estática', categoria: 'cardio', icono: '🚲' },
+  { slug: 'caminata', nombre: 'Caminata', categoria: 'cardio', icono: '🚶' },
+  { slug: 'running', nombre: 'Running en calle', categoria: 'cardio', icono: '👟' },
+  { slug: 'natacion', nombre: 'Natación', categoria: 'deporte', icono: '🏊' },
+  { slug: 'tenis', nombre: 'Tenis', categoria: 'deporte', icono: '🎾' },
+  { slug: 'yoga', nombre: 'Yoga', categoria: 'movilidad', icono: '🧘' },
+  { slug: 'otro', nombre: 'Otra actividad', categoria: 'otro', icono: '✨' },
+];
+// Variantes de un toque: el título que más se usa para cada una. El título
+// empieza con el nombre del catálogo, así la app la reconoce.
+const EVT_VARIANTES = {
+  cinta: ['Caminadora después de entrenar', 'Caminadora con inclinación'],
+  caminata: ['Caminata corta', 'Caminata larga'],
+  running: ['Running en calle suave', 'Running en calle a ritmo'],
+  escaladora: ['Escaladora después de entrenar'],
+  eliptica: ['Elíptica después de entrenar'],
+  bici_estatica: ['Bicicleta estática después de entrenar'],
+};
+const EVT_CATEGORIAS = [['cardio', 'Cardio'], ['deporte', 'Deportes'], ['movilidad', 'Movilidad y recuperación'], ['otro', 'Otro']];
+let _evtCatalogo = null;
+async function evtCatalogo() {
+  if (_evtCatalogo) return _evtCatalogo;
+  try {
+    const { data, error } = await sb.from('actividades_catalogo').select('slug,nombre,categoria,icono,remate,orden').eq('activo', true).order('orden');
+    _evtCatalogo = !error && data && data.length ? data : EVT_CATALOGO_MINIMO;
+  } catch (e) { _evtCatalogo = EVT_CATALOGO_MINIMO; }
+  return _evtCatalogo;
+}
+
 const evtLabel = (t) => (EVT_TIPOS.find(x => x[0] === t) || EVT_TIPOS[0])[1];
 const evtColor = (e) => e.color || (EVT_TIPOS.find(x => x[0] === e.tipo) || EVT_TIPOS[0])[2];
 
@@ -129,12 +166,13 @@ window.evtEditar = (ev, ctx) => {
   openModal(modalShell(esNuevo ? 'Nuevo evento' : 'Editar evento', `
     <div class="grid md:grid-cols-2 gap-3 mb-3">
       <div><label>Qué es</label>
-        <select id="ev-tipo">
+        <select id="ev-tipo" onchange="evtMostrarCatalogo()">
           ${EVT_TIPOS.map(([id, lab]) => `<option value="${id}" ${(e.tipo || 'actividad') === id ? 'selected' : ''}>${lab}</option>`).join('')}
         </select></div>
       <div><label>Título *</label>
         <input id="ev-titulo" value="${escapeHtml(e.titulo || '')}" placeholder="Natación"></div>
     </div>
+    <div id="ev-catalogo" class="mb-3 ${(e.tipo || 'actividad') === 'actividad' ? '' : 'hidden'}"></div>
 
     <div class="sec-title">Cuándo</div>
     <div class="flex gap-2 mb-3">
@@ -202,6 +240,67 @@ window.evtEditar = (ev, ctx) => {
 
   _evt.ctx = ctx;
   _evt.modo = modo;
+  evtPintarCatalogo();
+};
+
+// El catálogo del cliente, para elegir con un toque (cardio y deportes).
+async function evtPintarCatalogo() {
+  const caja = $('#ev-catalogo');
+  if (!caja) return;
+  const cat = await evtCatalogo();
+  if (!$('#ev-catalogo')) return;
+  const titulo = ($('#ev-titulo')?.value || '').trim();
+  const elegido = evtSlugDe(titulo, cat);
+  const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  caja.innerHTML = `
+    <label>Elige del catálogo (es el mismo que usa tu cliente)</label>
+    ${EVT_CATEGORIAS.map(([c, lab]) => {
+      const de = cat.filter(a => (a.categoria || 'otro') === c);
+      if (!de.length) return '';
+      return `
+        <div class="text-[11px] font-semibold text-slate-500 mt-2 mb-1">${lab}</div>
+        <div class="flex flex-wrap gap-1.5">
+          ${de.map(a => `<button type="button" class="chip ${elegido === a.slug ? 'active' : ''}" data-ev-act="${escapeHtml(a.slug)}"
+                    onclick="evtElegirActividad('${escapeHtml(a.slug)}')">${a.icono || ''} ${escapeHtml(a.nombre)}</button>`).join('')}
+        </div>`;
+    }).join('')}
+    ${elegido && EVT_VARIANTES[elegido] ? `
+      <div class="text-[11px] font-semibold text-slate-500 mt-2 mb-1">Como título</div>
+      <div class="flex flex-wrap gap-1.5">
+        ${EVT_VARIANTES[elegido].map(v => `<button type="button" class="chip ${norm(v) === norm(titulo) ? 'active' : ''}" data-ev-variante
+                  onclick="evtVariante(this.textContent)">${escapeHtml(v)}</button>`).join('')}
+      </div>` : ''}`;
+}
+
+// Qué actividad del catálogo es un título: el nombre del catálogo contenido
+// en el título («Caminadora con inclinación» → caminadora). La app usa la
+// misma regla (entrenoDatos.js, slugDeEvento).
+function evtSlugDe(titulo, cat) {
+  const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  const t = norm(titulo);
+  if (!t) return null;
+  const hit = (cat || []).filter(a => a.slug !== 'otro' && t.includes(norm(a.nombre)))
+    .sort((a, b) => b.nombre.length - a.nombre.length)[0];
+  return hit ? hit.slug : null;
+}
+
+window.evtMostrarCatalogo = () => {
+  const es = ($('#ev-tipo')?.value || 'actividad') === 'actividad';
+  $('#ev-catalogo')?.classList.toggle('hidden', !es);
+};
+
+window.evtElegirActividad = async (slug) => {
+  const a = (await evtCatalogo()).find(x => x.slug === slug);
+  const inp = $('#ev-titulo');
+  if (a && inp) inp.value = a.slug === 'otro' ? '' : a.nombre;
+  evtPintarCatalogo();
+  if (a && a.slug === 'otro') inp?.focus();
+};
+
+window.evtVariante = (texto) => {
+  const inp = $('#ev-titulo');
+  if (inp) inp.value = String(texto).trim();
+  evtPintarCatalogo();
 };
 
 window.evtModo = (m) => {

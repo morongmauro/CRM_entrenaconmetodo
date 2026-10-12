@@ -52,6 +52,15 @@ await p.evaluate(() => {
   ];
   // Fútbol los domingos, 3 semanas.
   TABLAS.actividades = ['2026-10-04', '2026-10-11', '2026-10-18'].map(f => ({ cliente_id: 'c1', fecha: f, titulo: 'Fútbol', tipo: 'futbol' }));
+  // Lo que el coach puso en el calendario de este ciclo: caminadora después
+  // de entrenar martes y jueves (semanas 1, 2 y 5), natación los sábados, y el
+  // pesaje del 12-oct. Más un evento de OTRO ciclo, que no se toca.
+  TABLAS.eventos = [
+    { id: 'ev1', cliente_id: 'c1', fase_id: 'f1', tipo: 'actividad', titulo: 'Caminadora después de entrenar', detalle: '15 min inclinación 8', duracion_min: 15, fecha: null, dias_semana: ['M', 'J'], semanas: [1, 2, 5], visible_cliente: null },
+    { id: 'ev2', cliente_id: 'c1', fase_id: 'f1', tipo: 'actividad', titulo: 'Natación', fecha: null, dias_semana: ['S'], semanas: null, visible_cliente: null },
+    { id: 'ev3', cliente_id: 'c1', fase_id: 'f1', tipo: 'peso', titulo: 'Pesarse en ayunas', fecha: '2026-10-12', dias_semana: [], semanas: null, visible_cliente: true },
+    { id: 'ev9', cliente_id: 'c1', fase_id: 'f0', tipo: 'actividad', titulo: 'Tenis', fecha: null, dias_semana: ['D'], semanas: null },
+  ];
 });
 
 await p.evaluate(() => entDuplicarCiclo('f1'));
@@ -66,7 +75,11 @@ ok('Lower: el sábado de más 2 veces → se repitió', sug.includes('agregar:Lo
 ok('Pull: el jueves una sola vez → puntual', sug.includes('mover:Pull:X>J:1:puntual'), JSON.stringify(sug));
 ok('fútbol los domingos → solo para tener en cuenta', sug.some(s => s.startsWith('nota::>D:3')), JSON.stringify(sug));
 ok('la sesión saltada y la ya movida no se cuentan dos veces', sug.length === 4, JSON.stringify(sug));
-ok('NADA viene marcado', await p.locator('[data-duplicar-ciclo] input[type=checkbox]:checked').count() === 0);
+ok('NADA de lo del cliente viene marcado', await p.locator('#dc-sugerencias input[type=checkbox]:checked').count() === 0);
+ok('el cardio, los deportes y el pesaje del ciclo salen para copiar (marcados)', await p.locator('#dc-eventos [data-dc-evento]').count() === 3
+  && await p.locator('#dc-eventos input:checked').count() === 3 && await p.locator('#dc-eventos', { hasText: 'Caminadora después de entrenar' }).count() === 1);
+// Natación no se repite en el ciclo nuevo.
+await p.locator('[data-dc-evento="ev2"] input').uncheck();
 ok('lo recomendable lo dice', await p.locator('text=Lo hizo casi siempre').count() >= 1 && await p.locator('text=Fue puntual').count() === 1);
 
 // Aceptar Push → martes: el martes era de Lower, así que se intercambian.
@@ -89,6 +102,13 @@ ok('cada rutina nueva queda con los días de la ventana', JSON.stringify(w.rutin
 ok('el sábado de Lower NO se copió (no se marcó)', !w.rutinas.nr2.dias_semana.includes('S'));
 ok('la fase nueva: 6 semanas, sus días y en borrador', w.fase[0] === 'f2' && w.fase[1].semanas === 6 && JSON.stringify(w.fase[1].dias_semana) === JSON.stringify(['L', 'M', 'J', 'V']) && w.fase[1].estado === 'borrador', JSON.stringify(w.fase));
 ok('avisa cuántos ajustes aplicó', (await p.evaluate(() => toasts.at(-1))).includes('1 ajuste del cliente aplicado'), await p.evaluate(() => toasts.at(-1)));
+const nuevos = await p.evaluate(() => TABLAS.eventos.filter(e => e.fase_id === 'f2'));
+const cam = nuevos.find(e => e.titulo === 'Caminadora después de entrenar');
+ok('copia el cardio al ciclo nuevo con sus días, semanas y detalle', cam && JSON.stringify(cam.dias_semana) === '["M","J"]' && JSON.stringify(cam.semanas) === '[1,2,5]' && cam.detalle === '15 min inclinación 8' && cam.fecha === null && cam.cliente_id === 'c1', JSON.stringify(cam));
+const peso = nuevos.find(e => e.tipo === 'peso');
+ok('el pesaje de un solo día se corre al mismo día del ciclo nuevo (12-oct → 9-nov)', peso && peso.fecha === '2026-11-09' && peso.visible_cliente === true, JSON.stringify(peso));
+ok('lo desmarcado (natación) y lo de otro ciclo no se copian', nuevos.length === 2 && !nuevos.some(e => e.titulo === 'Natación' || e.titulo === 'Tenis'), JSON.stringify(nuevos));
+ok('el aviso dice cuánto cardio y eventos copió', (await p.evaluate(() => toasts.at(-1))).includes('2 de cardio y eventos copiados'), await p.evaluate(() => toasts.at(-1)));
 
 // Un cliente que siguió todo al pie de la letra: no hay nada que preguntar.
 await p.evaluate(() => { TABLAS.rutina_movimientos = []; TABLAS.sesiones = [{ fase_id: 'f1', rutina_id: 'r1', fecha: '2026-09-28', estado: 'completada' }]; TABLAS.actividades = []; return entDuplicarCiclo('f1'); });

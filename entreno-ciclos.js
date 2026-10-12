@@ -157,12 +157,15 @@ window.entDuplicarCiclo = async (faseId) => {
   const rutinas = await entDb.rutinasDeFase(faseId);
   const fin = f.fecha_inicio && f.semanas ? evtSumarDias(f.fecha_inicio, f.semanas * 7 - 1) : null;
   const hoy = fmt.hoy();
-  const [movimientos, sesiones, actividades] = await Promise.all([
+  const [movimientos, sesiones, actividades, eventos] = await Promise.all([
     cicloLeer(sb.from('rutina_movimientos').select('rutina_id,desde,hasta,origen').eq('fase_id', faseId)),
     cicloLeer(sb.from('sesiones').select('rutina_id,fecha,estado').eq('fase_id', faseId)),
     f.fecha_inicio && f.cliente_id
       ? cicloLeer(sb.from('actividades').select('fecha,titulo,tipo').eq('cliente_id', f.cliente_id).gte('fecha', f.fecha_inicio).lte('fecha', fin || hoy))
       : Promise.resolve([]),
+    // El cardio, los deportes y lo demás que pusiste en el calendario de
+    // este ciclo: se copian al siguiente con sus días.
+    cicloLeer(sb.from('eventos').select('*').eq('fase_id', faseId).order('created_at')),
   ]);
   // Semanas que ya pasaron del ciclo: «3 de 4» se mide contra lo vivido.
   let semanas = f.semanas || 1;
@@ -178,6 +181,8 @@ window.entDuplicarCiclo = async (faseId) => {
   _dc.sugerencias = cicloAnalizar({ rutinas: _dc.rutinas, movimientos, sesiones, actividades, semanas });
   _dc.aplicadas = {};
   _dc.semanas = semanas;
+  _dc.eventos = eventos || [];
+  _dc.copiarEv = Object.fromEntries(_dc.eventos.map(e => [e.id, true]));
 
   openModal(modalShell(`Duplicar «${escapeHtml(f.nombre)}»`, `
     <div data-duplicar-ciclo>
@@ -191,6 +196,8 @@ window.entDuplicarCiclo = async (faseId) => {
       <div class="sec-title">Los días de cada rutina</div>
       <p class="text-xs text-slate-500 mb-2">Vienen como los armaste tú en este ciclo. Cámbialos aquí si quieres.</p>
       <div id="dc-dias"></div>
+      <div class="sec-title mt-4">Cardio, deportes y eventos del calendario</div>
+      <div id="dc-eventos"></div>
       <div class="sec-title mt-4">Lo que hizo tu cliente en este ciclo</div>
       <div id="dc-sugerencias"></div>
     </div>`,
@@ -215,6 +222,23 @@ function entDcPintar() {
       </div>
     </div>`).join('') : '<p class="text-xs text-slate-400">Este ciclo no tiene rutinas.</p>';
 
+  const cajaE = $('#dc-eventos');
+  if (cajaE) {
+    const evs = _dc.eventos || [];
+    const cuando = (e) => e.fecha
+      ? `el ${fmt.fechaCorta(e.fecha)} → se corre al mismo día del ciclo nuevo`
+      : `${(e.dias_semana || []).map(d => CICLO_NOMBRE_DIA[d] || d).join(', ')}${e.semanas && e.semanas.length ? ` · semanas ${e.semanas.join(', ')}` : ''}`;
+    cajaE.innerHTML = evs.length ? `
+      <p class="text-xs text-slate-500 mb-2">Se copian con sus días. Desmarca lo que no quieras repetir.</p>
+      ${evs.map(e => `
+        <label class="flex gap-2 items-start py-1.5 border-b border-slate-100 cursor-pointer" style="margin:0;text-transform:none;letter-spacing:0;font-weight:400" data-dc-evento="${e.id}">
+          <input type="checkbox" class="mt-0.5" style="width:auto" ${_dc.copiarEv[e.id] ? 'checked' : ''} onchange="entDcEvento('${e.id}', this.checked)">
+          <span class="min-w-0 text-sm text-slate-800"><b>${escapeHtml(e.titulo)}</b>
+            <span class="text-xs text-slate-500"> · ${escapeHtml(evtLabel(e.tipo).replace(/^\S+\s/, ''))} · ${escapeHtml(cuando(e))}</span></span>
+        </label>`).join('')}`
+      : '<p class="text-xs text-slate-400">Este ciclo no tiene cardio ni eventos en el calendario.</p>';
+  }
+
   const s = _dc.sugerencias;
   cajaS.innerHTML = !s.length
     ? `<div class="text-sm text-slate-500 bg-slate-50 rounded-lg p-3">Siguió los días tal cual los armaste: no hay nada que ajustar.</div>`
@@ -238,6 +262,8 @@ window.entDcDia = (rutinaId, d) => {
   _dc.dias[rutinaId] = act.includes(d) ? act.filter(x => x !== d) : cicloOrden(act.concat([d]));
   entDcPintar();
 };
+
+window.entDcEvento = (id, si) => { _dc.copiarEv[id] = !!si; };
 
 window.entDcSugerencia = (i, si) => {
   const s = _dc.sugerencias[i];
@@ -276,8 +302,35 @@ window.entDcGuardar = async () => {
     semanas, dias_semana: cicloOrden(Object.values(_dc.dias).flat()),
     estado: 'borrador', updated_at: new Date().toISOString(),
   });
+  // El cardio, los deportes y los eventos: los que se repiten, con sus
+  // mismos días; los de un solo día, corridos al mismo día del ciclo nuevo.
+  const inicioNuevo = $('#dc-inicio')?.value || null;
+  const corrimiento = f.fecha_inicio && inicioNuevo ? Math.round((Date.parse(inicioNuevo) - Date.parse(f.fecha_inicio)) / 86400000) : null;
+  const filas = (_dc.eventos || []).filter(e => _dc.copiarEv[e.id]).map(e => {
+    const fila = {
+      cliente_id: f.cliente_id, fase_id: nueva, tipo: e.tipo, titulo: e.titulo, detalle: e.detalle ?? null,
+      hora: e.hora ?? null, duracion_min: e.duracion_min ?? null, visible_cliente: e.visible_cliente ?? null, color: e.color ?? null,
+      fecha: null, dias_semana: e.dias_semana || [], semanas: null,
+    };
+    if (e.fecha) {
+      if (corrimiento == null) return null;
+      fila.fecha = evtSumarDias(String(e.fecha).slice(0, 10), corrimiento);
+      fila.dias_semana = [];
+    } else {
+      const sem = (e.semanas || []).filter(n => n <= semanas);
+      fila.semanas = sem.length ? sem : null;
+      if (!fila.dias_semana.length) return null;
+    }
+    return fila;
+  }).filter(Boolean);
+  let nEv = 0;
+  if (filas.length) {
+    const { error } = await sb.from('eventos').insert(filas);
+    if (error) toast('El ciclo quedó creado, pero no pude copiar el cardio y los eventos: ' + error.message);
+    else nEv = filas.length;
+  }
   const n = Object.keys(_dc.aplicadas).length;
   closeModal();
-  toast(`✓ «${nombre}» creado en borrador${n ? ` · ${n} ajuste${n === 1 ? '' : 's'} del cliente aplicado${n === 1 ? '' : 's'}` : ''}`);
+  toast(`✓ «${nombre}» creado en borrador${nEv ? ` · ${nEv} de cardio y eventos copiado${nEv === 1 ? '' : 's'}` : ''}${n ? ` · ${n} ajuste${n === 1 ? '' : 's'} del cliente aplicado${n === 1 ? '' : 's'}` : ''}`);
   entVistaClientes();
 };
