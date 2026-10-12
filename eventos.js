@@ -192,6 +192,7 @@ const evtCopiaDia = (ev, fecha, fase) => ({
   cliente_id: ev.cliente_id, fase_id: ev.fase_id || fase?.id || null, tipo: ev.tipo, titulo: ev.titulo,
   detalle: ev.detalle ?? null, hora: ev.hora ?? null, duracion_min: ev.duracion_min ?? null, color: ev.color ?? null,
   visible_cliente: ev.visible_cliente ?? null, fecha, dias_semana: [], semanas: null,
+  ...(typeof coCopia === 'function' ? coCopia(ev) : {}),
 });
 
 // Mover UN día: el de un solo día cambia de fecha; el de una serie sale de
@@ -232,6 +233,7 @@ window.evtEditar = (ev, ctx) => {
         <input id="ev-titulo" value="${escapeHtml(e.titulo || '')}" placeholder="Natación"></div>
     </div>
     <div id="ev-catalogo" class="mb-3 ${(e.tipo || 'actividad') === 'actividad' ? '' : 'hidden'}"></div>
+    ${typeof coHtml === 'function' ? coHtml(e) : ''}
 
     <div class="sec-title">Cuándo</div>
     <div class="flex gap-2 mb-3">
@@ -346,6 +348,7 @@ function evtSlugDe(titulo, cat) {
 window.evtMostrarCatalogo = () => {
   const es = ($('#ev-tipo')?.value || 'actividad') === 'actividad';
   $('#ev-catalogo')?.classList.toggle('hidden', !es);
+  $('#ev-cardio-opciones')?.classList.toggle('hidden', !es);
 };
 
 window.evtElegirActividad = async (slug) => {
@@ -401,6 +404,8 @@ window.evtGuardar = async (id) => {
     visible_cliente: vis === 'si' ? true : vis === 'no' ? false : null,
   };
 
+  // Cardio a elegir (cardio-opciones.js): la lista, los tiempos y la intensidad.
+  if (typeof coLeer === 'function') Object.assign(row, await coLeer(row));
   const ok = id ? await evtDb.actualizar(id, row) : !!(await evtDb.crear(row));
   if (!ok) return;
   closeModal();

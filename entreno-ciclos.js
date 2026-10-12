@@ -154,6 +154,7 @@ function cicloFilasEventos(eventos, { clienteId, faseNueva, corrimiento, semanas
       cliente_id: clienteId, fase_id: faseNueva, tipo: e.tipo, titulo: e.titulo, detalle: e.detalle ?? null,
       hora: e.hora ?? null, duracion_min: e.duracion_min ?? null, visible_cliente: e.visible_cliente ?? null, color: e.color ?? null,
       fecha: null, dias_semana: e.dias_semana || [], semanas: null,
+      ...(typeof coCopia === 'function' ? coCopia(e) : {}),
     };
     if (e.fecha) {
       if (corrimiento == null) return null;
