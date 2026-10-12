@@ -2716,6 +2716,7 @@ async function entVistaClientes() {
     ['lecturas', '🔎 Lecturas'],
     ['fases', '🗂️ Ciclos'],
     ['mezcla', '🔀 Unir y separar'],
+    ['videos', '🎥 Videos de técnica'],
   ];
 
   body.innerHTML = cabecera + avisoCiclo + selectorFase + `
@@ -2729,6 +2730,7 @@ async function entVistaClientes() {
       : _ent.subtab === 'sesiones' ? '<div id="ent-sesiones" class="card text-sm text-slate-400">Leyendo lo que registró…</div>'
       : _ent.subtab === 'lecturas' ? '<div id="ent-lecturas" class="card text-sm text-slate-400">Calculando…</div>'
       : _ent.subtab === 'mezcla' ? '<div id="ent-mezcla"></div>'
+      : _ent.subtab === 'videos' ? '<div id="ent-videos-tec" class="card"></div>'
       : fases.map(f => entTarjetaFase(f, rutinasPorFase[f.id] || [])).join('')}
 
     <!-- El agente de rutinas se monta aquí si asistente-rutinas.js está
@@ -2740,6 +2742,7 @@ async function entVistaClientes() {
   if (_ent.subtab === 'calendario') entPintarCalendario(cliente, fase, rutinas, ejerciciosPorRutina);
   if (_ent.subtab === 'sesiones') entPintarSesiones(cliente);
   if (_ent.subtab === 'lecturas') entPintarLecturas(cliente);
+  if (_ent.subtab === 'videos' && typeof vtPanel === 'function') vtPanel('#ent-videos-tec', cliente?.id);
   if (_ent.subtab === 'mezcla' && typeof mzAbrir === 'function') mzAbrir({ caja: '#ent-mezcla', fuentes: rutinas, faseId: fase?.id || null, clienteId: cliente?.id || null });
 }
 

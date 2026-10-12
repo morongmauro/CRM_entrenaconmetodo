@@ -3893,6 +3893,11 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
           <div class="mt-3">${historialCorporalHTML(cliente, medsCliente, {})}</div>
         </details>
 
+        ${typeof vtPanel === 'function' ? `<details class="card" open data-seg-videos>
+          <summary class="cursor-pointer text-xs font-bold text-slate-500 uppercase tracking-wider">🎥 Videos de técnica · pedidos, por revisar y a mejorar</summary>
+          <div class="mt-3" id="seg-vt"></div>
+        </details>` : ''}
+
         <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider px-1 pt-2">Timeline · ${segs.length} semana(s)</h4>
         <div class="space-y-3 em-timeline">
           ${segs.length === 0 ? '<div class="card text-sm text-slate-500 text-center py-8">Sin registros aún. <button class="text-emerald-600 font-semibold" onclick="abrirNuevoSeguimiento(\''+cliente.id+'\')">+ Crear el primero</button></div>' : segs.map(s => seguimientoCard(s, coachPorSeg[s.id] || [])).join('')}
@@ -3901,6 +3906,7 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
     </div>
   `;
   const sl = $('#seg-list'); if (sl && prevScroll) sl.scrollTop = prevScroll;
+  if (typeof vtPanel === 'function') vtPanel('#seg-vt', cliente.id);
 }
 
 function clienteSidebarItem(c, ult) {
