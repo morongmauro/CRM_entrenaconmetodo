@@ -3514,8 +3514,29 @@ function entLecturasDatos(sesiones, series) {
   const tresAlLimite = ultimas.length === 3 && ultimas.every(s => s.rpe != null && s.rpe >= 9);
   const ultimaFecha = completadas.length ? completadas.map(s => s.fecha).sort().pop() : null;
 
+  // Intensidad (RPE 1-10 que marca al terminar): promedio y acumulado (la
+  // suma) de esta semana, este mes y las últimas 8 semanas. Lo mismo que ve
+  // el cliente en su Dash.
+  const lunesDe = (f) => { const t = new Date(f + 'T12:00:00Z'); t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7)); return t.toISOString().slice(0, 10); };
+  const resumen = (lista) => {
+    const n = lista.length, suma = lista.reduce((a, x) => a + Number(x.rpe), 0);
+    return { n, suma, prom: n ? Math.round((suma / n) * 10) / 10 : null };
+  };
+  const conRpeOk = conRpe.filter(x => Number(x.rpe) >= 1 && Number(x.rpe) <= 10);
+  const lunesHoy = lunesDe(hoy);
+  const semanasRpe = Array.from({ length: 8 }, (_, i) => {
+    const t = new Date(lunesHoy + 'T12:00:00Z'); t.setUTCDate(t.getUTCDate() - 7 * (7 - i));
+    const desde = t.toISOString().slice(0, 10);
+    return { desde, ...resumen(conRpeOk.filter(x => lunesDe(x.fecha) === desde)) };
+  });
+  const intensidad = {
+    semana: resumen(conRpeOk.filter(x => x.fecha >= lunesHoy)),
+    mes: resumen(conRpeOk.filter(x => String(x.fecha).slice(0, 7) === hoy.slice(0, 7))),
+    semanas: semanasRpe,
+  };
+
   return {
-    ejercicios, estancados, progresando, nuevos,
+    ejercicios, estancados, progresando, nuevos, intensidad,
     completadas: completadas.length,
     sinTerminar: sinTerminar.length,
     rpeProm, tresAlLimite,
@@ -3523,6 +3544,32 @@ function entLecturasDatos(sesiones, series) {
     notas: sesiones.filter(s => s.notas_cliente && String(s.notas_cliente).trim())
       .sort((a, b) => b.fecha.localeCompare(a.fecha)).slice(0, 5),
   };
+}
+
+// La tarjeta de intensidad: semana y mes (promedio y acumulado) y las
+// últimas 8 semanas en barras.
+function entIntensidadHTML(it) {
+  if (!it) return '';
+  const caja = (t, r) => `
+    <div class="rounded-xl bg-slate-50 p-3">
+      <div class="text-xs text-slate-500">${t}</div>
+      <div class="text-2xl font-bold text-slate-900 leading-tight">${r.prom != null ? String(r.prom).replace('.', ',') : '—'}<span class="text-xs font-semibold text-slate-400">${r.prom != null ? ' /10 promedio' : ''}</span></div>
+      <div class="text-[11px] text-slate-500">${r.n ? `Acumulado ${r.suma} · ${r.n} entreno${r.n === 1 ? '' : 's'}` : 'Sin entrenos con intensidad'}</div>
+    </div>`;
+  const barras = it.semanas.map(w => `
+    <div class="flex flex-col items-center gap-1 flex-1 min-w-0" title="Semana del ${fmt.fechaCorta(w.desde)}: ${w.prom != null ? `${w.prom}/10 · acumulado ${w.suma}` : 'sin entrenos'}">
+      <div class="text-[10px] font-semibold text-slate-500">${w.prom != null ? String(w.prom).replace('.', ',') : ''}</div>
+      <div class="w-full rounded-md" style="height:${w.prom != null ? Math.max(4, Math.round(w.prom * 6)) : 2}px;background:${w.prom == null ? '#e2e8f0' : w.prom >= 9 ? '#C75A4A' : '#3C7BD6'}"></div>
+      <div class="text-[10px] text-slate-400 truncate">${fmt.fechaCorta(w.desde)}</div>
+    </div>`).join('');
+  return `
+    <div class="card mb-4" data-intensidad-crm>
+      <div class="font-bold text-slate-900 text-sm">⚡ Intensidad que reporta</div>
+      <div class="text-xs text-slate-500 mt-0.5 mb-3">Qué tan duro se sintió cada entreno (1 a 10, lo marca al terminar). Promedio y acumulado.</div>
+      <div class="grid grid-cols-2 gap-2">${caja('Esta semana', it.semana)}${caja('Este mes', it.mes)}</div>
+      <div class="text-xs text-slate-500 mt-4 mb-1">Promedio por semana · últimas 8</div>
+      <div class="flex items-end gap-1.5" style="height:90px">${barras}</div>
+    </div>`;
 }
 
 // ─── La pantalla ────────────────────────────────────────────────────────
@@ -3615,6 +3662,8 @@ async function entPintarLecturas(cliente) {
         }).join('') || '<div class="text-sm text-slate-500">Todavía no hay suficiente historial para sacar lecturas.</div>'}
       </div>
     </div>
+
+    ${entIntensidadHTML(d.intensidad)}
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
       ${tabla('🟰 Llevan tiempo sin superar su mejor marca',

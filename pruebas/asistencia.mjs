@@ -154,6 +154,18 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
   ok(`${tag} · galería: tocar «Los usan ahora» deja solo los que faltan de ese nivel`, f[0] === 'clientes' && f[1] === 'sin', JSON.stringify(f));
   await p.screenshot({ path: path.join(CAPTURAS, `galeria-niveles-${tag}.png`), fullPage: false });
 
+  // 7. Lecturas: la intensidad que reporta (promedio y acumulado de la semana y el mes).
+  await p.evaluate(() => {
+    const hoy = fmt.hoy();
+    TABLAS_FALSAS.sesiones.push({ id: 'rp1', cliente_id: 'c0', user_id: 'coach-1', fecha: hoy, estado: 'completada', rpe: 8, origen: 'cliente' },
+      { id: 'rp2', cliente_id: 'c0', user_id: 'coach-1', fecha: hoy, estado: 'completada', rpe: 6, origen: 'cliente' });
+    _ent.tab = 'clientes'; _ent.clienteId = 'c0'; _ent.subtab = 'lecturas';
+    return navigate('entrenamiento');
+  });
+  await p.waitForSelector('[data-intensidad-crm]', { timeout: 10000 }).catch(() => {});
+  const it = await p.locator('[data-intensidad-crm]').innerText().catch(() => '');
+  ok(`${tag} · lecturas: la intensidad con promedio y acumulado (7 · acumulado 14)`, /Esta semana/.test(it) && /\b7\b/.test(it) && /Acumulado 14/.test(it), it.slice(0, 200));
+
   ok(`${tag} · sin errores de JavaScript`, errores.length === 0, errores.join(' | '));
   await ctx.close();
 }
