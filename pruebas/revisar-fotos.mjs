@@ -112,9 +112,9 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   await p.evaluate(() => { _ent.ejercicios = null; });
   const mini = await p.evaluate(async (ids) => { await entDb.ejercicios(true); return ids.map(id => entMiniatura(_ent.ejercicios.find(e => e.id === id))); }, ids);
   const refs = await p.evaluate((ids) => ids.map(id => _ent.ejercicios.find(e => e.id === id).video_ref), ids);
-  ok(`${tag} · A: nunca la foto de otro video (usa la de su video)`, mini[0] === `https://i.ytimg.com/vi/${refs[0]}/mq2.jpg`, mini[0]);
+  ok(`${tag} · A: nunca la foto de otro video (usa la de su video)`, mini[0] === `https://i.ytimg.com/vi/${refs[0]}/mqdefault.jpg`, mini[0]);
   ok(`${tag} · B: video que empieza a mitad y sin foto elegida → sin foto (no una equivocada)`, mini[1] === null, String(mini[1]));
-  ok(`${tag} · C: la del medio de su video, igual que en la app`, mini[2] === `https://i.ytimg.com/vi/${refs[2]}/mq2.jpg`, mini[2]);
+  ok(`${tag} · C: la portada de su video, igual que en la app`, mini[2] === `https://i.ytimg.com/vi/${refs[2]}/mqdefault.jpg`, mini[2]);
 
   // La revisión, desde la galería.
   await p.evaluate(() => navigate('entrenamiento')); await p.waitForTimeout(500); await p.evaluate(() => entTab('ejercicios'));
@@ -138,7 +138,7 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   await p.locator(`[data-foto-ej="${ids[0]}"] [data-foto-ok]`).click();
   await p.waitForTimeout(500);
   fila = await p.evaluate((id) => TABLAS_FALSAS.ejercicios.find(e => e.id === id).poster_url, ids[0]);
-  ok(`${tag} · «✓ Está bien» guarda la que se ve (la del medio de su video)`, fila === `https://i.ytimg.com/vi/${refs[0]}/mq2.jpg`, fila);
+  ok(`${tag} · «✓ Está bien» guarda la que se ve (la portada de su video)`, fila === `https://i.ytimg.com/vi/${refs[0]}/mqdefault.jpg`, fila);
   // Página entera: las que usan tus clientes.
   await p.locator('[data-fotos-filtro="sin"]').click();
   await p.waitForTimeout(300);
@@ -153,7 +153,7 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   await p.evaluate((id) => entPonerVideo(id, 'NUEVOvideo1'), ids[2]);
   await p.waitForTimeout(400);
   const c = await p.evaluate((id) => { const e = _ent.ejercicios.find(x => x.id === id); return { pu: TABLAS_FALSAS.ejercicios.find(x => x.id === id).poster_url, mini: entMiniatura(e), rev: entFotoRevisada(e) }; }, ids[2]);
-  ok(`${tag} · al cambiarle el video se borra la foto elegida y vuelve a pedir revisión`, c.pu == null && c.mini === 'https://i.ytimg.com/vi/NUEVOvideo1/mq2.jpg' && !c.rev, JSON.stringify(c));
+  ok(`${tag} · al cambiarle el video se borra la foto elegida y vuelve a pedir revisión`, c.pu == null && c.mini === 'https://i.ytimg.com/vi/NUEVOvideo1/mqdefault.jpg' && !c.rev, JSON.stringify(c));
 
   const anchoP = await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1);
   ok(`${tag} · sin scroll de lado`, anchoP);

@@ -138,9 +138,10 @@ const ENT_CUADROS_YT = [['mqdefault', 'Portada'], ['mq1', '¼ del video'], ['mq2
 const entCuadroYt = (url) => (/^https:\/\/i\.ytimg\.com\/vi\/[^/]+\/(mqdefault|mq[123])\.jpg$/.exec(url || '') || [])[1] || null;
 const entUrlCuadro = (ref, cuadro) => ref && cuadro ? `https://i.ytimg.com/vi/${ref}/${cuadro}.jpg` : null;
 
-// El cuadro automático: el del MEDIO del video, el mismo que ve el cliente en
-// la app (las portadas traen letreros del canal).
-const ENT_CUADRO_AUTO = 'mq2';
+// La imagen automática: la PORTADA del video (la que ve el cliente en la app).
+// Los cuadros ¼, mitad y ¾ los saca YouTube al subir el video y no los
+// actualiza: si el canal lo recortó después, muestran otro ejercicio.
+const ENT_CUADRO_AUTO = 'mqdefault';
 const entIdYtimg = (url) => (/^https:\/\/i\.ytimg\.com\/vi\/([^/]+)\//.exec(url || '') || [])[1] || null;
 
 // Por qué la foto de un ejercicio puede no ser la suya (o null si no hay

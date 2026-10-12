@@ -110,7 +110,7 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
   // La imagen elegida es de SU video: con otro video, el mismo cuadro es otra
   // imagen (podía mostrar otro ejercicio). Vuelve a la automática del nuevo.
   ok(`${tag} · si cambias el video, la imagen elegida del anterior no se usa (vuelve la automática del nuevo)`, await p.evaluate(() =>
-    entMiniatura({ video_fuente: 'youtube', video_ref: 'NUEVO123456', poster_url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mq3.jpg' })) === 'https://i.ytimg.com/vi/NUEVO123456/mq2.jpg');
+    entMiniatura({ video_fuente: 'youtube', video_ref: 'NUEVO123456', poster_url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mq3.jpg' })) === 'https://i.ytimg.com/vi/NUEVO123456/mqdefault.jpg');
 
   // 3. Ventana 🎬 Video: se elige ahí mismo y se guarda al tocar.
   await p.evaluate((id) => entVideoRapido(id), EJ.id);
