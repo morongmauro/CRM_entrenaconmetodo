@@ -240,17 +240,22 @@ const entDb = {
     const { error } = await sb.from('rutinas').delete().eq('id', id);
     if (error) toast(error.message);
   },
+  // Devuelve la fila creada: el constructor la mete en su lista sin volver a
+  // leer la rutina entera.
   async agregarEjercicio(row) {
-    const { error } = await sb.from('rutina_ejercicios').insert(row);
-    if (error) toast(error.message);
+    const { data, error } = await sb.from('rutina_ejercicios').insert(row).select().single();
+    if (error) { toast(error.message); return null; }
+    return data || { ...row, id: null };
   },
   async actualizarRE(id, row) {
     const { error } = await sb.from('rutina_ejercicios').update(row).eq('id', id);
     if (error) toast(error.message);
+    return !error;
   },
   async quitarRE(id) {
     const { error } = await sb.from('rutina_ejercicios').delete().eq('id', id);
     if (error) toast(error.message);
+    return !error;
   },
 
   // Bloques (superseries, circuitos, EMOM, AMRAP)
@@ -556,14 +561,22 @@ function entFiltrar(lista) {
   return entOrdenarPorUso(entFiltrarSinOrden(lista));
 }
 
+// Los filtros de tipo, segmento, patrón, músculo y equipo admiten VARIAS
+// opciones a la vez (kettlebell + mancuerna, tren superior + inferior): pasa
+// el ejercicio que cumpla cualquiera de las marcadas. Un texto suelto (como
+// se guardaban antes) cuenta como una sola opción.
+const entSel = (v) => Array.isArray(v) ? v : (v ? [v] : []);
+
 function entFiltrarSinOrden(lista) {
   const f = _ent.filtros;
   const q = normalizeName(f.q || '');
+  const tipos = entSel(f.tipo), segs = entSel(f.segmento), pats = entSel(f.patron);
+  const equipos = entSel(f.equipo), musculos = entSel(f.musculo);
   return lista.filter(e => {
-    if (f.tipo && e.tipo !== f.tipo) return false;
-    if (f.segmento && e.segmento !== f.segmento) return false;
-    if (f.patron && e.patron !== f.patron) return false;
-    if (f.equipo && !(e.equipo || []).includes(f.equipo)) return false;
+    if (tipos.length && !tipos.includes(e.tipo)) return false;
+    if (segs.length && !segs.includes(e.segmento)) return false;
+    if (pats.length && !pats.includes(e.patron)) return false;
+    if (equipos.length && !(e.equipo || []).some(x => equipos.includes(x))) return false;
     // Todo ejercicio debe llevar video: este filtro saca los que faltan.
     const tieneVideo = (e.video_fuente || 'ninguno') !== 'ninguno';
     if (f.video === 'sin' && tieneVideo) return false;
@@ -574,9 +587,9 @@ function entFiltrarSinOrden(lista) {
     if (f.uso === 'clientes' && _ent.enUso && !_ent.enUso.has(e.id)) return false;
     if (f.uso === 'antes' && _ent.usados && _ent.enUso
       && (!_ent.usados.has(e.id) || _ent.enUso.has(e.id))) return false;
-    if (f.musculo) {
+    if (musculos.length) {
       const ms = [...(e.musculos_primarios || []), ...(e.musculos_secundarios || [])];
-      if (!ms.includes(f.musculo)) return false;
+      if (!ms.some(m => musculos.includes(m))) return false;
     }
     if (q) {
       const heno = normalizeName(`${e.nombre} ${e.alias || ''} ${e.busqueda || ''} ${e.descripcion || ''}`);
@@ -678,18 +691,18 @@ function entBarraFiltros(prefijo = 'flt') {
     <div class="card mb-4">
       <input id="${prefijo}-q" placeholder="Buscar por nombre…" value="${escapeHtml(f.q)}"
              class="w-full mb-2" oninput="entSetFiltro('q', this.value)">
-      <div class="grid grid-cols-2 md:grid-cols-6 gap-2">
-        <select onchange="entSetFiltro('tipo', this.value)">${entOpciones(ENT_TIPOS, f.tipo, 'Todo tipo')}</select>
-        <select onchange="entSetFiltro('segmento', this.value)">${entOpciones(ENT_SEGMENTOS, f.segmento, 'Todo segmento')}</select>
-        <select onchange="entSetFiltro('patron', this.value)">${entOpciones(ENT_PATRONES, f.patron, 'Todo patrón')}</select>
-        <select onchange="entSetFiltro('musculo', this.value)">${entOpciones(musOpts, f.musculo, 'Todo músculo')}</select>
-        <select onchange="entSetFiltro('equipo', this.value)">${entOpciones(ENT_EQUIPO, f.equipo, 'Todo equipo')}</select>
-        <select onchange="entSetFiltro('video', this.value)">${entOpciones([['sin', 'Sin video'], ['con', 'Con video']], f.video || '', 'Con y sin video')}</select>
+      <div class="${prefijo === 'cons' ? 'grid grid-cols-2 sm:grid-cols-3' : 'grid grid-cols-2 md:grid-cols-6'} gap-2">
+        ${entMulti('tipo', ENT_TIPOS, 'Todo tipo')}
+        ${entMulti('segmento', ENT_SEGMENTOS, 'Todo segmento')}
+        ${entMulti('patron', ENT_PATRONES, 'Todo patrón')}
+        ${entMulti('musculo', musOpts, 'Todo músculo')}
+        ${entMulti('equipo', ENT_EQUIPO, 'Todo equipo')}
+        <select data-sel="video" onchange="entSetFiltro('video', this.value)">${entOpciones([['sin', 'Sin video'], ['con', 'Con video']], f.video || '', 'Con y sin video')}</select>
       </div>
       <div class="mt-2">
-        <select onchange="entSetFiltro('uso', this.value)" title="1º lo que usan hoy, 2º lo que usaron antes, 3º toda la galería">${entOpciones(entNivelesOpciones(), f.uso || '', entNivelEtiqueta('', '📚 3 · Toda la galería'))}</select>
+        <select data-sel="uso" onchange="entSetFiltro('uso', this.value)" title="1º lo que usan hoy, 2º lo que usaron antes, 3º toda la galería">${entUsoOpciones()}</select>
       </div>
-      ${entNivelesResumen()}
+      <div id="${prefijo}-niveles">${entNivelesResumen(prefijo === 'cons')}</div>
       <div class="mt-2 flex items-center justify-between">
         <span id="${prefijo}-count" class="text-xs text-slate-500"></span>
         <button class="btn btn-ghost btn-sm" onclick="entLimpiarFiltros()">Limpiar filtros</button>
@@ -724,12 +737,24 @@ function entNivelesOpciones() {
   ];
 }
 
-function entNivelesResumen() {
+function entUsoOpciones() {
+  return entOpciones(entNivelesOpciones(), _ent.filtros.uso || '', entNivelEtiqueta('', '📚 3 · Toda la galería'));
+}
+
+// `compacto`: la versión de la columna angosta del constructor.
+function entNivelesResumen(compacto = false) {
   const c = entNivelesCuenta();
   if (!c.clientes) return '';
   const f = _ent.filtros;
   const caja = (nivel, icono, titulo, x) => {
     const marcado = (f.uso || '') === nivel && f.video === 'sin';
+    if (compacto) return `
+      <button type="button" data-nivel="${nivel}" onclick="entIrNivel('${nivel}')"
+              class="text-left rounded-lg border px-2 py-1.5 min-w-0 ${marcado ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'}"
+              title="${titulo}: ver los que faltan">
+        <div class="text-[10.5px] text-slate-500 truncate">${icono} ${titulo.replace(/^\d · /, '')}</div>
+        <div class="text-xs leading-tight"><b class="text-slate-900">${x.n}</b> · <b class="${x.sin ? 'text-red-600' : 'text-green-600'}">${x.sin ? `${x.sin} sin video` : 'con video'}</b></div>
+      </button>`;
     return `
       <button type="button" data-nivel="${nivel}" onclick="entIrNivel('${nivel}')"
               class="text-left rounded-lg border px-3 py-2 ${marcado ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'}"
@@ -739,7 +764,7 @@ function entNivelesResumen() {
       </button>`;
   };
   return `
-    <div class="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2" data-niveles>
+    <div class="mt-2 grid ${compacto ? 'grid-cols-3' : 'grid-cols-1 md:grid-cols-3'} gap-2" data-niveles>
       ${caja('clientes', '👥', '1 · Los usan ahora', c.clientes)}
       ${c.antes ? caja('antes', '🕘', '2 · Los usaron antes', c.antes) : ''}
       ${caja('', '📚', '3 · Toda la galería', c[''])}
@@ -750,27 +775,87 @@ function entNivelesResumen() {
 window.entIrNivel = (nivel) => {
   _ent.filtros.uso = nivel;
   _ent.filtros.video = 'sin';
-  const repintar = _ent.tab === 'rutinas' && _ent.rutinaId ? entPintarConstructor : entVistaEjercicios;
-  repintar();
+  document.querySelectorAll('select[data-sel="uso"]').forEach(s => { s.value = nivel; });
+  document.querySelectorAll('select[data-sel="video"]').forEach(s => { s.value = 'sin'; });
+  entRepintarGaleria();
 };
+
+// ---------- Filtro de varias opciones (casillas en un desplegable) ----------
+function entMulti(k, opciones, vacio) {
+  _ent.multis = _ent.multis || {};
+  _ent.multis[k] = { opciones, vacio };
+  const sel = entSel(_ent.filtros[k]);
+  return `
+    <details class="ent-multi" data-multi="${k}">
+      <summary class="${sel.length ? 'ent-multi-on' : ''}">${entMultiTexto(k)}</summary>
+      <div class="ent-multi-panel">
+        ${opciones.map(([v, l]) => `
+          <label class="ent-multi-op"><input type="checkbox" value="${escapeHtml(v)}" ${sel.includes(v) ? 'checked' : ''}
+                 onchange="entMarcarFiltro('${k}', this.value, this.checked)"><span>${escapeHtml(l)}</span></label>`).join('')}
+        <button type="button" class="ent-multi-limpiar" onclick="entLimpiarMulti('${k}')">Quitar selección</button>
+      </div>
+    </details>`;
+}
+
+function entMultiTexto(k) {
+  const { opciones, vacio } = _ent.multis[k];
+  const sel = entSel(_ent.filtros[k]);
+  if (!sel.length) return escapeHtml(vacio);
+  const nombre = (v) => (opciones.find(o => o[0] === v) || [v, v])[1];
+  return `<span class="truncate">${escapeHtml(nombre(sel[0]))}</span>${sel.length > 1 ? `<b class="ent-multi-n">+${sel.length - 1}</b>` : ''}`;
+}
+
+function entPintarMulti(k) {
+  const sel = entSel(_ent.filtros[k]);
+  document.querySelectorAll(`[data-multi="${k}"]`).forEach(d => {
+    const s = d.querySelector('summary');
+    s.innerHTML = entMultiTexto(k);
+    s.classList.toggle('ent-multi-on', sel.length > 0);
+    d.querySelectorAll('input[type=checkbox]').forEach(c => { c.checked = sel.includes(c.value); });
+  });
+}
+
+window.entMarcarFiltro = (k, v, on) => {
+  const sel = entSel(_ent.filtros[k]).filter(x => x !== v);
+  if (on) sel.push(v);
+  _ent.filtros[k] = sel;
+  entPintarMulti(k);
+  entRepintarGaleria();
+};
+
+window.entLimpiarMulti = (k) => {
+  _ent.filtros[k] = [];
+  entPintarMulti(k);
+  entRepintarGaleria();
+};
+
+// Un clic fuera cierra el desplegable abierto (y abrir uno cierra el otro).
+document.addEventListener('click', (ev) => {
+  document.querySelectorAll('details.ent-multi[open]').forEach(d => { if (!d.contains(ev.target)) d.open = false; });
+});
+
+// Cambiar un filtro repinta SOLO la lista de ejercicios: la barra, la
+// búsqueda (con el cursor donde estaba) y la rutina no se tocan.
+function entRepintarGaleria() {
+  if (_ent.tab === 'rutinas' && _ent.rutinaId) {
+    return document.getElementById('cons-gal-lista') ? entPintarGaleriaCons() : entPintarConstructor();
+  }
+  return document.getElementById('flt-lista') ? entPintarListaGaleria() : entVistaEjercicios();
+}
 
 window.entSetFiltro = (k, v) => {
   _ent.filtros[k] = v;
-  const activo = document.activeElement;
-  const eraBusqueda = activo && activo.id && activo.id.endsWith('-q');
-  const pos = eraBusqueda ? activo.selectionStart : null;
-  const idGuardado = eraBusqueda ? activo.id : null;
-  const repintar = _ent.tab === 'rutinas' && _ent.rutinaId ? entPintarConstructor : entVistaEjercicios;
-  Promise.resolve(repintar()).then(() => {
-    if (!idGuardado) return;
-    const nuevo = document.getElementById(idGuardado);
-    if (nuevo) { nuevo.focus(); try { nuevo.setSelectionRange(pos, pos); } catch (err) {} }
-  });
+  clearTimeout(_ent.tFiltro);
+  // Al escribir se espera un instante: no se repinta por cada letra.
+  if (k === 'q') { _ent.tFiltro = setTimeout(entRepintarGaleria, 150); return; }
+  entRepintarGaleria();
 };
 
 window.entLimpiarFiltros = () => {
-  _ent.filtros = { q: '', tipo: '', segmento: '', patron: '', musculo: '', equipo: '', video: '', uso: '' };
-  if (_ent.tab === 'rutinas' && _ent.rutinaId) entPintarConstructor(); else entVistaEjercicios();
+  _ent.filtros = { q: '', tipo: [], segmento: [], patron: [], musculo: [], equipo: [], video: '', uso: '' };
+  const barra = document.getElementById('cons-filtros');
+  if (_ent.tab === 'rutinas' && _ent.rutinaId && barra) { barra.innerHTML = entBarraFiltros('cons'); entPintarGaleriaCons(); }
+  else entVistaEjercicios();
 };
 
 async function entVistaEjercicios() {
@@ -779,9 +864,6 @@ async function entVistaEjercicios() {
   const todos = await entDb.ejercicios();
   // Los niveles de uso siempre: sus contadores dicen cuántos videos faltan.
   await entDb.niveles();
-  const lista = entFiltrar(todos);
-  // Firmar solo las miniaturas que se van a ver, no toda la biblioteca.
-  await entDb.firmarPosters(lista.map(e => e.poster_path).filter(Boolean));
 
   body.innerHTML = `
     <div class="flex justify-between items-center mb-3">
@@ -792,7 +874,21 @@ async function entVistaEjercicios() {
       </div>
     </div>
     ${entBarraFiltros('flt')}
-    ${lista.length === 0 ? `
+    <div id="flt-lista"></div>
+  `;
+  await entPintarListaGaleria();
+}
+
+// Solo la lista (y su contador): es lo que cambia al filtrar o buscar.
+async function entPintarListaGaleria() {
+  const seq = _ent.seqGal = (_ent.seqGal || 0) + 1;
+  const todos = await entDb.ejercicios();
+  const lista = entFiltrar(todos);
+  // Firmar solo las miniaturas que se van a ver, no toda la biblioteca.
+  await entDb.firmarPosters(lista.map(e => e.poster_path).filter(Boolean));
+  const caja = $('#flt-lista');
+  if (!caja || seq !== _ent.seqGal) return;
+  caja.innerHTML = lista.length === 0 ? `
       <div class="card text-center text-slate-500 py-8">
         ${todos.length === 0
           ? 'La galería está vacía. Crea tu primer ejercicio para empezar a armar rutinas.'
@@ -802,10 +898,11 @@ async function entVistaEjercicios() {
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         ${lista.map(e => entTarjetaEjercicio(e)).join('')}
       </div>
-    `}
-  `;
+    `;
   const c = $('#flt-count');
   if (c) c.textContent = `${lista.length} de ${todos.length}`;
+  const n = $('#flt-niveles');
+  if (n) n.innerHTML = entNivelesResumen();
 }
 
 // ---------- Ficha del ejercicio (solo lectura) ----------
@@ -1218,8 +1315,10 @@ window.entGuardarEjercicio = async (id) => {
   if (!ok) return;
   closeModal();
   toast(id ? '✓ Ejercicio actualizado' : '✓ Ejercicio creado');
-  // Desde el constructor se vuelve al constructor, no a la galería.
-  if (_ent.tab === 'rutinas' && _ent.rutinaId) entPintarConstructor(); else entVistaEjercicios();
+  // Desde el constructor se vuelve al constructor (sin recargarlo), no a la galería.
+  if (_ent.tab === 'rutinas' && _ent.rutinaId && $('#cons-rutina')) { entPintarGaleriaCons(); entRefrescarRutina(); }
+  else if (_ent.tab === 'rutinas' && _ent.rutinaId) entPintarConstructor();
+  else entVistaEjercicios();
 };
 
 window.entArchivarEjercicio = async (id) => {
@@ -1330,9 +1429,15 @@ window.entCerrarConstructor = () => {
 };
 
 // ---------- El constructor ----------
-// Dos columnas: la galería a la izquierda (con los mismos filtros de la
-// pestaña 1) y la rutina a la derecha. Un clic en "+ Añadir" la mete al
-// final. En móvil se apilan, galería abajo.
+// Tres columnas, cada una con su propio scroll: la galería (de a 2 por fila,
+// con los mismos filtros de la pestaña 1), la rutina y la asistencia. Se
+// arrastra un ejercicio de la galería a la rutina (o "+ Añadir" lo mete al
+// final). En móvil se apilan, galería abajo.
+//
+// La página se pinta ENTERA una sola vez, al abrir la rutina. Después cada
+// cosa repinta solo lo suyo: filtrar o buscar → la lista de la galería;
+// añadir, mover, quitar o arrastrar → la rutina (al instante, y se guarda
+// detrás). Así no salta ni se pierde el scroll de ninguna columna.
 async function entPintarConstructor() {
   const body = $('#ent-body');
   if (!body) return;
@@ -1341,9 +1446,7 @@ async function entPintarConstructor() {
   const r = await entDb.rutina(_ent.rutinaId);
   if (!r) { toast('No encontré esa rutina'); return entCerrarConstructor(); }
   _ent.rutina = r;
-
-  const todos = await entDb.ejercicios();
-  const galeria = entFiltrar(todos);
+  await entDb.ejercicios();
 
   // Contexto: si la rutina vive en la fase de un cliente, decirlo — el
   // riesgo real es editar la rutina equivocada creyendo que es la plantilla.
@@ -1355,21 +1458,57 @@ async function entPintarConstructor() {
       contexto = `${cli ? escapeHtml(cli.nombre) : 'Cliente'} · ${escapeHtml(f.nombre)}`;
     }
   }
+  _ent.consContexto = contexto;
+  await entDb.firmarPosters(r.ejercicios.map(x => x.ejercicios?.poster_path).filter(Boolean));
 
+  body.innerHTML = `
+    <div id="cons-cab">${entCabConstructorHTML(r)}</div>
+
+    <div class="grid lg:grid-cols-2 ${r.cliente_id ? 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_360px]' : ''} gap-4 items-start">
+      <div class="order-2 lg:order-1 ent-col" id="cons-col-gal">
+        <div class="text-sm font-bold text-slate-700 mb-2">Galería · arrástralo a la rutina o toca “+ Añadir”</div>
+        <div id="cons-destino">${entDestinoHTML(r)}</div>
+        <div id="cons-filtros">${entBarraFiltros('cons')}</div>
+        <div id="cons-gal-lista" class="grid grid-cols-2 gap-2 max-h-[70vh] overflow-y-auto pr-1 lg:max-h-none lg:overflow-visible lg:pr-0"></div>
+      </div>
+
+      <div class="order-1 lg:order-2 ent-col" id="cons-col-rutina">
+        <div class="text-sm font-bold text-slate-700 mb-2">La rutina</div>
+        <div id="cons-rutina">${entRenderRutina(r)}</div>
+      </div>
+
+      ${r.cliente_id ? `
+        <!-- Asistencia: su historial al lado (entreno-asistencia.js). -->
+        <div id="asi-panel" class="order-3 lg:col-span-2 xl:col-span-1 ent-col-xl">
+          <div class="card text-xs text-slate-400">Leyendo su historial…</div>
+        </div>` : ''}
+    </div>
+  `;
+  await entPintarGaleriaCons();
+  if (r.cliente_id && typeof asiMontarConstructor === 'function') asiMontarConstructor(r);
+  // Los números de los niveles (ahora / antes) se cargan detrás: no frenan
+  // la apertura de la rutina.
+  entDb.niveles().then(() => {
+    if (!$('#cons-gal-lista')) return;
+    document.querySelectorAll('#cons-filtros select[data-sel="uso"]').forEach(x => { x.innerHTML = entUsoOpciones(); });
+    entPintarGaleriaCons();
+  }).catch(() => {});
+}
+
+function entCabConstructorHTML(r) {
   // Los que llegarían al cliente sin una sola línea de cómo se hacen. De la
   // galería importada de Trainerize son la mayoría, así que decir cuántos hay
   // y cuáles evita ir fila por fila buscando el triángulo amarillo.
   const sinTexto = r.ejercicios
     .filter(re => !String(re.ejercicios?.descripcion || '').trim())
     .map(re => entNombres(re.ejercicios || {}).grande);
-
-  body.innerHTML = `
+  return `
     <div class="card mb-4">
       <div class="flex justify-between items-start gap-3 flex-wrap">
         <div class="min-w-0">
           <button class="btn btn-ghost btn-sm mb-1" onclick="entCerrarConstructor()">← Volver</button>
           <div class="font-bold text-lg text-slate-900">${escapeHtml(r.nombre)}</div>
-          <div class="text-xs text-slate-500">${contexto} · ${r.ejercicios.length} ejercicio${r.ejercicios.length === 1 ? '' : 's'}</div>
+          <div class="text-xs text-slate-500">${_ent.consContexto || ''} · ${r.ejercicios.length} ejercicio${r.ejercicios.length === 1 ? '' : 's'}</div>
           ${sinTexto.length ? `
             <div class="text-xs text-amber-700 mt-1">
               ⚠ ${sinTexto.length} sin descripción: el cliente los verá sin instrucciones
@@ -1382,42 +1521,102 @@ async function entPintarConstructor() {
           <button class="btn btn-ghost btn-sm" onclick="entCopiarRutinaA('${r.id}')">Copiar a…</button>
         </div>
       </div>
-    </div>
+    </div>`;
+}
 
-    <div class="grid lg:grid-cols-2 ${r.cliente_id ? 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_360px]' : ''} gap-4">
-      <div class="order-2 lg:order-1">
-        <div class="text-sm font-bold text-slate-700 mb-2">Galería · toca “Añadir” para meterlo a la rutina</div>
-        ${r.bloques.length ? `
-          <div class="card mb-2 flex items-center gap-2 flex-wrap" style="padding:0.7rem 0.9rem">
-            <span class="text-xs font-bold text-slate-600">Lo que añada va a:</span>
-            <select onchange="entDestino(this.value)" style="width:auto;min-width:150px">
-              <option value="" ${_ent.bloqueDestino === '' ? 'selected' : ''}>Sueltos (sin bloque)</option>
-              ${r.bloques.map(b => `<option value="${b.id}" ${_ent.bloqueDestino === b.id ? 'selected' : ''}>${escapeHtml(b.nombre || entLabel(ENT_TIPOS_BLOQUE, b.tipo))}</option>`).join('')}
-            </select>
-          </div>` : ''}
-        ${entBarraFiltros('cons')}
-        <div class="grid grid-cols-1 gap-2 max-h-[70vh] overflow-y-auto pr-1">
-          ${galeria.length === 0
-            ? '<div class="card text-center text-slate-500 py-6 text-sm">Ningún ejercicio con esos filtros.</div>'
-            : galeria.map(e => entTarjetaEjercicio(e, { agregar: true })).join('')}
-        </div>
-      </div>
+function entDestinoHTML(r) {
+  if (!r.bloques.length) return '';
+  return `
+    <div class="card mb-2 flex items-center gap-2 flex-wrap" style="padding:0.7rem 0.9rem">
+      <span class="text-xs font-bold text-slate-600">Lo que añada va a:</span>
+      <select onchange="entDestino(this.value)" style="width:auto;min-width:150px">
+        <option value="" ${_ent.bloqueDestino === '' ? 'selected' : ''}>Sueltos (sin bloque)</option>
+        ${r.bloques.map(b => `<option value="${b.id}" ${_ent.bloqueDestino === b.id ? 'selected' : ''}>${escapeHtml(b.nombre || entLabel(ENT_TIPOS_BLOQUE, b.tipo))}</option>`).join('')}
+      </select>
+    </div>`;
+}
 
-      <div class="order-1 lg:order-2">
-        <div class="text-sm font-bold text-slate-700 mb-2">La rutina</div>
-        ${entRenderRutina(r)}
-      </div>
-
-      ${r.cliente_id ? `
-        <!-- Asistencia: su historial al lado (entreno-asistencia.js). -->
-        <div id="asi-panel" class="order-3 lg:col-span-2 xl:col-span-1 xl:max-h-[calc(100vh-120px)] xl:overflow-y-auto xl:sticky xl:top-4">
-          <div class="card text-xs text-slate-400">Leyendo su historial…</div>
-        </div>` : ''}
-    </div>
-  `;
-  if (r.cliente_id && typeof asiMontarConstructor === 'function') asiMontarConstructor(r);
+// La lista de la galería del constructor (lo único que cambia al filtrar).
+async function entPintarGaleriaCons() {
+  const seq = _ent.seqGal = (_ent.seqGal || 0) + 1;
+  const todos = await entDb.ejercicios();
+  const galeria = entFiltrar(todos);
+  await entDb.firmarPosters(galeria.map(e => e.poster_path).filter(Boolean));
+  const caja = $('#cons-gal-lista');
+  if (!caja || seq !== _ent.seqGal) return;
+  caja.innerHTML = galeria.length === 0
+    ? '<div class="card col-span-2 text-center text-slate-500 py-6 text-sm">Ningún ejercicio con esos filtros.</div>'
+    : galeria.map(e => entTarjetaCons(e)).join('');
   const c = $('#cons-count');
   if (c) c.textContent = `${galeria.length} de ${todos.length}`;
+  const n = $('#cons-niveles');
+  if (n) n.innerHTML = entNivelesResumen(true);
+}
+
+// Tarjeta compacta (2 por fila) y arrastrable hacia la rutina.
+function entTarjetaCons(e) {
+  const thumb = entMiniatura(e);
+  const n = _ent.enUso && _ent.enUso.get(e.id);
+  const usoTag = n
+    ? `<span class="tag tag-blue ent-gal-uso" title="Clientes con este ejercicio en su ciclo actual">👥 ${n}</span>`
+    : (_ent.usados && _ent.usados.has(e.id) ? '<span class="tag tag-gray ent-gal-uso" title="Lo usó algún cliente en un ciclo anterior">🕘</span>' : '');
+  const prim = (e.musculos_primarios || []).map(m => ((_ent.musculos || []).find(x => x.slug === m) || {}).corto || m);
+  return `
+    <div class="card card-hover p-2 ent-gal" draggable="true" data-ej="${e.id}"
+         ondragstart="entEjDragStart(event)" ondragend="entEjDragEnd(event)" title="Arrástralo a la rutina">
+      <div class="ent-gal-foto">
+        ${thumb ? `<img src="${escapeHtml(thumb)}" loading="lazy" alt="" draggable="false">` : '<span class="text-2xl">🏋️</span>'}
+        ${usoTag}
+      </div>
+      <div class="font-bold text-slate-900 text-[13px] leading-tight ent-2lineas mt-1.5">${escapeHtml(entNombres(e).grande)}</div>
+      ${entNombreChico(e)}
+      <div class="text-[11px] text-slate-500 truncate">${entLabel(ENT_TIPOS, e.tipo)} · ${entLabel(ENT_SEGMENTOS, e.segmento)}</div>
+      ${prim.length ? `<div class="text-[11px] text-emerald-700 truncate">${escapeHtml(prim.join(' · '))}</div>` : ''}
+      <div class="flex items-center justify-between gap-1 mt-1.5">
+        <div class="min-w-0 whitespace-nowrap">${entIconoVideo(e)}</div>
+        <div class="flex gap-1 flex-shrink-0">
+          <button class="btn btn-ghost btn-sm" onclick="entVerFicha('${e.id}')" title="Ver la ficha">👁</button>
+          <button class="btn btn-primary btn-sm" onclick="entAgregarARutina('${e.id}')">+ Añadir</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// Repinta la rutina desde `_ent.rutina` (sin ir a la base). Conserva el
+// scroll y los «Más: RIR, tempo, notas» que estuvieran abiertos.
+function entRepintarRutina() {
+  const r = _ent.rutina;
+  const caja = $('#cons-rutina');
+  if (!r || !caja) return;
+  const abiertos = new Set([...caja.querySelectorAll('.ent-fila details[open]')].map(d => d.closest('.ent-fila')?.dataset.re));
+  const col = $('#cons-col-rutina');
+  const top = col ? col.scrollTop : 0;
+  caja.innerHTML = entRenderRutina(r);
+  abiertos.forEach(id => { const d = caja.querySelector(`.ent-fila[data-re="${id}"] details`); if (d) d.open = true; });
+  if (col) col.scrollTop = top;
+  const cab = $('#cons-cab');
+  if (cab) cab.innerHTML = entCabConstructorHTML(r);
+  const dest = $('#cons-destino');
+  if (dest) dest.innerHTML = entDestinoHTML(r);
+}
+
+// Vuelve a leer la rutina de la base y la repinta (sin «Cargando…»).
+async function entRefrescarRutina(op = {}) {
+  if (!_ent.rutinaId) return;
+  if (!$('#cons-rutina')) return entPintarConstructor();
+  const r = await entDb.rutina(_ent.rutinaId);
+  if (!r) return;
+  _ent.rutina = r;
+  await entDb.firmarPosters(r.ejercicios.map(x => x.ejercicios?.poster_path).filter(Boolean));
+  entRepintarRutina();
+  if (op.asistencia) entRefrescarAsistencia();
+}
+
+function entRefrescarAsistencia() {
+  const caja = $('#asi-panel');
+  if (!caja || !_ent.rutina || typeof asiMontarConstructor !== 'function') return;
+  const top = caja.scrollTop;
+  Promise.resolve(asiMontarConstructor(_ent.rutina)).then(() => { caja.scrollTop = top; });
 }
 
 // ---------- Render agrupado de la rutina ----------
@@ -1426,12 +1625,18 @@ async function entPintarConstructor() {
 // luego B1-B2. Un ejercicio que se sale de su bloque al moverlo simplemente
 // deja de estar en ese tramo — sin estados imposibles ni reordenar dos
 // listas a la vez.
+// Hueco entre tramos: soltar ahí deja el ejercicio SUELTO en esa posición.
+// Es la forma de sacar un ejercicio de un circuito arrastrándolo (si todo
+// está en bloques, no hay una fila suelta sobre la que soltarlo). Solo se ve
+// mientras se arrastra.
+function entHueco(pos, fijo = false) {
+  return `<div class="ent-hueco ${fijo ? 'ent-hueco-fijo' : ''}" data-pos="${pos}"
+       ondragover="entHuecoDragOver(event)" ondragleave="entHuecoDragLeave(event)" ondrop="entHuecoDrop(event)">
+    ${fijo ? 'Rutina vacía. Arrastra aquí ejercicios de la galería, o toca “+ Añadir”.' : 'Suéltalo aquí · queda como ejercicio individual'}</div>`;
+}
+
 function entRenderRutina(r) {
-  if (r.ejercicios.length === 0 && r.bloques.length === 0) {
-    return `<div class="card text-center text-slate-500 py-8 text-sm">
-      Rutina vacía. Elige ejercicios de la galería.
-    </div>`;
-  }
+  if (r.ejercicios.length === 0 && r.bloques.length === 0) return entHueco(0, true);
   const porId = Object.fromEntries(r.bloques.map(b => [b.id, b]));
 
   // Partir en tramos por bloque_id consecutivo
@@ -1443,10 +1648,11 @@ function entRenderRutina(r) {
   });
 
   const total = r.ejercicios.length;
-  let html = tramos.map(t => {
+  let html = (total ? entHueco(0) : entHueco(0, true)) + tramos.map(t => {
     const filas = t.items.map(({ re, i }) => entFilaRutina(re, i, total, r.bloques)).join('');
-    if (!t.bloqueId || !porId[t.bloqueId]) return `<div class="flex flex-col gap-2">${filas}</div>`;
-    return entEnvolverBloque(porId[t.bloqueId], filas, t.items.length);
+    const fin = t.items[t.items.length - 1].i + 1;
+    if (!t.bloqueId || !porId[t.bloqueId]) return `<div class="flex flex-col gap-2">${filas}</div>${entHueco(fin)}`;
+    return entEnvolverBloque(porId[t.bloqueId], filas, t.items.length) + entHueco(fin);
   }).join('');
 
   // Bloques todavía sin ejercicios: si no se pintaran, crearías un circuito
@@ -1454,7 +1660,7 @@ function entRenderRutina(r) {
   const usados = new Set(r.ejercicios.map(e => e.bloque_id).filter(Boolean));
   r.bloques.filter(b => !usados.has(b.id)).forEach(b => {
     html += entEnvolverBloque(b, `<div class="text-xs text-slate-400 py-3 text-center ent-bloque-vacio">
-      Bloque vacío — arrastra aquí un ejercicio, o elígelo arriba como destino.</div>`, 0);
+      Bloque vacío — arrastra aquí un ejercicio, o elígelo arriba como destino.</div>`, 0) + '<div class="h-2"></div>';
   });
   return html;
 }
@@ -1466,7 +1672,7 @@ function entEnvolverBloque(b, dentro, cuantos) {
   if (b.descanso_entre_seg != null) partes.push(`${b.descanso_entre_seg}s entre ejercicios`);
   if (b.descanso_seg != null) partes.push(`${b.descanso_seg}s entre vueltas`);
   return `
-    <div class="rounded-xl mb-2 ent-bloque" data-bloque="${b.id}"
+    <div class="rounded-xl ent-bloque" data-bloque="${b.id}"
          ondragover="entBloqueDragOver(event)" ondragleave="entBloqueDragLeave(event)"
          ondrop="entBloqueDrop(event)"
          style="border:1.5px solid #cbd5e1;background:#f8fafc;padding:0.6rem">
@@ -1497,7 +1703,10 @@ function entFilaRutina(re, i, total, bloques) {
   // cómo hacerlo. Se avisa AQUÍ, al meterlo en la rutina, porque es el único
   // momento en que alguien lo está mirando con la intención de mandárselo.
   const sinTexto = !String(e.descripcion || '').trim();
-  const mini = (typeof figuraMusculos === 'function')
+  // La foto del video manda (es como uno reconoce el ejercicio de un vistazo);
+  // el dibujo de músculos queda para los que todavía no tienen video.
+  const foto = entMiniatura(e);
+  const mini = (!foto && typeof figuraMusculos === 'function')
     ? figuraMusculos({
         primarios: e.musculos_primarios || [], secundarios: e.musculos_secundarios || [],
         mapa: entMapaMusculos(), alto: 54, leyenda: false, cara: 'frente',
@@ -1510,6 +1719,8 @@ function entFilaRutina(re, i, total, bloques) {
       <div class="flex justify-between items-start gap-2 mb-2">
         <div class="flex gap-2 min-w-0">
           <div class="ent-agarre" title="Arrastra para cambiar el orden">⠿</div>
+          ${foto ? `<img src="${escapeHtml(foto)}" class="ent-fila-foto" alt="" loading="lazy" draggable="false"
+                         onclick="entVerFicha('${e.id}')" title="Ver la ficha">` : ''}
           ${mini ? `<div class="ent-fila-fig">${mini}</div>` : ''}
           <div class="min-w-0">
             <div class="font-bold text-sm text-slate-900">${i + 1}. ${escapeHtml(entNombres(e).grande)}</div>
@@ -1562,15 +1773,27 @@ function entFilaRutina(re, i, total, bloques) {
   `;
 }
 
-window.entAgregarARutina = async (ejercicioId) => {
-  if (!_ent.rutinaId) { toast('Abre una rutina primero'); return; }
-  const orden = (_ent.rutina?.ejercicios?.length || 0) + 1;
-  await entDb.agregarEjercicio({
-    rutina_id: _ent.rutinaId, ejercicio_id: ejercicioId, orden,
-    bloque_id: _ent.bloqueDestino || null,
+// `donde` = { pos, bloque } cuando llega arrastrado: entra en esa posición y
+// en ese bloque (o suelto). Sin `donde`, al final y al bloque elegido arriba.
+window.entAgregarARutina = async (ejercicioId, donde = null) => {
+  if (!_ent.rutinaId || !_ent.rutina) { toast('Abre una rutina primero'); return; }
+  const lista = _ent.rutina.ejercicios.slice();
+  const pos = donde && donde.pos != null ? Math.max(0, Math.min(donde.pos, lista.length)) : lista.length;
+  const bloque = donde ? (donde.bloque || null) : (_ent.bloqueDestino || null);
+  const nuevo = await entDb.agregarEjercicio({
+    rutina_id: _ent.rutinaId, ejercicio_id: ejercicioId, orden: pos + 1,
+    bloque_id: bloque,
     series: 3, reps: '10', descanso_seg: 90,
   });
-  await entPintarConstructor();
+  if (!nuevo) return;
+  if (!nuevo.id) return entRefrescarRutina({ asistencia: true });
+  nuevo.ejercicios = nuevo.ejercicios || (_ent.ejercicios || []).find(x => x.id === ejercicioId) || {};
+  if (nuevo.ejercicios.poster_path) await entDb.firmarPosters([nuevo.ejercicios.poster_path]);
+  lista.splice(pos, 0, nuevo);
+  await entGuardarOrden(lista);
+  const fila = document.querySelector(`#cons-rutina .ent-fila[data-re="${nuevo.id}"]`);
+  if (fila) { fila.classList.add('ent-fila-nueva'); fila.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+  entRefrescarAsistencia();
 };
 
 // Los campos numéricos vacíos deben guardar NULL, no 0: "sin RIR definido" y
@@ -1586,8 +1809,12 @@ window.entGuardarRE = async (id, campo, valor) => {
 };
 
 window.entQuitarRE = async (id) => {
-  await entDb.quitarRE(id);
-  await entPintarConstructor();
+  if (!_ent.rutina) return;
+  _ent.rutina.ejercicios = _ent.rutina.ejercicios.filter(x => x.id !== id);
+  entRepintarRutina();
+  const ok = await entDb.quitarRE(id);
+  if (ok === false) return entRefrescarRutina();
+  entRefrescarAsistencia();
 };
 
 // ---------- Arrastrar ejercicios dentro de la rutina ----------
@@ -1602,41 +1829,90 @@ window.entQuitarRE = async (id) => {
 // Y hereda el bloque de donde cae. Arrastrar un ejercicio dentro de un
 // circuito y que se quede suelto sería el error silencioso de siempre: se ve
 // dentro del recuadro pero el cliente lo ejecuta aparte.
+// Mientras se arrastra (una fila o una tarjeta de la galería) aparecen los
+// huecos para dejarlo suelto. Se marca en el siguiente tic: tocar el DOM en
+// pleno dragstart hace que algunos navegadores cancelen el arrastre.
+function entMarcarArrastre(on) {
+  setTimeout(() => { const c = $('#cons-rutina'); if (c) c.classList.toggle('ent-arrastrando', on); }, 0);
+}
+function entLimpiarMarcas() {
+  document.querySelectorAll('.ent-fila-antes, .ent-fila-despues')
+    .forEach(f => f.classList.remove('ent-fila-antes', 'ent-fila-despues'));
+  document.querySelectorAll('.ent-bloque-destino, .ent-hueco-on')
+    .forEach(f => f.classList.remove('ent-bloque-destino', 'ent-hueco-on'));
+}
+const entArrastra = () => _ent.arrastrandoRE || _ent.arrastrandoEj;
+const entEfecto = () => (_ent.arrastrandoEj ? 'copy' : 'move');
+
 window.entReDragStart = (e) => {
   const fila = e.currentTarget;
   _ent.arrastrandoRE = fila.dataset.re;
+  _ent.arrastrandoEj = null;
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/plain', fila.dataset.re);   // Firefox lo exige
   fila.classList.add('ent-fila-arrastre');
+  entMarcarArrastre(true);
 };
 
 window.entReDragEnd = (e) => {
   e.currentTarget.classList.remove('ent-fila-arrastre');
-  document.querySelectorAll('.ent-fila-antes, .ent-fila-despues')
-    .forEach(f => f.classList.remove('ent-fila-antes', 'ent-fila-despues'));
+  entLimpiarMarcas();
+  entMarcarArrastre(false);
   _ent.arrastrandoRE = null;
 };
 
+// Arrastrar desde la galería: lo mismo que mover una fila, pero lo que cae es
+// un ejercicio NUEVO en esa posición (y en el bloque donde cae).
+window.entEjDragStart = (e) => {
+  const tarjeta = e.currentTarget;
+  _ent.arrastrandoEj = tarjeta.dataset.ej;
+  _ent.arrastrandoRE = null;
+  e.dataTransfer.effectAllowed = 'copy';
+  e.dataTransfer.setData('text/plain', tarjeta.dataset.ej);
+  tarjeta.classList.add('ent-fila-arrastre');
+  entMarcarArrastre(true);
+};
+
+window.entEjDragEnd = (e) => {
+  e.currentTarget.classList.remove('ent-fila-arrastre');
+  entLimpiarMarcas();
+  entMarcarArrastre(false);
+  _ent.arrastrandoEj = null;
+};
+
 window.entReDragOver = (e) => {
-  if (!_ent.arrastrandoRE) return;
+  if (!entArrastra()) return;
   const fila = e.currentTarget;
-  if (fila.dataset.re === _ent.arrastrandoRE) return;
+  if (_ent.arrastrandoRE && fila.dataset.re === _ent.arrastrandoRE) return;
   e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
+  e.stopPropagation();
+  e.dataTransfer.dropEffect = entEfecto();
   // La mitad superior de la fila significa "antes", la inferior "después".
   // Sin esta línea no se sabe dónde va a caer hasta que ya cayó.
   const caja = fila.getBoundingClientRect();
   const antes = (e.clientY - caja.top) < caja.height / 2;
-  document.querySelectorAll('.ent-fila-antes, .ent-fila-despues')
-    .forEach(f => f.classList.remove('ent-fila-antes', 'ent-fila-despues'));
+  entLimpiarMarcas();
   fila.classList.add(antes ? 'ent-fila-antes' : 'ent-fila-despues');
 };
 
 window.entReDrop = async (e) => {
   const id = _ent.arrastrandoRE;
+  const ej = _ent.arrastrandoEj;
   const fila = e.currentTarget;
   const destinoId = fila.dataset.re;
   _ent.arrastrandoRE = null;
+  _ent.arrastrandoEj = null;
+  entLimpiarMarcas();
+  if (ej && destinoId) {
+    e.preventDefault();
+    e.stopPropagation();
+    const caja = fila.getBoundingClientRect();
+    const antes = (e.clientY - caja.top) < caja.height / 2;
+    let pos = (_ent.rutina?.ejercicios || []).findIndex(x => x.id === destinoId);
+    if (pos < 0) return;
+    if (!antes) pos++;
+    return entAgregarARutina(ej, { pos, bloque: fila.dataset.bloque || null });
+  }
   if (!id || !destinoId || id === destinoId) return;
   e.preventDefault();
   e.stopPropagation();
@@ -1644,6 +1920,39 @@ window.entReDrop = async (e) => {
   const caja = fila.getBoundingClientRect();
   const antes = (e.clientY - caja.top) < caja.height / 2;
   await entReordenarRE(id, destinoId, antes, fila.dataset.bloque || null);
+};
+
+// Soltar en un hueco: queda SUELTO en esa posición (fuera de cualquier
+// circuito). Si viene de la galería, entra ahí como ejercicio individual.
+window.entHuecoDragOver = (e) => {
+  if (!entArrastra()) return;
+  e.preventDefault();
+  e.stopPropagation();
+  e.dataTransfer.dropEffect = entEfecto();
+  entLimpiarMarcas();
+  e.currentTarget.classList.add('ent-hueco-on');
+};
+window.entHuecoDragLeave = (e) => {
+  if (e.currentTarget.contains(e.relatedTarget)) return;
+  e.currentTarget.classList.remove('ent-hueco-on');
+};
+window.entHuecoDrop = async (e) => {
+  const pos = Number(e.currentTarget.dataset.pos) || 0;
+  const id = _ent.arrastrandoRE;
+  const ej = _ent.arrastrandoEj;
+  _ent.arrastrandoRE = null;
+  _ent.arrastrandoEj = null;
+  entLimpiarMarcas();
+  if (!id && !ej) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (ej) return entAgregarARutina(ej, { pos, bloque: null });
+  const lista = _ent.rutina?.ejercicios || [];
+  const sig = lista.slice(pos).find(x => x.id !== id);
+  if (sig) return entReordenarRE(id, sig.id, true, null);
+  const ult = [...lista].reverse().find(x => x.id !== id);
+  if (ult) return entReordenarRE(id, ult.id, false, null);
+  return entGuardarOrden(lista.slice(), { [id]: null });
 };
 
 // Saca el ejercicio de la lista, lo vuelve a meter donde toca y renumera
@@ -1660,29 +1969,39 @@ async function entReordenarRE(id, destinoId, antes, bloqueDestino) {
   if (!antes) hasta++;
   lista.splice(hasta, 0, movido);
 
-  const nuevoBloque = bloqueDestino || null;
-  const cambioBloque = (movido.bloque_id || null) !== nuevoBloque;
+  await entGuardarOrden(lista, { [id]: bloqueDestino || null });
+}
 
-  // Solo se escriben las filas cuyo `orden` cambió de verdad: mover el último
-  // al penúltimo puesto son dos escrituras, no quince.
+// Deja la rutina con la lista en ESTE orden: se ve al instante y se guarda
+// detrás. Solo se escriben las filas cuyo `orden` (o bloque) cambió de
+// verdad: mover el último al penúltimo puesto son dos escrituras, no quince.
+// Si alguna escritura falla, se vuelve a leer la rutina de la base para no
+// dejar en pantalla algo que no quedó guardado.
+async function entGuardarOrden(lista, bloques = {}) {
   const escrituras = [];
   lista.forEach((re, i) => {
     const parche = {};
     if (re.orden !== i + 1) parche.orden = i + 1;
-    if (re.id === id && cambioBloque) parche.bloque_id = nuevoBloque;
-    if (Object.keys(parche).length) escrituras.push(entDb.actualizarRE(re.id, parche));
+    if (re.id in bloques && (re.bloque_id || null) !== bloques[re.id]) parche.bloque_id = bloques[re.id];
+    if (Object.keys(parche).length) {
+      Object.assign(re, parche);
+      escrituras.push(entDb.actualizarRE(re.id, parche));
+    }
   });
-  await Promise.all(escrituras);
-  await entPintarConstructor();
+  if (_ent.rutina) _ent.rutina.ejercicios = lista;
+  entRepintarRutina();
+  const res = await Promise.all(escrituras);
+  if (res.some(x => x === false)) { toast('No se pudo guardar el cambio; vuelvo a cargar la rutina'); await entRefrescarRutina(); }
 }
+// fin entGuardarOrden
 
 // Soltar en el hueco de un bloque (no sobre una fila concreta) mete el
 // ejercicio AL FINAL de ese bloque. Es la única forma de meter algo a un
 // circuito vacío arrastrando: sin filas dentro, no hay sobre qué soltar.
 window.entBloqueDragOver = (e) => {
-  if (!_ent.arrastrandoRE) return;
+  if (!entArrastra()) return;
   e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
+  e.dataTransfer.dropEffect = entEfecto();
   // Si el cursor está sobre una fila, esa fila ya está pintando su línea de
   // inserción; resaltar además el bloque entero son dos señales a la vez.
   const sobreFila = e.target.closest?.('.ent-fila');
@@ -1698,8 +2017,20 @@ window.entBloqueDrop = async (e) => {
   const caja = e.currentTarget;
   caja.classList.remove('ent-bloque-destino');
   const id = _ent.arrastrandoRE;
+  const ej = _ent.arrastrandoEj;
   const bloqueId = caja.dataset.bloque;
   _ent.arrastrandoRE = null;
+  _ent.arrastrandoEj = null;
+  entLimpiarMarcas();
+  if (ej) {
+    // Al final de ese bloque (o al final de la rutina si está vacío).
+    e.preventDefault();
+    e.stopPropagation();
+    const lista = _ent.rutina?.ejercicios || [];
+    let ultimo = -1;
+    lista.forEach((x, i) => { if (x.bloque_id === bloqueId) ultimo = i; });
+    return entAgregarARutina(ej, { pos: ultimo >= 0 ? ultimo + 1 : lista.length, bloque: bloqueId });
+  }
   // Cuando la fila resuelve el drop llama a stopPropagation(), así que este
   // manejador ni se ejecuta. Si llega aquí es que cayó en el hueco. La única
   // excepción es soltar un ejercicio sobre sí mismo, y entonces `id` ya es
@@ -1714,8 +2045,7 @@ window.entBloqueDrop = async (e) => {
     await entReordenarRE(id, dentro[dentro.length - 1].id, false, bloqueId);
   } else {
     // Bloque vacío: basta con marcarle el bloque, el orden no cambia.
-    await entDb.actualizarRE(id, { bloque_id: bloqueId });
-    await entPintarConstructor();
+    await entGuardarOrden(lista.slice(), { [id]: bloqueId });
   }
 };
 
@@ -1726,11 +2056,9 @@ window.entMoverRE = async (id, delta) => {
   const i = lista.findIndex(x => x.id === id);
   const j = i + delta;
   if (i < 0 || j < 0 || j >= lista.length) return;
-  await Promise.all([
-    entDb.actualizarRE(lista[i].id, { orden: j + 1 }),
-    entDb.actualizarRE(lista[j].id, { orden: i + 1 }),
-  ]);
-  await entPintarConstructor();
+  const nueva = lista.slice();
+  [nueva[i], nueva[j]] = [nueva[j], nueva[i]];
+  await entGuardarOrden(nueva);
 };
 
 window.entDestino = (id) => { _ent.bloqueDestino = id || ''; };
@@ -1808,7 +2136,7 @@ window.entGuardarBloque = async (id) => {
   }
   closeModal();
   toast(id ? '✓ Bloque actualizado' : '✓ Bloque creado — lo que añadas entra aquí');
-  entPintarConstructor();
+  entRefrescarRutina();
 };
 
 window.entBorrarBloque = async (id) => {
@@ -1816,12 +2144,11 @@ window.entBorrarBloque = async (id) => {
   await entDb.borrarBloque(id);
   if (_ent.bloqueDestino === id) _ent.bloqueDestino = '';
   toast('Bloque deshecho');
-  entPintarConstructor();
+  entRefrescarRutina();
 };
 
 window.entMoverABloque = async (reId, bloqueId) => {
-  await entDb.actualizarRE(reId, { bloque_id: bloqueId || null });
-  await entPintarConstructor();
+  await entGuardarOrden((_ent.rutina?.ejercicios || []).slice(), { [reId]: bloqueId || null });
 };
 
 window.entEditarDatosRutina = () => {
@@ -1854,7 +2181,7 @@ window.entGuardarDatosRutina = async () => {
   });
   closeModal();
   toast('✓ Guardado');
-  entPintarConstructor();
+  entRefrescarRutina();
 };
 
 window.entDuplicarPlantilla = async (id) => {

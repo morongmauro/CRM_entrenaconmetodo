@@ -532,6 +532,83 @@ summary.list-none { list-style: none; }
 }
 .ent-aviso:hover { background: #fde68a; }
 
+/* ---- Constructor: tres columnas con scroll propio ----
+   En PC cada columna (galería, rutina, asistencia) baja por su cuenta y se
+   queda pegada arriba: se trabaja con las tres a la vista. */
+@media (min-width: 1024px) {
+  .ent-col { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; padding-right: 4px; scrollbar-gutter: stable; }
+}
+@media (min-width: 1280px) {
+  .ent-col-xl { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; padding-right: 4px; scrollbar-gutter: stable; }
+}
+
+/* Foto del video en cada fila de la rutina */
+.ent-fila-foto {
+  width: 5.25rem; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 0.5rem;
+  flex-shrink: 0; align-self: flex-start; height: auto; background: #f1f5f9; cursor: pointer;
+}
+.ent-fila-nueva { animation: ent-nueva 1.2s ease-out; }
+@keyframes ent-nueva { 0% { box-shadow: 0 0 0 3px #3C7BD6; } 100% { box-shadow: 0 0 0 0 rgba(60,123,214,0); } }
+
+/* Huecos para dejar un ejercicio suelto. Ocupan siempre lo mismo (son el
+   espacio entre bloques), así nada se mueve bajo el cursor al empezar a
+   arrastrar: se marcan con una línea punteada y solo crece el que tiene el
+   cursor encima. */
+.ent-hueco {
+  height: 0.6rem; border-radius: 0.6rem; display: flex; align-items: center; justify-content: center;
+  font-size: 0; color: transparent; overflow: hidden; transition: height 0.12s, background 0.12s;
+}
+.ent-arrastrando .ent-hueco {
+  background: linear-gradient(90deg, #cbd5e1 50%, transparent 0) center / 10px 1.5px repeat-x;
+}
+.ent-hueco-on {
+  height: 2.1rem; font-size: 0.68rem; color: #2F6CC4 !important;
+  border: 1.5px dashed #3C7BD6; background: #eef4fc !important;
+}
+.ent-hueco-fijo {
+  height: auto; min-height: 7rem; font-size: 0.85rem; color: #64748b; background: white;
+  border: 1.5px dashed #cbd5e1; text-align: center; padding: 0.5rem;
+}
+
+/* Tarjeta de la galería del constructor (2 por fila, arrastrable) */
+.ent-gal { cursor: grab; }
+.ent-gal:active { cursor: grabbing; }
+.ent-gal-foto {
+  position: relative; aspect-ratio: 16 / 9; border-radius: 0.5rem; overflow: hidden;
+  background: #f1f5f9; display: flex; align-items: center; justify-content: center;
+}
+.ent-gal-foto img { width: 100%; height: 100%; object-fit: cover; }
+.ent-gal-uso { position: absolute; left: 0.3rem; top: 0.3rem; }
+.ent-2lineas { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Filtro de varias opciones: parece un select, abre casillas. */
+.ent-multi { position: relative; min-width: 0; }
+.ent-multi > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 0.3rem;
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0.625rem;
+  padding: 0.55rem 1.6rem 0.55rem 0.75rem; font-size: 0.875rem; color: #1D1D1F;
+  white-space: nowrap; overflow: hidden; position: relative; user-select: none;
+}
+.ent-multi > summary::-webkit-details-marker { display: none; }
+.ent-multi > summary::after {
+  content: ''; position: absolute; right: 0.7rem; top: 50%; width: 0.4rem; height: 0.4rem;
+  border-right: 1.6px solid #1D1D1F; border-bottom: 1.6px solid #1D1D1F; transform: translateY(-70%) rotate(45deg);
+}
+.ent-multi > summary.ent-multi-on { background: #eef4fc; border-color: #9cbde9; }
+.ent-multi-n { flex-shrink: 0; font-size: 0.7rem; color: #2F6CC4; }
+.ent-multi-panel {
+  position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; min-width: 100%; width: max-content; max-width: 260px;
+  max-height: 290px; overflow-y: auto; background: white; border: 1px solid #e2e8f0;
+  border-radius: 0.75rem; box-shadow: 0 10px 30px rgba(15,23,42,0.14); padding: 0.35rem;
+}
+.ent-multi-op {
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.5rem; border-radius: 0.45rem;
+  font-size: 0.85rem; font-weight: 500; color: #1D1D1F; text-transform: none; letter-spacing: 0; margin: 0; cursor: pointer;
+}
+.ent-multi-op:hover { background: #f1f5f9; }
+.ent-multi-op input { width: 1rem; height: 1rem; padding: 0; margin: 0; flex-shrink: 0; accent-color: #1D1D1F; }
+.ent-multi-limpiar { width: 100%; text-align: left; font-size: 0.75rem; color: #64748b; padding: 0.4rem 0.5rem; border-top: 1px solid #f1f5f9; margin-top: 0.2rem; }
+
 .ent-progreso { height: 5px; background: #e2e8f0; border-radius: 9999px; overflow: hidden; }
 .ent-progreso-relleno { height: 100%; background: var(--brand-olive); border-radius: 9999px; }
 

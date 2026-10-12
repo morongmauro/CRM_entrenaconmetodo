@@ -5,7 +5,8 @@ import vm from 'vm';
 
 const src = readFileSync('/home/user/CRM_entrenaconmetodo/entrenamiento.js', 'utf8');
 const i = src.indexOf('async function entReordenarRE(');
-const j = src.indexOf('\n}', src.indexOf('await entPintarConstructor();', i)) + 2;
+// Hasta el final de entGuardarOrden(), que es quien escribe el orden nuevo.
+const j = src.indexOf('// fin entGuardarOrden', i);
 const cuerpo = src.slice(i, j);
 
 let escrituras;
@@ -13,6 +14,9 @@ const ctx = vm.createContext({
   _ent: {},
   entDb: { actualizarRE: async (id, parche) => { escrituras.push([id, parche]); } },
   entPintarConstructor: async () => {},
+  entRepintarRutina: () => {},
+  entRefrescarRutina: async () => {},
+  toast: () => {},
   console,
 });
 vm.runInContext(cuerpo + '\nglobalThis.entReordenarRE = entReordenarRE;', ctx);

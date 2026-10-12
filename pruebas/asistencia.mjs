@@ -134,6 +134,8 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
   ok(`${tag} · ficha: «Usar los de Trainerize» pone sus días (LMXJS)`, dias === 'LMXJS', dias);
 
   // 5. El filtro de la galería: el ciclo vigente aunque esté en borrador.
+  // Con la fecha de la carga (10 oct): el ciclo vigente es el 18, en borrador.
+  await p.evaluate(() => { fmt.hoy = () => '2026-10-10'; _ent.usados = null; });
   const enUso = await p.evaluate(async () => (await entDb.ejerciciosEnUso(true)).size);
   const esperado = new Set(fixture.rutina_ejercicios.filter(x => fixture.rutinas.find(r => r.id === x.rutina_id)?.fase_id === rutVieja.fase_id).map(x => x.ejercicio_id)).size;
   ok(`${tag} · galería «usan mis clientes»: cuenta el ciclo vigente en borrador (${enUso} de ${esperado})`, enUso === esperado);

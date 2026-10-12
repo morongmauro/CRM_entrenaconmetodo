@@ -105,7 +105,7 @@ await p.evaluate(() => { _ent.ejercicios = DB.ejercicios; document.getElementByI
 const cajas = await p.locator('[data-niveles] [data-nivel]').allInnerTexts();
 ok('los 3 niveles con su número (2 · 1 · 3)', cajas.length === 3 && /\b2\b ejercicios/.test(cajas[0]) && /\b1\b ejercicios/.test(cajas[1]) && /\b3\b ejercicios/.test(cajas[2]), JSON.stringify(cajas));
 ok('la tarjeta del nivel 2 dice «Usado antes»', (await p.locator('#ent-body', { hasText: 'Usado antes' }).count()) === 1);
-const opciones = await p.locator('[data-niveles]').evaluate(n => [...n.parentElement.querySelectorAll('select')].pop().innerText);
+const opciones = await p.locator('select[data-sel="uso"]').first().evaluate(n => n.innerText);
 ok('el desplegable trae los números', /ahora \(2\)/i.test(opciones) && /antes.*\(1\)/i.test(opciones) && /galería \(3\)/i.test(opciones), opciones);
 await p.evaluate(() => { _ent.filtros.uso = ''; _ent.filtros.video = ''; });
 ok('sin el filtro, vuelve toda la galería', (await p.evaluate(() => entFiltrar(DB.ejercicios).length)) === 3);

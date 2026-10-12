@@ -31,8 +31,12 @@ const r = await p.evaluate(() => {
   const dt = () => ({ effectAllowed:'', dropEffect:'', setData(){}, getData(){return '';} });
   const ev = (tipo, extra={}) => Object.assign(new Event(tipo, {bubbles:true, cancelable:true}), { dataTransfer: dt() }, extra);
 
+  // Cada arrastre parte de la rutina original: el constructor ahora aplica el
+  // cambio en pantalla al instante, y aquí se mira cada arrastre por separado.
+  const original = JSON.parse(JSON.stringify(_ent.rutina));
   const arrastrar = (desdeIdx, hastaIdx, mitadSuperior) => {
     escrituras = [];
+    _ent.rutina = JSON.parse(JSON.stringify(original));
     const a = filas()[desdeIdx], b2 = filas()[hastaIdx];
     const e1 = ev('dragstart'); Object.defineProperty(e1,'currentTarget',{value:a}); entReDragStart(e1);
     const caja = b2.getBoundingClientRect();
