@@ -50,11 +50,13 @@ async function entCargarPropuestas(force = false) {
 // Guarda el video de YouTube en el ejercicio. Solo toca las columnas del video.
 async function entPonerVideo(id, ref, inicio = null) {
   const e = (_ent.ejercicios || []).find(x => x.id === id);
-  if (e) _vid.previo[id] = { video_fuente: e.video_fuente, video_ref: e.video_ref, video_url: e.video_url, video_inicio_seg: e.video_inicio_seg, video_path: e.video_path, poster_path: e.poster_path };
+  if (e) _vid.previo[id] = { video_fuente: e.video_fuente, video_ref: e.video_ref, video_url: e.video_url, video_inicio_seg: e.video_inicio_seg, video_path: e.video_path, poster_path: e.poster_path, poster_url: e.poster_url ?? null };
   const row = {
     video_fuente: 'youtube', video_ref: ref,
     video_url: `https://www.youtube.com/watch?v=${ref}${inicio ? `&t=${inicio}s` : ''}`,
     video_inicio_seg: inicio || null, video_path: null, poster_path: null,
+    // La imagen elegida era del video anterior: vuelve a la automática.
+    poster_url: null,
     // Elegido por el coach: ningún SQL de carga lo vuelve a pisar.
     video_elegido_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -263,4 +265,144 @@ window.entDeshacerVideo = async () => {
 window.entCerrarVideoRapido = () => {
   closeModal();
   if (typeof entVistaEjercicios === 'function' && _ent.tab === 'ejercicios' && !_ent.rutinaId) entVistaEjercicios();
+};
+
+// =====================================================
+// REVISAR FOTOS · la foto del preview, de muchas a la vez
+// =====================================================
+// Lo que el cliente ve antes de abrir el ejercicio es una de las 4 imágenes
+// que YouTube saca del video. Casi siempre es el ejercicio, pero no siempre:
+// un video que trae varios ejercicios, una portada con letrero, una imagen
+// elegida para el video de antes… Con cientos de ejercicios no se puede ir
+// uno por uno. Aquí se ven 24 de golpe, tal como las ve el cliente, primero
+// las dudosas y las que tus clientes usan hoy; se corrige con un toque y se
+// da por buena con «✓ Está bien» (queda guardada para ESE video: si mañana le
+// cambias el video, vuelve a pedir revisión sola).
+const _fot = { filtro: 'uso', pag: 0 };
+const FOT_POR_PAG = 24;
+const entFotoRevisada = (e) => e.video_fuente === 'youtube' && !!e.video_ref
+  && entIdYtimg(e.poster_url) === e.video_ref && !!entCuadroYt(e.poster_url);
+const entFotoCuadroVisto = (e) => (entIdYtimg(e.poster_url) === e.video_ref && entCuadroYt(e.poster_url))
+  || (Number(e.video_inicio_seg) > 0 ? null : ENT_CUADRO_AUTO);
+
+window.entRevisarFotos = async (filtro) => {
+  await Promise.all([entDb.ejercicios(), entDb.niveles()]);
+  if (filtro) _fot.filtro = filtro;
+  _fot.pag = 0;
+  entPintarFotos();
+};
+
+function entListaFotos(filtro = _fot.filtro) {
+  const enUso = _ent.enUso || new Set(), usados = _ent.usados || new Set();
+  const conVideo = (_ent.ejercicios || []).filter(e => (e.video_fuente === 'youtube' && e.video_ref) || entFotoDudosa(e));
+  const pasa = {
+    uso: (e) => enUso.has(e.id) && !entFotoRevisada(e),
+    dudosas: (e) => !!entFotoDudosa(e),
+    sin: (e) => !entFotoRevisada(e),
+    todas: () => true,
+  }[filtro] || (() => true);
+  const rango = (e) => (entFotoDudosa(e) ? 0 : 3) + (enUso.has(e.id) ? 0 : usados.has(e.id) ? 1 : 2);
+  return conVideo.filter(pasa).sort((a, b) => rango(a) - rango(b)
+    || entNombres(a).grande.localeCompare(entNombres(b).grande, 'es', { sensitivity: 'base' }));
+}
+
+function entTarjetaFoto(e) {
+  const n = entNombres(e);
+  const foto = entMiniatura(e);
+  const duda = entFotoDudosa(e);
+  const ok = entFotoRevisada(e);
+  const visto = entFotoCuadroVisto(e);
+  const enUso = _ent.enUso && _ent.enUso.has(e.id);
+  return `
+    <div class="card p-2 flex flex-col gap-1.5" data-foto-ej="${e.id}" ${ok ? 'data-foto-revisada' : ''}>
+      <div class="relative rounded-lg overflow-hidden bg-slate-100" style="aspect-ratio:16/9">
+        ${foto ? `<img src="${escapeHtml(foto)}" class="w-full h-full object-cover" alt="" loading="lazy">`
+               : '<div class="w-full h-full flex items-center justify-center text-xs text-slate-400 text-center px-2">Sin foto · elige abajo cuál es</div>'}
+        ${ok ? '<span class="absolute top-1 right-1 text-[11px] font-bold bg-emerald-600 text-white rounded-full px-2 py-0.5">✓ Revisada</span>' : ''}
+        ${enUso ? '<span class="absolute top-1 left-1 text-[10px] font-bold bg-white/90 rounded-full px-1.5 py-0.5">En uso</span>' : ''}
+      </div>
+      <div class="min-w-0">
+        <div class="text-xs font-bold text-slate-900 truncate" title="${escapeHtml(n.grande)}">${escapeHtml(n.grande)}</div>
+        ${n.chico ? `<div class="text-[11px] text-slate-500 truncate">${escapeHtml(n.chico)}</div>` : ''}
+      </div>
+      ${duda ? `<div class="text-[11px] text-amber-700 leading-snug" data-foto-duda>⚠ ${escapeHtml(duda)}</div>` : ''}
+      ${e.video_fuente === 'youtube' && e.video_ref ? `
+        <div class="grid grid-cols-4 gap-1">
+          ${ENT_CUADROS_YT.map(([k, lab]) => `
+            <button type="button" title="${lab}" data-foto-cuadro="${k}" onclick="entFotoElegir('${e.id}', '${k}')"
+                    class="block rounded overflow-hidden" style="border:2px solid ${ok && visto === k ? '#1D1D1F' : 'transparent'}">
+              <img src="${entUrlCuadro(e.video_ref, k)}" class="w-full object-cover" style="aspect-ratio:16/9" alt="" loading="lazy">
+            </button>`).join('')}
+        </div>` : ''}
+      <div class="flex gap-1 mt-auto">
+        <button class="btn btn-sm ${ok ? 'btn-ghost' : 'btn-primary'} flex-1" data-foto-ok ${visto ? '' : 'disabled title="Elige primero cuál de las 4 es"'}
+                onclick="entFotoOk('${e.id}')">${ok ? '✓ Bien' : '✓ Está bien'}</button>
+        <button class="btn btn-ghost btn-sm" title="Ver el video y cambiarlo" onclick="entVideoRapido('${e.id}')">🎬</button>
+      </div>
+    </div>`;
+}
+
+function entPintarFotos() {
+  const lista = entListaFotos();
+  const paginas = Math.max(1, Math.ceil(lista.length / FOT_POR_PAG));
+  _fot.pag = Math.min(_fot.pag, paginas - 1);
+  const pagina = lista.slice(_fot.pag * FOT_POR_PAG, (_fot.pag + 1) * FOT_POR_PAG);
+  const cuenta = (f) => entListaFotos(f).length;
+  const chip = (f, txt) => `<button type="button" class="chip ${_fot.filtro === f ? 'active' : ''}" data-fotos-filtro="${f}" onclick="entRevisarFotos('${f}')">${txt} · ${cuenta(f)}</button>`;
+  _fot.vistos = pagina.map(e => e.id);
+  openModal(modalShell('🖼 Revisar fotos de los ejercicios', `
+    <div data-revisar-fotos>
+      <p class="text-xs text-slate-500 mb-2">Así las ve tu cliente antes de abrir el ejercicio. Si una no es la suya, toca la buena de las 4 de abajo: se guarda al tocarla. Si está bien, «✓ Está bien».</p>
+      <div class="flex flex-wrap gap-1.5 mb-3">
+        ${chip('uso', 'Las que usan tus clientes, sin revisar')}
+        ${chip('dudosas', '⚠ Dudosas')}
+        ${chip('sin', 'Todas sin revisar')}
+        ${chip('todas', 'Todas')}
+      </div>
+      ${pagina.length ? `<div class="grid gap-2" style="grid-template-columns:repeat(auto-fill,minmax(10.5rem,1fr))" id="fotos-grid">${pagina.map(entTarjetaFoto).join('')}</div>`
+        : '<div class="text-sm text-slate-500 bg-slate-50 rounded-lg p-4 text-center">Nada por revisar aquí. 🎉</div>'}
+    </div>`, `
+    ${paginas > 1 ? `
+      <button class="btn btn-secondary" onclick="entFotosPag(-1)" ${_fot.pag === 0 ? 'disabled' : ''}>← Anteriores</button>
+      <span class="text-sm text-slate-500 self-center px-2">${_fot.pag + 1} de ${paginas}</span>
+      <button class="btn btn-secondary" onclick="entFotosPag(1)" ${_fot.pag >= paginas - 1 ? 'disabled' : ''}>Siguientes →</button>` : ''}
+    ${pagina.length ? '<button class="btn btn-primary" data-fotos-todas-ok onclick="entFotosPaginaOk()" title="Da por buenas las de esta página que tienen foto">✓ Todas las de esta página están bien</button>' : ''}
+    <button class="btn btn-ghost" onclick="closeModal()">Cerrar</button>`), { wide: true });
+}
+
+window.entFotosPag = (paso) => { _fot.pag += paso; entPintarFotos(); };
+
+async function entFotoGuardar(e, cuadro) {
+  const nuevo = entUrlCuadro(e.video_ref, cuadro);
+  const { error } = await sb.from('ejercicios').update({ poster_url: nuevo, updated_at: new Date().toISOString() }).eq('id', e.id);
+  if (error) { toast(error.message); return false; }
+  e.poster_url = nuevo;
+  const caja = document.querySelector(`[data-foto-ej="${e.id}"]`);
+  if (caja) caja.outerHTML = entTarjetaFoto(e);
+  return true;
+}
+
+window.entFotoElegir = async (id, k) => {
+  const e = (_ent.ejercicios || []).find(x => x.id === id);
+  if (e && e.video_ref && await entFotoGuardar(e, k)) toast('✓ Foto guardada');
+};
+
+window.entFotoOk = async (id) => {
+  const e = (_ent.ejercicios || []).find(x => x.id === id);
+  const k = e && entFotoCuadroVisto(e);
+  if (!k) return toast('Elige primero cuál de las 4 es');
+  if (await entFotoGuardar(e, k)) toast('✓ Revisada');
+};
+
+window.entFotosPaginaOk = async () => {
+  const ids = (_fot.vistos || []);
+  let n = 0, sinFoto = 0;
+  for (const id of ids) {
+    const e = (_ent.ejercicios || []).find(x => x.id === id);
+    if (!e || entFotoRevisada(e)) continue;
+    const k = entFotoCuadroVisto(e);
+    if (!k || entFotoDudosa(e)) { sinFoto++; continue; }   // las dudosas se miran una a una
+    if (await entFotoGuardar(e, k)) n++;
+  }
+  toast(`✓ ${n} revisadas` + (sinFoto ? ` · ${sinFoto} dudosas o sin foto: elígelas a mano` : ''));
 };

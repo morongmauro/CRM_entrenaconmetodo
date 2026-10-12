@@ -107,8 +107,10 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
   // 2. La galería usa la elegida.
   const src = await p.evaluate(async (id) => entMiniatura((await entDb.ejercicios()).find(e => e.id === id)), EJ.id);
   ok(`${tag} · galería: el preview es la imagen elegida`, /\/mq3\.jpg$/.test(src || ''), src);
-  ok(`${tag} · si cambias el video se usa el mismo cuadro del nuevo`, await p.evaluate(() =>
-    entMiniatura({ video_fuente: 'youtube', video_ref: 'NUEVO123456', poster_url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mq3.jpg' })) === 'https://i.ytimg.com/vi/NUEVO123456/mq3.jpg');
+  // La imagen elegida es de SU video: con otro video, el mismo cuadro es otra
+  // imagen (podía mostrar otro ejercicio). Vuelve a la automática del nuevo.
+  ok(`${tag} · si cambias el video, la imagen elegida del anterior no se usa (vuelve la automática del nuevo)`, await p.evaluate(() =>
+    entMiniatura({ video_fuente: 'youtube', video_ref: 'NUEVO123456', poster_url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mq3.jpg' })) === 'https://i.ytimg.com/vi/NUEVO123456/mq2.jpg');
 
   // 3. Ventana 🎬 Video: se elige ahí mismo y se guarda al tocar.
   await p.evaluate((id) => entVideoRapido(id), EJ.id);

@@ -130,19 +130,45 @@ const entYoutubeThumb = (ref) => ref ? `https://i.ytimg.com/vi/${ref}/mqdefault.
 // ─── La imagen del preview: una de las 4 que da YouTube ─────────────────
 // YouTube no deja sacar un cuadro de cualquier segundo: por video da la
 // portada y 3 cuadros automáticos (más o menos al 25 %, 50 % y 75 %). El
-// coach elige una y queda en `poster_url`. Se guarda el CUADRO, no solo la
-// URL: si después le cambias el video, se usa el mismo cuadro del video nuevo
-// (la app hace lo mismo en entrenoDatos.js › miniatura).
+// coach elige una y queda en `poster_url`, con el id de SU video. Si después
+// le cambias el video, esa elección ya no vale (el mismo cuadro de otro video
+// es otra imagen): vuelve a la automática hasta que la revises.
+// (La app aplica la misma regla en entrenoDatos.js › miniatura.)
 const ENT_CUADROS_YT = [['mqdefault', 'Portada'], ['mq1', '¼ del video'], ['mq2', 'Mitad'], ['mq3', '¾ del video']];
 const entCuadroYt = (url) => (/^https:\/\/i\.ytimg\.com\/vi\/[^/]+\/(mqdefault|mq[123])\.jpg$/.exec(url || '') || [])[1] || null;
 const entUrlCuadro = (ref, cuadro) => ref && cuadro ? `https://i.ytimg.com/vi/${ref}/${cuadro}.jpg` : null;
 
-// Lo que se ve de preview en la galería, la rutina y la ficha.
+// El cuadro automático: el del MEDIO del video, el mismo que ve el cliente en
+// la app (las portadas traen letreros del canal).
+const ENT_CUADRO_AUTO = 'mq2';
+const entIdYtimg = (url) => (/^https:\/\/i\.ytimg\.com\/vi\/([^/]+)\//.exec(url || '') || [])[1] || null;
+
+// Por qué la foto de un ejercicio puede no ser la suya (o null si no hay
+// motivo para dudar). Lo usa la revisión de fotos.
+function entFotoDudosa(e) {
+  if (!e) return null;
+  const otro = entIdYtimg(e.poster_url);
+  if (otro && otro !== (e.video_fuente === 'youtube' ? e.video_ref : null)) return 'La foto guardada era de otro video';
+  if (e.video_fuente === 'youtube' && Number(e.video_inicio_seg) > 0 && !entCuadroYt(e.poster_url))
+    return `El video trae más cosas: tu ejercicio empieza en el segundo ${e.video_inicio_seg}`;
+  return null;
+}
+
+// Lo que se ve de preview en la galería, la rutina y la ficha. Nunca una foto
+// de otro video; si el video empieza a mitad (trae varios ejercicios) y nadie
+// eligió la imagen, ninguna: un cuadro automático sería de otro ejercicio.
 function entMiniatura(e) {
   if (!e) return null;
-  const cuadro = entCuadroYt(e.poster_url);
-  if (e.poster_url && !cuadro) return e.poster_url;
-  if (e.video_fuente === 'youtube' && e.video_ref) return entUrlCuadro(e.video_ref, cuadro || 'mqdefault');
+  const yt = e.video_fuente === 'youtube' && e.video_ref ? e.video_ref : null;
+  const idPoster = entIdYtimg(e.poster_url);
+  const deOtro = !!idPoster && idPoster !== yt;
+  const cuadro = deOtro ? null : entCuadroYt(e.poster_url);
+  if (e.poster_url && !deOtro && !cuadro) return e.poster_url;
+  if (yt) {
+    if (cuadro) return entUrlCuadro(yt, cuadro);
+    if (Number(e.video_inicio_seg) > 0) return null;
+    return entUrlCuadro(yt, ENT_CUADRO_AUTO);
+  }
   return e.poster_path ? _ent.posters[e.poster_path] : null;
 }
 
@@ -885,6 +911,7 @@ async function entVistaEjercicios() {
     <div class="flex justify-between items-center mb-3">
       <div class="text-sm text-slate-600">${todos.length} ejercicio${todos.length === 1 ? '' : 's'} en la galería</div>
       <div class="flex gap-2">
+        <button class="btn btn-secondary btn-sm" onclick="entRevisarFotos()" data-revisar-fotos-btn title="Ver de golpe la foto que ve tu cliente en cada ejercicio y corregir la que no corresponda">🖼 Revisar fotos</button>
         <button class="btn btn-secondary btn-sm" onclick="entRevisarVideos()" title="Recorre los ejercicios filtrados, uno a uno, con sus propuestas de video">🎬 Revisar videos uno a uno</button>
         <button class="btn btn-primary btn-sm" onclick="entEditarEjercicio()">+ Nuevo ejercicio</button>
       </div>
@@ -1096,8 +1123,9 @@ window.entEditarEjercicio = async (id) => {
     path: e.video_path || '',
     poster: e.poster_path || '',
     inicio: e.video_inicio_seg || '',
-    cuadro: entCuadroYt(e.poster_url),
-    posterPropio: e.poster_url && !entCuadroYt(e.poster_url) ? e.poster_url : null,
+    // Solo si la imagen guardada es de ESTE video.
+    cuadro: entIdYtimg(e.poster_url) === e.video_ref ? entCuadroYt(e.poster_url) : null,
+    posterPropio: e.poster_url && !entCuadroYt(e.poster_url) && (!entIdYtimg(e.poster_url) || entIdYtimg(e.poster_url) === e.video_ref) ? e.poster_url : null,
   };
   entPintarPanelVideo();
 };
@@ -1191,7 +1219,10 @@ window.entElegirCuadro = (k) => {
 window.entValidarYoutube = (url) => {
   const v = _ent._video;
   v.url = url;
+  const antes = v.ref;
   v.ref = entYoutubeId(url) || '';
+  // Otro video: la imagen elegida era del anterior.
+  if (v.ref !== antes) { v.cuadro = null; v.posterPropio = null; }
   const cuadros = $('#ej-cuadros');
   if (cuadros) cuadros.innerHTML = v.ref ? entHtmlCuadros(v.ref, v.cuadro, 'entElegirCuadro') : '<div class="text-[11px] text-slate-400">Pega el link y aquí eliges la imagen.</div>';
   const ini = typeof entYoutubeInicio === 'function' ? entYoutubeInicio(url) : null;
