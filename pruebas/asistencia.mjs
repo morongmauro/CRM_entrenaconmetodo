@@ -146,7 +146,9 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
   const niveles = await p.locator('[data-niveles] [data-nivel]').allInnerTexts();
   const antesEsperado = new Set(fixture.rutina_ejercicios.map(x => x.ejercicio_id).concat(fixture.series_log.map(x => x.ejercicio_id)));
   const nAntes = [...antesEsperado].filter(id => !fixture.rutina_ejercicios.some(x => x.ejercicio_id === id && fixture.rutinas.find(r => r.id === x.rutina_id)?.fase_id === rutVieja.fase_id)).length;
-  ok(`${tag} · galería: 3 niveles con su número (ahora ${esperado} · antes ${nAntes})`, niveles.length === 3
+  const nAnalisis = new Set(fixture.ejercicios.map(e => e.id)).size - esperado;
+  ok(`${tag} · galería: niveles con su número (ahora ${esperado} · antes ${nAntes} · en análisis ${nAnalisis})`, niveles.length === 4
+    && new RegExp(`\\b${nAnalisis}\\b ejercicios`).test(niveles[2])
     && new RegExp(`\\b${esperado}\\b ejercicios`).test(niveles[0]) && new RegExp(`\\b${nAntes}\\b ejercicios`).test(niveles[1]), JSON.stringify(niveles));
   await p.locator('[data-niveles] [data-nivel="clientes"]').click();
   await p.waitForTimeout(500);

@@ -641,6 +641,9 @@ function entFiltrarSinOrden(lista) {
     if (f.uso === 'clientes' && _ent.enUso && !_ent.enUso.has(e.id)) return false;
     if (f.uso === 'antes' && _ent.usados && _ent.enUso
       && (!_ent.usados.has(e.id) || _ent.enUso.has(e.id))) return false;
+    //   «analisis» → toda la galería MENOS lo que usan hoy (los usados antes
+    //   y los que nunca se han usado): lo que está en revisión de videos.
+    if (f.uso === 'analisis' && _ent.enUso && _ent.enUso.has(e.id)) return false;
     if (musculos.length) {
       const ms = [...(e.musculos_primarios || []), ...(e.musculos_secundarios || [])];
       if (!ms.some(m => musculos.includes(m))) return false;
@@ -776,7 +779,8 @@ function entNivelesCuenta() {
   const de = (lista) => ({ n: lista.length, sin: lista.filter(sinVideo).length });
   const ahora = _ent.enUso ? todos.filter(e => _ent.enUso.has(e.id)) : null;
   const antes = _ent.enUso && _ent.usados ? todos.filter(e => _ent.usados.has(e.id) && !_ent.enUso.has(e.id)) : null;
-  return { clientes: ahora && de(ahora), antes: antes && de(antes), '': de(todos) };
+  const analisis = _ent.enUso ? todos.filter(e => !_ent.enUso.has(e.id)) : null;
+  return { clientes: ahora && de(ahora), antes: antes && de(antes), analisis: analisis && de(analisis), '': de(todos) };
 }
 
 function entNivelEtiqueta(nivel, texto) {
@@ -788,6 +792,7 @@ function entNivelesOpciones() {
   return [
     ['clientes', entNivelEtiqueta('clientes', '👥 1 · Los usan ahora')],
     ['antes', entNivelEtiqueta('antes', '🕘 2 · Los usaron antes (hoy no)')],
+    ['analisis', entNivelEtiqueta('analisis', '🔬 En análisis (todo menos lo de hoy)')],
   ];
 }
 
@@ -818,9 +823,10 @@ function entNivelesResumen(compacto = false) {
       </button>`;
   };
   return `
-    <div class="mt-2 grid ${compacto ? 'grid-cols-3' : 'grid-cols-1 md:grid-cols-3'} gap-2" data-niveles>
+    <div class="mt-2 grid ${compacto ? 'grid-cols-2' : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-4'} gap-2" data-niveles>
       ${caja('clientes', '👥', '1 · Los usan ahora', c.clientes)}
       ${c.antes ? caja('antes', '🕘', '2 · Los usaron antes', c.antes) : ''}
+      ${c.analisis ? caja('analisis', '🔬', 'En análisis', c.analisis) : ''}
       ${caja('', '📚', '3 · Toda la galería', c[''])}
     </div>`;
 }
