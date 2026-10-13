@@ -462,13 +462,13 @@ const ASIS_HERRAMIENTAS = {
 // =====================================================
 // EL BUCLE: pregunta → herramientas → respuesta
 // =====================================================
-async function asisLlamar(mensajes, { perfil = 'general', nivel = 'rapido' } = {}) {
+async function asisLlamar(mensajes, { perfil = 'general', nivel = 'rapido', pantalla = '' } = {}) {
   const r = await fetch('/api/coach-ask', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       messages: mensajes,
-      contexto: { hoy: fmt.hoy(), semana: fmt.semanaISO(), coach: _settings.nombre_coach },
+      contexto: { hoy: fmt.hoy(), semana: fmt.semanaISO(), coach: _settings.nombre_coach, ...(pantalla ? { pantalla } : {}) },
       nivel,
       perfil,
       // La guía que el coach escribió en Ajustes. Cada agente recibe la suya:
@@ -510,7 +510,7 @@ async function asisMotor(estado, { perfil, herramientas, etiquetas, alRepintar }
   try {
 
   for (let vuelta = 0; vuelta < ASIS_MAX_VUELTAS; vuelta++) {
-    const resp = await asisLlamar(estado.mensajes, { perfil, nivel: estado.nivel });
+    const resp = await asisLlamar(estado.mensajes, { perfil, nivel: estado.nivel, pantalla: estado.pantalla || '' });
     estado.gasto.vueltas++;
     estado.gasto.entrada += resp.usage?.input_tokens || 0;
     estado.gasto.salida += resp.usage?.output_tokens || 0;

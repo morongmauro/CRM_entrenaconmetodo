@@ -388,9 +388,10 @@ window.asiUsarDiasTz = async (clienteId) => {
 
 // ─── La columna del constructor ─────────────────────────────────────────
 window.asiMontarConstructor = async (r) => {
-  const caja = $('#asi-panel');
+  // Con el agente de rutinas arriba, el historial va en su propia caja.
+  const caja = $('#asi-contenido') || $('#asi-panel');
   if (!caja) return;
-  if (!r?.cliente_id) { caja.remove(); return; }
+  if (!r?.cliente_id) { ($('#asi-panel') || caja).remove(); return; }
   try {
     const [datos, todos, cliente, segs] = await Promise.all([
       asiDatos(r.cliente_id), entDb.ejercicios(), db.clientes.get(r.cliente_id), db.seguimientos.listCliente(r.cliente_id),

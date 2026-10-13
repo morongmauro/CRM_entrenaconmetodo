@@ -601,6 +601,16 @@ summary.list-none { list-style: none; }
   background: #f1f5f9; display: flex; align-items: center; justify-content: center;
 }
 .ent-gal-foto img { width: 100%; height: 100%; object-fit: cover; }
+/* La vista previa abre el video (constructor). */
+.ent-foto-video { cursor: pointer; }
+.ent-play {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 34px; height: 34px; border-radius: 50%; background: rgba(29,29,31,.62); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-size: 13px; padding-left: 2px;
+  pointer-events: none; transition: transform .15s ease, background .15s ease;
+}
+.ent-foto-video:hover .ent-play { transform: translate(-50%, -50%) scale(1.08); background: rgba(60,123,214,.9); }
+.ent-fila-foto { cursor: pointer; }
 .ent-gal-uso { position: absolute; left: 0.3rem; top: 0.3rem; }
 .ent-2lineas { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 

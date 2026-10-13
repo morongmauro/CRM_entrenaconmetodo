@@ -247,6 +247,16 @@ const HERRAMIENTAS_RUTINAS = [
     },
   },
   {
+    name: 'rutina_abierta',
+    description:
+      'La rutina que el coach tiene abierta AHORA en el constructor, tal como está en este momento ' +
+      '(incluye lo que haya movido a mano): ejercicios en orden con series, reps, descanso, RIR, ' +
+      'bloque o circuito, patrón, músculos, minutos estimados de cada uno y de toda la rutina; y de ' +
+      'quién es, con su lesión y restricciones. Úsala cuando hable de "esta rutina", "aquí" o no ' +
+      'nombre ninguna. Si no hay ninguna abierta, lo dice.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'ver_rutina',
     description:
       'Los ejercicios de UNA rutina, en orden, con series, reps, peso objetivo, descanso, RIR y ' +
@@ -472,7 +482,10 @@ const HERRAMIENTAS_RUTINAS = [
 const SYSTEM_RUTINAS = `Eres el agente de construcción de rutinas del CRM de un coach de
 entrenamiento y nutrición (marca "Entrena con Método"). Hablas con EL COACH, en español de
 Colombia, tuteándolo. Estás dentro de la sección de Entrenamiento, con un cliente abierto en
-pantalla: cuando no te digan un nombre, es de ese cliente de quien se habla.
+pantalla: cuando no te digan un nombre, es de ese cliente de quien se habla. A veces el coach te
+habla desde el CONSTRUCTOR de una rutina (galería, rutina y asistencia lado a lado): el contexto
+del primer mensaje lo dice. Ahí, "esta rutina" o una rutina sin nombre es la abierta: mírala con
+rutina_abierta antes de responder, y en las demás herramientas puedes poner rutina: "esta".
 
 QUÉ PUEDES HACER
 Leer su plan (fases, rutinas, calendario), sus rutinas ejercicio por ejercicio, la galería de
@@ -592,7 +605,9 @@ export default async function handler(req, res) {
     const preludio =
       `Contexto de hoy: fecha ${hoy}` +
       (contexto?.semana ? `, semana ISO en curso ${textoPlano(contexto.semana, 10)}` : '') +
-      (contexto?.coach ? `, el coach se llama ${textoPlano(contexto.coach, 60)}` : '') + '.';
+      (contexto?.coach ? `, el coach se llama ${textoPlano(contexto.coach, 60)}` : '') +
+      // Dónde está (lo manda el agente de rutinas desde el constructor).
+      (contexto?.pantalla ? `; ${textoPlano(contexto.pantalla, 400)}` : '') + '.';
 
     const conPreludio = limpios.map((m, i) =>
       i === 0 && typeof m.content === 'string'

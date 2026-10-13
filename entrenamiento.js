@@ -1570,15 +1570,19 @@ async function entPintarConstructor() {
       </div>
 
       ${r.cliente_id ? `
-        <!-- Asistencia: su historial al lado (entreno-asistencia.js). -->
+        <!-- Asistencia: su historial al lado (entreno-asistencia.js), con el
+             agente de rutinas arriba (asistente-rutinas.js), que ya sabe qué
+             rutina está abierta. -->
         <div id="asi-panel" class="order-3 lg:col-span-2 xl:col-span-1 ent-col-xl">
-          <div class="card text-xs text-slate-400">Leyendo su historial…</div>
+          <div id="rut-panel" class="mb-3"></div>
+          <div id="asi-contenido"><div class="card text-xs text-slate-400">Leyendo su historial…</div></div>
         </div>` : ''}
     </div>
     </div>
   `;
   await entPintarGaleriaCons();
   entLeerTiempoReal(r);
+  if (r.cliente_id && typeof rutMontarPanel === 'function') rutMontarPanel();
   if (r.cliente_id && typeof asiMontarConstructor === 'function') asiMontarConstructor(r);
   // Los números de los niveles (ahora / antes) se cargan detrás: no frenan
   // la apertura de la rutina.
@@ -1770,6 +1774,44 @@ async function entPintarGaleriaCons() {
   if (n) n.innerHTML = entNivelesResumen(true);
 }
 
+// ── Ver el video al tocar la vista previa ──────────────────────────────
+// En el constructor, para elegir con criterio: el video del ejercicio en una
+// ventana, con sus músculos y, desde la galería, «+ Añadir a la rutina».
+const entTieneVideo = (e) => (e?.video_fuente === 'youtube' && !!e.video_ref) || (e?.video_fuente === 'archivo' && !!e.video_path);
+
+window.entVerVideoEj = async (id, { anadir = false } = {}) => {
+  const e = (await entDb.ejercicios()).find(x => x.id === id)
+    || (_ent.rutina?.ejercicios || []).map(x => x.ejercicios).find(x => x && x.id === id);
+  if (!e) return toast('No encuentro ese ejercicio');
+  if (!entTieneVideo(e)) return entVerFicha(id);
+  await entDb.musculos();
+  const n = entNombres(e);
+  const prim = (e.musculos_primarios || []).map(m => ((_ent.musculos || []).find(x => x.slug === m) || {}).nombre || m);
+  const yaEsta = (_ent.rutina?.ejercicios || []).some(x => x.ejercicio_id === id);
+  const reproductor = e.video_fuente === 'youtube'
+    ? entReproductor(e.video_ref, e.video_inicio_seg)
+    : '<div id="ent-vv-archivo" class="w-full rounded-lg bg-slate-100 text-slate-400 text-sm flex items-center justify-center" style="aspect-ratio:16/9">Cargando video…</div>';
+  openModal(modalShell(escapeHtml(n.grande), `
+    <div data-video-ej="${e.id}">
+      ${n.chico ? `<div class="text-sm text-slate-400 -mt-2 mb-3">${escapeHtml(n.chico)}</div>` : ''}
+      ${reproductor}
+      <div class="text-xs text-slate-500 mt-3">${entLabel(ENT_TIPOS, e.tipo)} · ${entLabel(ENT_PATRONES, e.patron)} · ${(e.equipo || []).map(x => escapeHtml(x)).join(', ') || 'sin equipo'}</div>
+      ${prim.length ? `<div class="text-xs text-emerald-700 mt-1">${escapeHtml(prim.join(' · '))}</div>` : ''}
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal(); entVerFicha('${e.id}')">Ver ficha</button>
+     ${anadir && _ent.rutinaId ? (yaEsta
+        ? '<span class="text-xs text-slate-500 self-center">Ya está en la rutina</span>'
+        : `<button class="btn btn-primary" data-vv-anadir onclick="closeModal(); entAgregarARutina('${e.id}')">+ Añadir a la rutina</button>`) : ''}`),
+    { wide: true });
+  if (e.video_fuente === 'archivo') {
+    const url = await entVideoFirmado(e.video_path);
+    const caja = $('#ent-vv-archivo');
+    if (caja) caja.outerHTML = url
+      ? `<video src="${escapeHtml(url)}" controls autoplay playsinline class="w-full rounded-lg" style="aspect-ratio:16/9;background:#000"></video>`
+      : '<div class="text-sm text-slate-500">No pude cargar el video.</div>';
+  }
+};
+
 // Tarjeta compacta (2 por fila) y arrastrable hacia la rutina.
 function entTarjetaCons(e) {
   const thumb = entMiniatura(e);
@@ -1781,8 +1823,10 @@ function entTarjetaCons(e) {
   return `
     <div class="card card-hover p-2 ent-gal" draggable="true" data-ej="${e.id}"
          ondragstart="entEjDragStart(event)" ondragend="entEjDragEnd(event)" title="Arrástralo a la rutina">
-      <div class="ent-gal-foto">
+      <div class="ent-gal-foto ent-foto-video" data-ver-video="${e.id}" onclick="entVerVideoEj('${e.id}', { anadir: true })"
+           title="${entTieneVideo(e) ? 'Ver el video' : 'Sin video: ver la ficha'}">
         ${thumb ? `<img src="${escapeHtml(thumb)}" loading="lazy" alt="" draggable="false">` : '<span class="text-2xl">🏋️</span>'}
+        ${entTieneVideo(e) ? '<span class="ent-play" aria-hidden="true">▶</span>' : ''}
         ${usoTag}
       </div>
       <div class="font-bold text-slate-900 text-[13px] leading-tight ent-2lineas mt-1.5">${escapeHtml(entNombres(e).grande)}</div>
@@ -1942,9 +1986,11 @@ function entFilaRutina(re, i, total, bloques) {
       <div class="flex justify-between items-start gap-2 mb-2">
         <div class="flex gap-2 min-w-0">
           <div class="ent-agarre" title="Arrastra para cambiar el orden">⠿</div>
-          ${foto ? `<img src="${escapeHtml(foto)}" class="ent-fila-foto" alt="" loading="lazy" draggable="false"
-                         onclick="entVerFicha('${e.id}')" title="Ver la ficha">` : ''}
-          ${mini ? `<div class="ent-fila-fig">${mini}</div>` : ''}
+          ${foto ? `<img src="${escapeHtml(foto)}" class="ent-fila-foto" alt="" loading="lazy" draggable="false" data-ver-video="${e.id}"
+                         onclick="entVerVideoEj('${e.id}')" title="${entTieneVideo(e) ? 'Ver el video' : 'Ver la ficha'}">` : ''}
+          ${mini ? (entTieneVideo(e)
+            ? `<div class="ent-fila-fig ent-foto-video" data-ver-video="${e.id}" onclick="entVerVideoEj('${e.id}')" title="Ver el video">${mini}</div>`
+            : `<div class="ent-fila-fig">${mini}</div>`) : ''}
           <div class="min-w-0">
             <div class="font-bold text-sm text-slate-900">${i + 1}. ${escapeHtml(entNombres(e).grande)}</div>
             ${entNombreChico(e)}

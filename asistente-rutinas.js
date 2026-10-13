@@ -50,9 +50,35 @@ const RUT_EJEMPLOS_PLAN = [
   '¿Le falta algún patrón de movimiento en esta fase?',
 ];
 
-const rutEjemplos = () =>
-  (typeof _ent === 'object' && _ent?.subtab === 'calendario')
+// Dentro del constructor: lo que se pregunta mientras se arma UNA rutina.
+const RUT_EJEMPLOS_CONSTRUCTOR = [
+  '¿Le falta algún patrón o músculo a esta rutina?',
+  'Agrégale fondos en paralelas, 3×10',
+  'Súbele una serie a la sentadilla',
+  '¿Qué pesos ha movido en los ejercicios de esta rutina?',
+  '¿Qué le quitarías para que dure 50 minutos?',
+  'Cámbiale el press banca por uno con mancuernas',
+];
+
+const rutEjemplos = () => rutAbierta() ? RUT_EJEMPLOS_CONSTRUCTOR
+  : (typeof _ent === 'object' && _ent?.subtab === 'calendario')
     ? RUT_EJEMPLOS_CALENDARIO : RUT_EJEMPLOS_PLAN;
+
+// La rutina abierta en el constructor (galería · rutina · asistencia), o
+// null si no estás ahí. Con ella el agente sabe de qué rutina, de qué
+// cliente y de qué fase le hablas sin que se lo repitas.
+function rutAbierta() {
+  if (typeof _ent !== 'object' || !_ent?.rutinaId || !_ent.rutina || _ent.rutina.id !== _ent.rutinaId) return null;
+  return document.getElementById('cons-rutina') ? _ent.rutina : null;
+}
+
+// Lo que se le cuenta al empezar la conversación: dónde está el coach.
+function rutPantalla() {
+  const r = rutAbierta();
+  if (!r) return '';
+  return `el coach está en el constructor de la rutina "${r.nombre}" (${_ent.consContexto || 'plantilla'}). `
+    + 'Cuando diga "esta rutina", "aquí" o no nombre una, es esa: mírala con rutina_abierta.';
+}
 
 // =====================================================
 // UTILIDADES
@@ -67,9 +93,11 @@ async function rutCliente(nombre) {
     if (c) return c;
     return null;
   }
-  if (!_ent.clienteId) return null;
-  return (await db.clientes.list()).find(c => c.id === _ent.clienteId)
-      || await db.clientes.get(_ent.clienteId);
+  // En el constructor manda el cliente de la rutina abierta.
+  const id = rutAbierta()?.cliente_id || _ent.clienteId;
+  if (!id) return null;
+  return (await db.clientes.list()).find(c => c.id === id)
+      || await db.clientes.get(id);
 }
 
 function rutSinCliente(nombre) {
@@ -89,6 +117,8 @@ async function rutContexto(cliente, nombreFase) {
   }
   // Sin fase nombrada: la que el coach tiene abierta, si es de este cliente;
   // si no, la activa; si no, la última.
+  const ab = rutAbierta();
+  if (!fase && ab?.fase_id) fase = fases.find(f => f.id === ab.fase_id) || null;
   if (!fase) fase = fases.find(f => f.id === _ent.faseId) || null;
   if (!fase) fase = fases.find(f => f.estado === 'activa') || fases[fases.length - 1];
   const rutinas = await entDb.rutinasDeFase(fase.id);
@@ -96,7 +126,11 @@ async function rutContexto(cliente, nombreFase) {
 }
 
 // "push", "el push", "Push · Empuje", "día 1" — todas deben encontrar la misma.
+// Sin nombre, o "esta", es la rutina abierta en el constructor.
+const RUT_ESTA = ['esta', 'esta rutina', 'la abierta', 'la rutina abierta', 'aqui', 'la que tengo abierta', 'la actual'];
 function rutBuscarRutina(rutinas, texto) {
+  const ab = rutAbierta();
+  if (ab && (!texto || RUT_ESTA.includes(normalizeName(texto)))) return rutinas.find(r => r.id === ab.id) || null;
   if (!texto) return null;
   const n = normalizeName(texto);
   return rutinas.find(r => normalizeName(r.nombre) === n)
@@ -207,7 +241,10 @@ window.rutAplicar = async () => {
     ? `✓ ${hechos} aplicado(s) · ${fallos.length} con error`
     : `✓ ${hechos} cambio(s) aplicado(s)`);
   if (fallos.length) console.warn('Cambios que fallaron:', fallos);
-  await entVistaClientes();               // repinta la sección con lo nuevo
+  // En el constructor se repinta la rutina (y su asistencia) sin sacarte de
+  // ahí; en la vista del cliente, la sección entera.
+  if (rutAbierta()) await entRefrescarRutina({ asistencia: true });
+  else await entVistaClientes();
   rutPintar();
 };
 
@@ -226,6 +263,47 @@ window.rutQuitarPropuesta = (id) => {
 // HERRAMIENTAS · lectura
 // =====================================================
 const RUT_HERRAMIENTAS = {
+
+  // La rutina del constructor TAL COMO ESTÁ AHORA (con lo que el coach haya
+  // movido a mano después de empezar la conversación).
+  async rutina_abierta() {
+    const r = rutAbierta();
+    if (!r) return { error: 'El coach no tiene ninguna rutina abierta en el constructor. Pregúntale cuál, o usa ver_rutina.' };
+    const cliente = r.cliente_id ? await rutCliente() : null;
+    const bloques = Object.fromEntries((r.bloques || []).map(b => [b.id, b]));
+    const t = entEstimarTiempo(r);
+    return {
+      rutina: r.nombre,
+      donde: _ent.consContexto || 'Plantilla de biblioteca',
+      es_plantilla_de_biblioteca: !r.cliente_id,
+      cliente: cliente?.nombre || null,
+      lugar_de_entreno: cliente?.lugar_entreno || null,
+      lesion_actual: cliente?.lesion_actual || null,
+      restricciones: cliente?.restricciones_lesiones || null,
+      dias_semana: rutDiasDe(r),
+      duracion_estimada_min: Math.round(t.total / 60),
+      ejercicios: (r.ejercicios || []).map((re, i) => {
+        const e = re.ejercicios || {};
+        const b = re.bloque_id ? bloques[re.bloque_id] : null;
+        return {
+          posicion: i + 1,
+          ejercicio: entNombres(e).grande,
+          en_espanol: entNombres(e).chico || null,
+          patron: entLabel(ENT_PATRONES, e.patron),
+          musculos: (e.musculos_primarios || []).join(', ') || null,
+          equipo: (e.equipo || []).join(', ') || null,
+          bloque: b ? `${b.nombre || entLabel(ENT_TIPOS_BLOQUE, b.tipo)}${b.vueltas ? ` · ${b.vueltas} vueltas` : ''}` : null,
+          series: re.series,
+          reps: re.reps,
+          peso_objetivo: re.peso_objetivo || null,
+          descanso_seg: re.descanso_seg,
+          rir: re.rir,
+          notas: re.notas || null,
+          minutos: t.porRE[re.id] ? Math.round(t.porRE[re.id] / 60) : null,
+        };
+      }),
+    };
+  },
 
   async plan_del_cliente({ nombre } = {}) {
     const c = await rutCliente(nombre);
@@ -797,6 +875,7 @@ const RUT_HERRAMIENTAS = {
 const RUT_ETIQUETAS = {
   plan_del_cliente: 'Mirando su plan',
   ver_rutina: 'Abriendo la rutina',
+  rutina_abierta: 'Mirando la rutina abierta',
   buscar_ejercicios: 'Buscando en la galería',
   cobertura_del_plan: 'Cruzando el plan con la galería',
   pesos_registrados: 'Leyendo lo que ha levantado',
@@ -825,6 +904,9 @@ window.rutPreguntar = async (textoDirecto) => {
   ch.error = null;
   ch.trabajando = true;
   ch.paso = 'Pensando';
+  // Dónde está el coach, fijado al empezar: si cambiara a mitad de la
+  // conversación, cambiaría su primer mensaje y se perdería la caché.
+  if (!ch.mensajes.length) ch.pantalla = rutPantalla();
   ch.mensajes.push({ role: 'user', content: pregunta });
   ch.visible.push({ rol: 'coach', texto: pregunta });
   ch.visible.push({ rol: 'asistente', texto: '', herramientas: [] });
@@ -909,7 +991,9 @@ function rutHiloHTML() {
     return `
       <div class="py-4">
         <div class="text-xs text-slate-500 mb-2">
-          ${_ent?.subtab === 'calendario'
+          ${rutAbierta()
+            ? 'Ya sabe qué rutina tienes abierta, de quién es y cómo va. Pregúntale o pídele cambios; te los deja'
+            : _ent?.subtab === 'calendario'
             ? 'Cuádrale la semana escribiendo, en vez de arrastrar. Los cambios te los deja'
             : 'Pregúntale sobre el plan de este cliente, o pídele cambios. Los cambios te los deja'}
           <strong>propuestos</strong>: nada se guarda sin que tú lo apruebes.
@@ -958,8 +1042,9 @@ function rutPanelHTML() {
   const pendientes = _rut.propuestas.length;
   if (!_rut.abierto) {
     return `
-      <button class="rut-abrir" onclick="rutToggle()">
-        ${_ent?.subtab === 'calendario'
+      <button class="rut-abrir" data-rut-abrir onclick="rutToggle()">
+        ${rutAbierta() ? '💬 Agente de rutinas · pregúntale sobre esta rutina'
+          : _ent?.subtab === 'calendario'
           ? '💬 Cuadrar la semana escribiéndole al agente'
           : '💬 Preguntarle al agente sobre este plan'}
         ${pendientes ? `<span class="tag tag-yellow ml-1">${pendientes} sin aplicar</span>` : ''}
@@ -968,7 +1053,7 @@ function rutPanelHTML() {
   return `
     <div class="card rut-caja">
       <div class="flex items-center justify-between gap-2 mb-2 flex-wrap">
-        <div class="font-bold text-slate-900 text-sm">${_ent?.subtab === 'calendario' ? '💬 Agente del calendario' : '💬 Agente de rutinas'}</div>
+        <div class="font-bold text-slate-900 text-sm">${!rutAbierta() && _ent?.subtab === 'calendario' ? '💬 Agente del calendario' : '💬 Agente de rutinas'}</div>
         <div class="flex gap-1">
           <button class="btn btn-ghost btn-sm" onclick="abrirGuiaAgente('ent')"
                   title="${(_settings.guia_entrenamiento || '').trim() ? 'Está usando tu guía de entrenamiento. Tócalo para cambiarla.' : 'Dile cómo armas tú las rutinas: criterios, preferencias, tope de ejercicios…'}">
@@ -982,7 +1067,9 @@ function rutPanelHTML() {
       <div id="rut-hilo" class="asis-hilo" style="max-height:42vh">${rutHiloHTML()}</div>
       <div class="flex gap-2 items-end mt-3">
         <textarea id="rut-input" rows="2" class="resize-none"
-                  placeholder="${_ent?.subtab === 'calendario'
+                  placeholder="${rutAbierta()
+                    ? 'Ej: agrégale fondos, 3×10 — o: ¿le falta algún patrón a esta rutina?'
+                    : _ent?.subtab === 'calendario'
                     ? 'Ej: quítale el martes al Lower — o: pon el Upper lunes, miércoles y viernes'
                     : 'Ej: agrégale fondos al Push, 3×10 — o: ¿qué pesos ha movido en sentadilla?'}"
                   onkeydown="rutTeclado(event)" ${ch?.trabajando ? 'disabled' : ''}></textarea>
