@@ -50,6 +50,23 @@ export const NIVELES = {
 
 export const NIVEL_POR_DEFECTO = 'profundo';
 
+// ── El asistente de rutinas usa sus propios modelos ──────────────────────
+// Mismos tres niveles y mismo esfuerzo, otro modelo. Las oportunidades de
+// alimentación y el asistente general siguen con los de arriba.
+//
+//   Haiku 5.5   0,10 USD por millón de entrada · 0,50 de salida (Rápido:
+//               buscar ejercicios, consultar, cambios sencillos)
+//   Opus 5.5    4 USD por millón de entrada · 20 de salida (criterio: armar,
+//               equilibrar, adaptar)
+//
+// Si el modelo nuevo no responde (no disponible, error de la API), la misma
+// pregunta se repite con el de NIVELES: el coach nunca se queda sin asistente.
+export const MODELOS_RUTINAS = {
+  rapido: 'claude-haiku-5-5',
+  profundo: 'claude-opus-5-5',
+  muy_profundo: 'claude-opus-5-5',
+};
+
 // Devuelve siempre un nivel válido, con las variables de entorno como último
 // recurso para poder forzar uno sin tocar la pantalla.
 export function resolverNivel(nivel, envVar) {

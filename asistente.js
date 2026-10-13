@@ -39,6 +39,9 @@ const ASIS_PRECIOS = {
   'claude-sonnet-5': { entrada: 2,  salida: 10 },
   'claude-opus-5':   { entrada: 5,  salida: 25 },
   'claude-haiku-4-5': { entrada: 1, salida: 5 },
+  // Los del asistente de rutinas (api/_niveles.js → MODELOS_RUTINAS).
+  'claude-haiku-5-5': { entrada: 0.10, salida: 0.50 },
+  'claude-opus-5-5':  { entrada: 4,  salida: 20, cache: 0.20 },
 };
 const ASIS_PRECIO_POR_DEFECTO = ASIS_PRECIOS['claude-sonnet-5'];
 
@@ -519,6 +522,17 @@ async function asisMotor(estado, { perfil, herramientas, etiquetas, alRepintar }
     const texto = (resp.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
     if (texto) turno.texto = turno.texto ? `${turno.texto}\n\n${texto}` : texto;
 
+    // Un rechazo del filtro de seguridad llega sin texto: se dice, en vez de
+    // dejar la burbuja vacía.
+    // Queda en la conversación como texto, para que la siguiente pregunta no
+    // lleve un turno vacío.
+    if (resp.stop_reason === 'refusal' && !texto) {
+      const aviso = 'No pude responder esto en este nivel. Prueba de nuevo con 🧠 Profundo o dilo de otra forma.';
+      turno.texto = turno.texto ? `${turno.texto}\n\n${aviso}` : aviso;
+      estado.mensajes[estado.mensajes.length - 1] = { role: 'assistant', content: [{ type: 'text', text: aviso }] };
+      return;
+    }
+
     const llamadas = (resp.content || []).filter(b => b.type === 'tool_use');
     if (resp.stop_reason !== 'tool_use' || !llamadas.length) return;
 
@@ -698,7 +712,7 @@ function asisGastoHTML(estado = _asis) {
   // Lo cacheado (las instrucciones y la lista de herramientas, que se repiten
   // en cada vuelta) se cobra a una décima parte.
   const p = ASIS_PRECIOS[g.modelo] || ASIS_PRECIO_POR_DEFECTO;
-  const usd = ((g.entrada - g.cache) * p.entrada + g.cache * (p.entrada / 10) + g.salida * p.salida) / 1e6;
+  const usd = ((g.entrada - g.cache) * p.entrada + g.cache * (p.cache ?? p.entrada / 10) + g.salida * p.salida) / 1e6;
   const cop = Math.round(usd * (Number(_settings.usd_cop_rate) || 4000));
   const nombre = (NIVELES_IA[estado.nivel]?.etiqueta || '').replace(/^\S+\s/, '') || '—';
   return `Esta conversación · ${nombre} · ${g.vueltas} consulta(s) · `

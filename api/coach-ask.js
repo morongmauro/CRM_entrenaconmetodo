@@ -31,7 +31,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { guard } from './_guard.js';
-import { NIVELES, resolverNivel } from './_niveles.js';
+import { NIVELES, MODELOS_RUTINAS, resolverNivel } from './_niveles.js';
 
 export const config = { maxDuration: 60 };
 
@@ -619,15 +619,21 @@ ${guia.trim().slice(0, 4000)}`,
         }]
       : [];
 
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
+    // El asistente de rutinas pide su propio modelo (MODELOS_RUTINAS); si
+    // falla, se repite con el de siempre. El resto no cambia.
+    const modelo = (perfil === 'rutinas' && MODELOS_RUTINAS[N.clave]) || N.modelo;
+    const llamar = (m) => fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': process.env.ANTHROPIC_API_KEY,
         'anthropic-version': '2023-06-01',
+        // Opus 5.5: si su filtro de seguridad rechaza por error una pregunta
+        // normal, Anthropic la repite sola en el modelo que recomienda.
+        ...(m === 'claude-opus-5-5' ? { 'anthropic-beta': 'server-side-fallback-2026-07-01' } : {}),
       },
       body: JSON.stringify({
-        model: N.modelo,
+        model: m,
         max_tokens: N.max_tokens_chat,
         // El pensamiento adaptativo se queda encendido en los dos modos: con
         // esfuerzo bajo apenas piensa, y apagarlo del todo en Opus 5 tiene
@@ -635,6 +641,7 @@ ${guia.trim().slice(0, 4000)}`,
         // texto en vez de ejecutarla). Lo que se regula es el esfuerzo.
         thinking: { type: 'adaptive' },
         output_config: { effort: N.effort },
+        ...(m === 'claude-opus-5-5' ? { fallbacks: 'default' } : {}),
         // Las herramientas se renderizan ANTES del system, así que el punto de
         // caché en el system cubre todo el prefijo estable (herramientas +
         // instrucciones): a partir de la segunda pregunta ese tramo cuesta una
@@ -644,6 +651,13 @@ ${guia.trim().slice(0, 4000)}`,
         messages: conPreludio,
       }),
     });
+
+    let r = await llamar(modelo);
+    if (!r.ok && modelo !== N.modelo && [400, 404, 529].includes(r.status)) {
+      const fallo = await r.json().catch(() => ({}));
+      console.warn(`coach-ask: ${modelo} respondió ${r.status} (${fallo.error?.message || ''}); se repite con ${N.modelo}`);
+      r = await llamar(N.modelo);
+    }
 
     if (!r.ok) {
       const data = await r.json().catch(() => ({}));

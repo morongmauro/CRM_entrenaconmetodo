@@ -8549,19 +8549,21 @@ const NIVELES_IA = {
     modelo: 'claude-sonnet-5',
     ayuda: 'Consultar datos y cambios sencillos. Responde en segundos.',
     // [insight, chat] en pesos colombianos
-    costo: { insight: [250, 400], chat: [30, 60] },
+    // rutinas: estimado con los precios de Haiku 5.5 / Opus 5.5 (se ajusta
+    // con el gasto real del contador).
+    costo: { insight: [250, 400], chat: [30, 60], rutinas: [2, 5] },
   },
   profundo: {
     etiqueta: '🧠 Profundo',
     modelo: 'claude-opus-5',
     ayuda: 'Le pides criterio: qué ajustar, qué falta, cómo adaptar.',
-    costo: { insight: [400, 700], chat: [90, 160] },
+    costo: { insight: [400, 700], chat: [90, 160], rutinas: [70, 130] },
   },
   muy_profundo: {
     etiqueta: '🔬 Muy profundo',
     modelo: 'claude-opus-5',
     ayuda: 'Lo máximo. Piensa largo antes de responder; también tarda más.',
-    costo: { insight: [600, 1250], chat: [150, 300] },
+    costo: { insight: [600, 1250], chat: [150, 300], rutinas: [120, 240] },
   },
 };
 const NIVEL_IA_DEFECTO = 'profundo';
@@ -8587,7 +8589,8 @@ function selectorNivelHTML(donde, nivelActual, alCambiar) {
   return `
     <div class="nivel-sel">
       ${Object.entries(NIVELES_IA).map(([k, n]) => {
-        const [min, max] = n.costo[donde === 'chat' ? 'chat' : 'insight'];
+        // 'rutinas' tiene sus propios modelos (api/_niveles.js → MODELOS_RUTINAS).
+        const [min, max] = n.costo[donde] || n.costo[donde === 'chat' ? 'chat' : 'insight'];
         return `
           <button type="button" class="nivel-btn ${k === nivelActual ? 'active' : ''}"
                   onclick="${alCambiar}('${k}')"

@@ -991,7 +991,7 @@ function rutPanelHTML() {
         </button>
       </div>
       <div class="mt-3">
-        ${selectorNivelHTML('chat', ch?.nivel || nivelIaGuardado('rutinas'), 'rutNivel')}
+        ${selectorNivelHTML('rutinas', ch?.nivel || nivelIaGuardado('rutinas'), 'rutNivel')}
         <div class="text-[11px] text-slate-400 mt-1.5 text-right">${ch ? asisGastoHTML(ch) : ''}</div>
       </div>
     </div>`;
