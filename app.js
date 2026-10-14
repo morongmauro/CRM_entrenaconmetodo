@@ -281,6 +281,8 @@ function renderRemindersMT() {
         d.push
           ? `<span class="tag tag-green" title="Activó las notificaciones push el ${fmt.fecha(String(d.push).slice(0, 10))}">🔔 push activo</span>`
           : `<span class="tag" style="background:#fef3c7;color:#b45309" title="No ha aceptado los recordatorios push — pídele tocar Activar en el aviso de su app">🔕 sin push</span>`,
+        // Abre la app tal como la ve este cliente (solo lectura, pase de 15 min).
+        `<button type="button" data-ver-como class="btn btn-secondary btn-sm ml-1" onclick="verComoCliente()" title="Abre su app en otra pestaña, tal como la ve él: su Dash, su semana, sus rutinas, su chat de comida. Solo lectura: nada de lo que toques se guarda. El pase dura 15 minutos.">👁 Ver como cliente</button>`,
       ].join(' ');
     }
   }
@@ -307,6 +309,20 @@ function renderRemindersMT() {
     </div>`).join('');
 }
 
+// «Ver como cliente»: pide a la app un pase de 15 minutos para ese cliente y
+// la abre en otra pestaña, en solo lectura (la app no guarda nada en ese
+// modo ni toca lo del navegador). Sirve para ver lo que él ve sin pedirle
+// pantallazos.
+async function verComoCliente() {
+  if (!_mtRem.userId) { toast('Este cliente no está vinculado a la app'); return; }
+  const ventana = window.open('', '_blank');   // abrir ya, antes del await (los bloqueadores de ventanas)
+  const r = await mtApiPost(`/api/coach-data?action=ver_como&user_id=${encodeURIComponent(_mtRem.userId)}`, {});
+  if (!r || !r.url) { if (ventana) ventana.close(); toast('⚠️ No se pudo abrir la vista del cliente'); return; }
+  if (ventana) ventana.location.href = r.url; else window.open(r.url, '_blank');
+  toast(`👁 Viendo la app como ${r.name} · solo lectura · ${r.minutos || 15} min`);
+}
+window.verComoCliente = verComoCliente;
+
 async function cargarRemindersMT(cliente) {
   _mtRem = { userId: null, list: [], device: null };
   const el = $('#sg-mt-rem-list');
@@ -322,7 +338,36 @@ async function cargarRemindersMT(cliente) {
   _mtRem.list = r.list;
   _mtRem.device = r.device;
   renderRemindersMT();
+  cargarErroresMT(mtId);
 }
+
+// La bitácora de errores de su app (lo que le falló en el teléfono en las
+// últimas 2 semanas): se pinta debajo de los recordatorios de la app.
+async function cargarErroresMT(mtId) {
+  const lista = $('#sg-mt-rem-list');
+  if (!lista) return;
+  let caja = $('#sg-mt-errores');
+  if (!caja) { lista.insertAdjacentHTML('afterend', '<div id="sg-mt-errores" class="mt-1"></div>'); caja = $('#sg-mt-errores'); }
+  const r = await mtApiGet(`/api/coach-data?action=errores&user_id=${encodeURIComponent(mtId)}`);
+  if (_mtRem.userId !== mtId) return;   // cambió de cliente mientras cargaba
+  const errs = (r && Array.isArray(r.errores)) ? r.errores : [];
+  if (!errs.length) { caja.innerHTML = '<div class="text-[11px] text-slate-400">Su app no ha reportado errores en las últimas 2 semanas.</div>'; return; }
+  const cuando = (iso) => { const d = new Date(iso); return `${fmt.fechaCorta(iso.slice(0, 10))} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  const tel = (ua) => /iPhone|iPad/.test(ua || '') ? 'iPhone' : /Android/.test(ua || '') ? 'Android' : 'otro';
+  caja.innerHTML = `
+    <details data-errores-app class="text-xs">
+      <summary class="cursor-pointer font-semibold text-amber-700">⚠️ ${errs.length} error${errs.length === 1 ? '' : 'es'} en su app (últimas 2 semanas)</summary>
+      <div class="mt-1 space-y-1 max-h-48 overflow-y-auto">
+        ${errs.map(e => `
+          <div class="bg-white border border-amber-100 rounded-lg px-2 py-1.5">
+            <div class="flex items-center gap-2 text-[11px] text-slate-500"><span>${cuando(e.creado_at)}</span><span>· ${escapeHtml(e.pantalla || '?')}</span><span>· ${tel(e.ua)}</span><span class="ml-auto uppercase tracking-wide">${escapeHtml(e.tipo || '')}</span></div>
+            <div class="text-slate-800 break-words">${escapeHtml(e.mensaje || '')}</div>
+            ${e.detalle ? `<details class="text-[10px] text-slate-400"><summary class="cursor-pointer">detalle</summary><pre class="whitespace-pre-wrap break-words">${escapeHtml(String(e.detalle).slice(0, 600))}</pre></details>` : ''}
+          </div>`).join('')}
+      </div>
+    </details>`;
+}
+window.cargarErroresMT = cargarErroresMT;
 
 async function persistRemindersMT() {
   renderRemindersMT(); // pintar optimista
