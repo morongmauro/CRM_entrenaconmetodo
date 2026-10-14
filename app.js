@@ -322,6 +322,19 @@ async function verComoCliente() {
   toast(`👁 Viendo la app como ${r.name} · solo lectura · ${r.minutos || 15} min`);
 }
 window.verComoCliente = verComoCliente;
+// Lo mismo desde la cabecera de la ficha (ahí solo se tiene el id del CRM).
+window.verComoClienteId = async (clienteId) => {
+  const c = await db.clientes.get(clienteId);
+  if (!c) return;
+  if (!mtConfigured()) { toast('Configura la conexión a la app en Ajustes (URL + contraseña de coach) para usar esto.'); return; }
+  const ventana = window.open('', '_blank');
+  const mtId = await resolverMealtrackerId(c);
+  if (!mtId) { if (ventana) ventana.close(); toast(`${c.nombre} aún no ha abierto la app: no hay nada que ver todavía`); return; }
+  const r = await mtApiPost(`/api/coach-data?action=ver_como&user_id=${encodeURIComponent(mtId)}`, {});
+  if (!r || !r.url) { if (ventana) ventana.close(); toast('⚠️ No se pudo abrir la vista del cliente'); return; }
+  if (ventana) ventana.location.href = r.url; else window.open(r.url, '_blank');
+  toast(`👁 Viendo la app como ${r.name} · solo lectura · ${r.minutos || 15} min`);
+};
 
 async function cargarRemindersMT(cliente) {
   _mtRem = { userId: null, list: [], device: null };
@@ -7582,6 +7595,7 @@ window.verCliente = async (id) => {
         <button class="btn btn-secondary btn-sm" onclick="nuevoPendiente('${c.id}')">+ Pendiente</button>
         <button class="btn btn-secondary btn-sm" onclick="nuevaMedicion('${c.id}')">+ Medición corporal</button>
         <button class="btn btn-secondary btn-sm" onclick="enviarPushManual('${c.id}')">📲 Push al teléfono</button>
+        <button class="btn btn-secondary btn-sm" data-ver-como onclick="verComoClienteId('${c.id}')" title="Abre su app en otra pestaña, tal como la ve él: su Dash, su semana, sus rutinas, su chat de comida. Solo lectura: nada de lo que toques se guarda. El pase dura 15 minutos.">👁 Ver como cliente</button>
         ${c.app_clave_hash ? `<button class="btn btn-secondary btn-sm" data-reiniciar-clave onclick="reiniciarClaveApp('${c.id}')">🔑 Reiniciar contraseña de la app</button>` : ''}
       </div>
       <div data-clave-app class="text-xs text-slate-500">🔑 Contraseña de la app: ${c.app_clave_hash
