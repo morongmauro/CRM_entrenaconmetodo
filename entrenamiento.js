@@ -2868,6 +2868,12 @@ async function entPintarSesiones(cliente) {
               <span class="text-xs font-bold px-2 py-0.5 rounded-full ${colorRpe(s.rpe)}" title="Esfuerzo percibido del 1 al 10">
                 ${s.rpe != null ? `RPE ${s.rpe}` : 'sin RPE'}
               </span>
+              ${s.estado !== 'saltada' && typeof fzQuitarSesion === 'function' ? `
+              <span class="flex items-center gap-1" data-ses-corregir="${s.id}" title="Si se equivocó al marcar: moverlo a otro día o quitarlo">
+                <input id="ses-mover-a-${s.id}" type="date" class="!w-auto text-xs" value="${s.fecha}">
+                <button class="btn btn-ghost btn-sm" data-ses-mover onclick="fzMoverSesion('${s.id}', '${s.fecha}')">Mover</button>
+                <button class="btn btn-ghost btn-sm text-red-600" data-ses-quitar onclick="fzQuitarSesion('${s.id}', '${s.fecha}')">✕ Quitar</button>
+              </span>` : ''}
             </span>
           </div>
           ${s.notas_cliente ? `<div class="mt-2 text-xs bg-slate-50 rounded-lg px-3 py-2 text-slate-700">💬 ${escapeHtml(s.notas_cliente)}</div>` : ''}
@@ -2875,6 +2881,7 @@ async function entPintarSesiones(cliente) {
     </div>
     <div class="text-[11px] text-slate-400 mt-3">
       RPE = qué tan duro se sintió, del 1 al 10, según el cliente. Verde 7-8 es el rango de trabajo; rojo 9-10, al límite. Tres rojos seguidos suelen pedir bajar la carga.
+      <br>Si se equivocó al marcar: «Mover» lo pasa a otro día con todo lo que marcó; «Quitar» borra ese entreno con sus series. Solo ese entreno.
     </div>`;
 }
 

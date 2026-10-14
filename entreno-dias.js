@@ -368,7 +368,7 @@ window.fzPanelFuerza = (fecha) => {
           <button class="btn btn-ghost btn-sm" onclick="closeModal(); entAbrirRutinaDesdeCalendario('${r.id}')">Abrir</button>
         </div>` : '<div class="text-sm text-slate-500 mb-1">Este día no tiene rutina de fuerza.</div>'}
       ${nota ? `<div class="text-xs text-slate-500 mb-2">${nota}${deshacer ? ` <button class="btn btn-ghost btn-sm" data-fz-devolver onclick="fzDevolverDia('${fecha}')">↺ Volver al plan</button>` : ''}</div>` : ''}
-      ${entreno ? '<div class="text-xs text-emerald-700 mb-1">Ese día ya entrenó: queda en su registro y no se cambia.</div>' : `
+      ${entreno ? `<div class="text-xs text-emerald-700 mb-1">Ese día ya entrenó: queda en su registro y no se cambia.</div>${fzPanelSesiones(fecha)}` : `
       <div class="rounded-lg bg-white p-2 mb-2" data-fz-solo-dia>
         <div class="text-[11px] font-semibold text-slate-500 mb-1.5">Solo el ${fzCorta(fecha)}</div>
         ${r ? `
@@ -397,6 +397,96 @@ window.fzPanelFuerza = (fecha) => {
           </div>` : (rutinas.length ? '' : '<div class="text-xs text-slate-500">Esta fase todavía no tiene rutinas: créalas en «Rutinas».</div>')}
       </div>
     </div>`;
+};
+
+// ── Corregir lo que el cliente marcó ──────────────────────────────────────
+// Un cliente marca una rutina como hecha sin haberla hecho, o la marca el
+// día equivocado, y te pide arreglarlo. Aquí se quita ESA sesión (con las
+// series que marcó: eran datos falsos) o se mueve a otro día. Solo esa
+// sesión; nada más se toca. En su app vuelve a salir como pendiente (o en
+// el día nuevo) y los aros se recalculan solos.
+const fzSemanaISO = (fecha) => {
+  const d = new Date(`${fecha}T12:00:00Z`);
+  const dow = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dow);
+  const y = d.getUTCFullYear();
+  const ene1 = new Date(Date.UTC(y, 0, 1));
+  const w = Math.ceil(((d - ene1) / 86400000 + 1) / 7);
+  return `${y}-W${String(w).padStart(2, '0')}`;
+};
+const fzEstadoSesion = (s) => (s.estado === 'completada' ? '✓ marcada como hecha' : s.estado === 'saltada' ? 'saltada' : '◐ abierta sin cerrar');
+window.fzPanelSesiones = (fecha) => {
+  const ses = ((_ent.sesionesPorFecha || {})[fecha] || []).filter(s => s.estado !== 'saltada');
+  if (!ses.length) return '';
+  const fase = _ent.faseCache;
+  const rutinas = _ent.rutinasCache || [];
+  const nombre = (s) => s.rutinas?.nombre || rutinas.find(r => r.id === s.rutina_id)?.nombre || 'Entreno';
+  return `
+    <div class="rounded-lg bg-white p-2 mb-2" data-fz-sesiones>
+      <div class="text-[11px] font-semibold text-slate-500 mb-1.5">Si se equivocó al marcar</div>
+      ${ses.map(s => `
+        <div class="flex gap-2 items-center flex-wrap py-1.5 border-t border-slate-100 first:border-t-0" data-fz-sesion="${s.id}">
+          <div class="flex-1 min-w-0 text-sm text-slate-700 truncate"><b>${escapeHtml(nombre(s))}</b> · ${fzEstadoSesion(s)}</div>
+          <input id="ses-mover-a-${s.id}" type="date" class="!w-auto text-sm" value="${fecha}" ${fase?.fecha_inicio ? `min="${fase.fecha_inicio}"` : ''}>
+          <button class="btn btn-secondary btn-sm" data-fz-mover-sesion onclick="fzMoverSesion('${s.id}', '${fecha}')">Mover a ese día</button>
+          <button class="btn btn-ghost btn-sm text-red-600" data-fz-quitar-sesion onclick="fzQuitarSesion('${s.id}', '${fecha}')">✕ Quitar este entreno</button>
+        </div>`).join('')}
+      <div class="text-[11px] text-slate-500 mt-1.5">Quitar borra ese entreno con las series que marcó. Mover lo pasa a otro día con todo lo que marcó. Solo ese entreno; lo demás no se toca.</div>
+    </div>`;
+};
+async function fzSesionDe(id, fecha) {
+  const local = ((_ent.sesionesPorFecha || {})[fecha] || []).find(s => s.id === id);
+  if (local) return local;
+  const { data } = await sb.from('sesiones').select('id, fecha, estado, rutina_id, fase_id, rutinas(nombre)').eq('id', id).limit(1);
+  return data && data[0] ? data[0] : null;
+}
+function fzSesionCambiada() {
+  // Repintar lo que esté a la vista: el calendario (sin esperar el minuto)
+  // y la pestaña «Lo que entrenó».
+  if (typeof closeModal === 'function') closeModal();
+  if (typeof _ent.calTick === 'function') _ent.calTick();
+  if (_ent.subtab === 'sesiones' && typeof entVistaClientes === 'function') entVistaClientes();
+}
+window.fzQuitarSesion = async (id, fecha) => {
+  const s = await fzSesionDe(id, fecha);
+  if (!s) { toast('No encontré ese entreno.'); return; }
+  const nombre = s.rutinas?.nombre || (_ent.rutinasCache || []).find(r => r.id === s.rutina_id)?.nombre || 'ese entreno';
+  if (!confirm(`¿Quitar «${nombre}» del ${fzCorta(s.fecha || fecha)}?\n\nSe borra ese entreno con las series, el peso y el esfuerzo que marcó ese día. Solo ese entreno. No se puede deshacer.`)) return;
+  const r1 = await sb.from('series_log').delete().eq('sesion_id', id);
+  if (r1.error) { toast('No pude quitarlo: ' + r1.error.message); return; }
+  const r2 = await sb.from('sesiones').delete().eq('id', id);
+  if (r2.error) { toast('No pude quitarlo: ' + r2.error.message); return; }
+  const f = s.fecha || fecha;
+  if (_ent.sesionesPorFecha && _ent.sesionesPorFecha[f]) _ent.sesionesPorFecha[f] = _ent.sesionesPorFecha[f].filter(x => x.id !== id);
+  toast(`Entreno quitado. En su app vuelve a salir como pendiente.`);
+  fzSesionCambiada();
+};
+window.fzMoverSesion = async (id, fecha, destinoDado = null) => {
+  const s = await fzSesionDe(id, fecha);
+  if (!s) { toast('No encontré ese entreno.'); return; }
+  const destino = destinoDado || document.getElementById(`ses-mover-a-${id}`)?.value;
+  if (!destino || !/^\d{4}-\d{2}-\d{2}$/.test(destino)) { toast('Elige el día al que lo mueves.'); return; }
+  const origen = s.fecha || fecha;
+  if (destino === origen) { toast('Es el mismo día.'); return; }
+  if (destino > fmt.hoy()) { toast('No se puede mover a un día que no ha llegado.'); return; }
+  // Una sola sesión por rutina y día (así está la base): si ese día ya tiene
+  // una de la misma rutina, se avisa en vez de fallar a medias.
+  const enDestino = ((_ent.sesionesPorFecha || {})[destino] || []).some(x => x.rutina_id && x.rutina_id === s.rutina_id);
+  if (enDestino) { toast(`Ese día ya tiene un entreno de esa rutina.`); return; }
+  const fase = (_ent.fases || []).find(f => f.id === s.fase_id) || _ent.faseCache;
+  const cambios = { fecha: destino, semana_iso: fzSemanaISO(destino) };
+  if (fase?.fecha_inicio) {
+    const dias = Math.floor((Date.parse(`${destino}T12:00:00Z`) - Date.parse(`${fase.fecha_inicio}T12:00:00Z`)) / 86400000);
+    if (dias >= 0) cambios.semana_num = Math.floor(dias / 7) + 1;
+  }
+  const { error } = await sb.from('sesiones').update(cambios).eq('id', id);
+  if (error) { toast('No pude moverlo: ' + (error.code === '23505' ? 'ese día ya tiene un entreno de esa rutina.' : error.message)); return; }
+  if (_ent.sesionesPorFecha) {
+    _ent.sesionesPorFecha[origen] = (_ent.sesionesPorFecha[origen] || []).filter(x => x.id !== id);
+    (_ent.sesionesPorFecha[destino] ||= []).push({ ...s, ...cambios });
+  }
+  toast(`Entreno movido al ${fzCorta(destino)}.`);
+  fzSesionCambiada();
 };
 
 // ── Cardio y deportes: todos los lunes de una serie ─────────────────────
