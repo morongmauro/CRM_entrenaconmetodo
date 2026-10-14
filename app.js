@@ -229,16 +229,16 @@ async function fetchRemindersMT(mtId) {
   if (mtApiBase()) {
     const res = await mtApiGet(`/api/coach-data?action=reminders&user_id=${encodeURIComponent(mtId)}`);
     if (res && Array.isArray(res.reminders)) {
-      return { list: res.reminders, device: { pwa: res.pwa_installed_at || null, push: res.push_enabled_at || null, upd: res.mt_updated_at || null, pwaNueva: res.pwa_nueva_at || null } };
+      return { list: res.reminders, device: { pwa: res.pwa_installed_at || null, push: res.push_enabled_at || null, upd: res.mt_updated_at || null, pwaNueva: res.pwa_nueva_at || null, abreEn: res.abre_en || null, abreEnAt: res.abre_en_at || null } };
     }
   }
   const mt = mtClient();
   if (mt) {
     const { data: row } = await mt.from('user_data')
-      .select('rem:data->coach_reminders,pwa:data->pwa_installed_at,push:data->push_enabled_at,pwaNueva:data->pwa_nueva_at,upd:updated_at')
+      .select('rem:data->coach_reminders,pwa:data->pwa_installed_at,push:data->push_enabled_at,pwaNueva:data->pwa_nueva_at,abreEn:data->abre_en,abreEnAt:data->abre_en_at,upd:updated_at')
       .eq('user_id', mtId).maybeSingle();
     if (row && Array.isArray(row.rem)) {
-      return { list: row.rem, device: { pwa: row.pwa || null, push: row.push || null, upd: row.upd || null, pwaNueva: row.pwaNueva || null } };
+      return { list: row.rem, device: { pwa: row.pwa || null, push: row.push || null, upd: row.upd || null, pwaNueva: row.pwaNueva || null, abreEn: row.abreEn || null, abreEnAt: row.abreEnAt || null } };
     }
   }
   return { list: [], device: null };
@@ -274,6 +274,9 @@ function renderRemindersMT() {
     } else {
       const d = _mtRem.device;
       dev.innerHTML = [
+        // Cómo la abrió la ÚLTIMA vez: en una pestaña del navegador es la señal
+        // para recordarle instalarla (aunque alguna vez la haya abierto instalada).
+        d.abreEn === 'navegador' ? `<span class="tag" data-abre-navegador style="background:#fef3c7;color:#92400e" title="La última vez (${d.abreEnAt ? fmt.fecha(String(d.abreEnAt).slice(0, 10)) : '—'}) abrió la app en el navegador, no desde su ícono. En su Dash le sale «Instala la app».">🌐 la abre en el navegador</span>` : '',
         d.pwaNueva ? `<span class="tag" style="background:#dbeafe;color:#1e40af" title="Tiene la app NUEVA (entrenaconmetodoapp) en su pantalla de inicio desde el ${fmt.fecha(String(d.pwaNueva).slice(0, 10))}">✨ app nueva instalada</span>` : '',
         d.pwa
           ? `<span class="tag tag-green" title="Abrió la app instalada (pantalla de inicio) el ${fmt.fecha(String(d.pwa).slice(0, 10))}">📲 instalada</span>`
@@ -6330,15 +6333,15 @@ async function fetchInstalacionesMT() {
   if (mtApiBase()) {
     const res = await mtApiGet('/api/coach-data?action=list');
     if (res && Array.isArray(res.clients)) {
-      filas = res.clients.map(c => ({ name: c.name, pwa: c.pwa_installed_at || null, push: c.push_enabled_at || null, nueva: c.app_nueva_at || null, pwaNueva: c.pwa_nueva_at || null }));
+      filas = res.clients.map(c => ({ name: c.name, pwa: c.pwa_installed_at || null, push: c.push_enabled_at || null, nueva: c.app_nueva_at || null, pwaNueva: c.pwa_nueva_at || null, abreEn: c.abre_en || null, abreEnAt: c.abre_en_at || null }));
     }
   }
   // Modo directo (anon key)
   if (!filas) {
     const mt = mtClient();
     if (mt) {
-      const { data } = await mt.from('user_data').select('name,pwa:data->pwa_installed_at,push:data->push_enabled_at,nueva:data->app_nueva_at,pwaNueva:data->pwa_nueva_at');
-      if (Array.isArray(data)) filas = data.map(r => ({ name: r.name, pwa: r.pwa || null, push: r.push || null, nueva: r.nueva || null, pwaNueva: r.pwaNueva || null }));
+      const { data } = await mt.from('user_data').select('name,pwa:data->pwa_installed_at,push:data->push_enabled_at,nueva:data->app_nueva_at,pwaNueva:data->pwa_nueva_at,abreEn:data->abre_en,abreEnAt:data->abre_en_at');
+      if (Array.isArray(data)) filas = data.map(r => ({ name: r.name, pwa: r.pwa || null, push: r.push || null, nueva: r.nueva || null, pwaNueva: r.pwaNueva || null, abreEn: r.abreEn || null, abreEnAt: r.abreEnAt || null }));
     }
   }
   if (!filas) return null;
@@ -6349,7 +6352,9 @@ async function fetchInstalacionesMT() {
     const n = normalizeName(f.name || '');
     if (!n) continue;
     const prev = porNombre.get(n);
-    if (!prev) { porNombre.set(n, { pwa: f.pwa, push: f.push, nueva: f.nueva, pwaNueva: f.pwaNueva }); continue; }
+    if (!prev) { porNombre.set(n, { pwa: f.pwa, push: f.push, nueva: f.nueva, pwaNueva: f.pwaNueva, abreEn: f.abreEn, abreEnAt: f.abreEnAt }); continue; }
+    // Cómo la abre: la señal MÁS RECIENTE de cualquiera de sus dispositivos.
+    if (f.abreEnAt && (!prev.abreEnAt || String(f.abreEnAt) > String(prev.abreEnAt))) { prev.abreEn = f.abreEn; prev.abreEnAt = f.abreEnAt; }
     if (f.nueva && (!prev.nueva || String(f.nueva) < String(prev.nueva))) prev.nueva = f.nueva;
     if (f.pwaNueva && (!prev.pwaNueva || String(f.pwaNueva) < String(prev.pwaNueva))) prev.pwaNueva = f.pwaNueva;
     if (f.pwa && (!prev.pwa || String(f.pwa) < String(prev.pwa))) prev.pwa = f.pwa;
@@ -6377,8 +6382,12 @@ async function cargarPanelInstalaciones(clientes) {
   // La cuenta de la APP NUEVA (entrenaconmetodoapp): instalada en la pantalla
   // de inicio desde ahí / la abrió pero no la instaló / sigue en la vieja.
   const nuevaInstalada = [], nuevaSinInstalar = [];
+  // La abren en el NAVEGADOR (su última apertura no fue desde el ícono): a
+  // estos hay que recordarles instalarla; en su Dash ya les sale la tarjeta.
+  const enNavegador = [];
   for (const c of clientes) {
     const d = mapa.get(normalizeName(c.nombre || ''));
+    if (d && d.abreEn === 'navegador') enNavegador.push({ c, f: d.abreEnAt });
     if (d && d.pwa) conApp.push({ c, pwa: d.pwa, push: d.push, nueva: d.nueva, pwaNueva: d.pwaNueva });
     else sinApp.push(c);
     if (d && d.nueva) enNueva.push(c); else sinMudar.push(c);
@@ -6400,6 +6409,7 @@ async function cargarPanelInstalaciones(clientes) {
             ${push ? '<span class="flex-shrink-0" title="Recordatorios push activados">🔔</span>' : '<span class="flex-shrink-0 opacity-40" title="Sin recordatorios push">🔕</span>'}
           </div>`).join('')}
       </div>` : ''}
+      ${enNavegador.length ? `<div data-app-en-navegador class="text-xs rounded-lg px-2 py-1.5 mt-2" style="background:#fef3c7;color:#92400e"><span class="font-semibold">🌐 La abren en el navegador, no desde su ícono (${enNavegador.length}):</span> ${enNavegador.sort((a, b) => String(b.f).localeCompare(String(a.f))).map(({ c, f }) => `<span class="cursor-pointer hover:underline" onclick="verCliente('${c.id}')">${escapeHtml(c.nombre)}</span> <span class="opacity-70">(${f ? fmt.fechaCorta(String(f).slice(0, 10)) : '—'})</span>`).join(' · ')}<div class="mt-1 opacity-80">A ellos les sale «Instala la app» en su Dash. Si siguen aquí, escríbeles: menú del navegador → Instalar.</div></div>` : ''}
       ${nuevaSinInstalar.length ? `<div data-app-nueva-sin-instalar class="text-xs text-slate-600 mt-2"><span class="font-semibold">Abrieron la app nueva pero aún no la instalan (${nuevaSinInstalar.length}):</span> ${nombres(nuevaSinInstalar)}</div>` : ''}
       ${sinMudar.length ? `<div data-app-vieja class="text-xs text-slate-500 mt-1"><span class="font-semibold">Siguen en la app vieja (${sinMudar.length}):</span> ${nombres(sinMudar)}</div>` : ''}
       <div class="text-[11px] text-slate-400 mt-2">Se actualiza solo: cada cliente cuenta en cuanto abre la app nueva desde su pantalla de inicio (quien ya la tenía instalada, al abrirla la próxima vez).</div>
