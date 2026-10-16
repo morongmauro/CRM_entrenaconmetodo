@@ -644,6 +644,9 @@ function entFiltrarSinOrden(lista) {
     //   «analisis» → toda la galería MENOS lo que usan hoy (los usados antes
     //   y los que nunca se han usado): lo que está en revisión de videos.
     if (f.uso === 'analisis' && _ent.enUso && _ent.enUso.has(e.id)) return false;
+    //   «duplicados» → fichas marcadas como copia de otra (nombres-en-analisis.sql),
+    //   para decidir una a una. Las que usan hoy nunca salen aquí.
+    if (f.uso === 'duplicados' && !entEsDuplicado(e)) return false;
     if (musculos.length) {
       const ms = [...(e.musculos_primarios || []), ...(e.musculos_secundarios || [])];
       if (!ms.some(m => musculos.includes(m))) return false;
@@ -727,6 +730,7 @@ function entTarjetaEjercicio(e, opts = {}) {
           <div class="flex flex-wrap gap-1">${entChipMusculos(e)}</div>
         </div>
       </div>
+      ${opts.agregar ? '' : entHtmlDuplicado(e)}
       <div class="flex items-center justify-between mt-2 pt-2 border-t border-slate-100">
         <div>${entIconoVideo(e)}</div>
         <div class="flex gap-1">
@@ -780,8 +784,46 @@ function entNivelesCuenta() {
   const ahora = _ent.enUso ? todos.filter(e => _ent.enUso.has(e.id)) : null;
   const antes = _ent.enUso && _ent.usados ? todos.filter(e => _ent.usados.has(e.id) && !_ent.enUso.has(e.id)) : null;
   const analisis = _ent.enUso ? todos.filter(e => !_ent.enUso.has(e.id)) : null;
-  return { clientes: ahora && de(ahora), antes: antes && de(antes), analisis: analisis && de(analisis), '': de(todos) };
+  const duplicados = todos.filter(entEsDuplicado);
+  return { clientes: ahora && de(ahora), antes: antes && de(antes), analisis: analisis && de(analisis), duplicados: duplicados.length ? { n: duplicados.length, sin: 0 } : null, '': de(todos) };
 }
+
+// ---------- Duplicados ----------
+// Una ficha en análisis que es el mismo ejercicio que otra (casi siempre una
+// que usan hoy tus clientes). La marca la pone carga/nombres-en-analisis.sql
+// en `duplicado_de`; aquí se decide: archivarla o «no es duplicado».
+function entEsDuplicado(e) {
+  return !!(e && e.duplicado_de) && !(_ent.enUso && _ent.enUso.has(e.id));
+}
+function entHtmlDuplicado(e) {
+  if (!entEsDuplicado(e)) return '';
+  const o = (_ent.ejercicios || []).find(x => x.id === e.duplicado_de);
+  const n = o ? entNombres(o) : null;
+  const usan = o && _ent.enUso && _ent.enUso.get(o.id);
+  return `
+    <div class="mt-2 rounded-lg bg-amber-50 border border-amber-200 p-2 text-xs" data-duplicado="${e.id}">
+      <div class="text-amber-900"><b>🔁 Duplicado de</b> ${n ? `<b>${escapeHtml(n.grande)}</b>${n.chico ? ` · ${escapeHtml(n.chico)}` : ''}` : 'una ficha archivada'}${usan ? ` <span class="tag tag-blue">👥 la usan hoy</span>` : ''}</div>
+      <div class="flex gap-1 mt-1.5">
+        <button class="btn btn-secondary btn-sm" data-dup-archivar onclick="entDupArchivar('${e.id}')" title="Sale de la galería; las rutinas viejas que lo usan no se tocan">Archivar este</button>
+        <button class="btn btn-ghost btn-sm" data-dup-no onclick="entDupNoEs('${e.id}')">No es duplicado</button>
+      </div>
+    </div>`;
+}
+window.entDupArchivar = async (id) => {
+  if (!confirm('¿Archivar este duplicado? Sale de la galería, pero las rutinas que ya lo usan no se tocan.')) return;
+  const ok = await entDb.archivarEjercicio(id);
+  if (!ok) return;
+  toast('Duplicado archivado');
+  entVistaEjercicios();
+};
+window.entDupNoEs = async (id) => {
+  const { error } = await sb.from('ejercicios').update({ duplicado_de: null, updated_at: new Date().toISOString() }).eq('id', id);
+  if (error) return toast(error.message);
+  const e = (_ent.ejercicios || []).find(x => x.id === id);
+  if (e) e.duplicado_de = null;
+  toast('Listo: no es duplicado');
+  entVistaEjercicios();
+};
 
 function entNivelEtiqueta(nivel, texto) {
   const c = entNivelesCuenta()[nivel];
@@ -793,6 +835,7 @@ function entNivelesOpciones() {
     ['clientes', entNivelEtiqueta('clientes', '👥 1 · Los usan ahora')],
     ['antes', entNivelEtiqueta('antes', '🕘 2 · Los usaron antes (hoy no)')],
     ['analisis', entNivelEtiqueta('analisis', '🔬 En análisis (todo menos lo de hoy)')],
+    ...(entNivelesCuenta().duplicados ? [['duplicados', entNivelEtiqueta('duplicados', '🔁 Duplicados (para decidir)')]] : []),
   ];
 }
 
@@ -822,11 +865,23 @@ function entNivelesResumen(compacto = false) {
         <div class="text-sm"><b class="text-slate-900">${x.n}</b> ejercicios · <b class="${x.sin ? 'text-red-600' : 'text-green-600'}">${x.sin ? `${x.sin} sin video` : 'todos con video'}</b></div>
       </button>`;
   };
+  // Duplicados: no cuenta videos, cuenta los que faltan por decidir.
+  const cajaDup = (x) => {
+    const marcado = (f.uso || '') === 'duplicados';
+    return `
+      <button type="button" data-nivel="duplicados" onclick="entIrNivel('duplicados')"
+              class="text-left rounded-lg border ${compacto ? 'px-2 py-1.5 min-w-0' : 'px-3 py-2'} ${marcado ? 'border-amber-400 bg-amber-50' : 'border-amber-200 hover:bg-amber-50'}"
+              title="Fichas repetidas: archívalas o márcalas como «no es duplicado»">
+        <div class="${compacto ? 'text-[10.5px] truncate' : 'text-[11px]'} text-slate-500">🔁 Duplicados</div>
+        <div class="${compacto ? 'text-xs leading-tight' : 'text-sm'}"><b class="text-slate-900">${x.n}</b> · <b class="text-amber-700">para decidir</b></div>
+      </button>`;
+  };
   return `
-    <div class="mt-2 grid ${compacto ? 'grid-cols-2' : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-4'} gap-2" data-niveles>
+    <div class="mt-2 grid ${compacto ? 'grid-cols-2' : `grid-cols-1 md:grid-cols-2 xl:grid-cols-${c.duplicados ? 5 : 4}`} gap-2" data-niveles>
       ${caja('clientes', '👥', '1 · Los usan ahora', c.clientes)}
       ${c.antes ? caja('antes', '🕘', '2 · Los usaron antes', c.antes) : ''}
       ${c.analisis ? caja('analisis', '🔬', 'En análisis', c.analisis) : ''}
+      ${c.duplicados ? cajaDup(c.duplicados) : ''}
       ${caja('', '📚', '3 · Toda la galería', c[''])}
     </div>`;
 }
@@ -834,9 +889,10 @@ function entNivelesResumen(compacto = false) {
 // Un clic en un nivel: ese nivel + «Sin video», lo que falta por buscar.
 window.entIrNivel = (nivel) => {
   _ent.filtros.uso = nivel;
-  _ent.filtros.video = 'sin';
+  // En duplicados se ven todos, tengan o no video: lo que falta es decidir.
+  _ent.filtros.video = nivel === 'duplicados' ? '' : 'sin';
   document.querySelectorAll('select[data-sel="uso"]').forEach(s => { s.value = nivel; });
-  document.querySelectorAll('select[data-sel="video"]').forEach(s => { s.value = 'sin'; });
+  document.querySelectorAll('select[data-sel="video"]').forEach(s => { s.value = _ent.filtros.video; });
   entRepintarGaleria();
 };
 
