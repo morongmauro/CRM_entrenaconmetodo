@@ -147,6 +147,46 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   await p.waitForSelector('[data-seg-videos] [data-vt-panel]', { timeout: 15000 });
   ok(`${tag} · en Seguimiento sale lo mismo (1 bien, 1 por llegar)`, /Bien · 1/.test(await p.locator('[data-seg-videos] [data-vt-cuenta="bien"]').innerText()) && /Por llegar · 1/.test(await p.locator('[data-seg-videos] [data-vt-cuenta="pedido"]').innerText()));
 
+  // La etiqueta en cada ejercicio de la rutina (Entrenamiento → el cliente → Rutinas).
+  await p.evaluate(() => verEntrenamientoCliente('c0'));
+  await p.waitForSelector('[data-traer-btn]', { timeout: 15000 });
+  await p.evaluate((id) => { _ent.faseId = id; return entSubtab('rutinas'); }, c18.id);
+  await p.waitForSelector('.ent-flecha', { timeout: 15000 });
+  // La rutina que tiene el ejercicio pedido (el pedido se hace sobre la fase activa).
+  await p.evaluate(async (id) => { const por = await entDb.ejerciciosDeRutinas(_ent.rutinasCache.map(r => r.id)); const r = _ent.rutinasCache.find(r => (por[r.id] || []).some(re => re.ejercicio_id === id)) || _ent.rutinasCache[0]; return entToggleRutina(r.id); }, x1.ejercicio_id);
+  await p.waitForSelector('[data-vt-etiqueta]', { timeout: 15000 });
+  const etiquetas = await p.$$eval('[data-vt-etiqueta]', xs => xs.map(x => x.dataset.vtEtiqueta));
+  ok(`${tag} · cada ejercicio de la rutina lleva su etiqueta de video (uno bien, uno por llegar, el resto sin pedir)`, etiquetas.includes('bien') && etiquetas.includes('pedido') && etiquetas.includes('ninguno'), etiquetas.join(','));
+  ok(`${tag} · el repetido dice en la etiqueta que es de nuevo y por qué (a mejorar: rodillas)`, /de nuevo, antes a mejorar: Rodillas hacia adentro/.test(await p.locator('[data-vt-etiqueta="pedido"]').first().getAttribute('title')));
+  // Desde la etiqueta «por llegar»: nada bien, con la nota, y pedido de nuevo.
+  await p.locator('[data-vt-etiqueta="pedido"]').first().click();
+  await p.waitForSelector('[data-vt-menu]', { timeout: 10000 });
+  await p.locator('[data-vt-menu-mal]').click();
+  await p.fill('#vt-nota', 'Espalda redondeada al bajar');
+  await p.locator('[data-vt-menu-guardar]').click();
+  await p.waitForTimeout(800);
+  f = await filas(p);
+  ok(`${tag} · «nada bien» desde la etiqueta guarda el estado con su nota y lo pide de nuevo`, f.some(x => x.estado === 'mal' && /Espalda redondeada/.test(x.nota || '')) && f.filter(x => x.estado === 'pedido').length === 1, JSON.stringify(f));
+  await p.waitForSelector('[data-vt-etiqueta]', { timeout: 15000 });
+  // Desde un ejercicio sin pedir: pedirlo ahí mismo.
+  await p.locator('[data-vt-etiqueta="ninguno"]').first().click();
+  await p.waitForSelector('[data-vt-menu-pedir]', { timeout: 10000 });
+  await p.locator('[data-vt-menu-pedir]').click();
+  await p.waitForTimeout(800);
+  f = await filas(p);
+  ok(`${tag} · desde el 🎥 de un ejercicio sin pedir se pide ahí mismo`, f.filter(x => x.estado === 'pedido').length === 2, JSON.stringify(f.map(x => x.estado)));
+  if (tag === 'ancho') await p.locator('.ent-tabla-ejs').first().screenshot({ path: path.join(CAPTURAS, 'videos-etiquetas.png') }).catch(() => {});
+  // «Lo que entrenó» también lleva el panel del cliente.
+  await p.evaluate(() => entSubtab('sesiones'));
+  await p.waitForSelector('[data-ses-videos] [data-vt-panel]', { timeout: 15000 });
+  ok(`${tag} · en «Lo que entrenó» va el panel de videos del cliente (los dos por llegar)`, /Por llegar · 2/.test(await p.locator('[data-ses-videos] [data-vt-cuenta="pedido"]').innerText()));
+  // Y en la lista de clientes de Entrenamiento, lo pendiente de todos.
+  await p.evaluate(() => entVerCliente(null));
+  await p.waitForSelector('[data-vt-general]', { timeout: 15000 });
+  const gen = await p.locator('[data-vt-general]').innerText();
+  ok(`${tag} · la lista general dice quién debe qué: Ana Pérez, los dos por llegar y, en el repetido, que antes estuvo nada bien y por qué`, /Ana Pérez/.test(gen) && /Por llegar · 2/.test(gen) && /antes nada bien: Espalda redondeada/.test(gen), gen.slice(0, 300));
+  if (tag === 'ancho') await p.locator('[data-vt-general]').screenshot({ path: path.join(CAPTURAS, 'videos-general.png') }).catch(() => {});
+
   ok(`${tag} · sin scroll de lado`, await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   ok(`${tag} · sin errores de JavaScript`, a.errores.length === 0, a.errores.join(' | '));
   await a.ctx.close();

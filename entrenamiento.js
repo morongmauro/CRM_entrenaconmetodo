@@ -2678,7 +2678,10 @@ async function entVistaClientes() {
         }).join('')}
       </div>
       ${clientes.length === 0 ? '<div class="card text-center text-slate-500 py-8">No hay clientes activos.</div>' : ''}
+      <div id="ent-vt-general" class="mt-4"></div>
     `;
+    // Todo lo pendiente de videos de técnica, de todos (videos-tecnica.js).
+    if (typeof vtListaGeneral === 'function') vtListaGeneral('#ent-vt-general');
     return;
   }
 
@@ -2706,7 +2709,12 @@ async function entVistaClientes() {
 
   // Los ejercicios de todas las rutinas de la fase, de un solo viaje: son los
   // que se despliegan al abrir cada rutina, y contarlos en la tarjeta.
-  const ejerciciosPorRutina = await entDb.ejerciciosDeRutinas(rutinas.map(r => r.id));
+  // Y la etiqueta de video de técnica de cada ejercicio (videos-tecnica.js).
+  const [ejerciciosPorRutina, vtUlt] = await Promise.all([
+    entDb.ejerciciosDeRutinas(rutinas.map(r => r.id)),
+    typeof vtEtiquetasCliente === 'function' ? vtEtiquetasCliente(_ent.clienteId).catch(() => ({})) : Promise.resolve({}),
+  ]);
+  _ent.vtUlt = vtUlt || {};
 
   const cabecera = `
     <div class="flex justify-between items-start mb-4 gap-2 flex-wrap">
@@ -2781,7 +2789,7 @@ async function entVistaClientes() {
     </div>
     ${_ent.subtab === 'calendario' ? entCalendarioHTML(cliente, fase, rutinas, ejerciciosPorRutina)
       : _ent.subtab === 'rutinas'  ? entListaRutinasHTML(fase, rutinas, ejerciciosPorRutina)
-      : _ent.subtab === 'sesiones' ? '<div id="ent-sesiones" class="card text-sm text-slate-400">Leyendo lo que registró…</div>'
+      : _ent.subtab === 'sesiones' ? `${typeof vtPanel === 'function' ? '<details class="card mb-3" open data-ses-videos><summary class="cursor-pointer text-xs font-bold text-slate-500 uppercase tracking-wider">🎥 Videos de técnica · pedidos, por revisar y a mejorar</summary><div class="mt-3" id="ent-ses-vt"></div></details>' : ''}<div id="ent-sesiones" class="card text-sm text-slate-400">Leyendo lo que registró…</div>`
       : _ent.subtab === 'lecturas' ? '<div id="ent-lecturas" class="card text-sm text-slate-400">Calculando…</div>'
       : _ent.subtab === 'mezcla' ? '<div id="ent-mezcla"></div>'
       : _ent.subtab === 'videos' ? '<div id="ent-videos-tec" class="card"></div>'
@@ -2794,7 +2802,7 @@ async function entVistaClientes() {
 
   if (typeof rutMontarPanel === 'function') rutMontarPanel();
   if (_ent.subtab === 'calendario') entPintarCalendario(cliente, fase, rutinas, ejerciciosPorRutina);
-  if (_ent.subtab === 'sesiones') entPintarSesiones(cliente);
+  if (_ent.subtab === 'sesiones') { entPintarSesiones(cliente); if (typeof vtPanel === 'function') vtPanel('#ent-ses-vt', cliente?.id); }
   if (_ent.subtab === 'lecturas') entPintarLecturas(cliente);
   if (_ent.subtab === 'videos' && typeof vtPanel === 'function') vtPanel('#ent-videos-tec', cliente?.id);
   if (_ent.subtab === 'mezcla' && typeof mzAbrir === 'function') mzAbrir({ caja: '#ent-mezcla', fuentes: rutinas, faseId: fase?.id || null, clienteId: cliente?.id || null });
@@ -3707,7 +3715,7 @@ function entResumenEjerciciosHTML(ejs, rutina) {
     <div class="overflow-x-auto">
       <table class="ent-tabla-ejs">
         <thead><tr>
-          <th>#</th><th>Ejercicio</th><th>Series</th><th>Reps</th><th>Peso</th><th>Desc.</th><th>Patrón</th>
+          <th>#</th><th>Ejercicio</th><th>Series</th><th>Reps</th><th>Peso</th><th>Desc.</th><th>Patrón</th><th title="Video de técnica pedido al cliente">Video</th>
         </tr></thead>
         <tbody>
           ${ejs.map((re, i) => {
@@ -3723,6 +3731,8 @@ function entResumenEjerciciosHTML(ejs, rutina) {
                 <td>${escapeHtml(re.peso_objetivo || '—')}</td>
                 <td>${re.descanso_seg != null ? `${re.descanso_seg}s` : '—'}</td>
                 <td><span class="tag tag-gray">${escapeHtml(entLabel(ENT_PATRONES, e.patron))}</span></td>
+                <td>${typeof vtEtiquetaHTML === 'function' && _ent.clienteId && !['calentamiento', 'estiramiento_pasivo', 'cardio'].includes(e.tipo)
+                  ? vtEtiquetaHTML((_ent.vtUlt || {})[e.id], { ejercicioId: e.id, nombre: entNombres(e).grande, clienteId: _ent.clienteId }) : ''}</td>
               </tr>`;
           }).join('')}
         </tbody>
