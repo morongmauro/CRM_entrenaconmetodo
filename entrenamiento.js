@@ -3842,7 +3842,7 @@ function entTarjetaFase(f, rutinas) {
           </div>
           ${f.objetivo ? `<div class="text-xs text-slate-600 mt-1">${escapeHtml(f.objetivo)}</div>` : ''}
         </div>
-        <div class="flex gap-1 flex-wrap flex-shrink-0">
+        <div class="flex gap-1 flex-wrap max-w-full">
           ${enviada
             ? `<button class="btn btn-secondary btn-sm" onclick="entRetirarFase('${f.id}')" title="Deja de mostrársela en su app. No se borra nada.">↩ Retirar</button>`
             : `<button class="btn btn-primary btn-sm" onclick="entEnviarFase('${f.id}')" ${rutinas.length ? '' : 'disabled title="Añade al menos una rutina antes de enviarla"'}>📤 Enviar al cliente</button>`}
