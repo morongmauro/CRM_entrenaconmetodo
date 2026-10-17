@@ -5009,6 +5009,7 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
       <div class="flex gap-2 flex-wrap">
         <button class="btn btn-secondary" onclick="enviarPushManual('${clienteId}')" title="Escribe un mensaje y le llega al teléfono como notificación push (si tiene los recordatorios activados en su app)">📲 Push al teléfono</button>
         <button class="btn btn-secondary" onclick="copiarMensajeWhatsApp('${clienteId}')" title="Genera y copia un borrador de mensaje para pegar en WhatsApp">💬 Copiar mensaje</button>
+        <button class="btn btn-secondary" data-dialogos-btn onclick="abrirDialogos('${clienteId}')" title="La galería de diálogos: saludos, técnica, videos, peso, alimentación, análisis…">🗂 Diálogos</button>
         <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
         <button class="btn btn-primary" id="sg-guardar" onclick="guardarSeguimiento('${clienteId}', '${semana}', ${s.id ? `'${s.id}'` : 'null'})">Guardar semana</button>
       </div>
@@ -6549,6 +6550,7 @@ function clienteForm(c = {}) {
         <div class="sec-title">1 · 👤 Identidad</div>
         <div class="grid grid-cols-2 gap-3">
           <div class="col-span-2"><label>Nombre *</label><input id="cl-nombre" value="${escapeHtml(c.nombre || '')}" required></div>
+          <div class="col-span-2"><label>Cómo le digo <span class="text-slate-400 font-normal">(sale en los diálogos de WhatsApp)</span></label><input id="cl-trato" placeholder="Ej.: Andre, Juanse… (vacío = su primer nombre)" value="${escapeHtml(c.trato || '')}"></div>
           <div><label>Fecha de nacimiento</label><input id="cl-nac" type="date" value="${c.fecha_nacimiento || ''}" onchange="actualizarCalcVivo()"></div>
           <div><label>Sexo</label>
             <select id="cl-sexo" onchange="actualizarCalcVivo()">
@@ -6877,6 +6879,7 @@ window.guardarCliente = async (id = null) => {
   const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
   const row = {
     nombre: $('#cl-nombre').value.trim(),
+    trato: ($('#cl-trato')?.value || '').trim() || null,
     fecha_nacimiento: $('#cl-nac').value || null,
     sexo: $('#cl-sexo').value || null,
     email: $('#cl-email').value.trim() || null,
@@ -6949,7 +6952,7 @@ window.guardarCliente = async (id = null) => {
 
 // Guarda un cliente tolerando que la BD aún no tenga las columnas nuevas
 // (email/telefono): si Supabase las rechaza, reintenta sin ellas y avisa.
-const COLS_NUEVAS_CLIENTE = ['email', 'telefono', 'suplementos', 'actividades_complementarias', 'grasa_pct_kcal', 'nombres_alternos'];
+const COLS_NUEVAS_CLIENTE = ['email', 'telefono', 'suplementos', 'actividades_complementarias', 'grasa_pct_kcal', 'nombres_alternos', 'trato'];
 async function guardarClienteSeguro(id, row) {
   // ── RENOMBRAR SIN ROMPER NADA ─────────────────────────────────────────
   // El nombre del cliente NO es solo una etiqueta: es la llave con la que
@@ -7601,6 +7604,7 @@ window.verCliente = async (id) => {
     <div class="space-y-4">
       <div class="flex gap-2 flex-wrap">
         <button class="btn btn-secondary btn-sm" onclick="editarCliente('${c.id}')">✎ Editar</button>
+        <button class="btn btn-secondary btn-sm" data-dialogos-btn onclick="abrirDialogos('${c.id}')" title="Mensajes listos para copiar en WhatsApp, con su nombre">💬 Diálogos</button>
         <button class="btn btn-secondary btn-sm" onclick="abrirNuevoSeguimiento('${c.id}')">+ Nueva semana</button>
         <button class="btn btn-secondary btn-sm" onclick="nuevoPendiente('${c.id}')">+ Pendiente</button>
         <button class="btn btn-secondary btn-sm" onclick="nuevaMedicion('${c.id}')">+ Medición corporal</button>
