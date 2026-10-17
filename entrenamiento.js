@@ -2903,6 +2903,8 @@ async function entPintarSesiones(cliente) {
   const conRpe = completadas.filter(s => s.rpe != null);
   const rpeProm = conRpe.length
     ? Math.round(conRpe.reduce((a, s) => a + s.rpe, 0) / conRpe.length * 10) / 10 : null;
+  // Desglose de tiempos por sesión (entreno-tiempos.js).
+  const tiempos = typeof entTiemposCargar === 'function' ? await entTiemposCargar(ses).catch(() => ({})) : {};
 
   caja.outerHTML = `
     <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
@@ -2941,6 +2943,7 @@ async function entPintarSesiones(cliente) {
             </span>
           </div>
           ${s.notas_cliente ? `<div class="mt-2 text-xs bg-slate-50 rounded-lg px-3 py-2 text-slate-700">💬 ${escapeHtml(s.notas_cliente)}</div>` : ''}
+          ${tiempos[s.id] ? entTiempoSesionHTML(tiempos[s.id], s.id) : ''}
         </div>`).join('')}
     </div>
     <div class="text-[11px] text-slate-400 mt-3">
@@ -4453,6 +4456,9 @@ async function entPintarLecturas(cliente) {
 
   const series = await entDb.seriesDeSesiones(ses.map(s => s.id));
   const d = entLecturasDatos(ses, series);
+  // Tiempos reales (entreno-tiempos.js): cuánto dura, cuánto descansa.
+  const tiempos = typeof entTiemposCargar === 'function'
+    ? entTiemposResumen(await entTiemposCargar(ses).catch(() => ({}))) : null;
 
   const H = [];
   const push = (tono, titulo, detalle, dato) => H.push({ tono, titulo, detalle, dato });
@@ -4490,6 +4496,8 @@ async function entPintarLecturas(cliente) {
     push('bien', `Subió en ${p.nombre}`, `De ${p.de} a ${p.a} en ${p.veces} sesiones. Eso se le dice.`, `+${p.subidaPct}%`);
   }
 
+  if (tiempos) entTiemposLecturas(tiempos).forEach(([tono, titulo, detalle, dato]) => push(tono, titulo, detalle, dato));
+
   const T = {
     bien: { icono: '✅', clase: 'border-emerald-300 bg-emerald-50', tinta: 'text-emerald-900' },
     ojo:  { icono: '⚠️', clase: 'border-amber-300 bg-amber-50',   tinta: 'text-amber-900' },
@@ -4525,6 +4533,7 @@ async function entPintarLecturas(cliente) {
     </div>
 
     ${entIntensidadHTML(d.intensidad)}
+    ${tiempos ? entTiemposHTML(tiempos) : ''}
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
       ${tabla('🟰 Llevan tiempo sin superar su mejor marca',
