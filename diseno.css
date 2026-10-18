@@ -1,0 +1,55 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   DISEÑO DEL CRM · la misma marca que la app, como lo haría Apple
+   Se carga al final: solo ajusta tamaños, pesos, jerarquía y botones.
+   ───────────────────────────────────────────────────────────────────────── */
+:root { --d-gris: #1D1D1F; --d-gris2: #6E6E73; --d-gris3: #8E8E93; --d-azul: #3C7BD6; --d-linea: #F1EFEA; }
+
+/* Títulos de página: grandes y en negrita; el texto de apoyo, gris y más chico */
+#view h2.text-2xl.font-bold, #view h2[data-titulo-pagina] {
+  font-size: 34px !important; font-weight: 800 !important; letter-spacing: -0.03em !important;
+  line-height: 1.1 !important; color: var(--d-gris) !important;
+}
+#view h2.text-2xl.font-bold + p, #view h2[data-titulo-pagina] + p {
+  font-size: 15px !important; color: var(--d-gris2) !important; margin-top: 4px !important;
+}
+@media (max-width: 640px) { #view h2.text-2xl.font-bold, #view h2[data-titulo-pagina] { font-size: 28px !important; } }
+
+/* Menú: en grupos (Hoy · Clientes · Negocio); la sección abierta en blanco */
+.em-nav .em-nav-grupo {
+  font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--d-gris3); padding: 14px 12px 6px;
+}
+.em-nav .em-nav-grupo:first-child { padding-top: 4px; }
+.em-nav .nav-item { font-size: 14.5px !important; color: #3A3A3C !important; border-radius: 11px !important; }
+.em-nav .nav-item.active {
+  background: #fff !important; color: var(--d-gris) !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 12px rgba(0,0,0,.05) !important;
+}
+.em-nav .em-nav-fin { margin-top: 10px; }
+@media (min-width: 1024px) {
+  .em-side { background: transparent !important; box-shadow: none !important; }
+}
+/* En el teléfono el menú es una tira que se desliza: sin títulos de grupo */
+@media (max-width: 1023px) { .em-nav .em-nav-grupo { display: none; } .em-nav .em-nav-fin { margin-top: 0; } }
+
+/* Botones: negro (principal), blanco (secundario), texto (terciario) */
+.btn { border-radius: 12px !important; font-weight: 700 !important; }
+.btn-secondary {
+  background: #fff !important; color: var(--d-gris) !important; border: 0 !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 1px 0 rgba(0,0,0,.02) !important;
+}
+.btn-secondary:hover { background: #FAFAF8 !important; }
+.btn-ghost:hover { background: rgba(31,31,31,.05) !important; }
+
+/* Pestañas de una sección (chips en fila): control segmentado como en la app */
+#view .em-seg {
+  display: inline-flex !important; gap: 2px !important; padding: 3px !important;
+  background: #E9E7E2; border-radius: 12px; overflow-x: auto; max-width: 100%;
+}
+#view .em-seg .chip {
+  border: 0 !important; background: transparent !important; color: #3A3A3C !important;
+  font-weight: 700 !important; border-radius: 9px !important; box-shadow: none !important; white-space: nowrap;
+}
+#view .em-seg .chip.active {
+  background: #fff !important; color: var(--d-gris) !important; box-shadow: 0 1px 3px rgba(0,0,0,.08) !important;
+}

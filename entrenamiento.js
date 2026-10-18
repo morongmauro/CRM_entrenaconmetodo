@@ -566,22 +566,22 @@ routes.entrenamiento = async () => {
   // ciclos. Lo demás son herramientas: qué ciclos vencen, las plantillas y
   // la galería para corregir ejercicios.
   const tabs = [
-    ['clientes', '👥 Clientes'],
-    ['ciclos', '🗓️ Ciclos por vencer'],
-    ['rutinas', '📋 Plantillas de rutinas'],
-    ['ejercicios', '🏋️ Galería de ejercicios'],
+    ['clientes', 'Clientes'],
+    ['ciclos', 'Ciclos por vencer'],
+    ['rutinas', 'Plantillas de rutinas'],
+    ['ejercicios', 'Galería de ejercicios'],
   ];
   // Editando la rutina de un cliente, la pestaña que se ve es la del cliente.
   const pestana = _ent.rutinaId && _ent.volver && _ent.volver.tab === 'clientes' ? 'clientes' : _ent.tab;
 
   view.innerHTML = `
     <div class="mb-4">
-      <h2 class="text-xl font-bold text-slate-900">Entrenamiento</h2>
-      <p class="text-sm text-slate-500">Elige un cliente y arma ahí su calendario, sus rutinas y sus ciclos.</p>
+      <h2 class="text-2xl font-bold text-slate-900">Entrenamiento</h2>
+      <p class="text-sm text-slate-500">Tus clientes y sus ciclos. Toca uno para armar su calendario, sus rutinas y sus ciclos.</p>
     </div>
     <!-- Aviso de ciclos por vencer (ciclos-vencen.js); vacío si no hay nada. -->
     ${_ent.tab !== 'ciclos' ? '<div id="cic-aviso"></div>' : ''}
-    <div class="flex gap-2 mb-5 overflow-x-auto pb-1">
+    <div class="em-seg mb-5">
       ${tabs.map(([id, lab]) => `
         <button class="chip ${pestana === id ? 'active' : ''}" data-ent-tab="${id}" onclick="entTab('${id}')">${lab}</button>
       `).join('')}
@@ -2741,6 +2741,24 @@ async function entResumenCiclos(estado) {
   return out;
 }
 
+// Las iniciales en un círculo de color (el mismo color siempre para el mismo nombre).
+function entAvatar(nombre) {
+  const ini = String(nombre || '?').trim().split(/\s+/).slice(0, 2).map(x => x[0] || '').join('').toUpperCase();
+  const tonos = ['#3C7BD6', '#46965A', '#EE8434', '#5F6670', '#8B6FD6', '#2F9C95', '#C9672B'];
+  let h = 0; for (const ch of String(nombre || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return `<span style="flex:none;display:grid;place-items:center;border-radius:999px;color:#fff;font-weight:800;width:40px;height:40px;font-size:14px;background:${tonos[h % tonos.length]}">${escapeHtml(ini)}</span>`;
+}
+// El aro de cumplimiento, como los de la app: verde ≥ 80 %, naranja ≥ 50 %, rojo debajo.
+function entAro(pct, titulo = '') {
+  const t = 54, g = 6, r = (t - g) / 2, c = 2 * Math.PI * r;
+  const color = pct == null ? '#C7C7CC' : pct >= 80 ? '#46965A' : pct >= 50 ? '#EE8434' : '#D64541';
+  const v = pct == null ? 0 : Math.max(0, Math.min(100, pct));
+  return `<span style="flex:none;position:relative;display:block;width:${t}px;height:${t}px" data-aro-cumplimiento="${pct ?? ''}" title="${escapeHtml(titulo)}">
+    <svg width="${t}" height="${t}" style="transform:rotate(-90deg)"><circle cx="${t / 2}" cy="${t / 2}" r="${r}" stroke="#EEECE7" stroke-width="${g}" fill="none"/>
+    <circle cx="${t / 2}" cy="${t / 2}" r="${r}" stroke="${color}" stroke-width="${g}" fill="none" stroke-linecap="round" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${(c * (1 - v / 100)).toFixed(1)}"/></svg>
+    <span style="position:absolute;inset:0;display:grid;place-items:center;font-weight:800;font-size:13px;letter-spacing:-.02em">${pct == null ? '—' : pct + '%'}</span></span>`;
+}
+
 function entTarjetaCiclo(r, e) {
   if (!r) return '';
   const f = r.fase, sig = e && e.siguiente;
@@ -2752,7 +2770,6 @@ function entTarjetaCiclo(r, e) {
   const semana = Math.min(semanas || 99, Math.floor((r.lleva - 1) / 7) + 1);
   const total = r.lleva + r.quedan;
   const avance = total ? Math.round((r.lleva / total) * 100) : 0;
-  const tonoPct = r.pct == null ? '#A0A4AB' : r.pct >= 80 ? '#46965A' : r.pct >= 50 ? '#E8A317' : '#D9442B';
   return `
     <div class="mt-3 pt-3" style="border-top:1px solid #F0EEE9" data-resumen-ciclo>
       <div class="flex items-start justify-between gap-3">
@@ -2761,8 +2778,8 @@ function entTarjetaCiclo(r, e) {
           <div class="text-xs text-slate-500">Semana ${semana}${semanas ? ` de ${semanas}` : ''}</div>
         </div>
         <div class="text-right flex-none" data-cumplimiento title="${r.hechas} entrenos hechos de ${r.planeadas} que tocaban hasta hoy">
-          <div class="text-xl font-extrabold leading-none" style="color:${tonoPct}">${r.pct == null ? '—' : r.pct + ' %'}</div>
-          <div class="text-[11px] text-slate-500 mt-0.5">${r.planeadas ? `${r.hechas} de ${r.planeadas} entrenos` : 'cumplimiento'}</div>
+          <div class="text-xs font-bold text-slate-800">${r.planeadas ? `${r.hechas} de ${r.planeadas} entrenos` : 'Sin entrenos aún'}</div>
+          <div class="text-[11px] text-slate-500 mt-0.5">cumplimiento ${r.pct == null ? '—' : r.pct + ' %'}</div>
         </div>
       </div>
       <div class="flex flex-wrap gap-1 mt-2">
@@ -2804,10 +2821,16 @@ async function entVistaClientes() {
           const t = e && typeof CIC_TONO !== 'undefined' ? CIC_TONO[e.tono] : null;
           return `
           <div class="card card-hover cursor-pointer" data-cliente-ent="${c.id}" onclick="entVerCliente('${c.id}')">
-            <div class="font-bold text-slate-900">${escapeHtml(c.nombre)}</div>
-            <div class="text-xs text-slate-500">
-              ${c.objetivo ? escapeHtml(c.objetivo) : 'Sin objetivo definido'}
-              ${(c.dias_entreno || []).length ? ` · ${c.dias_entreno.join(' ')}` : ''}
+            <div class="flex items-center gap-3">
+              ${entAvatar(c.nombre)}
+              <div class="min-w-0 flex-1">
+                <div class="font-bold text-slate-900 truncate" style="font-size:15.5px">${escapeHtml(c.nombre)}</div>
+                <div class="text-xs text-slate-500 truncate">
+                  ${c.objetivo ? escapeHtml(c.objetivo) : 'Sin objetivo definido'}
+                  ${(c.dias_entreno || []).length ? ` · ${c.dias_entreno.join(' ')}` : ''}
+                </div>
+              </div>
+              ${resumen[c.id] ? entAro(resumen[c.id].pct, `${resumen[c.id].hechas} de ${resumen[c.id].planeadas} entrenos hechos de los que tocaban hasta hoy`) : ''}
             </div>
             ${e && t ? `<div class="text-xs font-semibold mt-1.5 flex items-center gap-1.5" style="color:${t.tinta}" data-ciclo-tono="${e.tono}">
               <span style="width:8px;height:8px;border-radius:99px;background:${t.punto};flex:none"></span>${escapeHtml(e.texto)}</div>` : ''}

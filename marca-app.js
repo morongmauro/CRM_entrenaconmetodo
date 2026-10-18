@@ -47,7 +47,45 @@
       btn.insertBefore(s, btn.firstChild);
     }
   }
-  function revisarMenu() { document.querySelectorAll('#main-nav .nav-item[data-view]').forEach(iconoNav); }
+  // El menú en grupos: lo de hoy, lo de cada cliente y lo del negocio, con
+  // Ajustes al final. Los módulos añaden sus botones cuando cargan; aquí solo
+  // se ordenan y se les pone el título del grupo (no cambia lo que hacen).
+  const GRUPOS = [
+    ['Hoy', ['dashboard', 'bandeja', 'asistente']],
+    ['Clientes', ['clientes', 'seguimiento', 'entrenamiento', 'nutricion', 'composicion', 'aprendizaje']],
+    ['Negocio', ['pagos', 'pendientes', 'negocio', 'comunidad']],
+    ['', ['ajustes', 'ia']],
+  ];
+  let ordenando = false;
+  function agruparMenu() {
+    const nav = document.getElementById('main-nav');
+    if (!nav || ordenando) return;
+    const botones = [...nav.querySelectorAll(':scope > .nav-item[data-view]')];
+    const conocidos = new Set(GRUPOS.flatMap(g => g[1]));
+    const orden = [];
+    GRUPOS.forEach(([titulo, vistas], i) => {
+      const deEste = vistas.map(v => botones.find(b => b.dataset.view === v)).filter(Boolean);
+      if (i === 2) botones.filter(b => !conocidos.has(b.dataset.view)).forEach(b => deEste.push(b));
+      if (!deEste.length) return;
+      orden.push({ titulo, fin: !titulo }, ...deEste);
+    });
+    // ¿Ya está así? Entonces no se toca (evita bucles con el observador).
+    const actual = [...nav.children].map(n => n.dataset.view || ('g:' + (n.dataset.grupo || ''))).join(',');
+    const quiero = orden.map(o => (o.dataset ? o.dataset.view : 'g:' + (o.titulo || 'fin'))).join(',');
+    if (actual === quiero) return;
+    ordenando = true;
+    nav.querySelectorAll(':scope > .em-nav-grupo').forEach(g => g.remove());
+    orden.forEach(o => {
+      if (o.dataset) { nav.appendChild(o); return; }
+      const g = document.createElement('div');
+      g.className = 'em-nav-grupo' + (o.fin ? ' em-nav-fin' : '');
+      g.dataset.grupo = o.titulo || 'fin';
+      g.textContent = o.titulo;
+      nav.appendChild(g);
+    });
+    ordenando = false;
+  }
+  function revisarMenu() { document.querySelectorAll('#main-nav .nav-item[data-view]').forEach(iconoNav); agruparMenu(); }
 
   // Tarjetas del inicio: el emoji grande de la esquina por su ícono.
   const KPI = { '👥': 'k_activos', '💰': 'k_cobrado', '⏳': 'k_porcobrar', '⚠️': 'k_riesgo', '⚠': 'k_riesgo' };

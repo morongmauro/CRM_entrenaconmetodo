@@ -378,7 +378,7 @@ window.vtListaGeneral = async (caja) => {
   el.innerHTML = `
     <div class="card" data-vt-general>
       <div class="flex items-center gap-2 flex-wrap mb-2">
-        <div class="font-bold text-slate-900">🎥 Videos de técnica pendientes</div>
+        <div class="font-bold text-slate-900">Videos de técnica pendientes</div>
         ${chip('mal')} ${chip('mejorar')} ${chip('recibido')} ${chip('pedido')}
       </div>
       ${vig.length ? `<div class="divide-y divide-slate-100">${vig.map(f => `
