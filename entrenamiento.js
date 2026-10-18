@@ -2749,14 +2749,14 @@ function entAvatar(nombre) {
   return `<span style="flex:none;display:grid;place-items:center;border-radius:999px;color:#fff;font-weight:800;width:40px;height:40px;font-size:14px;background:${tonos[h % tonos.length]}">${escapeHtml(ini)}</span>`;
 }
 // El aro de cumplimiento, como los de la app: verde ≥ 80 %, naranja ≥ 50 %, rojo debajo.
-function entAro(pct, titulo = '') {
-  const t = 54, g = 6, r = (t - g) / 2, c = 2 * Math.PI * r;
+function entAro(pct, titulo = '', t = 54) {
+  const g = t >= 80 ? 9 : 6, r = (t - g) / 2, c = 2 * Math.PI * r;
   const color = pct == null ? '#C7C7CC' : pct >= 80 ? '#46965A' : pct >= 50 ? '#EE8434' : '#D64541';
   const v = pct == null ? 0 : Math.max(0, Math.min(100, pct));
   return `<span style="flex:none;position:relative;display:block;width:${t}px;height:${t}px" data-aro-cumplimiento="${pct ?? ''}" title="${escapeHtml(titulo)}">
     <svg width="${t}" height="${t}" style="transform:rotate(-90deg)"><circle cx="${t / 2}" cy="${t / 2}" r="${r}" stroke="#EEECE7" stroke-width="${g}" fill="none"/>
     <circle cx="${t / 2}" cy="${t / 2}" r="${r}" stroke="${color}" stroke-width="${g}" fill="none" stroke-linecap="round" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${(c * (1 - v / 100)).toFixed(1)}"/></svg>
-    <span style="position:absolute;inset:0;display:grid;place-items:center;font-weight:800;font-size:13px;letter-spacing:-.02em">${pct == null ? '—' : pct + '%'}</span></span>`;
+    <span style="position:absolute;inset:0;display:grid;place-items:center;font-weight:800;font-size:${t >= 80 ? 20 : 13}px;letter-spacing:-.02em">${pct == null ? '—' : pct + '%'}</span></span>`;
 }
 
 function entTarjetaCiclo(r, e) {
@@ -2795,6 +2795,35 @@ function entTarjetaCiclo(r, e) {
       ${r.rutinas.length ? `<div class="flex flex-wrap gap-1 mt-2.5" data-rutinas-ciclo>${r.rutinas.map(x => `<span class="text-[11px] font-semibold rounded-lg px-2 py-1" style="background:#F6F5F2;color:#1D1D1F">${escapeHtml(x.nombre)}${(x.dias_semana || []).length ? ` <span style="color:#8E8E93;font-weight:500">${x.dias_semana.join(' ')}</span>` : ''}</span>`).join('')}</div>` : ''}
     </div>`;
 }
+
+// Inicio del CRM: cómo va el equipo con su entrenamiento (todos los ciclos
+// vigentes), y los que más se están quedando para escribirles.
+window.inicioEquipo = async (idCaja) => {
+  const caja = document.getElementById(idCaja);
+  if (!caja) return;
+  try {
+    const filas = typeof cicDatos === 'function' ? await cicDatos() : [];
+    const estado = Object.fromEntries(filas.map(f => [f.cliente.id, f]));
+    const res = await entResumenCiclos(estado);
+    const lista = filas.map(f => ({ c: f.cliente, r: res[f.cliente.id] })).filter(x => x.r && x.r.planeadas > 0);
+    if (!lista.length) { caja.innerHTML = 'Sin ciclos vigentes con entrenos planeados todavía.'; return; }
+    const hechas = lista.reduce((a, x) => a + x.r.hechas, 0), planeadas = lista.reduce((a, x) => a + x.r.planeadas, 0);
+    const pct = Math.min(100, Math.round((hechas / planeadas) * 100));
+    const bajos = lista.filter(x => x.r.pct < 80).sort((a, b) => a.r.pct - b.r.pct).slice(0, 3);
+    caja.innerHTML = `
+      <div class="flex items-center gap-4" data-equipo-entreno>
+        ${entAro(pct, 'Entrenos hechos de los que tocaban hasta hoy, de todos tus clientes', 96)}
+        <div><div class="font-bold text-slate-900" style="font-size:15px">Entrenamiento</div>
+          <div class="text-[13px] text-slate-500">${hechas} de ${planeadas} entrenos hechos en sus ciclos</div></div>
+      </div>
+      ${bajos.length ? `<div class="text-[12px] font-bold text-slate-400 uppercase tracking-wider mt-4 mb-1">Para escribirles</div>
+        ${bajos.map(x => `<div class="flex items-center gap-3 py-2 cursor-pointer" style="border-top:1px solid #F1EFEA" data-equipo-bajo
+            onclick="_ent.tab='clientes';_ent.clienteId='${x.c.id}';navigate('entrenamiento')">
+          ${entAvatar(x.c.nombre)}<div class="flex-1 min-w-0"><div class="font-semibold text-slate-900 truncate text-sm">${escapeHtml(x.c.nombre)}</div>
+          <div class="text-xs text-slate-500">${x.r.hechas} de ${x.r.planeadas} entrenos · ${escapeHtml(x.r.fase.nombre || 'su ciclo')}</div></div>
+          ${entAro(x.r.pct, '', 44)}</div>`).join('')}` : '<div class="text-[13px] text-slate-500 mt-3">Todos van al 80 % o más.</div>'}`;
+  } catch (e) { caja.innerHTML = ''; }
+};
 
 async function entVistaClientes() {
   const body = $('#ent-body');

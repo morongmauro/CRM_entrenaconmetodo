@@ -3320,40 +3320,86 @@ routes.dashboard = async () => {
   const total = cobrado + porCobrar;
   const pct = total > 0 ? Math.round((cobrado / total) * 100) : 0;
 
+  // «Para hoy»: lo que hay que hacer hoy, en una sola lista y con su botón.
+  const ICO_HOY = {
+    pago: '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="3"/><path d="M3 10h18M16 15h2"/></svg>',
+    hoy: '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+    riesgo: '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>',
+  };
+  const paraHoy = [
+    ...vencidos.map(c => ({ tipo: 'pago', icono: ICO_HOY.pago, color: '#D64541', fondo: '#FDECE8', nombre: c.nombre,
+      detalle: `Pago vencido · día ${c.dia_pago} · ${fmt.money(c.monto, c.moneda)}`, boton: 'Marcar pagado', accion: `marcarPagoRapido('${c.id}')`,
+      extra: `<button class="btn btn-ghost btn-sm" title="Copiar recordatorio de pago para WhatsApp" onclick="copiarRecordatorioPago('${c.id}')">Recordar</button>` })),
+    ...proximos.filter(c => c.dias_falta === 0).map(c => ({ tipo: 'hoy', icono: ICO_HOY.hoy, color: '#C9672B', fondo: '#FDF1E6', nombre: c.nombre,
+      detalle: `Su pago vence hoy · ${fmt.money(c.monto, c.moneda)}`, boton: 'Marcar pagado', accion: `marcarPagoRapido('${c.id}')` })),
+    ...enRiesgo.slice(0, 6).map(c => ({ tipo: 'riesgo', icono: ICO_HOY.riesgo, color: '#3C7BD6', fondo: '#EAF1FB', nombre: c.nombre,
+      detalle: 'Hace rato sin contacto: escríbele', boton: 'Abrir', accion: `abrirNuevoSeguimiento('${c.id}')` })),
+  ];
+
   view.innerHTML = `
-    <div class="mb-6">
-      <h2 class="text-2xl font-bold text-slate-900">Hola, ${escapeHtml(_settings.nombre_coach)} 👋</h2>
-      <p class="text-sm text-slate-500">${new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })} · semana ${semana.split('-W')[1]} · 1 USD = COP ${_settings.usd_cop_rate.toLocaleString('es-CO')}</p>
+    <div class="mb-6 flex items-end justify-between gap-3 flex-wrap" data-inicio-cabecera>
+      <div>
+        <div class="em-eyebrow">${new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })} · semana ${semana.split('-W')[1]}</div>
+        <h2 class="text-2xl font-bold text-slate-900">Hola, ${escapeHtml(_settings.nombre_coach)}</h2>
+        <p class="text-sm text-slate-500">1 USD = COP ${_settings.usd_cop_rate.toLocaleString('es-CO')}</p>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-secondary" onclick="navigate('clientes')">Buscar cliente</button>
+        <button class="btn btn-primary" onclick="nuevoCliente()">+ Nuevo cliente</button>
+      </div>
     </div>
 
     <!-- Ciclos por vencer (ciclos-vencen.js) -->
     <div id="cic-aviso-inicio"></div>
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6" data-inicio-kpis>
       <div class="card">
-        <div class="flex items-center justify-between mb-2"><span class="text-xs font-semibold text-slate-500 uppercase">Activos</span><span class="text-lg">👥</span></div>
+        <div class="flex items-center justify-between mb-2"><span class="text-sm font-semibold text-slate-500">Activos</span><span class="text-lg">👥</span></div>
         <div class="text-3xl font-bold">${activos.length}</div>
         <div class="text-xs text-slate-500 mt-1">${clientes.filter(c => c.estado === 'pausa').length} en pausa</div>
       </div>
       <div class="card">
-        <div class="flex items-center justify-between mb-2"><span class="text-xs font-semibold text-slate-500 uppercase">Cobrado mes</span><span class="text-lg">💰</span></div>
+        <div class="flex items-center justify-between mb-2"><span class="text-sm font-semibold text-slate-500">Cobrado mes</span><span class="text-lg">💰</span></div>
         <div class="text-2xl font-bold text-emerald-600">${fmt.moneyCop(cobrado)}</div>
         <div class="text-xs text-slate-500 mt-1">${pagadosMes.length} pagos · ${pct}% del mes</div>
       </div>
       <div class="card">
-        <div class="flex items-center justify-between mb-2"><span class="text-xs font-semibold text-slate-500 uppercase">Por cobrar</span><span class="text-lg">⏳</span></div>
+        <div class="flex items-center justify-between mb-2"><span class="text-sm font-semibold text-slate-500">Por cobrar</span><span class="text-lg">⏳</span></div>
         <div class="text-2xl font-bold text-amber-600">${fmt.moneyCop(porCobrar)}</div>
         <div class="text-xs text-slate-500 mt-1">${activos.length - pagadosMes.length} pendientes</div>
       </div>
       <div class="card">
-        <div class="flex items-center justify-between mb-2"><span class="text-xs font-semibold text-slate-500 uppercase">En riesgo</span><span class="text-lg">⚠️</span></div>
+        <div class="flex items-center justify-between mb-2"><span class="text-sm font-semibold text-slate-500">En riesgo</span><span class="text-lg">⚠️</span></div>
         <div class="text-3xl font-bold text-red-600">${enRiesgo.length}</div>
         <div class="text-xs text-slate-500 mt-1">requieren atención</div>
       </div>
     </div>
 
+    <div class="em-inicio-fila mb-4">
+      <div class="card" data-para-hoy>
+        <div class="flex items-center justify-between mb-1">
+          <h3 class="em-h3">Para hoy</h3>
+          ${paraHoy.length ? `<span class="text-sm font-semibold text-slate-500">${paraHoy.length} ${paraHoy.length === 1 ? 'cosa' : 'cosas'}</span>` : ''}
+        </div>
+        ${paraHoy.length ? paraHoy.map(it => `
+          <div class="flex items-center gap-3" style="border-top:1px solid #F1EFEA;padding:12px 0" data-para-hoy-item="${it.tipo}">
+            <span style="width:38px;height:38px;border-radius:12px;display:grid;place-items:center;flex:none;background:${it.fondo};color:${it.color}">${it.icono}</span>
+            <div class="flex-1 min-w-0">
+              <div class="font-bold text-slate-900 truncate" style="font-size:15px">${escapeHtml(it.nombre)}</div>
+              <div class="text-[13px] text-slate-500 truncate">${it.detalle}</div>
+            </div>
+            ${it.extra || ''}
+            <button class="btn btn-secondary btn-sm" onclick="${it.accion}">${it.boton}</button>
+          </div>`).join('') : '<div class="text-sm text-slate-500 py-3">Nada urgente hoy: pagos al día y todos en contacto.</div>'}
+      </div>
+      <div class="card" data-equipo>
+        <h3 class="em-h3" style="margin-bottom:12px">Cómo va tu equipo</h3>
+        <div id="inicio-equipo" class="text-sm text-slate-500">Calculando…</div>
+      </div>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
-      ${vencidos.length > 0 ? `
+      ${false && vencidos.length > 0 ? `
         <div class="card">
           <div class="flex items-center justify-between mb-3">
             <h3 class="font-bold text-slate-900 flex items-center gap-2" title="Clientes cuyo día de pago ya pasó (contando sus días de gracia) sin pago registrado"><span class="w-2 h-2 rounded-full bg-red-500"></span>Pagos vencidos <span class="text-xs font-normal text-slate-400">(pasada su gracia)</span></h3>
@@ -3375,14 +3421,14 @@ routes.dashboard = async () => {
           </div>
         </div>` : ''}
 
-      ${proximos.length > 0 ? `
+      ${proximos.filter(c => c.dias_falta > 0).length > 0 ? `
         <div class="card">
           <div class="flex items-center justify-between mb-3">
             <h3 class="font-bold text-slate-900 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-500"></span>Próximos 7 días</h3>
-            <span class="tag tag-yellow">${proximos.length}</span>
+            <span class="tag tag-yellow">${proximos.filter(c => c.dias_falta > 0).length}</span>
           </div>
           <div class="space-y-2">
-            ${proximos.map(c => `
+            ${proximos.filter(c => c.dias_falta > 0).map(c => `
               <div class="flex items-center justify-between p-3 bg-amber-50 rounded-xl">
                 <div class="flex items-center gap-3 flex-1 min-w-0">
                   ${helpers.avatar(c.nombre, 9)}
@@ -3396,7 +3442,7 @@ routes.dashboard = async () => {
           </div>
         </div>` : ''}
 
-      ${enRiesgo.length > 0 ? `
+      ${false && enRiesgo.length > 0 ? `
         <div class="card">
           <div class="flex items-center justify-between mb-3">
             <h3 class="font-bold text-slate-900 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-orange-500"></span>Clientes en riesgo</h3>
@@ -3458,6 +3504,7 @@ routes.dashboard = async () => {
     </div>
   `;
   if (typeof cicAviso === 'function') cicAviso('cic-aviso-inicio');
+  if (typeof inicioEquipo === 'function') inicioEquipo('inicio-equipo');
 };
 
 // ═══════════════════════════════════════════════════════════════════════

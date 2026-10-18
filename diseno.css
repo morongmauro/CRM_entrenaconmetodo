@@ -53,3 +53,16 @@
 #view .em-seg .chip.active {
   background: #fff !important; color: var(--d-gris) !important; box-shadow: 0 1px 3px rgba(0,0,0,.08) !important;
 }
+
+/* La línea chica de arriba del título (la fecha, la sección) */
+.em-eyebrow { font-size: 12.5px; font-weight: 700; color: var(--d-gris3); letter-spacing: .05em; text-transform: uppercase; margin-bottom: 2px; }
+
+/* Inicio: las cuatro cifras grandes */
+[data-inicio-kpis] .text-3xl, [data-inicio-kpis] .text-2xl { font-size: 32px !important; font-weight: 800 !important; letter-spacing: -0.03em !important; line-height: 1.1 !important; }
+@media (max-width: 640px) { [data-inicio-kpis] .text-3xl, [data-inicio-kpis] .text-2xl { font-size: 24px !important; } }
+[data-para-hoy-item]:first-of-type { border-top: 0 !important; }
+.em-h3 { font-size: 19px !important; font-weight: 800 !important; letter-spacing: -0.02em; color: var(--d-gris); }
+.em-inicio-fila { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+[data-para-hoy-item] .btn { flex: none; }
+@media (max-width: 640px) { [data-para-hoy-item] { flex-wrap: wrap; } [data-para-hoy-item] > .flex-1 { flex-basis: calc(100% - 52px); } [data-para-hoy-item] .btn { margin-left: auto; } }
+@media (min-width: 1024px) { .em-inicio-fila { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: start; } }
