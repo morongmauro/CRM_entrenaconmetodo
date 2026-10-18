@@ -58,6 +58,7 @@ const RUT_EJEMPLOS_CONSTRUCTOR = [
   '¿Qué pesos ha movido en los ejercicios de esta rutina?',
   '¿Qué le quitarías para que dure 50 minutos?',
   'Cámbiale el press banca por uno con mancuernas',
+  'Dame alternativas para el primer ejercicio',
 ];
 
 const rutEjemplos = () => rutAbierta() ? RUT_EJEMPLOS_CONSTRUCTOR
@@ -258,6 +259,176 @@ window.rutQuitarPropuesta = (id) => {
   _rut.propuestas = _rut.propuestas.filter(p => p.id !== id);
   rutPintar();
 };
+
+
+// =====================================================
+// ALTERNATIVAS Y VARIANTES · tarjetas para elegir
+// =====================================================
+// La rutina de la que se habla: la abierta en el constructor (también si es
+// una plantilla de biblioteca) o, por nombre, una del plan del cliente.
+async function rutResolverRutina({ nombre, rutina, fase } = {}) {
+  const ab = rutAbierta();
+  if (ab && (!rutina || RUT_ESTA.includes(normalizeName(rutina)) || normalizeName(rutina) === normalizeName(ab.nombre))) {
+    const cliente = ab.cliente_id ? await rutCliente() : null;
+    return { r: ab, ejs: ab.ejercicios || [], cliente };
+  }
+  const c = await rutCliente(nombre);
+  if (!c) return { error: rutSinCliente(nombre).error };
+  const { fase: f, rutinas } = await rutContexto(c, fase);
+  if (!f) return { error: `${c.nombre} no tiene fases.` };
+  const r = rutBuscarRutina(rutinas, rutina);
+  if (!r) return { error: `No encontré la rutina "${rutina}".`, rutinas_de_esta_fase: rutinas.map(x => x.nombre) };
+  const ejs = (await entDb.ejerciciosDeRutinas([r.id]))[r.id] || [];
+  return { r, ejs, cliente: c };
+}
+// El renglón de la rutina por el nombre del ejercicio (inglés o español) o
+// por su posición («el 3»).
+function rutBuscarRE(ejs, texto) {
+  if (!texto) return null;
+  const n = Number(String(texto).replace(/[^\d]/g, ''));
+  if (/^\s*#?\d+\s*$/.test(String(texto)) && n >= 1 && n <= ejs.length) return ejs[n - 1];
+  const t = normalizeName(texto);
+  return ejs.find(x => normalizeName(x.ejercicios?.nombre) === t || normalizeName(x.ejercicios?.alias) === t)
+    || ejs.find(x => normalizeName(x.ejercicios?.nombre).includes(t) || normalizeName(x.ejercicios?.alias).includes(t))
+    || null;
+}
+// Tarjetas del turno que está respondiendo el asistente.
+function rutTarjeta(t) {
+  const turno = _rut.chat?.visible?.[_rut.chat.visible.length - 1];
+  if (!turno) return null;
+  (turno.tarjetas ||= []).push(t);
+  t.id = ++_rut.seq;
+  rutPintar();
+  return t.id;
+}
+const rutTarjetaPorId = (id) => (_rut.chat?.visible || []).flatMap(m => m.tarjetas || []).find(t => t.id === id) || null;
+const rutPrescripcion = (x) => [x.series != null && x.reps != null ? `${x.series}×${x.reps}` : (x.series != null ? `${x.series} series` : (x.reps ? `${x.reps} reps` : '')),
+  x.descanso_seg != null ? `${x.descanso_seg}s` : '', x.rir != null ? `RIR ${x.rir}` : ''].filter(Boolean).join(' · ');
+const RUT_CAMPOS_RE = ['series', 'reps', 'peso_objetivo', 'descanso_seg', 'rir', 'notas'];
+function rutFilaDe(x) {
+  const row = {};
+  if (x.series != null) row.series = Number(x.series);
+  if (x.reps != null) row.reps = String(x.reps);
+  if (x.peso_objetivo != null) row.peso_objetivo = String(x.peso_objetivo);
+  if (x.descanso_seg != null) row.descanso_seg = Number(x.descanso_seg);
+  if (x.rir != null) row.rir = Number(x.rir);
+  if (x.notas != null) row.notas = String(x.notas);
+  return row;
+}
+
+// Elegir una de las opciones: queda propuesta la sustitución.
+window.rutElegirOpcion = (tarjetaId, i) => {
+  const t = rutTarjetaPorId(tarjetaId);
+  const o = t && t.opciones[i];
+  if (!t || !o || t.elegida != null) return;
+  t.elegida = i;
+  const row = { ejercicio_id: o.e.id, ...rutFilaDe(o) };
+  rutProponer(
+    `Cambiar ${entNombres(t.sale).grande} por ${entNombres(o.e).grande} en "${t.rutina}"`,
+    ['mismo lugar' + (t.bloque ? ' y circuito' : ''), rutPrescripcion(o)].filter(Boolean).join(' · '),
+    () => entDb.actualizarRE(t.reId, row).then(ok => { if (ok === false) throw new Error('No se guardó'); }),
+  );
+};
+// La variante: reemplazar la rutina actual o guardarla como nueva (biblioteca).
+window.rutUsarVariante = (tarjetaId, modo) => {
+  const t = rutTarjetaPorId(tarjetaId);
+  if (!t || t.usada) return;
+  t.usada = modo;
+  const cambios = t.filas.filter(f => f.cambia);
+  const parche = (f) => ({ ejercicio_id: f.e.id, ...rutFilaDe(f) });
+  if (modo === 'reemplazar') {
+    rutProponer(
+      `Reemplazar "${t.rutina}" por su variante ${t.tipo}`,
+      `${cambios.length} de ${t.filas.length} posiciones cambian · mismo orden y circuitos`,
+      async () => {
+        for (const f of cambios) { const ok = await entDb.actualizarRE(f.reId, parche(f)); if (ok === false) throw new Error('No se guardó'); }
+      },
+    );
+  } else {
+    rutProponer(
+      `Guardar «${t.titulo}» como rutina nueva en tu biblioteca`,
+      `Copia de "${t.rutina}" con ${cambios.length} cambio${cambios.length === 1 ? '' : 's'} · la original queda igual`,
+      async () => {
+        const nueva = await entDb.copiarRutina(t.rutinaId, null, t.titulo);
+        if (!nueva) throw new Error('La copia no se creó');
+        // La copia trae renglones nuevos: cada cambio va al renglón que ocupa
+        // el mismo lugar (orden y ejercicio) que tenía en la original.
+        const porId = await entDb.ejerciciosDeRutinas([t.rutinaId, nueva]);
+        const enOrden = (l) => (l || []).slice().sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0) || String(a.ejercicio_id).localeCompare(String(b.ejercicio_id)));
+        const orig = enOrden(porId[t.rutinaId]), ejs = enOrden(porId[nueva]);
+        for (const f of cambios) {
+          const re = ejs[orig.findIndex(x => x.id === f.reId)];
+          if (re) { const ok = await entDb.actualizarRE(re.id, parche(f)); if (ok === false) throw new Error('No se guardó'); }
+        }
+      },
+    );
+  }
+  rutPintar();
+};
+// Los botones de variante del constructor: la pregunta ya armada (y con el
+// nivel Profundo, que es el que razona; el Rápido no arma rutinas enteras).
+const RUT_VARIANTES = {
+  desafiante: ['Más desafiante', 'Propónme una variante MÁS DESAFIANTE de esta rutina'],
+  sencilla: ['Más sencilla', 'Propónme una variante MÁS SENCILLA de esta rutina'],
+  sin_peso: ['Sin peso', 'Propónme una variante SIN PESO de esta rutina (peso corporal o banda)'],
+  con_peso: ['Con peso', 'Propónme una variante CON PESO de esta rutina'],
+};
+window.rutVariante = (k) => {
+  const v = RUT_VARIANTES[k];
+  if (!v || !rutAbierta()) return;
+  if (!_rut.chat) _rut.chat = asisEstadoNuevo('rutinas');
+  if (!_rut.abierto) _rut.abierto = true;
+  if ((_rut.chat.nivel || nivelIaGuardado('rutinas')) === 'rapido') _rut.chat.nivel = 'profundo';
+  rutPreguntar(`${v[1]}: mismo orden de patrones, ejercicios de la galería y series, reps, descanso y RIR ajustados. Muéstramela como variante para elegir.`);
+};
+// Desde la ventana «Alternativas» del constructor: que el asistente elija.
+window.rutPedirAlternativas = (reId) => {
+  const ab = rutAbierta();
+  const re = ab && (ab.ejercicios || []).find(x => x.id === reId);
+  if (!re) return;
+  if (!_rut.chat) _rut.chat = asisEstadoNuevo('rutinas');
+  _rut.abierto = true;
+  if ((_rut.chat.nivel || nivelIaGuardado('rutinas')) === 'rapido') _rut.chat.nivel = 'profundo';
+  const pos = ab.ejercicios.indexOf(re) + 1;
+  rutPreguntar(`Dame alternativas para ${entNombres(re.ejercicios || {}).grande} (posición ${pos}) de esta rutina`);
+  setTimeout(() => document.getElementById('rut-panel')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 60);
+};
+function rutTarjetasHTML(m) {
+  return (m.tarjetas || []).map(t => t.clase === 'opciones' ? `
+    <div class="rut-opciones" data-rut-opciones>
+      <div class="rut-op-titulo">Con qué cambiar <b>${escapeHtml(entNombres(t.sale).grande)}</b></div>
+      ${t.opciones.map((o, i) => `
+        <div class="rut-op${t.elegida === i ? ' elegida' : ''}${t.elegida != null && t.elegida !== i ? ' apagada' : ''}">
+          <div class="min-w-0">
+            <div class="rut-op-nombre">${escapeHtml(entNombres(o.e).grande)}</div>
+            ${entNombres(o.e).chico ? `<div class="rut-op-chico">${escapeHtml(entNombres(o.e).chico)}</div>` : ''}
+            <div class="rut-op-por">${escapeHtml(o.por_que)}</div>
+            ${rutPrescripcion(o) ? `<div class="rut-op-pres">${escapeHtml(rutPrescripcion(o))}</div>` : ''}
+          </div>
+          <button class="btn btn-sm ${t.elegida === i ? 'btn-secondary' : 'btn-primary'}" data-rut-elegir onclick="rutElegirOpcion(${t.id}, ${i})" ${t.elegida != null ? 'disabled' : ''}>${t.elegida === i ? 'Elegida ✓' : 'Elegir'}</button>
+        </div>`).join('')}
+      ${t.elegida != null ? '<div class="rut-op-nota">Quedó en los cambios sin aplicar, arriba.</div>' : ''}
+    </div>` : `
+    <div class="rut-variante" data-rut-variante>
+      <div class="rut-op-titulo">Variante <b>${escapeHtml(t.tipo)}</b> · ${escapeHtml(t.rutina)}</div>
+      ${t.explicacion ? `<div class="rut-op-por">${escapeHtml(t.explicacion)}</div>` : ''}
+      <ol class="rut-var-lista">
+        ${t.filas.map(f => `
+          <li class="${f.cambia ? 'cambia' : ''}">
+            <span class="rut-var-n">${f.posicion}</span>
+            <span class="min-w-0">
+              <span class="rut-var-ej">${escapeHtml(entNombres(f.e).grande)}${f.cambiaEj ? ` <span class="rut-var-antes">en vez de ${escapeHtml(entNombres(f.antes).grande)}</span>` : ''}</span>
+              <span class="rut-var-pres">${escapeHtml(rutPrescripcion(f))}${f.por_que ? ` · ${escapeHtml(f.por_que)}` : ''}</span>
+            </span>
+          </li>`).join('')}
+      </ol>
+      <div class="flex gap-2 flex-wrap mt-2">
+        <button class="btn btn-primary btn-sm" data-rut-reemplazar onclick="rutUsarVariante(${t.id}, 'reemplazar')" ${t.usada ? 'disabled' : ''}>${t.usada === 'reemplazar' ? 'Reemplazar ✓' : 'Reemplazar la actual'}</button>
+        <button class="btn btn-secondary btn-sm" data-rut-nueva onclick="rutUsarVariante(${t.id}, 'nueva')" ${t.usada ? 'disabled' : ''}>${t.usada === 'nueva' ? 'Guardar como nueva ✓' : 'Guardar como rutina nueva'}</button>
+      </div>
+      ${t.usada ? '<div class="rut-op-nota">Quedó en los cambios sin aplicar, arriba.</div>' : ''}
+    </div>`).join('');
+}
 
 // =====================================================
 // HERRAMIENTAS · lectura
@@ -772,6 +943,111 @@ const RUT_HERRAMIENTAS = {
     );
   },
 
+  // ---- Alternativas y variantes ----
+  async alternativas_de_ejercicio({ nombre, rutina, ejercicio, filtro, fase } = {}) {
+    const x = await rutResolverRutina({ nombre, rutina, fase });
+    if (x.error) return x;
+    const re = rutBuscarRE(x.ejs, ejercicio);
+    if (!re) return { error: `"${ejercicio}" no está en "${x.r.nombre}".`, ejercicios_de_la_rutina: x.ejs.map(e => entNombres(e.ejercicios || {}).grande) };
+    await entDb.ejercicios();
+    const src = (_ent.ejercicios || []).find(e => e.id === re.ejercicio_id) || re.ejercicios || {};
+    let lista = altCandidatos(src, _ent.ejercicios || []);
+    if (filtro) {
+      const f = { sin_peso: { carga: 'sin_peso' }, con_peso: { carga: 'con_peso' }, facil: { nivel: 'facil' }, dificil: { nivel: 'dificil' }, casa: { lugar: 'casa' }, gym: { lugar: 'gym' } }[filtro] || {};
+      const antes = _alt.filtros; _alt.filtros = f; _alt.q = '';
+      lista = lista.filter(altPasaFiltros);
+      _alt.filtros = antes;
+    }
+    const hechos = x.cliente ? await altCargarHechos(x.cliente.id) : null;
+    const enRutina = new Set(x.ejs.map(e => e.ejercicio_id));
+    return {
+      rutina: x.r.nombre,
+      cliente: x.cliente?.nombre || null,
+      lugar_de_entreno: x.cliente?.lugar_entreno || null,
+      lesion_actual: x.cliente?.lesion_actual || null,
+      restricciones: x.cliente?.restricciones_lesiones || null,
+      sale: { ejercicio: entNombres(src).grande, en_espanol: entNombres(src).chico || null, posicion: x.ejs.indexOf(re) + 1,
+        prescripcion: rutPrescripcion(re), equipo: altEquipoTexto(src) || null, musculos: (src.musculos_primarios || []).join(', ') || null },
+      alternativas: lista.slice(0, 15).map(a => ({
+        ejercicio: entNombres(a.e).grande,
+        en_espanol: entNombres(a.e).chico || null,
+        por_que_se_parece: a.porque.join(', '),
+        equipo: altEquipoTexto(a.e) || 'sin equipo',
+        con_peso: altConCarga(a.e),
+        dificultad: a.dif < 0 ? 'más fácil' : a.dif > 0 ? 'más difícil' : 'parecida',
+        a_un_lado: !!a.e.unilateral,
+        lugar: (a.e.lugar || []).join(', ') || null,
+        ya_en_la_rutina: enRutina.has(a.e.id),
+        veces_que_lo_hizo: hechos && hechos.get(a.e.id) ? hechos.get(a.e.id).size : 0,
+        tiene_video: !!(a.e.video_fuente && a.e.video_fuente !== 'ninguno'),
+      })),
+      total_parecidos: lista.length,
+    };
+  },
+
+  async mostrar_opciones_de_sustitucion({ nombre, rutina, ejercicio, opciones = [], fase } = {}) {
+    const x = await rutResolverRutina({ nombre, rutina, fase });
+    if (x.error) return x;
+    const re = rutBuscarRE(x.ejs, ejercicio);
+    if (!re) return { error: `"${ejercicio}" no está en "${x.r.nombre}".` };
+    const malas = [], buenas = [];
+    for (const o of (opciones || []).slice(0, 5)) {
+      const e = await rutBuscarEjercicio(o.ejercicio);
+      if (!e) malas.push(o.ejercicio); else if (e.id !== re.ejercicio_id) buenas.push({ ...o, e });
+    }
+    if (buenas.length < 2) return { error: 'Necesito al menos 2 opciones que estén en la galería.', no_estan_en_la_galeria: malas };
+    rutTarjeta({ clase: 'opciones', rutina: x.r.nombre, reId: re.id, bloque: re.bloque_id || null, sale: re.ejercicios || {}, opciones: buenas });
+    return {
+      estado: 'OPCIONES EN PANTALLA — el coach elige una tocándola; tú no propongas la sustitución',
+      opciones_mostradas: buenas.length,
+      ...(malas.length ? { no_estan_en_la_galeria: malas } : {}),
+    };
+  },
+
+  async sustituir_ejercicio({ nombre, rutina, ejercicio, por, fase, ...pres } = {}) {
+    const x = await rutResolverRutina({ nombre, rutina, fase });
+    if (x.error) return x;
+    const re = rutBuscarRE(x.ejs, ejercicio);
+    if (!re) return { error: `"${ejercicio}" no está en "${x.r.nombre}".`, ejercicios_de_la_rutina: x.ejs.map(e => entNombres(e.ejercicios || {}).grande) };
+    const e = await rutBuscarEjercicio(por);
+    if (!e) return { error: `"${por}" no está en la galería. Búscalo con alternativas_de_ejercicio o buscar_ejercicios.` };
+    if (e.id === re.ejercicio_id) return { error: 'Es el mismo ejercicio.' };
+    const row = { ejercicio_id: e.id, ...rutFilaDe(pres) };
+    return rutProponer(
+      `Cambiar ${entNombres(re.ejercicios || {}).grande} por ${entNombres(e).grande} en "${x.r.nombre}"`,
+      ['mismo lugar' + (re.bloque_id ? ' y circuito' : ''), rutPrescripcion(pres)].filter(Boolean).join(' · '),
+      () => entDb.actualizarRE(re.id, row).then(ok => { if (ok === false) throw new Error('No se guardó'); }),
+    );
+  },
+
+  async proponer_variante_de_rutina({ nombre, rutina, tipo, titulo, explicacion, ejercicios = [], fase } = {}) {
+    const x = await rutResolverRutina({ nombre, rutina, fase });
+    if (x.error) return x;
+    if (!x.ejs.length) return { error: `"${x.r.nombre}" no tiene ejercicios.` };
+    const porPos = new Map((ejercicios || []).map(f => [Number(f.posicion), f]));
+    const faltan = x.ejs.map((_, i) => i + 1).filter(n => !porPos.has(n));
+    if (faltan.length) return { error: `Faltan las posiciones ${faltan.join(', ')}: la variante lleva TODAS las de la rutina, en el mismo orden (si una no cambia, repítela igual).` };
+    const filas = [], malas = [];
+    for (let i = 0; i < x.ejs.length; i++) {
+      const re = x.ejs[i], f = porPos.get(i + 1);
+      const e = await rutBuscarEjercicio(f.ejercicio);
+      if (!e) { malas.push(f.ejercicio); continue; }
+      const antesPres = Object.fromEntries(RUT_CAMPOS_RE.map(k => [k, re[k] ?? null]));
+      const nueva = { ...antesPres, ...Object.fromEntries(RUT_CAMPOS_RE.filter(k => f[k] != null).map(k => [k, f[k]])) };
+      const cambiaEj = e.id !== re.ejercicio_id;
+      const cambiaPres = RUT_CAMPOS_RE.some(k => String(nueva[k] ?? '') !== String(antesPres[k] ?? ''));
+      filas.push({ posicion: i + 1, reId: re.id, e, antes: re.ejercicios || {}, cambiaEj, cambia: cambiaEj || cambiaPres, por_que: cambiaEj ? (f.por_que || '') : '', ...nueva });
+    }
+    if (malas.length) return { error: 'Estos no están en la galería: ' + malas.join(', ') + '. Búscalos con alternativas_de_ejercicio.' };
+    if (!filas.some(f => f.cambia)) return { error: 'La variante quedó igual a la rutina actual: no hay nada que proponer.' };
+    rutTarjeta({ clase: 'variante', rutina: x.r.nombre, rutinaId: x.r.id, tipo: tipo || 'nueva', titulo: titulo || `${x.r.nombre} · ${tipo || 'variante'}`, explicacion, filas });
+    return {
+      estado: 'VARIANTE EN PANTALLA — el coach elige "Reemplazar la actual" o "Guardar como rutina nueva"; no está guardada',
+      posiciones: filas.length,
+      cambian: filas.filter(f => f.cambia).length,
+    };
+  },
+
   // ---- Eventos: lo del calendario que no es una rutina ----
   // "agrégale natación lunes y miércoles", "ponle medición de peso el viernes
   // de la semana 1 y la 4", "quítale el fútbol". Son la mitad de las frases
@@ -885,6 +1161,10 @@ const RUT_ETIQUETAS = {
   editar_rutina: 'Preparando un cambio de rutina',
   editar_dias_de_fase: 'Preparando los días de la fase',
   duplicar_rutina: 'Preparando una copia',
+  alternativas_de_ejercicio: 'Buscando alternativas en la galería',
+  mostrar_opciones_de_sustitucion: 'Preparando las opciones',
+  sustituir_ejercicio: 'Preparando el cambio',
+  proponer_variante_de_rutina: 'Armando la variante',
   ver_eventos: 'Mirando su calendario',
   agregar_evento: 'Preparando un evento',
   quitar_evento: 'Preparando quitar un evento',
@@ -1015,7 +1295,8 @@ function rutHiloHTML() {
           <div class="flex flex-wrap gap-1 mb-2">
             ${[...new Set(m.herramientas)].map(h => `<span class="asis-paso">${escapeHtml(h)}</span>`).join('')}
           </div>` : ''}
-        ${m.texto ? asisFormato(m.texto) : '<span class="text-slate-400 text-xs">…</span>'}
+        ${m.texto ? asisFormato(m.texto) : ((m.tarjetas || []).length ? '' : '<span class="text-slate-400 text-xs">…</span>')}
+        ${rutTarjetasHTML(m)}
       </div>
     </div>`).join('') + (ch.trabajando ? `
     <div class="flex justify-start mb-3">
@@ -1064,6 +1345,11 @@ function rutPanelHTML() {
         </div>
       </div>
       ${rutPropuestasHTML()}
+      ${rutAbierta() ? `
+        <div class="rut-variantes" data-rut-variantes>
+          <span>Variante de esta rutina:</span>
+          ${Object.entries(RUT_VARIANTES).map(([k, v]) => `<button class="rut-var-btn" data-variante="${k}" onclick="rutVariante('${k}')" ${ch?.trabajando ? 'disabled' : ''}>${v[0]}</button>`).join('')}
+        </div>` : ''}
       <div id="rut-hilo" class="asis-hilo" style="max-height:42vh">${rutHiloHTML()}</div>
       <div class="flex gap-2 items-end mt-3">
         <textarea id="rut-input" rows="2" class="resize-none"

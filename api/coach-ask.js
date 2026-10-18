@@ -427,6 +427,107 @@ const HERRAMIENTAS_RUTINAS = [
 
   // ---- Eventos del calendario ----
   {
+    name: 'alternativas_de_ejercicio',
+    description:
+      'Las alternativas que hay EN LA GALERÍA para un ejercicio de una rutina: mismo movimiento y ' +
+      'músculos, con otro equipo, agarre o a un lado, de la más parecida a la menos. Trae por qué ' +
+      'se parece, el equipo, si es más fácil o más difícil (estimado), si ya está en la rutina y si ' +
+      'el cliente ya lo hizo. Úsala ANTES de ofrecer opciones o de armar una variante: es la única ' +
+      'fuente de reemplazos que existen.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nombre: { type: 'string' }, rutina: { type: 'string', description: '"esta" = la abierta en el constructor.' },
+        ejercicio: { type: 'string', description: 'El ejercicio de la rutina a reemplazar.' },
+        filtro: { type: 'string', enum: ['sin_peso', 'con_peso', 'facil', 'dificil', 'casa', 'gym'], description: 'Opcional.' },
+        fase: { type: 'string' },
+      },
+      required: ['ejercicio'],
+    },
+  },
+  {
+    name: 'mostrar_opciones_de_sustitucion',
+    description:
+      'Pone en pantalla de 3 a 5 TARJETAS para que el coach elija con qué reemplazar un ejercicio. ' +
+      'Cada una con su porqué corto y concreto y, si cambia, la prescripción que tendría. NO cambia ' +
+      'nada: al tocar una, queda propuesta la sustitución. Úsala cuando pida "alternativas", ' +
+      '"opciones" o "con qué lo cambio". Las opciones salen de alternativas_de_ejercicio.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nombre: { type: 'string' }, rutina: { type: 'string' },
+        ejercicio: { type: 'string', description: 'El que se reemplaza.' },
+        opciones: {
+          type: 'array', minItems: 2, maxItems: 5,
+          items: {
+            type: 'object',
+            properties: {
+              ejercicio: { type: 'string', description: 'Nombre exacto de la galería.' },
+              por_que: { type: 'string', description: 'Una línea: qué gana o por qué encaja con este cliente.' },
+              series: { type: 'integer' }, reps: { type: 'string' }, descanso_seg: { type: 'integer' }, rir: { type: 'integer' },
+            },
+            required: ['ejercicio', 'por_que'],
+          },
+        },
+        fase: { type: 'string' },
+      },
+      required: ['ejercicio', 'opciones'],
+    },
+  },
+  {
+    name: 'sustituir_ejercicio',
+    description:
+      'PROPONE cambiar un ejercicio por otro EN SU MISMO LUGAR de la rutina: se quedan su orden, su ' +
+      'bloque o circuito y su prescripción, salvo lo que cambies aquí. No lo guarda. Úsala cuando ' +
+      'el coach ya dijo cuál va ("cámbiale X por Y"); si pide opciones, usa mostrar_opciones_de_sustitucion.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nombre: { type: 'string' }, rutina: { type: 'string' },
+        ejercicio: { type: 'string', description: 'El que sale.' },
+        por: { type: 'string', description: 'El que entra (de la galería).' },
+        series: { type: 'integer' }, reps: { type: 'string' }, peso_objetivo: { type: 'string' },
+        descanso_seg: { type: 'integer' }, rir: { type: 'integer' }, notas: { type: 'string' },
+        fase: { type: 'string' },
+      },
+      required: ['ejercicio', 'por'],
+    },
+  },
+  {
+    name: 'proponer_variante_de_rutina',
+    description:
+      'Pone en pantalla una VARIANTE COMPLETA de una rutina (más desafiante, más sencilla, sin peso, ' +
+      'con peso…) para que el coach la revise y elija "Reemplazar la actual" o "Guardar como rutina ' +
+      'nueva" (en su biblioteca). No cambia nada sola. Lleva TODAS las posiciones de la rutina ' +
+      'actual, en el mismo orden (cada una conserva su bloque o circuito): en cada una, el ejercicio ' +
+      '(el mismo u otro de la galería) y su prescripción.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nombre: { type: 'string' }, rutina: { type: 'string' },
+        tipo: { type: 'string', description: 'Qué variante es: "más desafiante", "más sencilla", "sin peso", "con peso" u otra.' },
+        titulo: { type: 'string', description: 'Nombre para la rutina nueva, p. ej. "Push · sin peso".' },
+        explicacion: { type: 'string', description: 'Dos o tres líneas: qué cambió y por qué.' },
+        ejercicios: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              posicion: { type: 'integer', description: '1 = el primero de la rutina actual.' },
+              ejercicio: { type: 'string', description: 'Nombre exacto de la galería (el mismo si no cambia).' },
+              series: { type: 'integer' }, reps: { type: 'string' }, descanso_seg: { type: 'integer' }, rir: { type: 'integer' },
+              peso_objetivo: { type: 'string' }, notas: { type: 'string' },
+              por_que: { type: 'string', description: 'Solo si cambió el ejercicio: por qué ese.' },
+            },
+            required: ['posicion', 'ejercicio'],
+          },
+        },
+        fase: { type: 'string' },
+      },
+      required: ['tipo', 'titulo', 'ejercicios'],
+    },
+  },
+  {
     name: 'ver_eventos',
     description:
       'Lo que el cliente tiene en el calendario que NO es una rutina: natación, mediciones, ' +
@@ -515,6 +616,29 @@ CÓMO TRABAJAS
    —natación, una medición de peso, una cita, "esa semana está de viaje"— es agregar_evento.
    "Agrégale natación los lunes" NO es crear una rutina de natación: llenaría su historial de
    entrenos no hechos y le arruinaría la adherencia.
+
+ALTERNATIVAS Y VARIANTES
+- "Dame alternativas para X" / "¿con qué lo cambio?": llama alternativas_de_ejercicio, elige de 3 a
+  5 que tengan sentido para ESTE cliente (su lugar de entreno y equipo, sus restricciones, lo que ya
+  hizo, la lógica de la rutina) y ponlas con mostrar_opciones_de_sustitucion. Cada porqué en una
+  línea y concreto ("mismo empuje horizontal sin barra: lo puede hacer en casa"). La prescripción
+  solo cambia si el reemplazo lo pide (a un lado → "10 por lado"; peso corporal → más reps). No
+  propongas la sustitución tú: la elige el coach tocando una tarjeta.
+- "Cámbiale X por Y" (ya dijo cuál): sustituir_ejercicio.
+- Variante de la rutina (más desafiante, más sencilla, sin peso, con peso): mira la rutina
+  (rutina_abierta o ver_rutina), busca reemplazos con alternativas_de_ejercicio solo para las
+  posiciones que cambian y llama proponer_variante_de_rutina con TODAS las posiciones, en el mismo
+  orden: los compuestos siguen primero y el orden de patrones no cambia.
+    · más desafiante: variantes que piden más (peso libre, a un lado, más rango), RIR más bajo
+      (1–2) y, en los principales, una serie más; descansos iguales o un poco más cortos.
+    · más sencilla: variantes más guiadas (máquina, apoyo, menos rango), RIR 2–3, una serie menos
+      donde sobre; nada de técnica nueva difícil.
+    · sin peso: todo con peso corporal o banda; reps más altas o tempo más lento para que siga
+      siendo exigente.
+    · con peso: variantes con carga (mancuernas, barra, máquina) y reps en rango de fuerza o
+      hipertrofia según la rutina.
+  Respeta la lesión y las restricciones: si una posición no tiene reemplazo seguro, déjala igual
+  y dilo. En el texto, tres líneas: qué cambió y cómo elegir entre reemplazar o guardar como nueva.
 
 CÓMO RESPONDES
 - Corto y con los números concretos que devolvió la herramienta ("4 series de empuje a la

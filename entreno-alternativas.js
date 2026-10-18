@@ -238,6 +238,8 @@ window.entAlternativas = async (reId) => {
         <button class="btn btn-ghost btn-sm" onclick="closeModal()" aria-label="Cerrar">✕</button>
       </div>
       <p class="alt-ayuda">El mismo movimiento y los mismos músculos, con otro equipo o variante. Al sustituir se quedan su lugar, sus series, reps, descanso y RIR, y su bloque o circuito.</p>
+      ${document.getElementById('rut-panel') && typeof rutPedirAlternativas === 'function'
+        ? `<button type="button" class="alt-ia" data-alt-ia onclick="closeModal();rutPedirAlternativas('${reId}')">✨ Que el asistente elija 3 a 5 y te diga por qué</button>` : ''}
       ${flojo ? `<p class="alt-aviso">A esta ficha le falta ${!altArr(src.musculos_primarios).length ? 'músculos' : 'patrón'}: las alternativas salen mejor si la completas. <button class="alt-link" onclick="closeModal();entEditarEjercicio('${src.id}')">Completarla</button></p>` : ''}
       <div class="alt-filtros">
         ${ALT_FILTROS.map(([k, t, g]) => `<button type="button" class="alt-filtro${_alt.filtros[g] === k ? ' on' : ''}" data-f="${k}" data-g="${g}" onclick="altFiltro('${g}', '${k}')">${t}</button>`).join('')}
