@@ -7647,36 +7647,75 @@ window.verCliente = async (id) => {
   _journeyCtx = { id: c.id, journey: (c.journey && typeof c.journey === 'object') ? { ...c.journey } : {} };
   setTimeout(() => { renderJourneyList(); autollenarJourney(c, segs, meds); cargarPanelCentro(c); }, 80);
   setTimeout(() => { if (typeof asiPintarCompara === 'function') asiPintarCompara(c, 'tz-compara-ficha', segs); }, 90);
-  openModal(modalShell(escapeHtml(c.nombre), `
-    <div class="space-y-4">
-      <div class="flex gap-2 flex-wrap">
-        <button class="btn btn-secondary btn-sm" onclick="editarCliente('${c.id}')">✎ Editar</button>
-        <button class="btn btn-secondary btn-sm" data-dialogos-btn onclick="abrirDialogos('${c.id}')" title="Mensajes listos para copiar en WhatsApp, con su nombre">💬 Diálogos</button>
-        <button class="btn btn-secondary btn-sm" onclick="abrirNuevoSeguimiento('${c.id}')">+ Nueva semana</button>
-        <button class="btn btn-secondary btn-sm" onclick="nuevoPendiente('${c.id}')">+ Pendiente</button>
-        <button class="btn btn-secondary btn-sm" onclick="nuevaMedicion('${c.id}')">+ Medición corporal</button>
-        <button class="btn btn-secondary btn-sm" onclick="enviarPushManual('${c.id}')">📲 Push al teléfono</button>
-        <button class="btn btn-secondary btn-sm" data-ver-como onclick="verComoClienteId('${c.id}')" title="Abre su app en otra pestaña, tal como la ve él: su Dash, su semana, sus rutinas, su chat de comida. Solo lectura: nada de lo que toques se guarda. El pase dura 15 minutos.">👁 Ver como cliente</button>
-        ${c.app_clave_hash ? `<button class="btn btn-secondary btn-sm" data-reiniciar-clave onclick="reiniciarClaveApp('${c.id}')">🔑 Reiniciar contraseña de la app</button>` : ''}
+  // La ficha: cabecera con su nombre y cómo le dices, lo principal a la mano
+  // (Diálogos y WhatsApp) y lo demás en «Más». Las secciones van por pestañas
+  // (fichaPestanas, abajo): Resumen · Entrenamiento · Alimentación · Cuerpo ·
+  // Pagos · Journey · Perfil.
+  const telWa = String(c.telefono || '').replace(/[^\d]/g, '');
+  const pagoTxt = c.dia_pago ? `Pago el ${c.dia_pago} de cada mes` : 'Sin día de pago';
+  setTimeout(() => fichaPestanas(c), 40);
+  openModal(modalShell('Ficha del cliente', `
+    <div class="space-y-4" data-ficha>
+      <div class="flex items-center gap-4 flex-wrap" data-ficha-cabecera>
+        ${typeof entAvatar === 'function' ? entAvatar(c.nombre).replace('width:40px;height:40px;font-size:14px', 'width:64px;height:64px;font-size:22px') : helpers.avatar(c.nombre, 14)}
+        <div class="flex-1 min-w-0">
+          <div class="font-extrabold text-slate-900" style="font-size:30px;letter-spacing:-.03em;line-height:1.1">${escapeHtml(c.nombre)}</div>
+          <div class="text-slate-500" style="font-size:14.5px;margin-top:2px">${[c.trato ? `Le dices «${escapeHtml(c.trato)}»` : '', c.objetivo ? escapeHtml(String(c.objetivo).slice(0, 60)) : '', c.fecha_inicio ? `cliente desde ${fmt.fecha(c.fecha_inicio)}` : ''].filter(Boolean).join(' · ')}</div>
+          <div class="flex gap-1.5 flex-wrap mt-2">
+            <span class="em-pill ${c.estado === 'activo' ? 'em-pill-ok' : 'em-pill-gris'}" style="text-transform:capitalize">${escapeHtml(c.estado || '—')}</span>
+            <span class="em-pill em-pill-gris" data-ficha-ciclo hidden></span>
+            <span class="em-pill em-pill-naranja">${pagoTxt}</span>
+            ${streakF > 1 ? `<span class="em-pill em-pill-ok">${streakF} sem de fuerza seguidas</span>` : ''}
+            ${streakC > 1 ? `<span class="em-pill em-pill-ok">${streakC} sem de cardio seguidas</span>` : ''}
+            ${streakGlobal > 1 ? `<span class="em-pill em-pill-azul">${streakGlobal} sem cumpliendo</span>` : ''}
+          </div>
+        </div>
+        <div class="flex gap-2 items-center flex-wrap">
+          <button class="btn btn-secondary" data-dialogos-btn onclick="abrirDialogos('${c.id}')" title="Mensajes listos para copiar en WhatsApp, con su nombre">Diálogos</button>
+          ${telWa ? `<a class="btn btn-primary" style="background:#25A35A!important" href="https://wa.me/${telWa}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+          <details class="relative" data-ficha-mas>
+            <summary class="btn btn-secondary" style="list-style:none;cursor:pointer" title="Más acciones">⋯</summary>
+            <div class="em-menu">
+              <button onclick="editarCliente('${c.id}')">Editar datos</button>
+              <button onclick="abrirNuevoSeguimiento('${c.id}')">Nueva semana de seguimiento</button>
+              <button onclick="nuevoPendiente('${c.id}')">Nuevo pendiente</button>
+              <button onclick="nuevaMedicion('${c.id}')">Nueva medición corporal</button>
+              <button onclick="enviarPushManual('${c.id}')">Mandar aviso a su teléfono</button>
+              <button data-ver-como onclick="verComoClienteId('${c.id}')" title="Abre su app en otra pestaña, tal como la ve él. Solo lectura. El pase dura 15 minutos.">Ver su app como la ve</button>
+              ${c.app_clave_hash ? `<button data-reiniciar-clave onclick="reiniciarClaveApp('${c.id}')">Reiniciar contraseña de la app</button>` : ''}
+            </div>
+          </details>
+        </div>
       </div>
-      <div data-clave-app class="text-xs text-slate-500">🔑 Contraseña de la app: ${c.app_clave_hash
-        ? `creada${c.app_clave_at ? ` el ${fmt.fecha(String(c.app_clave_at).slice(0, 10))}` : ''}`
-        : 'aún no la crea (la crea él al abrir la app, con su correo de aquí)'}</div>
 
-      ${streakF > 1 || streakC > 1 || streakGlobal > 1 ? `
-      <div class="flex gap-2 flex-wrap">
-        ${streakF > 1 ? `<span class="tag tag-green">🔥 ${streakF} sem fuerza</span>` : ''}
-        ${streakC > 1 ? `<span class="tag tag-green">🔥 ${streakC} sem cardio</span>` : ''}
-        ${streakGlobal > 1 ? `<span class="tag tag-violet">🏆 ${streakGlobal} sem cumpliendo global</span>` : ''}
-      </div>` : ''}
+      <div class="em-seg" data-ficha-tabs>
+        ${[['resumen', 'Resumen'], ['entreno', 'Entrenamiento'], ['comida', 'Alimentación'], ['cuerpo', 'Cuerpo'], ['pagos', 'Pagos'], ['journey', 'Journey'], ['perfil', 'Perfil']]
+          .map(([k, t], n) => `<button class="chip ${n ? '' : 'active'}" data-ficha-tab="${k}" onclick="fichaVerPestana('${k}')">${t}</button>`).join('')}
+      </div>
 
-      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
-        <div><span class="text-slate-500 text-xs">Estado:</span><br><strong>${c.estado}</strong></div>
-        <div><span class="text-slate-500 text-xs">Mensualidad:</span><br><strong>${fmt.money(c.monto, c.moneda)}</strong></div>
-        <div><span class="text-slate-500 text-xs">Día pago:</span><br><strong>${c.dia_pago || '—'}</strong></div>
-        <div><span class="text-slate-500 text-xs">Adherencia 4 sem:</span><br><strong class="${promAdh === null ? '' : promAdh >= 7.5 ? 'text-emerald-600' : promAdh >= 5 ? 'text-amber-600' : 'text-red-600'}">${promAdh === null ? '—' : promAdh.toFixed(1) + '/10'}</strong></div>
-        <div><span class="text-slate-500 text-xs">Inició:</span><br><strong>${c.fecha_inicio ? fmt.fecha(c.fecha_inicio) : '—'}</strong></div>
-        <div><span class="text-slate-500 text-xs">Canal:</span><br><strong class="capitalize">${c.canal_adquisicion || '—'}</strong></div>
+      <div data-ficha-sec="resumen" class="em-ficha-aros" id="ficha-aros">
+        <div class="card em-aro-card">${typeof entAro === 'function' ? entAro(null, '', 72) : ''}<div><div class="em-aro-t">Entrenamiento</div><div class="em-aro-d" id="ficha-aro-entreno">Calculando su ciclo…</div></div></div>
+        <div class="card em-aro-card">${typeof entAro === 'function' ? entAro(promAdh == null ? null : Math.round(promAdh * 10), '', 72) : ''}<div><div class="em-aro-t">Adherencia</div><div class="em-aro-d">${promAdh == null ? 'Sin seguimientos aún' : `${promAdh.toFixed(1)}/10 · últimas 4 semanas`}</div></div></div>
+        ${(() => {
+          const v = segs.slice(0, 4).map(s => s.score_alim_metas).filter(x => x != null);
+          const prom = v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null;
+          return `<div class="card em-aro-card">${typeof entAro === 'function' ? entAro(prom, '', 72) : ''}<div><div class="em-aro-t">Alimentación</div><div class="em-aro-d">${prom == null ? 'Sin datos de metas aún' : 'Metas · últimas 4 semanas'}</div></div></div>`;
+        })()}
+      </div>
+
+      <div class="sec sec-slate" data-ficha-sec="resumen">
+        <div class="sec-title">Datos</div>
+        <div class="em-datos">
+          <div><span>Estado</span><b>${escapeHtml(c.estado || '—')}</b></div>
+          <div><span>Mensualidad</span><b>${fmt.money(c.monto, c.moneda)}</b></div>
+          <div><span>Día de pago</span><b>${c.dia_pago || '—'}</b></div>
+          <div><span>Adherencia 4 semanas</span><b class="${promAdh === null ? '' : promAdh >= 7.5 ? 'text-emerald-600' : promAdh >= 5 ? 'text-amber-600' : 'text-red-600'}">${promAdh === null ? '—' : promAdh.toFixed(1) + '/10'}</b></div>
+          <div><span>Inició</span><b>${c.fecha_inicio ? fmt.fecha(c.fecha_inicio) : '—'}</b></div>
+          <div><span>Canal</span><b class="capitalize">${escapeHtml(c.canal_adquisicion || '—')}</b></div>
+          <div data-clave-app><span>Contraseña de la app</span><b>${c.app_clave_hash
+            ? `creada${c.app_clave_at ? ` el ${fmt.fecha(String(c.app_clave_at).slice(0, 10))}` : ''}`
+            : 'aún no la crea (la crea él al abrir la app, con su correo de aquí)'}</b></div>
+        </div>
       </div>
 
       <!-- Adherencia rápida · últimas 3 semanas (entreno + alimentación) -->
@@ -7885,6 +7924,54 @@ window.verCliente = async (id) => {
     </div>
   `, `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>`), { wide: true });
 };
+
+// ── La ficha por pestañas ───────────────────────────────────────────────
+// Cada sección sabe a qué pestaña va por su título; lo nuevo que no esté en
+// la lista se queda en «Perfil». Solo cambia qué se ve: todo sigue ahí.
+const FICHA_SECCIONES = [
+  ['Adherencia rápida', 'resumen'], ['Alineación', 'resumen'], ['Pendientes', 'resumen'],
+  ['Nivel de actividad', 'entreno'], ['Últimas semanas', 'entreno'],
+  ['Meta nutricional', 'comida'],
+  ['Composición corporal', 'cuerpo'], ['Historial de peso', 'cuerpo'],
+  ['Últimos pagos', 'pagos'],
+  ['Journey', 'journey'], ['Centro de recursos', 'journey'],
+];
+let _fichaTab = 'resumen';
+function fichaPestanas(c) {
+  const raiz = document.querySelector('[data-ficha]');
+  if (!raiz) return;
+  [...raiz.children].forEach(el => {
+    if (el.dataset.fichaSec || el.matches('[data-ficha-cabecera], [data-ficha-tabs]')) return;
+    if (el.id === 'tz-compara-ficha') { el.dataset.fichaSec = 'entreno'; return; }
+    const t = (el.querySelector('.sec-title') || {}).textContent || '';
+    const m = FICHA_SECCIONES.find(([k]) => t.includes(k));
+    el.dataset.fichaSec = m ? m[1] : 'perfil';
+  });
+  _fichaTab = 'resumen';
+  fichaVerPestana(_fichaTab);
+  fichaCiclo(c).catch(() => {});
+}
+window.fichaVerPestana = (k) => {
+  _fichaTab = k;
+  document.querySelectorAll('[data-ficha] [data-ficha-sec]').forEach(el => { el.style.display = el.dataset.fichaSec === k ? '' : 'none'; });
+  document.querySelectorAll('[data-ficha-tab]').forEach(b => b.classList.toggle('active', b.dataset.fichaTab === k));
+};
+// Su ciclo vigente: la píldora de arriba y el aro de entrenamiento del resumen.
+async function fichaCiclo(c) {
+  if (typeof cicEstado !== 'function' || typeof entResumenCiclos !== 'function') return;
+  const { data } = await sb.from('fases').select('id, cliente_id, nombre, fecha_inicio, semanas, estado, visible_cliente, orden').eq('cliente_id', c.id);
+  const e = cicEstado((data || []).filter(f => f.estado !== 'archivada'), fmt.hoy());
+  const r = (await entResumenCiclos({ [c.id]: e }))[c.id];
+  const pill = document.querySelector('[data-ficha-ciclo]');
+  const det = document.getElementById('ficha-aro-entreno');
+  if (r) {
+    const semana = Math.min(Number(r.fase.semanas) || 99, Math.floor((r.lleva - 1) / 7) + 1);
+    if (pill) { pill.textContent = `${r.fase.nombre || 'Ciclo'} · semana ${semana}${r.fase.semanas ? ` de ${r.fase.semanas}` : ''}`; pill.hidden = false; }
+    const aro = document.querySelector('#ficha-aros .em-aro-card');
+    if (aro && typeof entAro === 'function') aro.firstElementChild.outerHTML = entAro(r.pct, '', 72);
+    if (det) det.textContent = r.planeadas ? `${r.hechas} de ${r.planeadas} entrenos del ciclo` : 'Su ciclo aún no tiene entrenos que tocaran';
+  } else if (det) det.textContent = 'Sin ciclo vigente';
+}
 
 // ===== Mediciones corporales =====
 // Registrar peso/%grasa es el momento en que la meta puede quedar vieja: el

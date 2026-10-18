@@ -173,6 +173,7 @@ for (const [ancho, alto, tag] of TAMANOS) {
   const claveTxt = await p.locator('[data-clave-app]').innerText().catch(() => '');
   ok(`${tag} · ficha: dice si ya creó la contraseña de la app`, /creada/.test(claveTxt), claveTxt);
   p.once('dialog', d => d.accept());
+  await p.locator('[data-ficha-mas] > summary').click().catch(() => {});   // va en «⋯ Más acciones»
   await p.locator('[data-reiniciar-clave]').click().catch(() => {}); await p.waitForTimeout(900);
   ok(`${tag} · ficha: «Reiniciar contraseña» la borra sin tocar nada más`, await p.evaluate(() => {
     const c = (window.TABLAS_FALSAS.clientes || []).find(x => x.id === 'c0');

@@ -124,6 +124,9 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
 
   // 4. La ficha: Trainerize al lado, y pasar sus días a la ficha.
   await p.evaluate(() => window.verCliente('c0'));
+  await p.waitForSelector('[data-ficha-tab="entreno"]', { timeout: 8000 }).catch(() => {});
+  await p.waitForTimeout(300);
+  await p.locator('[data-ficha-tab="entreno"]').click().catch(() => {});   // está en la pestaña Entrenamiento
   await p.waitForFunction(() => document.querySelector('#tz-compara-ficha [data-tz-compara]'), null, { timeout: 8000 }).catch(() => {});
   const ficha = await p.locator('#tz-compara-ficha').innerText().catch(() => '');
   ok(`${tag} · ficha: Trainerize al lado de lo tuyo`, /trainerize al lado/i.test(ficha) && /tu ficha/i.test(ficha), ficha.slice(0, 200));
