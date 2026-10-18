@@ -2700,6 +2700,85 @@ window.entBorrarRutina = async (id, esPlantilla) => {
 // Una fase es "este bloque dura X semanas y se entrena estos días". De ahí
 // sale el calendario que verá el cliente: fecha_inicio + semanas + días.
 
+// ── El inicio de Entrenamiento: cómo va cada cliente con su ciclo ──────
+// Para cada cliente con ciclo vigente (ciclos-vencen.js): qué ciclo va y en
+// qué semana, si es el último armado o ya hay otro después, si está enviado
+// y si lo está usando (cuándo abrió por última vez una rutina de ese ciclo),
+// cuántos días lleva y cuántos le faltan, su cumplimiento (entrenos hechos
+// frente a los que tocaban hasta hoy según su plan semanal) y sus rutinas.
+async function entResumenCiclos(estado) {
+  const actuales = Object.values(estado).filter(e => e.actual).map(e => e.actual);
+  const ids = actuales.map(f => f.id);
+  if (!ids.length) return {};
+  const [rRut, rSes] = await Promise.all([
+    sb.from('rutinas').select('*').in('fase_id', ids),
+    sb.from('sesiones').select('fase_id, fecha, estado, created_at').in('fase_id', ids),
+  ]);
+  const hoy = fmt.hoy();
+  const out = {};
+  actuales.forEach(f => {
+    const rutinas = (rRut.data || []).filter(r => r.fase_id === f.id && !r.archivada)
+      .sort((a, b) => (a.dia_orden || 0) - (b.dia_orden || 0));
+    const ses = (rSes.data || []).filter(x => x.fase_id === f.id);
+    const fin = cicFin(f);
+    const hasta = hoy < fin ? hoy : fin;
+    // Lo que tocaba hasta hoy: los días de su plan semanal desde el inicio.
+    const porDia = {};
+    rutinas.filter(r => !r.complementaria).forEach(r => (r.dias_semana || []).forEach(d => { porDia[d] = (porDia[d] || 0) + 1; }));
+    let planeadas = 0;
+    for (let d = f.fecha_inicio; d <= hasta; d = evtSumarDias(d, 1)) planeadas += porDia[evtCodigoDe(d)] ? 1 : 0;
+    const hechas = new Set(ses.filter(x => x.estado === 'completada' && x.fecha <= hoy).map(x => x.fecha)).size;
+    // La última vez que abrió una rutina de este ciclo (la fecha de la sesión:
+    // las importadas de Trainerize traen la hora de la importación).
+    const ultimo = ses.map(x => String(x.fecha || '')).filter(x => x && x <= hoy).sort().pop() || null;
+    out[f.cliente_id] = {
+      fase: f, rutinas, planeadas, hechas,
+      pct: planeadas ? Math.min(100, Math.round((hechas / planeadas) * 100)) : null,
+      lleva: cicDias(f.fecha_inicio, hoy) + 1, quedan: cicDias(hoy, fin),
+      abrio: ultimo ? cicDias(ultimo.slice(0, 10), hoy) : null,
+    };
+  });
+  return out;
+}
+
+function entTarjetaCiclo(r, e) {
+  if (!r) return '';
+  const f = r.fase, sig = e && e.siguiente;
+  const chip = (txt, tono = 'gris') => {
+    const c = { ok: ['#E9F4EC', '#2F6B3E'], rojo: ['#FDECE8', '#A3301B'], ambar: ['#FDF4DF', '#8A5A00'], gris: ['#F1F2F4', '#5F6670'], azul: ['#EAF1FB', '#2F68C0'] }[tono];
+    return `<span class="text-[11px] font-semibold rounded-full px-2 py-0.5 whitespace-nowrap" style="background:${c[0]};color:${c[1]}">${txt}</span>`;
+  };
+  const semanas = Number(f.semanas) || 0;
+  const semana = Math.min(semanas || 99, Math.floor((r.lleva - 1) / 7) + 1);
+  const total = r.lleva + r.quedan;
+  const avance = total ? Math.round((r.lleva / total) * 100) : 0;
+  const tonoPct = r.pct == null ? '#A0A4AB' : r.pct >= 80 ? '#46965A' : r.pct >= 50 ? '#E8A317' : '#D9442B';
+  return `
+    <div class="mt-3 pt-3" style="border-top:1px solid #F0EEE9" data-resumen-ciclo>
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-sm font-bold text-slate-900 truncate">${escapeHtml(f.nombre || 'Ciclo')}</div>
+          <div class="text-xs text-slate-500">Semana ${semana}${semanas ? ` de ${semanas}` : ''}</div>
+        </div>
+        <div class="text-right flex-none" data-cumplimiento title="${r.hechas} entrenos hechos de ${r.planeadas} que tocaban hasta hoy">
+          <div class="text-xl font-extrabold leading-none" style="color:${tonoPct}">${r.pct == null ? '—' : r.pct + ' %'}</div>
+          <div class="text-[11px] text-slate-500 mt-0.5">${r.planeadas ? `${r.hechas} de ${r.planeadas} entrenos` : 'cumplimiento'}</div>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-1 mt-2">
+        ${chip('Vigente', 'ok')}
+        ${sig ? chip(`Después: ${escapeHtml(sig.nombre || 'otro ciclo')}${sig.visible_cliente ? '' : ' (sin enviar)'}`, sig.visible_cliente ? 'azul' : 'ambar') : chip('Último armado', 'gris')}
+        ${f.visible_cliente ? chip('Enviado', 'ok') : chip('Sin enviar', 'rojo')}
+        ${f.visible_cliente ? (r.abrio == null ? chip('No ha abierto sus rutinas', 'ambar') : chip(r.abrio === 0 ? 'Entró hoy' : `Entró hace ${r.abrio} ${r.abrio === 1 ? 'día' : 'días'}`, r.abrio > 7 ? 'ambar' : 'gris')) : ''}
+      </div>
+      <div class="mt-2.5">
+        <div class="flex justify-between text-[11px] text-slate-500"><span>Lleva ${r.lleva} ${r.lleva === 1 ? 'día' : 'días'}</span><span>${r.quedan === 0 ? 'Termina hoy' : `Faltan ${r.quedan} ${r.quedan === 1 ? 'día' : 'días'}`}</span></div>
+        <div class="h-1.5 rounded-full mt-1" style="background:#EEECE7"><div class="h-1.5 rounded-full" style="width:${avance}%;background:#1D1D1F"></div></div>
+      </div>
+      ${r.rutinas.length ? `<div class="flex flex-wrap gap-1 mt-2.5" data-rutinas-ciclo>${r.rutinas.map(x => `<span class="text-[11px] font-semibold rounded-lg px-2 py-1" style="background:#F6F5F2;color:#1D1D1F">${escapeHtml(x.nombre)}${(x.dias_semana || []).length ? ` <span style="color:#8E8E93;font-weight:500">${x.dias_semana.join(' ')}</span>` : ''}</span>`).join('')}</div>` : ''}
+    </div>`;
+}
+
 async function entVistaClientes() {
   const body = $('#ent-body');
   if (!body) return;
@@ -2713,10 +2792,12 @@ async function entVistaClientes() {
     // El estado del ciclo de cada uno (ciclos-vencen.js): lo urgente primero.
     let estado = {};
     try { if (typeof cicDatos === 'function') estado = Object.fromEntries((await cicDatos()).map(f => [f.cliente.id, f])); } catch (e) {}
+    let resumen = {};
+    try { resumen = await entResumenCiclos(estado); } catch (e) { resumen = {}; }
     const peso = (c) => (estado[c.id] ? estado[c.id].orden : 9);
     const lista = clientes.slice().sort((a, b) => peso(a) - peso(b) || String(a.nombre).localeCompare(String(b.nombre)));
     body.innerHTML = `
-      <div class="text-sm text-slate-600 mb-3">Elige un cliente: ahí armas su calendario, sus rutinas y sus ciclos. Arriba, los que necesitan algo.</div>
+      <div class="text-sm text-slate-600 mb-3">Cómo va cada cliente con su ciclo. Toca uno para armar su calendario, sus rutinas y sus ciclos. Arriba, los que necesitan algo.</div>
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         ${lista.map(c => {
           const e = estado[c.id];
@@ -2730,6 +2811,7 @@ async function entVistaClientes() {
             </div>
             ${e && t ? `<div class="text-xs font-semibold mt-1.5 flex items-center gap-1.5" style="color:${t.tinta}" data-ciclo-tono="${e.tono}">
               <span style="width:8px;height:8px;border-radius:99px;background:${t.punto};flex:none"></span>${escapeHtml(e.texto)}</div>` : ''}
+            ${entTarjetaCiclo(resumen[c.id], e)}
           </div>`;
         }).join('')}
       </div>
