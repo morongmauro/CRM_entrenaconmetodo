@@ -1,0 +1,146 @@
+// AUDITORÍA (no es parte de las pruebas): en cada sección del CRM, rectángulos
+// con borde sólido en sus 4 lados y emojis que quedan a la vista.
+//   NODE_PATH=… TAILWIND_CSS=… node pruebas/_auditoria-bordes.mjs
+// (Arriba, el mismo arranque de visual-crm.mjs.)
+
+// El CRM entero en Chromium, con datos de ejemplo y sin red: saca capturas
+// de cada sección (escritorio y teléfono) a pruebas/capturas/ y revisa que
+// no haya errores de JavaScript ni scroll de lado en el teléfono.
+//
+//   NODE_PATH=/ruta/node_modules TAILWIND_CSS=/ruta/tailwind.css node pruebas/visual-crm.mjs
+//
+// Tailwind y supabase-js vienen de CDNs: aquí se reemplazan. TAILWIND_CSS es
+// el CSS compilado de Tailwind para las clases del CRM (sin él la página se
+// ve sin utilidades, pero la prueba corre igual).
+import { createRequire } from 'module';
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+const require_ = createRequire(import.meta.url);
+let chromium;
+try { ({ chromium } = require_('playwright')); }
+catch { console.error('Falta playwright (npm i -D playwright, o NODE_PATH=…)'); process.exit(2); }
+
+const RAIZ = path.join(import.meta.dirname, '..');
+const CAPTURAS = path.join(import.meta.dirname, 'capturas');
+fs.mkdirSync(CAPTURAS, { recursive: true });
+const TIPOS = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.woff2': 'font/woff2' };
+const servidor = http.createServer((req, res) => {
+  let f = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+  if (f === '/') f = '/index.html';
+  const p = path.join(RAIZ, f);
+  if (!p.startsWith(RAIZ) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); return res.end(); }
+  res.writeHead(200, { 'Content-Type': TIPOS[path.extname(p)] || 'application/octet-stream' });
+  fs.createReadStream(p).pipe(res);
+});
+await new Promise(r => servidor.listen(0, r));
+const BASE = `http://127.0.0.1:${servidor.address().port}`;
+const tailwind = process.env.TAILWIND_CSS && fs.existsSync(process.env.TAILWIND_CSS) ? fs.readFileSync(process.env.TAILWIND_CSS, 'utf8') : '';
+const falso = fs.readFileSync(path.join(import.meta.dirname, 'arnes', 'supabase-falso.js'), 'utf8');
+
+// ── Datos de ejemplo ──
+function datos(hoyISO) {
+  const hoy = new Date(hoyISO + 'T12:00:00');
+  const semanaISO = (d) => {
+    const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const dia = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - dia);
+    const ini = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+    return `${t.getUTCFullYear()}-W${String(Math.ceil(((t - ini) / 86400000 + 1) / 7)).padStart(2, '0')}`;
+  };
+  const nombres = ['Ana Pérez', 'Carlos Ruiz', 'Lucía Gómez', 'Andrés Mejía', 'Valentina Ríos', 'Jorge Salas', 'Camila Duarte', 'Felipe Torres'];
+  const clientes = nombres.map((nombre, i) => ({
+    id: 'c' + i, user_id: 'coach-1', nombre, sexo: i % 2 ? 'M' : 'F', ciudad: ['Bogotá', 'Medellín', 'Cali', 'Miami'][i % 4],
+    objetivo: ['Bajar grasa', 'Ganar músculo', 'Recomposición', 'Rendimiento'][i % 4], meta_especifica: 'Llegar a 72 kg con más fuerza',
+    lugar_entreno: ['gym', 'casa', 'mixto'][i % 3], dias_entreno_cantidad: 3 + (i % 3), dias_entreno: ['L', 'X', 'V', 'S'].slice(0, 3 + (i % 2)),
+    monto: i === 7 ? 120 : 280000 + i * 20000, moneda: i === 7 ? 'USD' : 'COP', dia_pago: [5, 10, 15, 20, 1, 28, 12, 3][i],
+    fecha_inicio: `2026-0${1 + (i % 8)}-0${1 + (i % 9)}`, estado: i === 6 ? 'pausa' : 'activo', canal_adquisicion: ['instagram', 'referido', 'web'][i % 3],
+    tags: i % 3 ? ['online'] : ['online', 'presencial'], dias_gracia: 3, created_at: '2026-01-01T00:00:00Z',
+    email: `cliente${i}@correo.com`, app_clave_hash: i === 0 ? 'scrypt$sal$hash' : null, app_clave_at: i === 0 ? '2026-09-20T10:00:00Z' : null,
+  }));
+  const pagos = [], seguimientos = [], pendientes = [];
+  for (const c of clientes) {
+    for (let m = 1; m <= hoy.getMonth() + 1; m++) {
+      const mes = `${hoy.getFullYear()}-${String(m).padStart(2, '0')}`;
+      const pagado = !(c.id === 'c3' && m === hoy.getMonth() + 1) && !(c.id === 'c5' && m >= hoy.getMonth());
+      pagos.push({ id: `p-${c.id}-${m}`, user_id: 'coach-1', cliente_id: c.id, mes, pagado, monto: c.monto, moneda: c.moneda, fecha_pago: pagado ? `${mes}-0${(m % 9) + 1}` : null });
+    }
+    for (let k = 0; k < 8; k++) {
+      const d = new Date(hoy); d.setDate(d.getDate() - 7 * k);
+      if (c.id === 'c4' && k < 3) continue;   // alguien que dejó de reportar
+      const base = 6 + ((c.id.charCodeAt(1) + k) % 4);
+      seguimientos.push({
+        id: `s-${c.id}-${k}`, user_id: 'coach-1', cliente_id: c.id, semana: semanaISO(d), fecha: d.toISOString().slice(0, 10),
+        adherencia_entreno: Math.min(10, base), adherencia_alimentacion: Math.max(3, base - (k % 3)), adherencia_descanso: Math.min(10, base - 1 + (k % 2)),
+        dias_planeados: c.dias_entreno_cantidad, dias_asistidos: Math.max(1, c.dias_entreno_cantidad - (k % 2)), dias_entrenados: ['L', 'X', 'V'],
+        estado: 'hecho', estado_animo: ['excelente', 'bien', 'neutro', 'bien'][k % 4], avances: k ? '' : 'Subió 2,5 kg en sentadilla.', created_at: d.toISOString(),
+      });
+    }
+  }
+  pendientes.push(
+    { id: 'pe1', user_id: 'coach-1', cliente_id: 'c0', para: 'cliente', descripcion: 'Enviar fotos de progreso', prioridad: 'alta', estado: 'abierto', fecha_limite: hoyISO, created_at: hoyISO },
+    { id: 'pe2', user_id: 'coach-1', cliente_id: 'c2', para: 'coach', descripcion: 'Ajustar macros de la fase 3', prioridad: 'media', estado: 'abierto', created_at: hoyISO },
+    { id: 'pe3', user_id: 'coach-1', cliente_id: null, para: 'coach', descripcion: 'Grabar cápsula de sueño', prioridad: 'baja', estado: 'abierto', created_at: hoyISO },
+  );
+  const mediciones_corporales = clientes.slice(0, 4).flatMap(c => [0, 30, 60].map((dd, j) => {
+    const d = new Date(hoy); d.setDate(d.getDate() - dd);
+    return { id: `m-${c.id}-${j}`, cliente_id: c.id, fecha: d.toISOString().slice(0, 10), peso: 78 - j * 0.9, grasa: 22 - j * 0.6 };
+  }));
+  return {
+    clientes, pagos, seguimientos, pendientes, mediciones_corporales,
+    settings: [{ user_id: 'coach-1', usd_cop_rate: 4000, nombre_coach: 'Mauro' }],
+    metas_historial: [], nutricion_insights: [], ia_uso: [], push_pago_log: [], fases: [], rutinas: [], sesiones: [],
+    comunidad_posts: [{ id: 'cp1', user_id: 'coach-1', texto: 'Esta semana: 3 entrenos y 8 horas de sueño.', fijado: true, publicado_en: hoyISO + 'T12:00:00Z', borrado_en: null }],
+    comunidad_reacciones: [{ post_id: 'cp1', cliente_id: 'c0', tipo: 'fuego', creado_en: new Date().toISOString() }, { post_id: 'cp1', cliente_id: 'c1', tipo: 'fuerza', creado_en: '2020-01-01T00:00:00Z' }],
+    comunidad_comentarios: [{ id: 'k1', post_id: 'cp1', cliente_id: 'c0', texto: '¡Vamos con todo!', creado_en: new Date().toISOString(), borrado_en: null },
+      { id: 'k2', post_id: 'cp1', cliente_id: 'c1', texto: 'Comentario que no gusta', creado_en: new Date().toISOString(), borrado_en: null }],
+    comunidad_vistas: [{ post_id: 'cp1', cliente_id: 'c0' }, { post_id: 'cp1', cliente_id: 'c1' }, { post_id: 'cp1', cliente_id: 'c2' }],
+  };
+}
+
+const hoy = new Date().toISOString().slice(0, 10);
+const b = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME } : {});
+let mal = 0;
+const ok = (nombre, c, extra = '') => { if (!c) mal++; console.log(`  ${c ? 'ok ' : 'MAL'}  ${nombre}${c ? '' : '  ' + extra}`); };
+
+async function abrir(ancho, alto) {
+  const ctx = await b.newContext({ viewport: { width: ancho, height: alto }, deviceScaleFactor: ancho > 1500 ? 1 : 2 });
+  const p = await ctx.newPage();
+  const errores = [];
+  p.on('pageerror', e => errores.push(e.message));
+  await ctx.addInitScript((t) => { window.TABLAS_FALSAS = t; }, datos(hoy));
+  await p.route('**/*', (ruta) => {
+    const u = ruta.request().url();
+    if (u.startsWith(BASE)) return ruta.continue();
+    if (u.includes('cdn.tailwindcss.com')) return ruta.fulfill({ contentType: 'text/javascript', body: `(function(){var s=document.createElement('style');s.textContent=${JSON.stringify(tailwind)};document.head.prepend(s);window.tailwind={config:{}};})();` });
+    if (u.includes('supabase-js')) return ruta.fulfill({ contentType: 'text/javascript', body: falso });
+    if (u.includes('fonts.googleapis.com') || u.includes('fonts.gstatic.com')) return ruta.continue().catch(() => ruta.abort());
+    // Las bases de otros proyectos (centro, Mealtracker) devuelven listas.
+    return ruta.fulfill({ status: 200, contentType: 'application/json', body: u.includes('/rest/v1/') ? '[]' : '{}' });
+  });
+  await p.goto(BASE + '/');
+  await p.locator('#app-screen').waitFor({ state: 'visible', timeout: 20000 });
+  await p.waitForTimeout(1200);
+  return { ctx, p, errores };
+}
+const b2 = b;
+const { p: pg } = await abrir(1440, 900);
+const vistas = await pg.evaluate(() => [...document.querySelectorAll('#main-nav [data-view]')].map(x => x.dataset.view));
+const res = {};
+for (const s of vistas) {
+  await pg.locator(`#main-nav [data-view="${s}"]`).first().click(); await pg.waitForTimeout(900);
+  res[s] = await pg.evaluate(() => {
+    const out = []; const emo = [];
+    for (const el of document.querySelectorAll('#app-screen *')) {
+      const r = el.getBoundingClientRect(); if (r.width < 12 || r.height < 12) continue;
+      const cs = getComputedStyle(el); if (cs.visibility === 'hidden' || cs.display === 'none') continue;
+      if (['INPUT'].includes(el.tagName) && /checkbox|radio/.test(el.type)) continue;
+      const lados = ['Top', 'Right', 'Bottom', 'Left'].filter(l => parseFloat(cs['border' + l + 'Width']) >= 1 && cs['border' + l + 'Style'] === 'solid' && !/rgba\(\d+, \d+, \d+, 0\)|transparent/.test(cs['border' + l + 'Color']));
+      if (lados.length === 4) out.push((el.tagName + '.' + [...el.classList].slice(0, 4).join('.')).slice(0, 80) + ' ' + cs.borderTopColor);
+    }
+    const w = document.createTreeWalker(document.getElementById('app-screen'), NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) if (/\p{Extended_Pictographic}/u.test(n.nodeValue) && n.parentElement.offsetParent) emo.push(n.nodeValue.trim().slice(0, 40));
+    return { bordes: [...new Set(out)], emojis: [...new Set(emo)] };
+  });
+}
+console.log(JSON.stringify(res, null, 1));
+await b2.close(); process.exit(0);
