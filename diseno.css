@@ -84,3 +84,37 @@
 .em-datos > div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--d-linea); font-size: 14px; }
 .em-datos > div:first-child { border-top: 0; }
 .em-datos span { color: var(--d-gris2); } .em-datos b { font-weight: 700; color: var(--d-gris); text-align: right; }
+
+/* Alternativas de un ejercicio (entreno-alternativas.js) */
+.ent-alt-btn .txt { display: none; }
+@media (min-width: 1280px) { .ent-alt-btn .txt { display: inline; } }
+.alt-modal { display: grid; gap: 10px; padding: 22px 24px 20px; }
+@media (max-width: 560px) { .alt-modal { padding: 16px 14px 14px; } }
+.alt-titulo { font-size: 22px; font-weight: 800; letter-spacing: -.02em; color: var(--d-gris); line-height: 1.15; margin: 0; }
+.alt-chico { font-size: 13px; color: var(--d-gris2); }
+.alt-ayuda { font-size: 14px; color: var(--d-gris2); margin: 0; line-height: 1.45; }
+.alt-aviso { font-size: 13.5px; color: #9A4F12; background: #FDF1E6; border-radius: 12px; padding: 9px 12px; margin: 0; }
+.alt-link { background: none; border: 0; padding: 0; font: inherit; font-weight: 700; color: #9A4F12; text-decoration: underline; cursor: pointer; }
+.alt-filtros { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.alt-filtro { border: 1px solid #DCDDE0; background: #fff; color: var(--d-gris); border-radius: 999px; padding: 6px 12px; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+.alt-filtro.on { background: var(--d-gris); border-color: var(--d-gris); color: #fff; }
+.alt-q { flex: 1 1 160px; min-width: 0; border: 1px solid #DCDDE0; border-radius: 999px; padding: 6px 12px; font-size: 13.5px; }
+.alt-cuenta { font-size: 12.5px; color: var(--d-gris3); white-space: nowrap; }
+.alt-lista { display: grid; gap: 8px; max-height: 62vh; overflow-y: auto; padding-right: 2px; }
+.alt-item { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 12px; align-items: center; background: #fff; border: 1px solid #ECEDEF; border-radius: 14px; padding: 10px 12px; }
+.alt-foto { width: 64px; height: 48px; object-fit: cover; border-radius: 9px; background: #F1F2F4; }
+.alt-fig { width: 64px; display: flex; justify-content: center; }
+.alt-nombre { font-size: 15px; font-weight: 700; color: var(--d-gris); line-height: 1.25; }
+.alt-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.alt-chip { font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 2px 8px; background: #F1F2F4; color: #5F6670; }
+.alt-chip.alt-por { background: #EAF1FB; color: #2F68C0; }
+.alt-meta { font-size: 12.5px; color: var(--d-gris2); margin-top: 4px; }
+.alt-marcas { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.alt-marca { font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 2px 8px; }
+.alt-ya { background: #FDF1E6; color: #9A4F12; } .alt-hizo { background: #E9F4EC; color: #2F6B3E; }
+.alt-vacio { font-size: 14px; color: var(--d-gris2); padding: 18px 4px; text-align: center; }
+@media (max-width: 560px) {
+  .alt-item { grid-template-columns: 52px minmax(0, 1fr); }
+  .alt-foto, .alt-fig { width: 52px; }
+  .alt-sust { grid-column: 1 / -1; width: 100%; justify-content: center; text-align: center; }
+}

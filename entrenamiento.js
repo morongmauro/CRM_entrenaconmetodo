@@ -2066,6 +2066,7 @@ function entFilaRutina(re, i, total, bloques) {
           </div>
         </div>
         <div class="flex gap-0.5 flex-shrink-0">
+          <button class="btn btn-ghost btn-sm ent-alt-btn" data-alternativas onclick="entAlternativas('${re.id}')" title="Alternativas: otro ejercicio parecido en su lugar">⇄<span class="txt"> Alternativas</span></button>
           <button class="btn btn-ghost btn-sm" onclick="entVerFicha('${e.id}')" title="Ver la ficha completa">👁</button>
           <button class="btn btn-ghost btn-sm" ${i === 0 ? 'disabled' : ''} onclick="entMoverRE('${re.id}', -1)">↑</button>
           <button class="btn btn-ghost btn-sm" ${i === total - 1 ? 'disabled' : ''} onclick="entMoverRE('${re.id}', 1)">↓</button>
