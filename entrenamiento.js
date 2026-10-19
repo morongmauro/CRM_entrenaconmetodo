@@ -367,6 +367,7 @@ const entDb = {
     }
     quien.forEach((set, id) => enUso.set(id, set.size));
     _ent.enUso = enUso;
+    _ent.quienUsa = quien;   // ejercicio → clientes que lo tienen hoy (reporte «Sin video por cliente»)
     return enUso;
   },
 
@@ -886,6 +887,63 @@ function entNivelesResumen(compacto = false) {
     </div>`;
 }
 
+// ---------- Reporte: ejercicios sin video, por cliente ----------
+// Con el ciclo vigente de cada cliente activo (el mismo que «Los usan ahora»):
+// cuántos clientes ven hoy algún ejercicio sin video, cuáles son, y por cuál
+// empezar (el que más clientes tienen). Tocar un ejercicio abre su ficha para
+// ponerle el video. Solo lee: no cambia nada.
+window.entReporteSinVideo = async () => {
+  openModal(modalShell('Ejercicios sin video, por cliente', '<div class="text-sm text-slate-500" data-reporte-cargando>Revisando el ciclo de cada cliente…</div>'), { wide: true });
+  await entDb.ejerciciosEnUso(true);
+  const ejercicios = _ent.ejercicios || await entDb.ejercicios();
+  const { data: clis } = await sb.from('clientes').select('id, nombre, estado');
+  const nombreCli = Object.fromEntries((clis || []).map(c => [c.id, c.nombre || 'Sin nombre']));
+  const activos = (clis || []).filter(c => String(c.estado || 'activo').toLowerCase() === 'activo');
+  const porId = Object.fromEntries((ejercicios || []).map(e => [e.id, e]));
+  const sinVideo = (e) => !!e && (e.video_fuente || 'ninguno') === 'ninguno';
+  const porCliente = new Map();
+  const faltan = [];
+  (_ent.quienUsa || new Map()).forEach((clientes, ejId) => {
+    const e = porId[ejId];
+    if (!sinVideo(e)) return;
+    faltan.push({ e, clientes: [...clientes] });
+    clientes.forEach(c => { if (!porCliente.has(c)) porCliente.set(c, []); porCliente.get(c).push(e); });
+  });
+  faltan.sort((a, b) => b.clientes.length - a.clientes.length || entNombres(a.e).grande.localeCompare(entNombres(b.e).grande));
+  const filasCli = [...porCliente.entries()].sort((a, b) => b[1].length - a[1].length || String(nombreCli[a[0]]).localeCompare(String(nombreCli[b[0]])));
+  const chip = (e) => `<button type="button" class="tag tag-gray" style="cursor:pointer" data-ej-sin-video="${e.id}" onclick="closeModal(); entEditarEjercicio('${e.id}')" title="Abrir la ficha para ponerle el video">${escapeHtml(entNombres(e).grande)}</button>`;
+  const cuerpo = !faltan.length
+    ? `<div class="rounded-xl bg-green-50 text-green-800 p-4 text-sm" data-reporte-ok>Todos los ejercicios que tus clientes tienen hoy tienen video.</div>`
+    : `
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5" data-reporte-resumen>
+      <div class="rounded-xl bg-slate-50 p-4"><div class="text-xs text-slate-500">Clientes con algún ejercicio sin video</div><div class="text-2xl font-bold text-slate-900"><span data-reporte-clientes>${porCliente.size}</span> <span class="text-base text-slate-500 font-semibold">de ${activos.length} activos</span></div></div>
+      <div class="rounded-xl bg-slate-50 p-4"><div class="text-xs text-slate-500">Ejercicios distintos sin video</div><div class="text-2xl font-bold text-red-600" data-reporte-ejercicios>${faltan.length}</div></div>
+      <div class="rounded-xl bg-slate-50 p-4"><div class="text-xs text-slate-500">Empieza por</div><div class="text-sm font-semibold text-slate-900 mt-1">${escapeHtml(entNombres(faltan[0].e).grande)}</div><div class="text-xs text-slate-500">lo tienen ${faltan[0].clientes.length} ${faltan[0].clientes.length === 1 ? 'cliente' : 'clientes'}</div></div>
+    </div>
+    <h4 class="font-bold text-slate-900 mb-2">Por ejercicio · primero los que más clientes tienen</h4>
+    <div class="divide-y divide-slate-100 mb-6" data-reporte-por-ejercicio>
+      ${faltan.map(x => `
+        <div class="py-2 flex items-start gap-3">
+          <div class="w-10 shrink-0 text-right font-bold text-slate-900">${x.clientes.length}</div>
+          <div class="min-w-0">
+            ${chip(x.e)}
+            <div class="text-xs text-slate-500 mt-1">${x.clientes.map(c => escapeHtml(nombreCli[c] || '')).sort().join(' · ')}</div>
+          </div>
+        </div>`).join('')}
+    </div>
+    <h4 class="font-bold text-slate-900 mb-2">Por cliente</h4>
+    <div class="divide-y divide-slate-100" data-reporte-por-cliente>
+      ${filasCli.map(([c, lista]) => `
+        <div class="py-2">
+          <div class="text-sm"><b class="text-slate-900">${escapeHtml(nombreCli[c] || '')}</b> · <span class="text-red-600 font-semibold">${lista.length} sin video</span></div>
+          <div class="flex flex-wrap gap-1 mt-1">${lista.map(chip).join('')}</div>
+        </div>`).join('')}
+    </div>`;
+  openModal(modalShell('Ejercicios sin video, por cliente', `
+    <p class="text-sm text-slate-600 mb-4">Lo que cada cliente activo tiene en su ciclo de hoy y todavía no tiene video. Toca un ejercicio para abrir su ficha y ponerle el video.</p>
+    ${cuerpo}`), { wide: true });
+};
+
 // Un clic en un nivel: ese nivel + «Sin video», lo que falta por buscar.
 window.entIrNivel = (nivel) => {
   _ent.filtros.uso = nivel;
@@ -982,10 +1040,11 @@ async function entVistaEjercicios() {
   await entDb.niveles();
 
   body.innerHTML = `
-    <div class="flex justify-between items-center mb-3">
+    <div class="flex flex-wrap justify-between items-center gap-2 mb-3">
       <div class="text-sm text-slate-600">${todos.length} ejercicio${todos.length === 1 ? '' : 's'} en la galería</div>
-      <div class="flex gap-2">
+      <div class="flex flex-wrap gap-2">
         <button class="btn btn-secondary btn-sm" onclick="entRevisarFotos()" data-revisar-fotos-btn title="Ver de golpe la foto que ve tu cliente en cada ejercicio y corregir la que no corresponda">🖼 Revisar fotos</button>
+        <button class="btn btn-secondary btn-sm" onclick="entReporteSinVideo()" data-reporte-sin-video title="Qué clientes tienen hoy ejercicios sin video, y cuáles son">👥 Sin video por cliente</button>
         <button class="btn btn-secondary btn-sm" onclick="entRevisarVideos()" title="Recorre los ejercicios filtrados, uno a uno, con sus propuestas de video">🎬 Revisar videos uno a uno</button>
         <button class="btn btn-primary btn-sm" onclick="entEditarEjercicio()">+ Nuevo ejercicio</button>
       </div>
