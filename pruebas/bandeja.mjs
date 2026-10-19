@@ -93,6 +93,8 @@ const de = (quien, pref) => b.atencion.find(a => a.cliente_id === quien && a.id.
 console.log('── Necesita tu atención ──');
 ok('nota sin leer (con el ejercicio del que habla)', de('eva', 'nota:n1') && de('eva', 'nota:n1').ejercicio === 'Prensa');
 ok('la nota ya leída no vuelve', !ids.includes('nota:n2'));
+ok('la nota ya leída queda en «Listas»', (b.notasListas || []).some(n => n.id === 'nota:n2' && n.listo_en));
+ok('la pendiente no está en «Listas»', !(b.notasListas || []).some(n => n.id === 'nota:n1'));
 ok('entreno saltado, con su motivo', de('dani', 'salto:d1') && de('dani', 'salto:d1').detalle === 'Viaje');
 ok('nota al cerrar el entreno', !!de('caro', 'cierre:c1'));
 ok('tres seguidas al límite', !!de('caro', 'rpe:'));

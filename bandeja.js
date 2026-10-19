@@ -28,7 +28,8 @@
 
 const BDJ_DIAS_VISTA = 7;          // el «día a día» enseña una semana
 const BDJ_DIAS_DATOS = 14;         // lo que se lee (para comparar semanas)
-const BDJ_DIAS_SERIES = 56;        // para el estancamiento: ocho semanas
+const BDJ_DIAS_SERIES = 56;
+const BDJ_DIAS_NOTAS = 30;         // notas: pendientes y listas de un mes        // para el estancamiento: ocho semanas
 const BDJ_CLAVE_VISTOS = 'bdj:vistos:v1';
 
 const _bdj = { filtro: 'todo', datos: null, cargando: null, cargadoEn: 0 };
@@ -76,6 +77,7 @@ function bdjArmar(d) {
 
   const atencion = [];
   const felicitar = [];
+  const notasListas = [];   // las que ya marcaste «Listo»: se guardan aparte
   const add = (lista, item) => lista.push({ ...item, cliente: nombreDe[item.cliente_id] || 'Cliente' });
 
   // Sesiones que cuentan: las del cliente (lo importado de Trainerize no es
@@ -84,11 +86,10 @@ function bdjArmar(d) {
 
   // ── 1. Notas que te dejó en la app ──
   (d.notas || []).forEach(n => {
-    if (n.leida_en) return;
-    add(atencion, {
+    add(n.leida_en ? notasListas : atencion, {
       id: `nota:${n.id}`, tipo: 'nota', cliente_id: n.cliente_id, fecha: n.fecha || String(n.created_at || '').slice(0, 10),
       icono: '💬', titulo: `Te escribió${n.rutina_id && rutinaDe[n.rutina_id] ? ` sobre ${rutinaDe[n.rutina_id]}` : ''}`,
-      detalle: n.texto, nota_id: n.id, ejercicio: n.ejercicio_nombre || null,
+      detalle: n.texto, nota_id: n.id, ejercicio: n.ejercicio_nombre || null, listo_en: n.leida_en || null,
     });
   });
 
@@ -318,7 +319,8 @@ function bdjArmar(d) {
     fecha,
     filas: Object.values(filas[fecha]).sort((a, b) => a.cliente.localeCompare(b.cliente)),
   }));
-  return { atencion, felicitar, dias };
+  notasListas.sort((a, b) => String(b.listo_en || b.fecha).localeCompare(String(a.listo_en || a.fecha)));
+  return { atencion, felicitar, dias, notasListas };
 }
 
 function bdjLunes(ymd) {
@@ -343,6 +345,10 @@ function bdjMarcarVisto(id) {
   const v = bdjVistos(); v.add(id);
   try { localStorage.setItem(BDJ_CLAVE_VISTOS, JSON.stringify([...v].slice(-800))); } catch (e) {}
 }
+function bdjQuitarVisto(id) {
+  const v = bdjVistos(); v.delete(id);
+  try { localStorage.setItem(BDJ_CLAVE_VISTOS, JSON.stringify([...v])); } catch (e) {}
+}
 
 // ═════════════════════════════════════════════════════════════════════
 // LOS DATOS
@@ -353,6 +359,8 @@ async function bdjCargar(forzar = false) {
   _bdj.cargando = (async () => {
     const hoy = fmt.hoy();
     const desde = bdjSumarDias(hoy, -(BDJ_DIAS_DATOS - 1));
+    // Las notas, un mes: así las pendientes no se pierden y las listas se pueden repasar.
+    const desdeNotas = bdjSumarDias(hoy, -(BDJ_DIAS_NOTAS - 1));
     const desdeSeries = bdjSumarDias(hoy, -BDJ_DIAS_SERIES);
     const avisos = [];
     // Cada lectura por su cuenta: si falta una tabla (migración sin correr),
@@ -377,7 +385,7 @@ async function bdjCargar(forzar = false) {
       db.clientes.list(),
       leer('fases', sb.from('fases').select('id,cliente_id,fecha_inicio,semanas,dias_semana,estado,visible_cliente').eq('estado', 'activa').eq('visible_cliente', true)),
       leerTodo('sesiones', () => sb.from('sesiones').select('*').gte('fecha', desdeSeries).order('fecha', { ascending: false }).order('id')),
-      leer('notas_entreno', sb.from('notas_entreno').select('*, ejercicios(nombre, alias)').gte('fecha', desde).order('created_at', { ascending: false }).limit(500)),
+      leer('notas_entreno', sb.from('notas_entreno').select('*, ejercicios(nombre, alias)').gte('fecha', desdeNotas).order('created_at', { ascending: false }).limit(500)),
       leerTodo('mediciones', () => sb.from('mediciones_corporales').select('*').gte('fecha', bdjSumarDias(hoy, -120)).order('fecha').order('id')),
       leerTodo('actividades', () => sb.from('actividades').select('*').gte('fecha', desde).order('fecha').order('id')),
       leer('evento_registros', sb.from('evento_registros').select('*, eventos(tipo,titulo)').gte('fecha', desde).order('fecha')),
@@ -455,17 +463,26 @@ routes.bandeja = async () => {
   const pasa = (tipo) => _bdj.filtro === 'todo' || tipo === _bdj.filtro;
   const pendientes = d.atencion.filter(a => !vistos.has(a.id) && pasa(a.tipo));
   const felicitar = d.felicitar.filter(a => !vistos.has(a.id) && pasa(a.tipo));
+  // Notas: pendientes y las que ya marcaste «Listo» (en la base o en este navegador).
+  const notasPend = d.atencion.filter(a => a.tipo === 'nota' && !vistos.has(a.id));
+  const notasListas = [
+    ...d.atencion.filter(a => a.tipo === 'nota' && vistos.has(a.id)),
+    ...(d.notasListas || []),
+  ].sort((a, b) => String(b.listo_en || b.fecha).localeCompare(String(a.listo_en || a.fecha)));
+  const soloNotas = _bdj.filtro === 'nota';
 
-  const tarjeta = (a, accion) => `
+  const tarjeta = (a, accion, deshacer) => `
     <div class="flex items-start gap-3 py-2.5" style="border-bottom:1px solid #f1f5f9">
       <div class="text-lg leading-none mt-0.5 w-6 text-center flex-shrink-0">${a.icono}</div>
       <div class="min-w-0 flex-1 cursor-pointer" onclick="verCliente('${a.cliente_id}')">
         <div class="text-sm"><strong class="text-slate-900">${escapeHtml(a.cliente)}</strong>
           <span class="text-slate-700"> · ${escapeHtml(a.titulo)}</span></div>
         ${a.detalle ? `<div class="text-xs text-slate-500 mt-0.5 leading-relaxed">${escapeHtml(a.detalle)}${a.ejercicio ? ` — <em>${escapeHtml(a.ejercicio)}</em>` : ''}</div>` : ''}
-        <div class="text-[11px] text-slate-400 mt-0.5">${a.fecha === fmt.hoy() ? 'hoy' : fmt.fechaCorta(a.fecha)}</div>
+        <div class="text-[11px] text-slate-400 mt-0.5">${a.fecha === fmt.hoy() ? 'hoy' : fmt.fechaCorta(a.fecha)}${deshacer && a.listo_en ? ` · listo el ${fmt.fechaCorta(String(a.listo_en).slice(0, 10))}` : ''}</div>
       </div>
-      <button class="btn btn-secondary btn-sm flex-shrink-0" onclick="bdjListo('${a.id}'${a.nota_id ? `, '${a.nota_id}'` : ''})">${accion}</button>
+      ${deshacer
+        ? `<button class="btn btn-ghost btn-sm flex-shrink-0" data-nota-deshacer onclick="bdjDeshacer('${a.id}'${a.nota_id ? `, '${a.nota_id}'` : ''})" title="Volver a pendientes">Deshacer</button>`
+        : `<button class="btn btn-secondary btn-sm flex-shrink-0" onclick="bdjListo('${a.id}'${a.nota_id ? `, '${a.nota_id}'` : ''})">${accion}</button>`}
     </div>`;
 
   const hoyYmd = fmt.hoy();
@@ -483,7 +500,7 @@ routes.bandeja = async () => {
     </div>
 
     <div class="flex gap-2 mb-5 overflow-x-auto pb-1">
-      ${BDJ_FILTROS.map(([id, lab]) => `<button class="chip ${_bdj.filtro === id ? 'active' : ''}" onclick="bdjFiltro('${id}')">${lab}</button>`).join('')}
+      ${BDJ_FILTROS.map(([id, lab]) => `<button class="chip ${_bdj.filtro === id ? 'active' : ''}" onclick="bdjFiltro('${id}')">${lab}${id === 'nota' && notasPend.length ? ` (${notasPend.length})` : ''}</button>`).join('')}
     </div>
 
     ${faltan.length ? `<div class="card mb-4 text-xs text-amber-900 bg-amber-50 border border-amber-200">
@@ -491,6 +508,26 @@ routes.bandeja = async () => {
     ${(d.avisos || []).includes('comida') ? `<div class="card mb-4 text-xs text-slate-600">
       La comida no aparece porque el CRM no está conectado por la API segura del Mealtracker (Ajustes → Conexión Mealtracker).</div>` : ''}
 
+    ${soloNotas ? `
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+      <div class="card" data-notas-pendientes>
+        <div class="flex items-baseline justify-between mb-1">
+          <h3 class="font-bold text-slate-900">Pendientes</h3>
+          <span class="text-xs text-slate-400">${notasPend.length}</span>
+        </div>
+        ${notasPend.length ? notasPend.map(a => tarjeta(a, 'Listo')).join('')
+          : '<div class="text-sm text-slate-500 py-3">Ninguna nota pendiente. 👌</div>'}
+      </div>
+      <div class="card" data-notas-listas>
+        <div class="flex items-baseline justify-between mb-1">
+          <h3 class="font-bold text-slate-900">Listas</h3>
+          <span class="text-xs text-slate-400">${notasListas.length}</span>
+        </div>
+        <p class="text-xs text-slate-500 mb-1">Las que ya marcaste «Listo» en los últimos ${BDJ_DIAS_NOTAS} días.</p>
+        ${notasListas.length ? notasListas.map(a => tarjeta(a, '', true)).join('')
+          : '<div class="text-sm text-slate-500 py-3">Todavía ninguna.</div>'}
+      </div>
+    </div>` : `
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
       <div class="card">
         <div class="flex items-baseline justify-between mb-1">
@@ -508,7 +545,7 @@ routes.bandeja = async () => {
         ${felicitar.length ? felicitar.map(a => tarjeta(a, 'Hecho')).join('')
           : '<div class="text-sm text-slate-500 py-3">Esta semana todavía nada que celebrar.</div>'}
       </div>
-    </div>
+    </div>`}
 
     <div class="card">
       <h3 class="font-bold text-slate-900 mb-1">Día a día</h3>
@@ -539,6 +576,16 @@ window.bdjListo = async (id, notaId) => {
   if (notaId) {
     // La nota se marca en la base: así queda leída también en el teléfono.
     try { await sb.from('notas_entreno').update({ leida_en: new Date().toISOString() }).eq('id', notaId); } catch (e) {}
+  }
+  bdjPintarContador();
+  routes.bandeja();
+};
+// Una nota marcada «Listo» por error vuelve a pendientes.
+window.bdjDeshacer = async (id, notaId) => {
+  bdjQuitarVisto(id);
+  if (notaId) {
+    try { await sb.from('notas_entreno').update({ leida_en: null }).eq('id', notaId); } catch (e) {}
+    await bdjCargar(true);
   }
   bdjPintarContador();
   routes.bandeja();
