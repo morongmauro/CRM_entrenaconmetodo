@@ -944,6 +944,135 @@ window.entReporteSinVideo = async () => {
     ${cuerpo}`), { wide: true });
 };
 
+// ---------- Reporte: ejercicios que el cliente ve sin «última vez» ----------
+// Por cada cliente activo, los ejercicios de su ciclo de hoy que no tienen
+// NINGUNA serie suya guardada, y por qué:
+//   · «de Trainerize» — la app ya le enseña lo último que hizo allá (la foto
+//     del export), así que no le sale vacío;
+//   · «en otro ejercicio» — tiene historial, pero en otra ficha con el mismo
+//     nombre (un duplicado o la que se cambió): ahí se perdió de vista;
+//   · «primera vez» — nunca lo ha hecho, ni aquí ni en lo que se trajo.
+// Solo lee: no cambia nada.
+const entNormNombre = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+window.entReporteSinHistorial = async () => {
+  const titulo = 'Ejercicios sin historial, por cliente';
+  openModal(modalShell(titulo, '<div class="text-sm text-slate-500" data-reporte-cargando>Revisando el historial de cada cliente…</div>'), { wide: true });
+  await entDb.ejerciciosEnUso(true);
+  const ejercicios = _ent.ejercicios || await entDb.ejercicios();
+  const porId = Object.fromEntries((ejercicios || []).map(e => [e.id, e]));
+  const { data: clis } = await sb.from('clientes').select('id, nombre, estado');
+  const nombreCli = Object.fromEntries((clis || []).map(c => [c.id, c.nombre || 'Sin nombre']));
+
+  // Lo que cada cliente tiene hoy (ejercicio → clientes, al revés).
+  const hoyDe = new Map();
+  (_ent.quienUsa || new Map()).forEach((clientes, ejId) => clientes.forEach(c => {
+    if (!hoyDe.has(c)) hoyDe.set(c, new Set());
+    hoyDe.get(c).add(ejId);
+  }));
+  const ids = [...hoyDe.keys()];
+  const tandas = (l, n) => { const t = []; for (let i = 0; i < l.length; i += n) t.push(l.slice(i, i + n)); return t; };
+  const todo = async (consulta) => {
+    const out = [];
+    for (let desde = 0; ; desde += 1000) {
+      const { data, error } = await consulta().range(desde, desde + 999);
+      if (error) throw error;
+      out.push(...(data || []));
+      if (!data || data.length < 1000) return out;
+    }
+  };
+
+  // Sus sesiones y, de ellas, qué ejercicios tienen series marcadas.
+  const clienteDeSesion = {};
+  for (const t of tandas(ids, 40)) {
+    (await todo(() => sb.from('sesiones').select('id, cliente_id').in('cliente_id', t).order('id')))
+      .forEach(x => { clienteDeSesion[x.id] = x.cliente_id; });
+  }
+  const conHistorial = new Map();   // cliente → Set(ejercicio)
+  for (const t of tandas(Object.keys(clienteDeSesion), 150)) {
+    (await todo(() => sb.from('series_log').select('sesion_id, ejercicio_id').in('sesion_id', t).eq('completada', true).order('id')))
+      .forEach(x => {
+        const c = clienteDeSesion[x.sesion_id];
+        if (!conHistorial.has(c)) conHistorial.set(c, new Set());
+        conHistorial.get(c).add(x.ejercicio_id);
+      });
+  }
+
+  // Lo último de Trainerize de cada uno, por nombre (si la tabla existe).
+  const deTrainerize = new Map();   // cliente → Set(nombre normalizado)
+  try {
+    for (const t of tandas(ids, 40)) {
+      const { data, error } = await sb.from('trainerize_resumen').select('cliente_id, datos').in('cliente_id', t);
+      if (error) break;
+      (data || []).forEach(f => ((f.datos && f.datos.rutinas) || []).forEach(r => (r.ejercicios || []).forEach(e => {
+        if (e.tiempo || !e.fecha || !Array.isArray(e.hist) || !e.hist.length || /⚠/.test(e.ultimo || '')) return;
+        if (!deTrainerize.has(f.cliente_id)) deTrainerize.set(f.cliente_id, new Set());
+        deTrainerize.get(f.cliente_id).add(entNormNombre(e.alias));
+      })));
+    }
+  } catch (e) { /* sin la foto de Trainerize el reporte sale igual */ }
+
+  const nombresDe = (e) => [e && e.alias, e && e.nombre].map(entNormNombre).filter(Boolean);
+  const filas = [];
+  const cuenta = { trainerize: 0, otro: 0, nada: 0 };
+  hoyDe.forEach((ejs, c) => {
+    const tiene = conHistorial.get(c) || new Set();
+    const tz = deTrainerize.get(c) || new Set();
+    const items = [];
+    ejs.forEach(ejId => {
+      if (tiene.has(ejId)) return;
+      const e = porId[ejId] || { id: ejId, nombre: 'Ejercicio' };
+      const mios = nombresDe(e);
+      let estado = 'nada', otro = null;
+      if (mios.some(n => tz.has(n))) estado = 'trainerize';
+      else {
+        const gemelo = [...tiene].map(id => porId[id]).find(o => o && o.id !== ejId && nombresDe(o).some(n => mios.includes(n)));
+        if (gemelo) { estado = 'otro'; otro = gemelo; }
+      }
+      cuenta[estado]++;
+      items.push({ e, estado, otro });
+    });
+    if (items.length) filas.push({ c, items });
+  });
+  const orden = { otro: 0, nada: 1, trainerize: 2 };
+  filas.forEach(f => f.items.sort((a, b) => orden[a.estado] - orden[b.estado] || entNombres(a.e).grande.localeCompare(entNombres(b.e).grande)));
+  filas.sort((a, b) => b.items.filter(x => x.estado !== 'trainerize').length - a.items.filter(x => x.estado !== 'trainerize').length
+    || String(nombreCli[a.c]).localeCompare(String(nombreCli[b.c])));
+
+  const TONO = {
+    otro: ['bg-amber-50 text-amber-900', 'en otro ejercicio'],
+    nada: ['bg-slate-100 text-slate-700', 'primera vez'],
+    trainerize: ['bg-green-50 text-green-800', 'ya ve lo de Trainerize'],
+  };
+  const item = (x) => `
+    <div class="flex flex-wrap items-center gap-2 py-1" data-sin-historial="${x.estado}">
+      <button type="button" class="tag tag-gray" style="cursor:pointer" onclick="closeModal(); entEditarEjercicio('${x.e.id}')" title="Abrir la ficha">${escapeHtml(entNombres(x.e).grande)}</button>
+      <span class="text-xs rounded-full px-2 py-0.5 ${TONO[x.estado][0]}">${TONO[x.estado][1]}</span>
+      ${x.otro ? `<span class="text-xs text-slate-500">su historial está en <b>${escapeHtml(entNombres(x.otro).grande)}</b></span>` : ''}
+    </div>`;
+  const total = cuenta.trainerize + cuenta.otro + cuenta.nada;
+  const cuerpo = !total
+    ? `<div class="rounded-xl bg-green-50 text-green-800 p-4 text-sm" data-reporte-ok>Todos los ejercicios que tus clientes tienen hoy ya tienen su «última vez».</div>`
+    : `
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5" data-reporte-resumen>
+      <div class="rounded-xl bg-amber-50 p-4"><div class="text-xs text-amber-900">En otro ejercicio (duplicado o cambiado)</div><div class="text-2xl font-bold text-amber-900" data-cuenta-otro>${cuenta.otro}</div><div class="text-xs text-amber-900/80">Tiene historial, pero en otra ficha: se puede juntar.</div></div>
+      <div class="rounded-xl bg-slate-50 p-4"><div class="text-xs text-slate-500">Primera vez</div><div class="text-2xl font-bold text-slate-900" data-cuenta-nada>${cuenta.nada}</div><div class="text-xs text-slate-500">Nunca lo ha registrado: es normal que salga vacío.</div></div>
+      <div class="rounded-xl bg-green-50 p-4"><div class="text-xs text-green-800">Ya ve lo último de Trainerize</div><div class="text-2xl font-bold text-green-800" data-cuenta-trainerize>${cuenta.trainerize}</div><div class="text-xs text-green-800/80">No le sale vacío: la app le muestra eso.</div></div>
+    </div>
+    <div class="divide-y divide-slate-100" data-reporte-por-cliente>
+      ${filas.map(f => `
+        <div class="py-3">
+          <div class="text-sm mb-1"><b class="text-slate-900">${escapeHtml(nombreCli[f.c] || '')}</b>
+            <span class="text-slate-500">· ${f.items.length} sin historial en la app</span></div>
+          ${f.items.map(item).join('')}
+        </div>`).join('')}
+    </div>`;
+  openModal(modalShell(titulo, `
+    <p class="text-sm text-slate-600 mb-4">Los ejercicios del ciclo de hoy de cada cliente activo que no tienen ninguna serie suya guardada, y por qué. Solo lee: no cambia nada.</p>
+    ${cuerpo}`), { wide: true });
+};
+
 // Un clic en un nivel: ese nivel + «Sin video», lo que falta por buscar.
 window.entIrNivel = (nivel) => {
   _ent.filtros.uso = nivel;
@@ -1045,6 +1174,7 @@ async function entVistaEjercicios() {
       <div class="flex flex-wrap gap-2">
         <button class="btn btn-secondary btn-sm" onclick="entRevisarFotos()" data-revisar-fotos-btn title="Ver de golpe la foto que ve tu cliente en cada ejercicio y corregir la que no corresponda">🖼 Revisar fotos</button>
         <button class="btn btn-secondary btn-sm" onclick="entReporteSinVideo()" data-reporte-sin-video title="Qué clientes tienen hoy ejercicios sin video, y cuáles son">👥 Sin video por cliente</button>
+        <button class="btn btn-secondary btn-sm" onclick="entReporteSinHistorial()" data-reporte-sin-historial title="Qué ejercicios de hoy le salen al cliente sin «última vez», y por qué">📈 Sin historial por cliente</button>
         <button class="btn btn-secondary btn-sm" onclick="entRevisarVideos()" title="Recorre los ejercicios filtrados, uno a uno, con sus propuestas de video">🎬 Revisar videos uno a uno</button>
         <button class="btn btn-primary btn-sm" onclick="entEditarEjercicio()">+ Nuevo ejercicio</button>
       </div>
