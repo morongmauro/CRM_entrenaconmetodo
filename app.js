@@ -229,7 +229,7 @@ async function fetchRemindersMT(mtId) {
   if (mtApiBase()) {
     const res = await mtApiGet(`/api/coach-data?action=reminders&user_id=${encodeURIComponent(mtId)}`);
     if (res && Array.isArray(res.reminders)) {
-      return { list: res.reminders, device: { pwa: res.pwa_installed_at || null, push: res.push_enabled_at || null, upd: res.mt_updated_at || null, pwaNueva: res.pwa_nueva_at || null, abreEn: res.abre_en || null, abreEnAt: res.abre_en_at || null } };
+      return { list: res.reminders, device: { pwa: res.pwa_installed_at || null, push: res.push_enabled_at || null, upd: res.mt_updated_at || null, pwaNueva: res.pwa_nueva_at || null, abreEn: res.abre_en || null, abreEnAt: res.abre_en_at || null, vista: res.vista_app || null } };
     }
   }
   const mt = mtClient();
@@ -284,6 +284,19 @@ function renderRemindersMT() {
         d.push
           ? `<span class="tag tag-green" title="Activó las notificaciones push el ${fmt.fecha(String(d.push).slice(0, 10))}">🔔 push activo</span>`
           : `<span class="tag" style="background:#fef3c7;color:#b45309" title="No ha aceptado los recordatorios push — pídele tocar Activar en el aviso de su app">🔕 sin push</span>`,
+        // La vista de su app (completa o compacta) y, para quien está en la
+        // prueba, el botón para ponérsela o quitársela.
+        (() => {
+          const v = d.vista;
+          const compacta = v && v.modo === 'compacta';
+          const quien = v && v.por === 'coach' ? 'se la pusiste tú' : 'la eligió él';
+          const chip = compacta
+            ? `<span class="tag" data-vista-ficha="compacta" style="background:#EAF1FB;color:#2D62B0" title="Ve la app compacta (solo Entrenamiento, Alimentación y Más) desde el ${fmt.fecha(String(v.desde).slice(0, 10))} · ${quien}">▦ vista compacta · ${fmt.fechaCorta(String(v.desde).slice(0, 10))}</span>`
+            : `<span class="tag" data-vista-ficha="completa" style="background:#f1f5f9;color:#64748b" title="Ve la app completa">vista completa</span>`;
+          const puede = VISTA_COMPACTA_PRUEBA.includes(normalizeName(_mtRem.nombre || ''));
+          const boton = puede ? `<button type="button" data-cambiar-vista class="btn btn-secondary btn-sm" onclick="cambiarVistaMT('${compacta ? 'completa' : 'compacta'}')" title="Le cambia la vista la próxima vez que abra la app">${compacta ? 'Ponerle la completa' : 'Ponerle la compacta'}</button>` : '';
+          return chip + (boton ? ' ' + boton : '');
+        })(),
         // Abre la app tal como la ve este cliente (solo lectura, pase de 15 min).
         `<button type="button" data-ver-como class="btn btn-secondary btn-sm ml-1" onclick="verComoCliente()" title="Abre su app en otra pestaña, tal como la ve él: su Dash, su semana, sus rutinas, su chat de comida. Solo lectura: nada de lo que toques se guarda. El pase dura 15 minutos.">👁 Ver como cliente</button>`,
       ].join(' ');
@@ -339,8 +352,19 @@ window.verComoClienteId = async (clienteId) => {
   toast(`👁 Viendo la app como ${r.name} · solo lectura · ${r.minutos || 15} min`);
 };
 
+// El coach le pone la vista completa o la compacta (la app la toma al abrir).
+window.cambiarVistaMT = async (modo) => {
+  if (!_mtRem.userId) return;
+  const r = await mtApiPatch(`/api/coach-data?action=vista&user_id=${encodeURIComponent(_mtRem.userId)}`, { modo });
+  if (!r || !r.ok) { toast('⚠️ No se pudo cambiar la vista de su app'); return; }
+  _mtRem.device = { ...(_mtRem.device || {}), vista: r.vista_app };
+  _pwaInstallCache = null;
+  renderRemindersMT();
+  toast(modo === 'compacta' ? '▦ Vista compacta: la verá al abrir la app' : 'Vista completa: la verá al abrir la app');
+};
+
 async function cargarRemindersMT(cliente) {
-  _mtRem = { userId: null, list: [], device: null };
+  _mtRem = { userId: null, list: [], device: null, nombre: cliente && cliente.nombre };
   const el = $('#sg-mt-rem-list');
   if (el) el.innerHTML = '<div class="text-xs text-slate-400">Cargando…</div>';
   if (!mtConfigured()) {
@@ -6381,7 +6405,7 @@ async function fetchInstalacionesMT() {
   if (mtApiBase()) {
     const res = await mtApiGet('/api/coach-data?action=list');
     if (res && Array.isArray(res.clients)) {
-      filas = res.clients.map(c => ({ name: c.name, pwa: c.pwa_installed_at || null, push: c.push_enabled_at || null, nueva: c.app_nueva_at || null, pwaNueva: c.pwa_nueva_at || null, abreEn: c.abre_en || null, abreEnAt: c.abre_en_at || null }));
+      filas = res.clients.map(c => ({ name: c.name, pwa: c.pwa_installed_at || null, push: c.push_enabled_at || null, nueva: c.app_nueva_at || null, pwaNueva: c.pwa_nueva_at || null, abreEn: c.abre_en || null, abreEnAt: c.abre_en_at || null, vista: c.vista_app || null }));
     }
   }
   // Modo directo (anon key)
@@ -6400,7 +6424,9 @@ async function fetchInstalacionesMT() {
     const n = normalizeName(f.name || '');
     if (!n) continue;
     const prev = porNombre.get(n);
-    if (!prev) { porNombre.set(n, { pwa: f.pwa, push: f.push, nueva: f.nueva, pwaNueva: f.pwaNueva, abreEn: f.abreEn, abreEnAt: f.abreEnAt }); continue; }
+    if (!prev) { porNombre.set(n, { pwa: f.pwa, push: f.push, nueva: f.nueva, pwaNueva: f.pwaNueva, abreEn: f.abreEn, abreEnAt: f.abreEnAt, vista: f.vista || null }); continue; }
+    // La vista de la app: la elegida más recientemente en cualquiera de sus dispositivos.
+    if (f.vista && (!prev.vista || String(f.vista.desde || '') > String(prev.vista.desde || ''))) prev.vista = f.vista;
     // Cómo la abre: la señal MÁS RECIENTE de cualquiera de sus dispositivos.
     if (f.abreEnAt && (!prev.abreEnAt || String(f.abreEnAt) > String(prev.abreEnAt))) { prev.abreEn = f.abreEn; prev.abreEnAt = f.abreEnAt; }
     if (f.nueva && (!prev.nueva || String(f.nueva) < String(prev.nueva))) prev.nueva = f.nueva;
@@ -6479,6 +6505,13 @@ async function cargarPanelInstalaciones(clientes) {
 // Subsección abierta en Clientes. Arranca en Activos: es con quien se
 // trabaja el día a día. Los otros dos siguen a un toque de distancia.
 let _cliSub = 'activo';   // activo | pausa | finalizado
+// Filtro «Vista compacta»: solo los que usan la app en la vista compacta.
+let _cliSoloCompacta = false;
+window.cliSoloCompacta = () => { _cliSoloCompacta = !_cliSoloCompacta; rerenderView(); };
+// Quiénes pueden probar la vista compacta (igual que VISTA_COMPACTA_PRUEBA
+// en la app, src/vistaApp.js). Al resto la app no se la muestra todavía.
+const VISTA_COMPACTA_PRUEBA = ['mauro moron'];
+const vistaDe = (c) => { const m = _pwaInstallCache && _pwaInstallCache.rows; const d = m && m.get(normalizeName(c.nombre || '')); return (d && d.vista) || null; };
 window.cliSub = (k) => { _cliSub = k; rerenderView(); };
 
 routes.clientes = async () => {
@@ -6490,7 +6523,9 @@ routes.clientes = async () => {
   // Los que se pintan es la subsección elegida, no todos revueltos. Un
   // cliente en pausa o finalizado ya no aparece en Seguimiento, Nutrición
   // ni Entrenamiento: aquí es donde se le encuentra.
-  const enPantalla = _cliSub === 'pausa' ? pausa : _cliSub === 'finalizado' ? fin : activos;
+  const enSub = _cliSub === 'pausa' ? pausa : _cliSub === 'finalizado' ? fin : activos;
+  const compactas = enSub.filter(c => (vistaDe(c) || {}).modo === 'compacta');
+  const enPantalla = _cliSoloCompacta ? compactas : enSub;
   const subs = [
     ['activo', 'Activos', activos.length],
     ['pausa', 'En pausa', pausa.length],
@@ -6529,6 +6564,7 @@ routes.clientes = async () => {
       ${subs.map(([k, lab, n]) => `
         <button class="chip ${_cliSub === k ? 'active' : ''}" onclick="cliSub('${k}')">${lab} · ${n}</button>
       `).join('')}
+      <button data-filtro-compacta class="chip ${_cliSoloCompacta ? 'active' : ''}" onclick="cliSoloCompacta()" title="Los que usan la app en la vista compacta (solo Entrenamiento, Alimentación y Más)">▦ Vista compacta · ${compactas.length}</button>
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -6557,6 +6593,7 @@ routes.clientes = async () => {
                 return `<div class="flex justify-between" title="Journey del cliente — abre la ficha para ver el detalle"><span class="text-slate-500">Journey</span><span class="font-medium ${n === tot ? 'text-emerald-600' : n >= tot / 2 ? 'text-amber-600' : 'text-slate-500'}">🚀 ${n}/${tot}</span></div>`;
               })()}
               <div class="flex justify-between" data-caps-cell="${c.id}" title="Cápsulas informativas abiertas — abre la ficha para ver cuáles"></div>
+              <div class="flex justify-between" data-vista-cell="${c.id}" title="Cómo ve la app: completa o compacta (y desde cuándo)">${celdaVista(c)}</div>
             </div>
             ${(c.tags && c.tags.length) ? `<div class="mt-3 pt-3 border-t border-slate-100">${c.tags.map(t => `<span class="tag-pill">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
           </div>
@@ -6569,7 +6606,12 @@ routes.clientes = async () => {
       }</div>` : ''}
     </div>
   `;
-  cargarPanelInstalaciones(enPantalla);
+  cargarPanelInstalaciones(enPantalla).then(() => {
+    // Con lo que trajo la app: la vista de cada uno y el número del filtro.
+    enPantalla.forEach(c => { const el = document.querySelector(`[data-vista-cell="${c.id}"]`); if (el) el.innerHTML = celdaVista(c); });
+    const chip = document.querySelector('[data-filtro-compacta]');
+    if (chip) chip.textContent = `▦ Vista compacta · ${enSub.filter(c => (vistaDe(c) || {}).modo === 'compacta').length}`;
+  });
   pintarCapsulasEnCards(enPantalla);
   };
 
@@ -6584,6 +6626,16 @@ routes.clientes = async () => {
   _cliDataCache = { clientes, allSegs, firma };
   if (!igual) renderClientes(clientes, allSegs);
 };
+
+// La fila «App» de la tarjeta del cliente: completa o compacta, y desde cuándo.
+function celdaVista(c) {
+  const v = vistaDe(c);
+  if (!v) return '<span class="text-slate-500">App</span><span class="font-medium text-slate-400">—</span>';
+  const desde = v.desde ? fmt.fechaCorta(String(v.desde).slice(0, 10)) : '';
+  return v.modo === 'compacta'
+    ? `<span class="text-slate-500">App</span><span class="font-medium" style="color:#2D62B0" data-vista="compacta">▦ Compacta${desde ? ` · ${desde}` : ''}</span>`
+    : `<span class="text-slate-500">App</span><span class="font-medium text-slate-600" data-vista="completa">Completa</span>`;
+}
 
 function clienteForm(c = {}) {
   // Objetivo guardado como texto → qué chips van marcados y qué queda como "otro"

@@ -913,8 +913,128 @@ const COMP_TABS = [
   ['calculadora', '🧮 Calculadora de meta'],
 ];
 
+// =====================================================
+// EL EQUIPO DE UN VISTAZO
+// =====================================================
+// Todos los clientes activos en tres listas:
+//   · Composición al día — su última medición tiene menos de seis semanas
+//     (un ciclo con su medición al final).
+//   · Hace rato sin actualizar — más de seis semanas, o nunca se midió.
+//   · Posible cambio de meta — su última medición se aparta de verdad de la
+//     meta vigente (los mismos umbrales del aviso: peso, % grasa o kcal).
+//     No entra quien solo tiene una meta vieja sin peso de referencia: eso
+//     va aparte, porque no dice que la meta esté mal.
+// Solo lee. Tocar un cliente abre su composición.
+const COMP_DIAS_AL_DIA = 42;
+
+function compClasificar(c, meds, metas) {
+  const conPeso = (meds || []).filter(m => m.peso != null).slice().sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
+  const ultima = conPeso[conPeso.length - 1] || (meds || []).slice().sort((a, b) => (a.fecha || '').localeCompare(b.fecha || '')).pop() || null;
+  const dias = ultima && ultima.fecha ? Math.round((Date.parse(fmt.hoy() + 'T12:00:00Z') - Date.parse(ultima.fecha + 'T12:00:00Z')) / 86400000) : null;
+  const aviso = compEvaluarMeta(c, meds, metas);
+  let genuino = false, motivos = [];
+  if (aviso && aviso.nivel === 'revisar' && !compSilenciado(c.id, aviso.medicion)) {
+    const pesoRef = aviso.ref && aviso.ref.peso_kg != null ? Number(aviso.ref.peso_kg) : null;
+    if (aviso.dPeso != null && pesoRef != null && Math.abs(aviso.dPeso) >= Math.max(COMP_UMBRALES.kg, pesoRef * COMP_UMBRALES.kg_pct)) motivos.push(`peso ${aviso.dPeso > 0 ? '+' : ''}${aviso.dPeso} kg`);
+    if (aviso.dGrasa != null && Math.abs(aviso.dGrasa) >= COMP_UMBRALES.grasa_pp) motivos.push(`grasa ${aviso.dGrasa > 0 ? '+' : ''}${aviso.dGrasa} pts`);
+    if (aviso.dKcal != null && Math.abs(aviso.dKcal) >= COMP_UMBRALES.kcal) motivos.push(`recalculada ${aviso.dKcal > 0 ? '+' : ''}${aviso.dKcal} kcal`);
+    genuino = motivos.length > 0;
+  }
+  const sinReferencia = !!(aviso && aviso.nivel === 'revisar' && !genuino && aviso.ref && aviso.ref.peso_kg == null);
+  return { c, ultima, dias, aviso, genuino, motivos, sinReferencia, sinMeta: !!(aviso && aviso.nivel === 'sin_meta') };
+}
+
+async function compCargarEquipo(forzar = false) {
+  if (_comp.equipo && !forzar) return;
+  _comp.equipo = { cargando: true };
+  rerenderView();
+  try {
+    if (forzar) invalidarCache('clientes', 'mediciones', 'metas');
+    const clientes = (await db.clientes.list()).filter(c => (c.estado || 'activo') === 'activo');
+    const ids = clientes.map(c => c.id);
+    const tandas = []; for (let i = 0; i < ids.length; i += 60) tandas.push(ids.slice(i, i + 60));
+    const todo = async (q) => {
+      const out = [];
+      for (let desde = 0; ; desde += 1000) {
+        const { data, error } = await q().range(desde, desde + 999);
+        if (error) return null;
+        out.push(...(data || []));
+        if (!data || data.length < 1000) return out;
+      }
+    };
+    const meds = [], metas = [];
+    let sinMetas = false;
+    for (const t of tandas) {
+      meds.push(...((await todo(() => sb.from('mediciones_corporales').select('*').in('cliente_id', t).order('fecha', { ascending: true }).order('id'))) || []));
+      const m = await todo(() => sb.from('metas_historial').select('*').in('cliente_id', t).order('fecha', { ascending: false }).order('created_at', { ascending: false }));
+      if (m === null) sinMetas = true; else metas.push(...m);
+    }
+    const filas = clientes.map(c => compClasificar(c, meds.filter(m => m.cliente_id === c.id), sinMetas ? null : metas.filter(m => m.cliente_id === c.id)));
+    _comp.equipo = { filas, cargadoEn: Date.now() };
+  } catch (e) {
+    _comp.equipo = { error: e.message || String(e) };
+  }
+  rerenderView();
+}
+
+function compEquipoHTML() {
+  const eq = _comp.equipo || {};
+  if (eq.cargando) return '<div class="card"><div class="sk sk-line" style="width:40%"></div><div class="sk sk-card" style="margin:.9rem 0"></div></div>';
+  if (eq.error) return `<div class="card border-l-4 border-red-400"><div class="font-bold text-slate-800 mb-1">No pude cargar</div><p class="text-sm text-slate-600">${escapeHtml(eq.error)}</p></div>`;
+  const filas = eq.filas || [];
+  const alDia = filas.filter(f => f.dias != null && f.dias <= COMP_DIAS_AL_DIA).sort((a, b) => a.dias - b.dias);
+  const viejos = filas.filter(f => f.dias == null || f.dias > COMP_DIAS_AL_DIA).sort((a, b) => (b.dias == null ? 1e9 : b.dias) - (a.dias == null ? 1e9 : a.dias));
+  const meta = filas.filter(f => f.genuino).sort((a, b) => b.motivos.length - a.motivos.length);
+  const otros = filas.filter(f => f.sinMeta || f.sinReferencia);
+  const nombre = (f) => `<button type="button" class="font-semibold text-slate-900 hover:underline text-left" onclick="compAbrirCliente('${f.c.id}')">${escapeHtml(f.c.nombre)}</button>`;
+  const med = (f) => f.ultima ? `${f.ultima.peso != null ? `${f.ultima.peso} kg` : ''}${f.ultima.grasa_pct != null ? ` · ${f.ultima.grasa_pct}%` : ''}` : '';
+  const lista = (titulo, sub, items, fila, attr, vacio, tono) => `
+    <div class="card" ${attr}>
+      <div class="flex items-baseline justify-between mb-1"><h3 class="font-bold text-slate-900">${titulo}</h3><span class="text-xs font-bold ${tono}">${items.length}</span></div>
+      <p class="text-xs text-slate-500 mb-2">${sub}</p>
+      ${items.length ? items.map(f => `<div class="py-2 text-sm" style="border-top:1px solid #f1f5f9">${fila(f)}</div>`).join('') : `<div class="text-sm text-slate-400 py-2">${vacio}</div>`}
+    </div>`;
+  return `
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+      ${lista('✅ Composición al día', `Última medición hace ${COMP_DIAS_AL_DIA} días o menos.`, alDia,
+        f => `<div class="flex justify-between gap-2">${nombre(f)}<span class="text-xs text-slate-500 text-right">${fmt.fechaCorta(f.ultima.fecha)} · hace ${f.dias} d</span></div><div class="text-xs text-slate-500">${med(f)}</div>`,
+        'data-comp-al-dia', 'Nadie con medición reciente.', 'text-emerald-600')}
+      ${lista('⏳ Hace rato sin actualizar', `Más de ${COMP_DIAS_AL_DIA} días sin medirse, o nunca.`, viejos,
+        f => `<div class="flex justify-between gap-2">${nombre(f)}<span class="text-xs ${f.dias == null ? 'text-red-600' : 'text-amber-700'} text-right">${f.dias == null ? 'nunca se ha medido' : `hace ${f.dias} días`}</span></div>${f.ultima ? `<div class="text-xs text-slate-500">Última: ${fmt.fechaCorta(f.ultima.fecha)} · ${med(f)}</div>` : ''}`,
+        'data-comp-viejos', 'Todos tienen medición reciente. 👌', 'text-amber-700')}
+      ${lista('🎯 Posible cambio de meta', 'Su última medición se aparta de la meta vigente (peso, % grasa o kcal recalculadas).', meta,
+        f => `<div class="flex justify-between gap-2">${nombre(f)}<span class="text-xs text-slate-500 text-right">${f.aviso.ref && f.aviso.ref.kcal ? `${f.aviso.ref.kcal} kcal hoy` : ''}${f.aviso.propuesta ? ` → ${f.aviso.propuesta.kcal}` : ''}</span></div><div class="text-xs text-amber-800">${escapeHtml(f.motivos.join(' · '))}</div>`,
+        'data-comp-meta', 'Las metas siguen cuadrando con la última medición.', 'text-blue-700')}
+    </div>
+    ${otros.length ? `<div class="card" data-comp-otros>
+      <h3 class="font-bold text-slate-900 mb-1">Para revisar con calma</h3>
+      <p class="text-xs text-slate-500 mb-2">No dice que la meta esté mal: falta información para compararla.</p>
+      ${otros.map(f => `<div class="py-1.5 text-sm" style="border-top:1px solid #f1f5f9">${nombre(f)} <span class="text-xs text-slate-500">· ${f.sinMeta ? 'tiene medición pero no tiene meta nutricional' : 'su meta no guarda con qué peso se calculó: recalcularla deja la trazabilidad'}</span></div>`).join('')}
+    </div>` : ''}`;
+}
+
+window.compVerEquipo = (on) => { _comp.vistaEquipo = on; if (on) compCargarEquipo(); else rerenderView(); };
+window.compAbrirCliente = (id) => { _comp.vistaEquipo = false; _comp.tab = 'panorama'; compCargar(id); };
+window.compRefrescarEquipo = () => compCargarEquipo(true);
+
 routes.composicion = async () => {
   const clientes = (await db.clientes.list()).filter(c => c.estado !== 'finalizado');
+  if (_comp.vistaEquipo) {
+    if (!_comp.equipo) { compCargarEquipo(); return; }
+    view.innerHTML = `
+      <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div>
+          <h2 class="text-lg font-bold text-slate-900">🧬 Composición · todo el equipo</h2>
+          <p class="text-xs text-slate-500">Quién está al día con su medición, quién hace rato no se mide y a quién conviene revisarle la meta según su última medición. Solo lee: toca un nombre para abrir su composición.</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <button class="btn btn-secondary btn-sm" onclick="compRefrescarEquipo()">🔄 Actualizar</button>
+          <button class="btn btn-secondary btn-sm" onclick="compVerEquipo(false)">👤 Por cliente</button>
+        </div>
+      </div>
+      ${compEquipoHTML()}`;
+    return;
+  }
 
   if (!_comp.clienteId && clientes.length) {
     _comp.clienteId = clientes[0].id;
@@ -934,6 +1054,7 @@ routes.composicion = async () => {
         <select class="text-sm !w-auto min-w-[200px]" onchange="compElegirCliente(this.value)">
           ${clientes.map(c => `<option value="${c.id}" ${c.id === _comp.clienteId ? 'selected' : ''}>${escapeHtml(c.nombre)}</option>`).join('')}
         </select>
+        <button class="btn btn-secondary btn-sm" onclick="compVerEquipo(true)" data-comp-ver-equipo title="Quién está al día, quién hace rato no se mide y a quién revisarle la meta">👥 Todo el equipo</button>
         <button class="btn btn-secondary btn-sm" onclick="compRefrescar()">🔄 Actualizar</button>
         <button class="btn btn-primary btn-sm" onclick="nuevaMedicion('${_comp.clienteId}')">📏 Nueva medición</button>
         ${_comp.clienteId ? `<button class="btn btn-secondary btn-sm" onclick="verNutricionCliente('${_comp.clienteId}')">🥗 Nutrición</button>` : ''}
