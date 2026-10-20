@@ -160,7 +160,7 @@ guion = (body, n) => {
   return texto('Ahí tienes la variante.');
 };
 await p.evaluate(() => { _rut.chat.nivel = 'rapido'; rutPintar(); });
-ok('con la rutina abierta salen los 4 botones de variante', await p.locator('#rut-panel [data-rut-variantes] .rut-var-btn').count() === 4);
+ok('con la rutina abierta salen los 4 botones de variante y «Cambiar solo los ejercicios»', await p.locator('#rut-panel [data-rut-variantes] .rut-var-btn[data-variante]').count() === 4 && await p.locator('#rut-panel [data-cambiar-solo-ejercicios]').count() === 1);
 await p.locator('#rut-panel [data-variante="sin_peso"]').click();
 await p.waitForFunction(() => document.querySelector('#rut-panel [data-rut-variante]'), null, { timeout: 8000 }).catch(() => {});
 ok('el botón «Sin peso» pregunta en Profundo', pedidos[0]?.nivel === 'profundo' && /SIN PESO/.test((pedidos[0]?.messages || [])[0]?.content || ''));

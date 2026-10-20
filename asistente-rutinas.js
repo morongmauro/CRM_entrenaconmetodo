@@ -1347,6 +1347,7 @@ function rutPanelHTML() {
       ${rutPropuestasHTML()}
       ${rutAbierta() ? `
         <div class="rut-variantes" data-rut-variantes>
+          <button class="rut-var-btn rut-var-ej" data-cambiar-solo-ejercicios onclick="entCambiarEjercicios()">⇄ Cambiar solo los ejercicios</button>
           <span>Variante de esta rutina:</span>
           ${Object.entries(RUT_VARIANTES).map(([k, v]) => `<button class="rut-var-btn" data-variante="${k}" onclick="rutVariante('${k}')" ${ch?.trabajando ? 'disabled' : ''}>${v[0]}</button>`).join('')}
         </div>` : ''}

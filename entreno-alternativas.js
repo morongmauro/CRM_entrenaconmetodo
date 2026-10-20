@@ -280,3 +280,194 @@ window.altSustituir = async (ejercicioId) => {
   if (typeof entRefrescarAsistencia === 'function') entRefrescarAsistencia();
   toast(`${entNombres(nuevo).grande} en lugar de ${antes}`, 3200);
 };
+
+// =====================================================
+// CAMBIAR SOLO LOS EJERCICIOS · la rutina entera, sin IA
+// =====================================================
+// Desde el agente de rutinas: la rutina tal como está a la izquierda y, al
+// lado de cada ejercicio, 3 parecidos de la galería (el mismo motor de
+// «Alternativas»). Tú eliges en cada renglón o lo dejas igual. Se quedan los
+// bloques, el orden, las series, reps, peso, descanso, RIR y notas: solo
+// cambia qué ejercicio es. Se aplica a esta rutina o se guarda como nueva.
+
+const CX_POR_PAGINA = 3;
+const CX_FILTROS = [['casa', 'Casa', 'lugar'], ['gym', 'Gimnasio', 'lugar'], ['sin_peso', 'Sin peso', 'carga'], ['con_peso', 'Con peso', 'carga']];
+const _cx = { filas: [], filtros: {}, aplicando: false };
+
+const cxPres = (re) => [
+  re.series != null && re.reps ? `${re.series}×${re.reps}` : re.series != null ? `${re.series} series` : re.reps ? `${re.reps} reps` : '',
+  re.descanso_seg ? `${re.descanso_seg}s` : '', re.rir != null ? `RIR ${re.rir}` : '',
+].filter(Boolean).join(' · ');
+
+function cxPasa(x) {
+  const f = _cx.filtros, e = x.e;
+  if (f.carga === 'sin_peso' && altConCarga(e)) return false;
+  if (f.carga === 'con_peso' && !altConCarga(e)) return false;
+  if (f.lugar && !altArr(e.lugar).includes(f.lugar)) return false;
+  return true;
+}
+// Las opciones de un renglón: parecidos que no estén ya en la rutina.
+function cxOpciones(fila) {
+  const enRutina = new Set((_ent.rutina?.ejercicios || []).map(x => x.ejercicio_id));
+  return fila.todas.filter(x => !enRutina.has(x.e.id) && cxPasa(x));
+}
+const cxElegidoEnOtra = (fila, id) => _cx.filas.some(f => f !== fila && f.elegido === id);
+
+function cxBloqueTexto(b) {
+  if (!b) return '';
+  const tipo = (ENT_TIPOS_BLOQUE.find(t => t[0] === b.tipo) || [null, ''])[1];
+  return [b.nombre || tipo || 'Bloque', b.vueltas ? `${b.vueltas} vueltas` : ''].filter(Boolean).join(' · ');
+}
+
+function cxFilaHTML(f, i) {
+  const n = entNombres(f.src);
+  const ops = cxOpciones(f);
+  const total = ops.length;
+  const desde = total ? (f.pagina * CX_POR_PAGINA) % total : 0;
+  let vista = ops.slice(desde, desde + CX_POR_PAGINA);
+  // Lo elegido sigue a la vista aunque se pase de página.
+  const el = f.elegido && ops.find(x => x.e.id === f.elegido);
+  if (el && !vista.includes(el)) vista = [el, ...vista.slice(0, CX_POR_PAGINA - 1)];
+  const op = (x) => {
+    const nx = entNombres(x.e), on = f.elegido === x.e.id, usado = !on && cxElegidoEnOtra(f, x.e.id);
+    return `
+      <button type="button" class="cx-op${on ? ' on' : ''}" data-cx-op="${x.e.id}" aria-pressed="${on}" ${usado ? 'disabled title="Ya lo elegiste en otro ejercicio"' : ''}
+              onclick="cxElegir(${i}, '${x.e.id}')">
+        <span class="cx-op-nombre">${escapeHtml(nx.grande)}</span>
+        ${nx.chico ? `<span class="cx-op-chico">${escapeHtml(nx.chico)}</span>` : ''}
+        <span class="cx-op-por">${escapeHtml([...x.porque.slice(0, 2), x.dif < 0 ? 'Más fácil' : x.dif > 0 ? 'Más difícil' : ''].filter(Boolean).join(' · '))}</span>
+        <span class="cx-op-eq">${escapeHtml(altEquipoTexto(x.e) || 'Sin equipo')}</span>
+      </button>`;
+  };
+  return `
+    <div class="cx-fila${f.elegido ? ' cambia' : ''}" data-cx-fila="${f.reId}">
+      <div class="cx-ahora">
+        <span class="cx-n">${i + 1}</span>
+        <div class="min-w-0">
+          <div class="cx-nombre">${escapeHtml(n.grande)}</div>
+          ${n.chico ? `<div class="cx-chico">${escapeHtml(n.chico)}</div>` : ''}
+          ${cxPres(f.re) ? `<div class="cx-pres">${escapeHtml(cxPres(f.re))}</div>` : ''}
+        </div>
+      </div>
+      <div class="cx-alts">
+        <button type="button" class="cx-op cx-igual${f.elegido ? '' : ' on'}" data-cx-igual aria-pressed="${!f.elegido}" onclick="cxElegir(${i}, null)">
+          <span class="cx-op-nombre">Dejar igual</span>
+        </button>
+        ${vista.map(op).join('')}
+        ${total > CX_POR_PAGINA ? `<button type="button" class="cx-mas" data-cx-mas onclick="cxMas(${i})">Otras ${Math.min(CX_POR_PAGINA, total - CX_POR_PAGINA)} ›</button>` : ''}
+        ${!total ? `<span class="cx-nada">${f.todas.length ? 'Con estos filtros no queda ninguno.' : 'No encontré parecidos en la galería.'}</span>` : ''}
+      </div>
+    </div>`;
+}
+
+function cxPintar() {
+  const caja = document.getElementById('cx-lista');
+  if (!caja) return;
+  const bloques = Object.fromEntries((_ent.rutina?.bloques || []).map(b => [b.id, b]));
+  let antes;
+  caja.innerHTML = _cx.filas.map((f, i) => {
+    const b = f.re.bloque_id || null;
+    const cab = b !== antes && b ? `<div class="cx-bloque">${escapeHtml(cxBloqueTexto(bloques[b]))}</div>` : (b !== antes && antes ? '<div class="cx-bloque cx-bloque-fin"></div>' : '');
+    antes = b;
+    return cab + cxFilaHTML(f, i);
+  }).join('');
+  const n = _cx.filas.filter(f => f.elegido).length;
+  const pie = document.getElementById('cx-pie');
+  if (pie) pie.innerHTML = `
+    <span class="cx-cuenta" data-cx-cuenta>${n ? `${n} de ${_cx.filas.length} cambian` : 'Elige en cada ejercicio, o déjalo igual'}</span>
+    <button class="btn btn-secondary btn-sm" data-cx-nueva onclick="cxAplicar('nueva')" ${!n || _cx.aplicando ? 'disabled' : ''}>Guardar como rutina nueva</button>
+    <button class="btn btn-primary btn-sm" data-cx-aplicar onclick="cxAplicar('aqui')" ${!n || _cx.aplicando ? 'disabled' : ''}>${_cx.aplicando ? 'Guardando…' : `Cambiar ${n || ''} en esta rutina`}</button>`;
+  document.querySelectorAll('.cx-filtro').forEach(b => b.classList.toggle('on', _cx.filtros[b.dataset.g] === b.dataset.f));
+}
+
+window.entCambiarEjercicios = async () => {
+  const r = _ent.rutina;
+  if (!r || !(r.ejercicios || []).length) return toast('Abre una rutina con ejercicios en el constructor');
+  await entDb.ejercicios();
+  _cx.filtros = {}; _cx.aplicando = false;
+  _cx.filas = r.ejercicios.map(re => ({ reId: re.id, re, src: re.ejercicios || {}, todas: altCandidatos(re.ejercicios || {}, _ent.ejercicios || []), pagina: 0, elegido: null }));
+  openModal(`
+    <div class="alt-modal cx-modal" data-cambiar-ejercicios>
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="em-eyebrow">Cambiar solo los ejercicios</div>
+          <h3 class="alt-titulo">${escapeHtml(r.nombre || 'Rutina')}</h3>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="closeModal()" aria-label="Cerrar">✕</button>
+      </div>
+      <p class="alt-ayuda">Se quedan los bloques, el orden, las series, reps, descanso y RIR. Al lado de cada ejercicio, parecidos de la galería (mismo movimiento y músculos): elige uno o déjalo igual.</p>
+      <div class="alt-filtros">
+        ${CX_FILTROS.map(([k, t, g]) => `<button type="button" class="alt-filtro cx-filtro" data-f="${k}" data-g="${g}" onclick="cxFiltro('${g}', '${k}')">${t}</button>`).join('')}
+        <span class="cx-sep"></span>
+        <button type="button" class="alt-filtro" data-cx-proponer onclick="cxProponerTodo()">Proponer uno para cada uno</button>
+        <button type="button" class="alt-filtro" data-cx-limpiar onclick="cxLimpiar()">Dejar todo igual</button>
+      </div>
+      <div class="cx-cols"><span>Ahora</span><span>Alternativas</span></div>
+      <div id="cx-lista" class="cx-lista"></div>
+      <div id="cx-pie" class="cx-pie"></div>
+    </div>`, { wide: true });
+  cxPintar();
+};
+
+window.cxElegir = (i, id) => { const f = _cx.filas[i]; if (!f) return; f.elegido = id && f.elegido !== id ? id : null; cxPintar(); };
+window.cxMas = (i) => { const f = _cx.filas[i]; if (!f) return; f.pagina++; cxPintar(); };
+window.cxFiltro = (g, k) => {
+  _cx.filtros[g] = _cx.filtros[g] === k ? null : k;
+  // Lo elegido que ya no pasa el filtro se suelta.
+  _cx.filas.forEach(f => { f.pagina = 0; if (f.elegido && !cxOpciones(f).some(x => x.e.id === f.elegido)) f.elegido = null; });
+  cxPintar();
+};
+// La más parecida de cada uno (sin repetir la misma en dos lugares).
+window.cxProponerTodo = () => {
+  const usados = new Set();
+  _cx.filas.forEach(f => {
+    const x = cxOpciones(f).find(o => !usados.has(o.e.id));
+    f.elegido = x ? x.e.id : null; f.pagina = 0;
+    if (x) usados.add(x.e.id);
+  });
+  cxPintar();
+};
+window.cxLimpiar = () => { _cx.filas.forEach(f => { f.elegido = null; }); cxPintar(); };
+
+window.cxAplicar = async (modo) => {
+  const r = _ent.rutina;
+  const cambios = _cx.filas.filter(f => f.elegido);
+  if (!r || !cambios.length || _cx.aplicando) return;
+  _cx.aplicando = true; cxPintar();
+  try {
+    if (modo === 'nueva') {
+      const nueva = await entDb.copiarRutina(r.id, null, `${r.nombre} · variante`);
+      if (!nueva) throw new Error('La copia no se creó');
+      // La copia trae renglones nuevos: cada cambio va al que ocupa el mismo lugar.
+      const porId = await entDb.ejerciciosDeRutinas([r.id, nueva]);
+      const enOrden = (l) => (l || []).slice().sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0) || String(a.ejercicio_id).localeCompare(String(b.ejercicio_id)));
+      const orig = enOrden(porId[r.id]), ejs = enOrden(porId[nueva]);
+      for (const f of cambios) {
+        const re = ejs[orig.findIndex(x => x.id === f.reId)];
+        if (re && await entDb.actualizarRE(re.id, { ejercicio_id: f.elegido }) === false) throw new Error('No se guardó');
+      }
+      closeModal();
+      toast(`«${r.nombre} · variante» quedó en tu biblioteca con ${cambios.length} cambio${cambios.length === 1 ? '' : 's'}`, 4000);
+      return;
+    }
+    const nuevos = [];
+    for (const f of cambios) {
+      if (await entDb.actualizarRE(f.reId, { ejercicio_id: f.elegido }) === false) throw new Error('No se guardó');
+      const re = (r.ejercicios || []).find(x => x.id === f.reId);
+      const nuevo = (_ent.ejercicios || []).find(x => x.id === f.elegido);
+      if (re && nuevo) { re.ejercicio_id = nuevo.id; re.ejercicios = nuevo; nuevos.push(nuevo); }
+    }
+    const posters = nuevos.map(e => e.poster_path).filter(Boolean);
+    if (posters.length) await entDb.firmarPosters(posters);
+    closeModal();
+    entRepintarRutina();
+    cambios.forEach(f => document.querySelector(`#cons-rutina .ent-fila[data-re="${f.reId}"]`)?.classList.add('ent-fila-nueva'));
+    if (typeof entRefrescarAsistencia === 'function') entRefrescarAsistencia();
+    toast(`${cambios.length} ejercicio${cambios.length === 1 ? '' : 's'} cambiado${cambios.length === 1 ? '' : 's'} · lo demás quedó igual`, 3500);
+  } catch (e) {
+    toast(e.message || 'No se pudo guardar');
+  } finally {
+    _cx.aplicando = false;
+    if (document.getElementById('cx-lista')) cxPintar();
+  }
+};
