@@ -112,6 +112,22 @@ for (const [tag, ancho, alto] of [['ancho', 1600, 900], ['telefono', 390, 844]])
   ok(`${tag} · hasta 3 parecidos por ejercicio (${v.conOpciones} con opciones) y todos empiezan en «Dejar igual»`, v.conOpciones > 0 && v.maxOpciones <= 3 && v.igualOn);
   ok(`${tag} · no propone lo que ya está en la rutina`, v.ninguna);
   ok(`${tag} · alternativas ${tag === 'ancho' ? 'al lado' : 'debajo'} de lo actual, sin salirse de lo ancho`, v.ancho && v.lado === (tag === 'ancho' ? 'al lado' : 'debajo'), JSON.stringify(v));
+  // Filtros por uso: «Los que usan hoy» y «Todo menos los de hoy».
+  const uso = async (k) => { await p.locator(`[data-cx-uso="${k}"]`).click(); return p.evaluate(() => {
+    const ids = [...document.querySelectorAll('[data-cambiar-ejercicios] [data-cx-op]')].map(b => b.dataset.cxOp);
+    return { n: ids.length, hoy: ids.filter(id => _ent.enUso.has(id)).length, conTag: document.querySelectorAll('[data-cx-op-uso]').length };
+  }); };
+  // En el arnés solo Ana tiene ciclo (y lo suyo ya está en la rutina): se
+  // suman a «hoy» dos parecidos, como si otros clientes los tuvieran.
+  const uso0 = await p.evaluate(() => { const ids = _cx.filas.flatMap(f => cxOpciones(f).slice(0, 1).map(x => x.e.id)).slice(0, 2); ids.forEach(id => _ent.enUso.set(id, 2)); cxPintar(); return { ids, total: _ent.enUso.size }; });
+  ok(`${tag} · lee qué usan hoy tus clientes (${uso0.total})`, uso0.total > uso0.ids.length);
+  const uHoy = await uso('hoy');
+  ok(`${tag} · «Los que usan hoy» deja solo los que tus clientes tienen hoy, con cuántos (${uHoy.n})`, uHoy.n > 0 && uHoy.hoy === uHoy.n && uHoy.conTag === uHoy.n, JSON.stringify(uHoy));
+  const uResto = await uso('resto');
+  ok(`${tag} · «Todo menos los de hoy» deja solo los que nadie usa hoy (${uResto.n})`, uResto.n > 0 && uResto.hoy === 0, JSON.stringify(uResto));
+  await p.locator('[data-cx-uso="resto"]').click();
+  const uTodo = await p.evaluate(() => document.querySelectorAll('[data-cambiar-ejercicios] [data-cx-op]').length);
+  ok(`${tag} · tocarlo otra vez vuelve a todos`, uTodo >= Math.max(uHoy.n, uResto.n), String(uTodo));
   // Elegir en un renglón
   const fila = p.locator('[data-cambiar-ejercicios] .cx-fila').filter({ has: p.locator('[data-cx-op]') }).first();
   const reId = await fila.getAttribute('data-cx-fila');

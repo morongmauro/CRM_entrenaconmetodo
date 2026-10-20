@@ -168,6 +168,8 @@
 .cx-op:disabled { opacity: .4; cursor: default; }
 .cx-op.on { background: #3C7BD6; box-shadow: 0 4px 12px rgba(60,123,214,.25); }
 .cx-op.on .cx-op-nombre, .cx-op.on .cx-op-chico, .cx-op.on .cx-op-por, .cx-op.on .cx-op-eq { color: #fff; }
+.cx-op-uso { font-size: 11px; font-weight: 700; color: #2F68C0; }
+.cx-op.on .cx-op-uso { color: #fff; }
 .cx-igual { justify-content: center; align-items: center; text-align: center; }
 .cx-igual.on { background: #1D1D1F; box-shadow: none; }
 .cx-op-nombre { font-size: 13.5px; font-weight: 700; color: var(--d-gris); line-height: 1.25; overflow-wrap: anywhere; }

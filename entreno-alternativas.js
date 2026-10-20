@@ -291,7 +291,9 @@ window.altSustituir = async (ejercicioId) => {
 // cambia qué ejercicio es. Se aplica a esta rutina o se guarda como nueva.
 
 const CX_POR_PAGINA = 3;
-const CX_FILTROS = [['casa', 'Casa', 'lugar'], ['gym', 'Gimnasio', 'lugar'], ['sin_peso', 'Sin peso', 'carga'], ['con_peso', 'Con peso', 'carga']];
+// «uso»: los que tus clientes tienen hoy en su ciclo vigente (el mismo
+// cálculo que «Los usan ahora» de la galería) o todo lo demás.
+const CX_FILTROS = [['hoy', 'Los que usan hoy', 'uso'], ['resto', 'Todo menos los de hoy', 'uso'], ['casa', 'Casa', 'lugar'], ['gym', 'Gimnasio', 'lugar'], ['sin_peso', 'Sin peso', 'carga'], ['con_peso', 'Con peso', 'carga']];
 const _cx = { filas: [], filtros: {}, aplicando: false };
 
 const cxPres = (re) => [
@@ -304,6 +306,7 @@ function cxPasa(x) {
   if (f.carga === 'sin_peso' && altConCarga(e)) return false;
   if (f.carga === 'con_peso' && !altConCarga(e)) return false;
   if (f.lugar && !altArr(e.lugar).includes(f.lugar)) return false;
+  if (f.uso && _ent.enUso) { const hoy = _ent.enUso.has(e.id); if (f.uso === 'hoy' ? !hoy : hoy) return false; }
   return true;
 }
 // Las opciones de un renglón: parecidos que no estén ya en la rutina.
@@ -337,6 +340,7 @@ function cxFilaHTML(f, i) {
         ${nx.chico ? `<span class="cx-op-chico">${escapeHtml(nx.chico)}</span>` : ''}
         <span class="cx-op-por">${escapeHtml([...x.porque.slice(0, 2), x.dif < 0 ? 'Más fácil' : x.dif > 0 ? 'Más difícil' : ''].filter(Boolean).join(' · '))}</span>
         <span class="cx-op-eq">${escapeHtml(altEquipoTexto(x.e) || 'Sin equipo')}</span>
+        ${_ent.enUso && _ent.enUso.get(x.e.id) ? `<span class="cx-op-uso" data-cx-op-uso>${_ent.enUso.get(x.e.id)} ${_ent.enUso.get(x.e.id) === 1 ? 'cliente' : 'clientes'} hoy</span>` : ''}
       </button>`;
   };
   return `
@@ -384,6 +388,7 @@ window.entCambiarEjercicios = async () => {
   const r = _ent.rutina;
   if (!r || !(r.ejercicios || []).length) return toast('Abre una rutina con ejercicios en el constructor');
   await entDb.ejercicios();
+  await entDb.ejerciciosEnUso().catch(() => null);
   _cx.filtros = {}; _cx.aplicando = false;
   _cx.filas = r.ejercicios.map(re => ({ reId: re.id, re, src: re.ejercicios || {}, todas: altCandidatos(re.ejercicios || {}, _ent.ejercicios || []), pagina: 0, elegido: null }));
   openModal(`
@@ -397,7 +402,7 @@ window.entCambiarEjercicios = async () => {
       </div>
       <p class="alt-ayuda">Se quedan los bloques, el orden, las series, reps, descanso y RIR. Al lado de cada ejercicio, parecidos de la galería (mismo movimiento y músculos): elige uno o déjalo igual.</p>
       <div class="alt-filtros">
-        ${CX_FILTROS.map(([k, t, g]) => `<button type="button" class="alt-filtro cx-filtro" data-f="${k}" data-g="${g}" onclick="cxFiltro('${g}', '${k}')">${t}</button>`).join('')}
+        ${CX_FILTROS.map(([k, t, g], j) => `${j && CX_FILTROS[j - 1][2] === 'uso' && g !== 'uso' ? '<span class="cx-sep"></span>' : ''}<button type="button" class="alt-filtro cx-filtro" data-f="${k}" data-g="${g}" data-cx-uso="${g === 'uso' ? k : ''}" onclick="cxFiltro('${g}', '${k}')"${g === 'uso' && !_ent.enUso ? ' disabled title="No pude leer qué usan hoy tus clientes"' : ''}>${t}</button>`).join('')}
         <span class="cx-sep"></span>
         <button type="button" class="alt-filtro" data-cx-proponer onclick="cxProponerTodo()">Proponer uno para cada uno</button>
         <button type="button" class="alt-filtro" data-cx-limpiar onclick="cxLimpiar()">Dejar todo igual</button>
