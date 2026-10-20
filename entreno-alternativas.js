@@ -268,7 +268,7 @@ window.altSustituir = async (ejercicioId) => {
   const nuevo = (_ent.ejercicios || []).find(x => x.id === ejercicioId);
   if (!re || !nuevo) return;
   const antes = entNombres(re.ejercicios || {}).grande;
-  const ok = await entDb.actualizarRE(re.id, { ejercicio_id: nuevo.id });
+  const ok = await entDb.actualizarRE(re.id, { ejercicio_id: nuevo.id }, { origen: 'alternativas' });
   if (ok === false) return;
   re.ejercicio_id = nuevo.id;
   re.ejercicios = nuevo;
@@ -444,7 +444,7 @@ window.cxAplicar = async (modo) => {
       const orig = enOrden(porId[r.id]), ejs = enOrden(porId[nueva]);
       for (const f of cambios) {
         const re = ejs[orig.findIndex(x => x.id === f.reId)];
-        if (re && await entDb.actualizarRE(re.id, { ejercicio_id: f.elegido }) === false) throw new Error('No se guardó');
+        if (re && await entDb.actualizarRE(re.id, { ejercicio_id: f.elegido }, { origen: 'solo-ejercicios' }) === false) throw new Error('No se guardó');
       }
       closeModal();
       toast(`«${r.nombre} · variante» quedó en tu biblioteca con ${cambios.length} cambio${cambios.length === 1 ? '' : 's'}`, 4000);
@@ -452,7 +452,7 @@ window.cxAplicar = async (modo) => {
     }
     const nuevos = [];
     for (const f of cambios) {
-      if (await entDb.actualizarRE(f.reId, { ejercicio_id: f.elegido }) === false) throw new Error('No se guardó');
+      if (await entDb.actualizarRE(f.reId, { ejercicio_id: f.elegido }, { origen: 'solo-ejercicios' }) === false) throw new Error('No se guardó');
       const re = (r.ejercicios || []).find(x => x.id === f.reId);
       const nuevo = (_ent.ejercicios || []).find(x => x.id === f.elegido);
       if (re && nuevo) { re.ejercicio_id = nuevo.id; re.ejercicios = nuevo; nuevos.push(nuevo); }

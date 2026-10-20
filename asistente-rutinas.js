@@ -326,7 +326,7 @@ window.rutElegirOpcion = (tarjetaId, i) => {
   rutProponer(
     `Cambiar ${entNombres(t.sale).grande} por ${entNombres(o.e).grande} en "${t.rutina}"`,
     ['mismo lugar' + (t.bloque ? ' y circuito' : ''), rutPrescripcion(o)].filter(Boolean).join(' · '),
-    () => entDb.actualizarRE(t.reId, row).then(ok => { if (ok === false) throw new Error('No se guardó'); }),
+    () => entDb.actualizarRE(t.reId, row, { origen: 'agente' }).then(ok => { if (ok === false) throw new Error('No se guardó'); }),
   );
 };
 // La variante: reemplazar la rutina actual o guardarla como nueva (biblioteca).
@@ -341,7 +341,7 @@ window.rutUsarVariante = (tarjetaId, modo) => {
       `Reemplazar "${t.rutina}" por su variante ${t.tipo}`,
       `${cambios.length} de ${t.filas.length} posiciones cambian · mismo orden y circuitos`,
       async () => {
-        for (const f of cambios) { const ok = await entDb.actualizarRE(f.reId, parche(f)); if (ok === false) throw new Error('No se guardó'); }
+        for (const f of cambios) { const ok = await entDb.actualizarRE(f.reId, parche(f), { origen: 'agente-variante' }); if (ok === false) throw new Error('No se guardó'); }
       },
     );
   } else {
@@ -358,7 +358,7 @@ window.rutUsarVariante = (tarjetaId, modo) => {
         const orig = enOrden(porId[t.rutinaId]), ejs = enOrden(porId[nueva]);
         for (const f of cambios) {
           const re = ejs[orig.findIndex(x => x.id === f.reId)];
-          if (re) { const ok = await entDb.actualizarRE(re.id, parche(f)); if (ok === false) throw new Error('No se guardó'); }
+          if (re) { const ok = await entDb.actualizarRE(re.id, parche(f), { origen: 'agente-variante' }); if (ok === false) throw new Error('No se guardó'); }
         }
       },
     );
@@ -786,7 +786,7 @@ const RUT_HERRAMIENTAS = {
     return rutProponer(
       `Cambiar ${e.nombre} en "${r.nombre}" de ${c.nombre}`,
       cambios.join(' · '),
-      () => entDb.actualizarRE(re.id, row),
+      () => entDb.actualizarRE(re.id, row, { origen: 'agente' }),
     );
   },
 
@@ -1016,7 +1016,7 @@ const RUT_HERRAMIENTAS = {
     return rutProponer(
       `Cambiar ${entNombres(re.ejercicios || {}).grande} por ${entNombres(e).grande} en "${x.r.nombre}"`,
       ['mismo lugar' + (re.bloque_id ? ' y circuito' : ''), rutPrescripcion(pres)].filter(Boolean).join(' · '),
-      () => entDb.actualizarRE(re.id, row).then(ok => { if (ok === false) throw new Error('No se guardó'); }),
+      () => entDb.actualizarRE(re.id, row, { origen: 'agente' }).then(ok => { if (ok === false) throw new Error('No se guardó'); }),
     );
   },
 

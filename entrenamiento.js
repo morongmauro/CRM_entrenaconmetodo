@@ -274,10 +274,28 @@ const entDb = {
     if (error) { toast(error.message); return null; }
     return data || { ...row, id: null };
   },
-  async actualizarRE(id, row) {
+  // `meta.origen`: cómo se hizo el cambio (agente, alternativas…). Si cambia
+  // QUÉ ejercicio es, queda registrado (trazabilidad, ver entRegistrarCambio).
+  async actualizarRE(id, row, meta = {}) {
+    let antes = null;
+    if (row && row.ejercicio_id) {
+      antes = (_ent.rutina?.ejercicios || []).find(x => x.id === id);
+      antes = antes ? { ejercicio_id: antes.ejercicio_id, rutina_id: antes.rutina_id || _ent.rutina.id, orden: antes.orden, ejercicios: antes.ejercicios } : null;
+      if (!antes) {
+        const { data } = await sb.from('rutina_ejercicios').select('ejercicio_id, rutina_id, orden').eq('id', id).maybeSingle();
+        antes = data || null;
+      }
+    }
     const { error } = await sb.from('rutina_ejercicios').update(row).eq('id', id);
     if (error) toast(error.message);
+    if (!error && antes && antes.ejercicio_id !== row.ejercicio_id) {
+      entRegistrarCambio({ reId: id, antes, despues: row.ejercicio_id, origen: meta.origen || 'manual' }).catch(() => {});
+    }
     return !error;
+  },
+  async cambiosDeRutina(rutinaId) {
+    const { data, error } = await sb.from('cambios_ejercicio').select('*').eq('rutina_id', rutinaId).order('creado_at', { ascending: false }).limit(200);
+    return error ? null : (data || []);
   },
   async quitarRE(id) {
     const { error } = await sb.from('rutina_ejercicios').delete().eq('id', id);
@@ -1789,6 +1807,7 @@ async function entPintarConstructor() {
   if (!r) { toast('No encontré esa rutina'); return entCerrarConstructor(); }
   _ent.rutina = r;
   await entDb.ejercicios();
+  await entCargarCambios(r.id);
 
   // Contexto: si la rutina vive en la fase de un cliente, decirlo — el
   // riesgo real es editar la rutina equivocada creyendo que es la plantilla.
@@ -2170,6 +2189,7 @@ function entRenderRutina(r) {
 
   // Bloques todavía sin ejercicios: si no se pintaran, crearías un circuito
   // y desaparecería hasta meterle algo.
+  html += entHistorialCambiosHTML(r);
   const usados = new Set(r.ejercicios.map(e => e.bloque_id).filter(Boolean));
   r.bloques.filter(b => !usados.has(b.id)).forEach(b => {
     html += entEnvolverBloque(b, `<div class="text-xs text-slate-400 py-3 text-center ent-bloque-vacio">
@@ -2263,6 +2283,7 @@ function entFilaRutina(re, i, total, bloques) {
           <button class="btn btn-ghost btn-sm" onclick="entQuitarRE('${re.id}')">✕</button>
         </div>
       </div>
+      ${entCambioDeFila(re)}
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
         <div><label class="text-[0.65rem]">Series</label>
           <input type="number" min="1" value="${re.series ?? 3}" onchange="entGuardarRE('${re.id}', 'series', this.value)"></div>
@@ -4891,4 +4912,82 @@ async function entPintarLecturas(cliente) {
             <div class="text-sm text-slate-700">${escapeHtml(n.notas_cliente)}</div>
           </div>`))}
     </div>`;
+}
+
+
+// =====================================================
+// TRAZABILIDAD · qué ejercicio había y cuál quedó
+// =====================================================
+// Cada vez que en una rutina un ejercicio se cambia por otro (con el agente,
+// «Alternativas», «Cambiar solo los ejercicios» o a mano) queda guardado:
+// cuál había, cuál quedó, en qué posición, cuándo y cómo. Va a la tabla
+// `cambios_ejercicio` (migraciones/cambios-ejercicio.sql); si la tabla aún no
+// existe, se guarda en este navegador y se sube sola cuando exista.
+const ENT_ORIGEN_CAMBIO = {
+  agente: 'con el agente', 'agente-variante': 'variante del agente', alternativas: 'con Alternativas',
+  'solo-ejercicios': 'con «Cambiar solo los ejercicios»', manual: 'a mano',
+};
+const ENT_CLAVE_CAMBIOS = 'crm:cambiosEjercicioPendientes';
+const entCambiosLocales = () => { try { return JSON.parse(localStorage.getItem(ENT_CLAVE_CAMBIOS) || '[]'); } catch (e) { return []; } };
+const entGuardarLocales = (l) => { try { localStorage.setItem(ENT_CLAVE_CAMBIOS, JSON.stringify(l.slice(-500))); } catch (e) { /* lleno */ } };
+
+async function entRegistrarCambio({ reId, antes, despues, origen }) {
+  const cat = _ent.ejercicios || [];
+  const ejAntes = antes.ejercicios || cat.find(x => x.id === antes.ejercicio_id) || {};
+  const ejDespues = cat.find(x => x.id === despues) || {};
+  const rut = _ent.rutina && _ent.rutina.id === antes.rutina_id ? _ent.rutina : null;
+  const fila = {
+    cliente_id: rut ? (rut.cliente_id || null) : null,
+    rutina_id: String(antes.rutina_id || ''), rutina_nombre: rut ? rut.nombre : null,
+    rutina_ejercicio_id: String(reId), posicion: antes.orden ?? null,
+    ejercicio_antes: String(antes.ejercicio_id), nombre_antes: entNombres(ejAntes).grande || null,
+    ejercicio_despues: String(despues), nombre_despues: entNombres(ejDespues).grande || null,
+    origen, creado_at: new Date().toISOString(),
+  };
+  // Antes del primer await: así la fila ya lo muestra al repintar.
+  if (rut) {
+    if (_ent.cambiosRutina !== rut.id) _ent.cambios = [];
+    _ent.cambios.unshift(fila); _ent.cambiosRutina = rut.id;
+  }
+  const { error } = await sb.from('cambios_ejercicio').insert(fila);
+  if (error) entGuardarLocales([...entCambiosLocales(), fila]);
+  else entSubirPendientes();
+}
+// Lo que quedó en el navegador sin subir (la tabla no existía): se sube.
+async function entSubirPendientes() {
+  const l = entCambiosLocales();
+  if (!l.length) return;
+  const { error } = await sb.from('cambios_ejercicio').insert(l);
+  if (!error) entGuardarLocales([]);
+}
+async function entCargarCambios(rutinaId) {
+  await entSubirPendientes().catch(() => {});
+  const nube = await entDb.cambiosDeRutina(rutinaId).catch(() => null);
+  const locales = entCambiosLocales().filter(c => c.rutina_id === String(rutinaId));
+  _ent.cambios = [...locales, ...(nube || [])].sort((a, b) => String(b.creado_at).localeCompare(String(a.creado_at)));
+  _ent.cambiosRutina = rutinaId;
+}
+const entFechaCambio = (iso) => { try { return new Date(iso).toLocaleString('es-CO', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; } };
+
+// En la fila: el último cambio de ese renglón («Antes: …»).
+function entCambioDeFila(re) {
+  if (!_ent.rutina || _ent.cambiosRutina !== _ent.rutina.id) return '';
+  const c = (_ent.cambios || []).find(x => x.rutina_ejercicio_id === String(re.id));
+  if (!c) return '';
+  return `<div class="ent-cambio" data-cambio-re="${re.id}" title="${escapeHtml(`${entFechaCambio(c.creado_at)} · ${ENT_ORIGEN_CAMBIO[c.origen] || c.origen}`)}">⇄ Antes: <b>${escapeHtml(c.nombre_antes || 'otro ejercicio')}</b> · ${escapeHtml(ENT_ORIGEN_CAMBIO[c.origen] || c.origen)}</div>`;
+}
+// Al final de la rutina: todos los cambios, del más nuevo al más viejo.
+function entHistorialCambiosHTML(r) {
+  if (_ent.cambiosRutina !== r.id) return '';
+  const l = _ent.cambios || [];
+  if (!l.length) return '';
+  return `
+    <details class="ent-historial-cambios" data-historial-cambios>
+      <summary>Cambios de ejercicios en esta rutina (${l.length})</summary>
+      <ol>
+        ${l.map(c => `<li><span class="ent-hc-fecha">${escapeHtml(entFechaCambio(c.creado_at))}</span>
+          <span><s>${escapeHtml(c.nombre_antes || '—')}</s> → <b>${escapeHtml(c.nombre_despues || '—')}</b></span>
+          <span class="ent-hc-origen">${c.posicion ? `posición ${c.posicion} · ` : ''}${escapeHtml(ENT_ORIGEN_CAMBIO[c.origen] || c.origen || '')}</span></li>`).join('')}
+      </ol>
+    </details>`;
 }
