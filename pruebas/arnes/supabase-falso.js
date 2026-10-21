@@ -76,7 +76,7 @@
       rpc: async () => ({ data: null, error: null }),
       channel: () => ({ on() { return this; }, subscribe() { return this; } }),
       removeChannel() {},
-      storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: '' } }), list: async () => ({ data: [], error: null }), upload: async () => ({ data: null, error: null }) }) },
+      storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: '' } }), list: async () => ({ data: [], error: null }), upload: async () => ({ data: null, error: null }), createSignedUrl: async (ruta) => ({ data: { signedUrl: 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="300" height="400" fill="#8A8F86"/><text x="20" y="200" fill="#fff" font-size="22">${ruta}</text></svg>`) }, error: null }) }) },
       functions: { invoke: async () => ({ data: null, error: null }) },
       auth: {
         getSession: async () => ({ data: { session: sesion }, error: null }),

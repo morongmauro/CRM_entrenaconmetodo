@@ -7066,7 +7066,7 @@ window.guardarCliente = async (id = null) => {
   window._pendingMeta = null;
   window._pendingMetaCtx = null;
   closeModal();
-  toast(r.sinColumnas ? '⚠️ Guardado, pero sin los campos nuevos: corre la migración de schema.sql en Supabase' : 'Guardado');
+  toast(r.sinColumnas ? '⚠️ Guardado, pero a la tabla le falta alguna columna: corre migraciones/cliente-columnas.sql en Supabase' : 'Guardado');
   refrescarVista('clientes');
 };
 
@@ -7110,10 +7110,16 @@ async function guardarClienteSeguro(id, row) {
     : sb.from('clientes').insert(r).select('id').single();
   let { data, error } = await q(row);
   let sinColumnas = false;
-  if (error && COLS_NUEVAS_CLIENTE.some(col => (error.message || '').includes(`'${col}'`))) {
+  // Si a la tabla le falta alguna columna nueva, se quita SOLO esa y se
+  // reintenta (hasta agotar la lista). Antes se quitaban todas de golpe: con
+  // una sola que faltara («trato»), el correo y el teléfono tampoco se
+  // guardaban, sin que nada lo dijera claro.
+  let r2 = { ...row };
+  for (let intento = 0; error && intento < COLS_NUEVAS_CLIENTE.length; intento++) {
+    const falta = COLS_NUEVAS_CLIENTE.find(col => col in r2 && (error.message || '').includes(`'${col}'`));
+    if (!falta) break;
     sinColumnas = true;
-    const r2 = { ...row };
-    COLS_NUEVAS_CLIENTE.forEach(col => delete r2[col]);
+    delete r2[falta];
     ({ data, error } = Object.keys(r2).length ? await q(r2) : { data: null, error: null });
   }
   if (error) { toast(error.message); return { ok: false, sinColumnas }; }

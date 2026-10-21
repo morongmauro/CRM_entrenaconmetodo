@@ -193,7 +193,13 @@ window.ccEnviar = async () => {
   const { error } = await sb.from('comentarios_coach').insert(fila);
   if (error) { toast(/does not exist|relation/.test(error.message || '') ? 'Falta correr migraciones/comentarios-coach.sql en Supabase' : error.message); return; }
   if (previo) await sb.from('comentarios_coach').update({ quitado_en: ahora }).eq('id', previo.id).then(() => {}, () => {});
-  toast(_cc.tipo === 'puntual' ? 'Enviado: le saldrá el circulito en el ejercicio' : 'Listo: queda fijo en su tarjeta del ejercicio');
+  // El puntual avisa al teléfono al momento (si el cliente tiene push y no
+  // apagó los avisos de su coach). El «siempre presente» no suena: es de
+  // referencia, no una conversación.
+  const aviso = _cc.tipo === 'puntual' ? await ccAvisarTelefono(a, texto) : null;
+  toast(_cc.tipo === 'puntual'
+    ? `Enviado: le saldrá el circulito en el ejercicio${aviso === true ? ' · aviso al teléfono enviado' : aviso === 'apagado' ? ' · tiene los avisos del coach apagados' : aviso === false ? ' · sin push activo en su app' : ''}`
+    : 'Listo: queda fijo en su tarjeta del ejercicio');
   await ccCargar(a.cliente_id, [a.ejercicio_id]).catch(() => {});
   ccPintarVentana(); ccPintarFilas();
 };
@@ -206,3 +212,27 @@ window.ccQuitar = async (id) => {
   await ccCargar(a.cliente_id, [a.ejercicio_id]).catch(() => {});
   ccPintarVentana(); ccPintarFilas();
 };
+
+// ── Aviso al teléfono ──────────────────────────────────────────────────
+// Va por la misma tubería del push manual (/api/push-send en la app). Si el
+// cliente escribió una nota después del último comentario del coach, el
+// aviso dice «te respondió»; si no, lleva el nombre del ejercicio.
+// true: enviado · false: sin push · 'apagado': lo apagó en su app · null: no
+// se pudo intentar (sin modo seguro configurado).
+async function ccAvisarTelefono(a, texto) {
+  try {
+    if (typeof mtApiPost !== 'function' || typeof mtApiBase !== 'function' || !mtApiBase()) return null;
+    const nombre = await ccNombreCliente(a.cliente_id);
+    if (!nombre) return null;
+    const d = ccDe(a.cliente_id, a.ejercicio_id);
+    const ultNota = d.cliente.map(n => n.created_at || '').sort().slice(-1)[0] || '';
+    const ultCoach = d.coach.filter(c => c.tipo === 'puntual').map(c => c.creado_en || '').sort().slice(-1)[0] || '';
+    const coach = (typeof _settings !== 'undefined' && _settings && _settings.nombre_coach && _settings.nombre_coach !== 'Coach') ? _settings.nombre_coach : 'Tu coach';
+    const ej = a.e && (a.e.nombre || a.e.alias) ? (a.e.nombre || a.e.alias) : '';
+    const title = ultNota && ultNota > ultCoach ? `${coach} te respondió` : `${coach}${ej ? ` · ${ej}` : ''}`;
+    const r = await mtApiPost('/api/push-send', { name: nombre, tipo: 'coach', title, body: texto.slice(0, 400), url: '/?ir=entreno' });
+    if (!r) return null;
+    if (r.ok) return true;
+    return r.apagado ? 'apagado' : false;
+  } catch (e) { return null; }
+}

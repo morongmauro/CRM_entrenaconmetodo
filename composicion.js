@@ -870,8 +870,69 @@ function compFotosHTML() {
   // enseña progreso.
   const porPose = {};
   fotos.forEach(f => (porPose[f.pose] || (porPose[f.pose] = [])).push(f));
+  // «Nueva»: subida después de la última vez que abriste esta pestaña (la
+  // primera vez, las de los últimos 7 días).
+  const vistoHasta = _comp.fotosVistoHasta || '';
+  const esNueva = (f) => !!vistoHasta && String(f.fecha || '') > vistoHasta;
+  const nuevas = fotos.filter(esNueva).length;
+  const meds = _comp.meds || [];
+  // El peso y la grasa de cada foto: lo que traiga la foto; si no, la
+  // medición más cercana (hasta 14 días).
+  const medidaDe = (f) => {
+    const t = Date.parse(`${f.fecha}T12:00:00Z`);
+    let mejor = null, dist = 15 * 86400000;
+    for (const m of meds) {
+      if (!m.fecha) continue;
+      const d = Math.abs(Date.parse(`${m.fecha}T12:00:00Z`) - t);
+      if (d < dist && (m.peso != null || m.grasa_pct != null)) { dist = d; mejor = m; }
+    }
+    return { peso: f.peso_kg != null ? Number(f.peso_kg) : (mejor && mejor.peso != null ? Number(mejor.peso) : null), grasa: mejor && mejor.grasa_pct != null ? Number(mejor.grasa_pct) : null };
+  };
+  const kg = (n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(1).replace('.', ',')} kg`;
+  const pts = (n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(1).replace('.', ',')} pts grasa`;
+  const etiqueta = (f) => { const m = medidaDe(f); return `${fmt.fechaCorta(f.fecha)}${m.peso != null ? ` · ${String(m.peso).replace('.', ',')} kg` : ''}`; };
 
-  return Object.entries(porPose).map(([pose, lista]) => `
+  // Comparador lado a lado: la más vieja contra la más nueva de cada pose
+  // (se puede cambiar cualquiera de las dos).
+  const comparadores = Object.entries(porPose).filter(([, l]) => l.length >= 2).map(([pose, lista]) => {
+    const orden = lista.slice().sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
+    const sel = (_comp.fotosCmp || {})[pose] || {};
+    const a = orden.find(f => f.id === sel.a) || orden[0];
+    const b = orden.find(f => f.id === sel.b) || orden[orden.length - 1];
+    const ma = medidaDe(a), mb = medidaDe(b);
+    const dias = Math.round((Date.parse(`${b.fecha}T12:00:00Z`) - Date.parse(`${a.fecha}T12:00:00Z`)) / 86400000);
+    const tiempo = Math.abs(dias) >= 14 ? `${Math.round(Math.abs(dias) / 7)} semanas` : `${Math.abs(dias)} ${Math.abs(dias) === 1 ? 'día' : 'días'}`;
+    const dif = [ma.peso != null && mb.peso != null ? kg(mb.peso - ma.peso) : null, ma.grasa != null && mb.grasa != null ? pts(mb.grasa - ma.grasa) : null].filter(Boolean);
+    const lado = (f, cual) => `
+      <div>
+        <div style="position:relative">
+          <img src="${escapeHtml(f.url)}" alt="${fmt.fechaCorta(f.fecha)}" class="w-full rounded-xl bg-slate-100" style="aspect-ratio:3/4;object-fit:cover">
+          <span class="tag" style="position:absolute;left:8px;top:8px;background:${cual === 'b' ? '#3C7BD6' : 'rgba(31,31,31,.78)'};color:#fff;font-weight:700">${etiqueta(f)}</span>
+        </div>
+        <select class="mt-1 w-full text-xs" onchange="compFotoLado('${pose}','${cual}',this.value)">
+          ${orden.map(x => `<option value="${x.id}" ${x.id === f.id ? 'selected' : ''}>${etiqueta(x)}</option>`).join('')}
+        </select>
+      </div>`;
+    return `
+      <div class="card mb-3" data-fotos-comparar="${pose}" style="max-width:640px">
+        <div class="font-bold text-slate-900 text-sm mb-2">${COMP_POSES[pose] || pose} <span class="text-slate-400 font-normal">· antes y ahora</span></div>
+        <div class="grid grid-cols-2 gap-2">${lado(a, 'a')}${lado(b, 'b')}</div>
+        <div class="grid grid-cols-3 gap-2 mt-3 rounded-xl p-3" style="background:#F6F6F8">
+          <div><div class="text-[11px] text-slate-500">Diferencia</div><div class="font-bold" style="color:${dif.length ? '#2F7A45' : '#94A3B8'}">${dif.length ? dif.join(' · ') : 'sin medidas'}</div></div>
+          <div><div class="text-[11px] text-slate-500">Tiempo</div><div class="font-bold text-slate-900">${tiempo}</div></div>
+          <div><div class="text-[11px] text-slate-500">Fotos</div><div class="font-bold text-slate-900">${orden.length}</div></div>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="flex items-center gap-2 mb-3 px-1" data-fotos-cabecera>
+      <div class="font-bold text-slate-900">Fotos de progreso</div>
+      ${nuevas ? `<span class="tag" data-fotos-nuevas style="background:#E6F4EA;color:#2F7A45;font-weight:700">${nuevas} ${nuevas === 1 ? 'nueva' : 'nuevas'}</span>` : ''}
+      <span class="text-xs text-slate-400 ml-auto">Te llega un aviso al teléfono cuando sube fotos, como con las medidas.</span>
+    </div>
+    ${comparadores}
+    ${Object.entries(porPose).map(([pose, lista]) => `
     <div class="card mb-3">
       <div class="font-bold text-slate-900 text-sm mb-2">
         ${COMP_POSES[pose] || pose}
@@ -879,20 +940,26 @@ function compFotosHTML() {
       </div>
       <div class="grid gap-2" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr))">
         ${lista.map(f => `
-          <a href="${escapeHtml(f.url)}" target="_blank" rel="noopener" class="block">
+          <a href="${escapeHtml(f.url)}" target="_blank" rel="noopener" class="block" ${esNueva(f) ? 'data-foto-nueva' : ''}>
             <img src="${escapeHtml(f.url)}" alt="${fmt.fechaCorta(f.fecha)}" loading="lazy"
                  class="w-full rounded-lg bg-slate-100" style="aspect-ratio:3/4;object-fit:cover">
-            <div class="text-[11px] text-slate-500 mt-1">
-              ${fmt.fechaCorta(f.fecha)}${f.peso_kg ? ` · ${f.peso_kg} kg` : ''}
+            <div class="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
+              <span>${etiqueta(f)}</span>${esNueva(f) ? '<span class="tag" style="background:#E6F4EA;color:#2F7A45;font-weight:700;padding:0 6px">nueva</span>' : ''}
             </div>
             ${f.nota ? `<div class="text-[11px] text-slate-400">${escapeHtml(f.nota)}</div>` : ''}
           </a>`).join('')}
       </div>
-    </div>`).join('')
-    + `<div class="text-[11px] text-slate-400 px-1">
-         Los enlaces caducan en 5 minutos. Si una imagen deja de verse, cambia de pestaña y vuelve.
-       </div>`;
+    </div>`).join('')}
+    <div class="text-[11px] text-slate-400 px-1">
+      Los enlaces caducan en 5 minutos. Si una imagen deja de verse, cambia de pestaña y vuelve.
+    </div>`;
 }
+
+window.compFotoLado = (pose, cual, id) => {
+  _comp.fotosCmp = _comp.fotosCmp || {};
+  _comp.fotosCmp[pose] = { ...(_comp.fotosCmp[pose] || {}), [cual]: id };
+  rerenderView();
+};
 
 window.compElegirCliente = (id) => { _comp.tab = 'panorama'; compCargar(id); };
 window.compTab = (t) => {
@@ -900,7 +967,17 @@ window.compTab = (t) => {
   setTimeout(() => { if (t === 'calculadora') compCalcVivo(); }, 0);
   // Las fotos se piden solo al abrir la pestaña: firmar veinte URLs en cada
   // carga del perfil sería pagar por algo que casi nunca se mira.
-  if (t === 'fotos') compCargarFotos();
+  if (t === 'fotos') {
+    // Qué cuenta como «nueva»: lo subido después de la última visita a esta
+    // pestaña (en este navegador). La primera vez, los últimos 7 días.
+    try {
+      const k = `crm:fotosVistas:${_comp.clienteId}`;
+      const hace7 = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+      _comp.fotosVistoHasta = localStorage.getItem(k) || hace7;
+      localStorage.setItem(k, fmt.hoy());
+    } catch (e) { _comp.fotosVistoHasta = ''; }
+    compCargarFotos();
+  }
 };
 window.compRefrescar = () => compCargar(_comp.clienteId, { forzar: true });
 

@@ -4420,9 +4420,27 @@ window.entEnviarFase = async (id) => {
   if (!ok) return;
   const n = await entDb.publicarFase(id, true);
   if (n == null) return;
-  toast(`📤 Enviada · el cliente ya ve ${n} ${n === 1 ? 'rutina' : 'rutinas'}`);
+  // Un solo aviso al teléfono por envío (aunque traiga cuatro rutinas). Si
+  // no tiene push, o apagó «Ciclo o rutina nueva» en su app, lo ve al entrar.
+  const aviso = await entAvisarCicloNuevo(_ent.clienteId, f, n);
+  toast(`📤 Enviada · el cliente ya ve ${n} ${n === 1 ? 'rutina' : 'rutinas'}${aviso === true ? ' · aviso al teléfono enviado' : aviso === 'apagado' ? ' · tiene ese aviso apagado' : aviso === false ? ' · sin push activo' : ''}`);
   entVistaClientes();
 };
+
+async function entAvisarCicloNuevo(clienteId, fase, n) {
+  try {
+    if (typeof mtApiPost !== 'function' || typeof mtApiBase !== 'function' || !mtApiBase()) return null;
+    const c = await db.clientes.get(clienteId);
+    if (!c || !c.nombre) return null;
+    const r = await mtApiPost('/api/push-send', {
+      name: c.nombre, tipo: 'ciclo', title: 'Tu ciclo nuevo ya está listo',
+      body: `${fase.nombre} · ${n} ${n === 1 ? 'rutina' : 'rutinas'}. Toca para verlo.`, url: '/?ir=entreno',
+    });
+    if (!r) return null;
+    if (r.ok) return true;
+    return r.apagado ? 'apagado' : false;
+  } catch (e) { return null; }
+}
 
 window.entRetirarFase = async (id) => {
   if (!confirm('Retirar esta fase de la app del cliente.\n\nDeja de verla, pero no se borra: ni la rutina, ni lo que ya entrenó. Puedes volver a enviarla cuando quieras.')) return;

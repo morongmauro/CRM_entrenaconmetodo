@@ -75,6 +75,14 @@ function tablas() {
       { slug: 'otro', nombre: 'Otra actividad', categoria: 'otro', icono: '✨', orden: 900, activo: true },
     ],
     comunidad_posts: [], comunidad_reacciones: [], comunidad_comentarios: [], comunidad_vistas: [],
+    // Fotos de progreso de Ana: tres de frente (la más vieja con peso de su
+    // medición, la nueva con su kg) y una sola de lado (sin comparador).
+    fotos_progreso: [
+      { id: 'f1', cliente_id: 'c0', fecha: hace(98), pose: 'frente', ruta: 'c0/f1.jpg', peso_kg: 72.2, nota: null },
+      { id: 'f2', cliente_id: 'c0', fecha: hace(50), pose: 'frente', ruta: 'c0/f2.jpg', peso_kg: null, nota: 'misma luz' },
+      { id: 'f3', cliente_id: 'c0', fecha: hace(1), pose: 'frente', ruta: 'c0/f3.jpg', peso_kg: 70, nota: null },
+      { id: 'f4', cliente_id: 'c0', fecha: hace(1), pose: 'lado', ruta: 'c0/f4.jpg', peso_kg: 70, nota: null },
+    ],
   };
 }
 
@@ -125,6 +133,16 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   await p.waitForTimeout(800);
   ok(`${tag} · tocar el nombre abre su composición`, /Composición · Ana Pérez/.test(await p.locator('#view').innerText()));
   ok(`${tag} · no se cambió nada (solo lee)`, await p.evaluate(() => TABLAS_FALSAS.metas_historial.length === 3 && TABLAS_FALSAS.mediciones_corporales.length === 3));
+  // Fotos: comparador lado a lado (antes y ahora), diferencia y «nuevas».
+  await p.evaluate(() => compTab('fotos')); await p.waitForSelector('[data-fotos-comparar="frente"]', { timeout: 15000 }); await p.waitForTimeout(400);
+  const cmp = await t('[data-fotos-comparar="frente"]');
+  ok(`${tag} · fotos: comparador de frente, la más vieja contra la más nueva`, /antes y ahora/.test(cmp) && (await p.locator('[data-fotos-comparar="frente"] img').count()) === 2, cmp);
+  ok(`${tag} · fotos: diferencia −2,2 kg y 14 semanas, 3 fotos`, /−2,2 kg/.test(cmp) && /14 semanas/.test(cmp) && /Fotos\s*3/.test(cmp), cmp);
+  ok(`${tag} · fotos: de lado (una sola) no tiene comparador`, (await p.locator('[data-fotos-comparar="lado"]').count()) === 0);
+  ok(`${tag} · fotos: las dos de ayer salen como nuevas`, /2 nuevas/.test(await t('[data-fotos-nuevas]')) && (await p.locator('[data-foto-nueva]').count()) === 2);
+  await p.locator('[data-fotos-comparar="frente"] select').first().selectOption('f2'); await p.waitForTimeout(400);
+  ok(`${tag} · fotos: cambiar el lado izquierdo recalcula el tiempo (7 semanas)`, /7 semanas/.test(await t('[data-fotos-comparar="frente"]')));
+  if (tag === 'ancho') await p.screenshot({ path: path.join(CAPTURAS, 'composicion-fotos.png'), fullPage: true });
   await p.evaluate(() => navigate('clientes')); await p.waitForTimeout(900);
   ok(`${tag} · Clientes: cada tarjeta tiene su fila «App»`, (await p.locator('[data-vista-cell]').count()) === 4);
   ok(`${tag} · Clientes: el filtro «Vista compacta» está (en 0 sin la app conectada)`, /Vista compacta · 0/.test(await t('[data-filtro-compacta]')));
