@@ -2300,6 +2300,7 @@ function entFilaRutina(re, i, total, bloques) {
             ${entNombreChico(e)}
             <div class="text-xs text-slate-500">${entLabel(ENT_TIPOS, e.tipo)} · ${entChipMusculos(e)}
               <span class="ent-tiempo-re" data-tiempo-re="${re.id}" title="Lo que pesa en el reloj (series, descansos y el cambio al siguiente)">${_ent.rutina ? (s2 => s2 ? `≈ ${entMin(s2)}` : '')(entEstimarTiempo(_ent.rutina).porRE[re.id]) : ''}</span></div>
+            ${window.ccSiempreHTML ? ccSiempreHTML(re) : ''}
             ${sinTexto ? `
               <button class="ent-aviso" onclick="entEditarEjercicio('${e.id}')"
                       title="El cliente lo verá sin ninguna instrucción de cómo hacerlo">
@@ -2308,6 +2309,7 @@ function entFilaRutina(re, i, total, bloques) {
           </div>
         </div>
         <div class="flex gap-0.5 flex-shrink-0">
+          ${window.ccBotonHTML && _ent.rutina && _ent.rutina.cliente_id ? ccBotonHTML(re) : ''}
           <button class="btn btn-ghost btn-sm ent-alt-btn" data-alternativas onclick="entAlternativas('${re.id}')" title="Alternativas: otro ejercicio parecido en su lugar">⇄<span class="txt"> Alternativas</span></button>
           <button class="btn btn-ghost btn-sm" onclick="entVerFicha('${e.id}')" title="Ver la ficha completa">👁</button>
           <button class="btn btn-ghost btn-sm" ${i === 0 ? 'disabled' : ''} onclick="entMoverRE('${re.id}', -1)">↑</button>
