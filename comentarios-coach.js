@@ -59,7 +59,7 @@ const ccSinLeerCliente = (d) => d.cliente.filter(n => !n.leida_en).length;
 window.ccBotonHTML = (re) => {
   const e = re.ejercicios || {};
   return `<button class="btn btn-ghost btn-sm cc-btn" data-cc-btn="${escapeHtml(re.id)}" data-cc-ej="${escapeHtml(e.id || re.ejercicio_id || '')}"
-    onclick="ccAbrir('${escapeHtml(re.id)}')" title="Escríbele al cliente sobre este ejercicio: para la próxima vez o siempre presente">Comentario del coach</button>`;
+    onclick="ccAbrir('${escapeHtml(re.id)}')" title="Comentario del coach: escríbele al cliente sobre este ejercicio, para la próxima vez o siempre presente"><span class="cc-ico" aria-hidden="true">&#9993;</span><span class="txt">Comentario del coach</span></button>`;
 };
 window.ccSiempreHTML = (re) => `<div class="cc-siempre-linea" data-cc-siempre="${escapeHtml(re.id)}"></div>`;
 

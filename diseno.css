@@ -247,6 +247,9 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):focus, select:foc
 
 /* ── Comentario del coach (comentarios-coach.js) ── */
 .cc-btn { position:relative; background:#EAF1FB; color:#2F68C0; font-weight:650; border-radius:999px; }
+/* En pantallas angostas solo el ícono, como «Alternativas»: la fila de botones no se sale del ancho. */
+.cc-btn .txt { display:none; } .cc-btn .cc-ico { font-size:15px; line-height:1; }
+@media (min-width: 1280px) { .cc-btn .txt { display:inline; } .cc-btn .cc-ico { display:none; } }
 .cc-btn.cc-nuevo::after { content:''; position:absolute; top:2px; right:2px; width:9px; height:9px; border-radius:99px; background:#EE8434; box-shadow:0 0 0 2px #fff; }
 .cc-siempre-txt { display:block; font-size:12px; color:#2F68C0; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:420px; }
 .cc-foto { width:44px; height:44px; border-radius:12px; object-fit:cover; background:#EEECE7; flex:none; display:block; }
