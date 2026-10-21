@@ -115,6 +115,33 @@ await p.evaluate(() => { _ent.filtros.uso = ''; _ent.filtros.video = ''; });
 ok('sin el filtro, vuelve toda la galería', (await p.evaluate(() => entFiltrar(DB.ejercicios).length)) === 3);
 
 ok('sin errores de JavaScript', errores.length === 0, errores.join(' | '));
+// 8. YouTube: los que no se reproducen fuera de YouTube (entreno-youtube.js)
+await p.evaluate(() => { closeModal(); DB.ytMalos = ['U3Atcn3wFjY']; DB.ejercicios[0].video_ref = 'U3Atcn3wFjY'; DB.ejercicios[0].video_fuente = 'youtube';
+  DB.ejercicios[1].video_fuente = 'youtube'; DB.ejercicios[1].video_ref = 'IODxDxX7oi4'; _ent.ejercicios = null; _yt.estado = null; DB.ejercicio_video_estado = []; localStorage.removeItem('crm:ytEstado'); });
+await p.evaluate(() => entYtAbrir());
+ok('«Revisar YouTube» abre su ventana con cuántos videos hay', (await p.locator('[data-yt-ventana]').count()) === 1 && /2\s*videos de YouTube/.test(await p.locator('[data-yt-ventana]').innerText()));
+await p.getByRole('button', { name: 'Revisar todos' }).click();
+await p.waitForFunction(() => !_yt.corriendo && _yt.hechos === 2, null, { timeout: 5000 });
+ok('revisa todos y encuentra el bloqueado', await p.locator('[data-yt-malos]').innerText() === '1' && /Dumbbell Lateral Raise/.test(await p.locator('[data-yt-ventana]').innerText()));
+const filas = await p.evaluate(() => DB.ejercicio_video_estado.map(f => f.video_ref + ':' + f.estado + ':' + (f.codigo ?? '')).sort().join(' '));
+ok('lo anota en la tabla (problema con su código, y el que sí arranca)', filas === 'IODxDxX7oi4:ok: U3Atcn3wFjY:problema:150', filas);
+const filt = await p.evaluate(() => { _ent.filtros.video = 'yt'; const r = entFiltrar(DB.ejercicios).map(e => e.id); _ent.filtros.video = ''; return r; });
+ok('el filtro «Con problemas en YouTube» deja solo ese', JSON.stringify(filt) === '["e1"]', JSON.stringify(filt));
+ok('el filtro está en la lista de videos', (await p.evaluate(() => entBarraFiltros('flt'))).includes('Con problemas en YouTube'));
+await p.evaluate(() => { document.getElementById('ent-body').innerHTML = entTarjetaEjercicio(DB.ejercicios[0]) + entTarjetaEjercicio(DB.ejercicios[1]); });
+ok('la tarjeta de la galería lleva la etiqueta «Problema en YouTube» (solo la del bloqueado)', (await p.locator('#ent-body [data-yt-problema="U3Atcn3wFjY"]').count()) === 1 && (await p.locator('#ent-body [data-yt-problema]').count()) === 1);
+await p.getByRole('button', { name: 'Revisarlos uno a uno' }).click().catch(() => {});
+await p.evaluate(async () => { DB.sinTablaPropuestas = false; await entCargarPropuestas(true); return entVideoRapido('e1'); });
+ok('en la revisión uno a uno avisa que no se reproduce en la app y por qué', (await p.locator('[data-yt-aviso]').count()) === 1 && /No se reproduce en la app/.test(await p.locator('[data-yt-aviso]').innerText()));
+await p.waitForTimeout(150);
+ok('las propuestas también se revisan solas', await p.evaluate(() => ['iK22GwXJji0', 'XPPfnSEATJA', 'xT31s-Y0l_0'].every(r => entYtEstadoRef(r))), await p.evaluate(() => JSON.stringify([Object.keys(_yt.estado), [...document.querySelectorAll('[data-propuesta]')].map(x => x.dataset.propuesta), DB.ytProbados])));
+await p.evaluate(() => { DB.ytMalos.push('abcdefghij2'); });
+await p.fill('#vr-url', 'https://youtu.be/abcdefghij2'); await p.getByText('Guardar link').click(); await p.waitForTimeout(200);
+ok('al poner un video nuevo se revisa solo', await p.evaluate(() => (entYtEstadoRef('abcdefghij2') || {}).estado === 'problema'));
+await p.evaluate(async () => { DB.sinTablaYt = true; DB.ejercicio_video_estado = []; _yt.estado = null; await entYtCargar(); await entYtRevisarUno('U3Atcn3wFjY', 'e1'); _yt.estado = null; return entYtCargar(); });
+ok('sin la tabla, lo revisado queda en el navegador', await p.evaluate(() => (entYtEstadoRef('U3Atcn3wFjY') || {}).estado === 'problema' && _yt.sinTabla));
+ok('sin errores de JavaScript (YouTube)', errores.length === 0, errores.join(' | '));
+
 await b.close();
 console.log(mal ? `\n${mal} fallo(s)` : `\n${n}/${n} bien`);
 process.exit(mal ? 1 : 0);

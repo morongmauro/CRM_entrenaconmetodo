@@ -654,6 +654,8 @@ function entFiltrarSinOrden(lista) {
     const tieneVideo = (e.video_fuente || 'ninguno') !== 'ninguno';
     if (f.video === 'sin' && tieneVideo) return false;
     if (f.video === 'con' && !tieneVideo) return false;
+    // YouTube no lo deja ver fuera de YouTube (entreno-youtube.js).
+    if (f.video === 'yt' && !(window.entYtProblema && entYtProblema(e))) return false;
     // Niveles de uso (se ignoran mientras no se hayan cargado):
     //   «clientes» → en el ciclo actual de algún cliente activo;
     //   «antes»    → lo usaron alguna vez, pero hoy nadie lo tiene.
@@ -699,7 +701,7 @@ function entChipMusculos(e) {
 }
 
 function entIconoVideo(e) {
-  if (e.video_fuente === 'youtube') return '<span class="tag tag-red">▶ YouTube</span>';
+  if (e.video_fuente === 'youtube') return '<span class="tag tag-red">▶ YouTube</span>' + (window.entYtEtiqueta ? ' ' + entYtEtiqueta(e.video_ref) : '');
   if (e.video_fuente === 'archivo') return '<span class="tag tag-blue">⬆ Subido</span>';
   return '<span class="tag tag-gray">sin video</span>';
 }
@@ -777,7 +779,7 @@ function entBarraFiltros(prefijo = 'flt') {
         ${entMulti('patron', ENT_PATRONES, 'Todo patrón')}
         ${entMulti('musculo', musOpts, 'Todo músculo')}
         ${entMulti('equipo', ENT_EQUIPO, 'Todo equipo')}
-        <select data-sel="video" onchange="entSetFiltro('video', this.value)">${entOpciones([['sin', 'Sin video'], ['con', 'Con video']], f.video || '', 'Con y sin video')}</select>
+        <select data-sel="video" onchange="entSetFiltro('video', this.value)">${entOpciones([['sin', 'Sin video'], ['con', 'Con video'], ['yt', 'Con problemas en YouTube']], f.video || '', 'Con y sin video')}</select>
       </div>
       <div class="mt-2">
         <select data-sel="uso" onchange="entSetFiltro('uso', this.value)" title="1º lo que usan hoy, 2º lo que usaron antes, 3º toda la galería">${entUsoOpciones()}</select>
@@ -1183,6 +1185,8 @@ async function entVistaEjercicios() {
   const body = $('#ent-body');
   if (!body) return;
   const todos = await entDb.ejercicios();
+  // Lo ya revisado en YouTube: etiqueta y filtro «Con problemas en YouTube».
+  if (window.entYtCargar) await entYtCargar().catch(() => {});
   // Los niveles de uso siempre: sus contadores dicen cuántos videos faltan.
   await entDb.niveles();
 
@@ -1194,6 +1198,7 @@ async function entVistaEjercicios() {
         <button class="btn btn-secondary btn-sm" onclick="entReporteSinVideo()" data-reporte-sin-video title="Qué clientes tienen hoy ejercicios sin video, y cuáles son">👥 Sin video por cliente</button>
         <button class="btn btn-secondary btn-sm" onclick="entReporteSinHistorial()" data-reporte-sin-historial title="Qué ejercicios de hoy le salen al cliente sin «última vez», y por qué">📈 Sin historial por cliente</button>
         <button class="btn btn-secondary btn-sm" onclick="entRevisarVideos()" title="Recorre los ejercicios filtrados, uno a uno, con sus propuestas de video">🎬 Revisar videos uno a uno</button>
+        <button class="btn btn-secondary btn-sm" onclick="entYtAbrir()" data-revisar-youtube title="Encuentra los videos que YouTube no deja ver fuera de YouTube (tampoco se ven en la app)">Revisar YouTube</button>
         <button class="btn btn-primary btn-sm" onclick="entEditarEjercicio()">+ Nuevo ejercicio</button>
       </div>
     </div>

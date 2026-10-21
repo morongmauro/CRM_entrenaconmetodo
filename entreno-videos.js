@@ -130,8 +130,12 @@ function entPintarVideoRapido() {
   const enCola = _vid.cola.length > 1;
   const nomBusqueda = encodeURIComponent((e.alias || e.nombre || '') + ' exercise');
 
+  // YouTube no deja ver este video fuera de YouTube (entreno-youtube.js).
+  const ytMal = actual && window.entYtEtiqueta ? entYtEtiqueta(actual) : '';
+  const avisoYt = ytMal ? `<div class="rounded-lg text-sm p-2.5 mb-2" style="background:rgba(238,132,52,.1);color:#8a4a12" data-yt-aviso>
+      ${ytMal} <b>No se reproduce en la app:</b> ${escapeHtml(entYtMotivo(entYtEstadoRef(actual).codigo))}. Elige otro abajo o pega tu link.</div>` : '';
   const bloqueActual = actual
-    ? entMiniaturaVideo(actual, e.video_inicio_seg, 'Ahora')
+    ? avisoYt + entMiniaturaVideo(actual, e.video_inicio_seg, 'Ahora')
     : e.video_fuente === 'archivo'
       ? '<div class="rounded-lg bg-slate-100 text-slate-500 text-sm p-4 text-center">Tiene un video <b>subido</b> (archivo). Si eliges uno de YouTube, lo reemplaza.</div>'
       : '<div class="rounded-lg bg-amber-50 text-amber-800 text-sm p-4 text-center">Este ejercicio <b>no tiene video</b>.</div>';
@@ -144,6 +148,7 @@ function entPintarVideoRapido() {
       <div class="flex flex-wrap gap-1">
         ${p.habla === false ? '<span class="tag tag-green">Sin voz</span>' : p.habla ? '<span class="tag tag-gray">Con voz</span>' : ''}
         ${p.vertical ? '<span class="tag tag-gray">Vertical</span>' : ''}
+        ${window.entYtEtiqueta ? entYtEtiqueta(p.ref, true) : ''}
       </div>
       <button class="btn btn-primary btn-sm mt-auto" onclick="entUsarPropuesta('${escapeHtml(p.ref)}')">Usar este</button>
     </div>`;
@@ -191,6 +196,14 @@ function entPintarVideoRapido() {
        <button class="btn btn-secondary" onclick="entVideoMover(1)" ${_vid.pos >= _vid.cola.length - 1 ? 'disabled' : ''}>Siguiente →</button>` : ''}
      <button class="btn btn-ghost" onclick="entCerrarVideoRapido()">Cerrar</button>`
   ), { wide: true });
+
+  // Lo que aún no se ha revisado en YouTube (el actual y las propuestas) se
+  // revisa ya: si alguno no se reproduce, la ventana lo marca al momento.
+  if (window.entYtRevisarUno) [actual, ...props.map(p => p.ref)].filter(r => r && !entYtEstadoRef(r)).forEach(r => {
+    entYtRevisarUno(r, r === actual ? id : null).then(f => {
+      if (f && f.estado === 'problema' && document.querySelector(`[data-video-rapido="${id}"]`)) entPintarVideoRapido();
+    });
+  });
 }
 
 // Elegir la imagen del preview aquí mismo: se guarda al tocarla. Solo toca

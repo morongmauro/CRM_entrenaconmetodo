@@ -43,14 +43,21 @@ window.DB = {
   series_log: [],
   escrituras: [],
   sinTablaPropuestas: false,
+  ejercicio_video_estado: [],
 };
+// Un YouTube de mentira: los ids de DB.ytMalos contestan con error 150; los demás arrancan.
+window.YT = { Player: function(div, o){ const malo = (DB.ytMalos||[]).includes(o.videoId); DB.ytProbados = (DB.ytProbados||[]).concat(o.videoId);
+  setTimeout(()=>{ o.events.onReady({target:{mute(){},playVideo(){}}}); setTimeout(()=> malo ? o.events.onError({data:150}) : o.events.onStateChange({data:1}), 5); }, 5);
+  this.destroy=()=>{}; } };
 function consulta(tabla){
   const q = { filtros:[], _row:null,
     select(){return q;}, order(){return q;}, range(){return q;},
     eq(c,v){ q.filtros.push([c,v]); return q; },
     in(c,vs){ q.filtros.push([c,(x)=>vs.includes(x)]); return q; },
     update(row){ q._row=row; return q; },
+    upsert(filas){ if (DB.sinTablaYt) return Promise.resolve({error:{message:'relation does not exist'}}); (DB.ejercicio_video_estado ||= []); filas.forEach(f=>{ const i=DB.ejercicio_video_estado.findIndex(x=>x.video_ref===f.video_ref); if(i>=0) DB.ejercicio_video_estado[i]=f; else DB.ejercicio_video_estado.push(f); }); return Promise.resolve({error:null}); },
     then(res, rej){
+      if (tabla==='ejercicio_video_estado' && DB.sinTablaYt) return Promise.resolve({data:null,error:{message:'relation does not exist'}}).then(res,rej);
       if (tabla==='ejercicio_video_propuestas' && DB.sinTablaPropuestas) return Promise.resolve({data:null,error:{message:'relation does not exist'}}).then(res,rej);
       if (q._row){
         const filas = DB[tabla].filter(r=>q.filtros.every(([c,v])=>typeof v==='function'?v(r[c]):r[c]===v));
@@ -69,4 +76,5 @@ const navBtn = document.createElement('button'); navBtn.dataset.route = 'cliente
 </script>
 <script src="../../entrenamiento.js"></script>
 <script src="../../entreno-videos.js"></script>
+<script src="../../entreno-youtube.js"></script>
 </body></html>
