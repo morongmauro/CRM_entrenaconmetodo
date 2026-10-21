@@ -3117,6 +3117,17 @@ async function entVistaClientes() {
   ]);
   _ent.vtUlt = vtUlt || {};
 
+  // ¿Cada rutina quedó igual que en el ciclo anterior o cambió? Solo se pide
+  // al mirar la lista de rutinas, que es donde va la etiqueta.
+  _ent.cicloComp = {};
+  const idxFase = fase ? fases.indexOf(fase) : -1;
+  const faseAnt = idxFase > 0 ? fases[idxFase - 1] : null;
+  if (_ent.subtab === 'rutinas' && faseAnt && rutinas.length) {
+    const rutAnt = rutinasPorFase[faseAnt.id] || [];
+    const ejsAnt = rutAnt.length ? await entDb.ejerciciosDeRutinas(rutAnt.map(r => r.id)) : {};
+    _ent.cicloComp = entCompararCiclo(rutinas, ejerciciosPorRutina, rutAnt, ejsAnt);
+  }
+
   const cabecera = `
     <div class="flex justify-between items-start mb-4 gap-2 flex-wrap">
       <div>
@@ -4085,7 +4096,7 @@ function entListaRutinasHTML(fase, rutinas, ejerciciosPorRutina) {
           <div class="min-w-0 flex items-center gap-2">
             <span class="ent-flecha ${abierta ? 'ent-flecha-abierta' : ''}">▶</span>
             <div class="min-w-0">
-              <div class="font-bold text-slate-900">${escapeHtml(r.nombre)}${typeof entEsBloque === 'function' && entEsBloque(r) ? ' <span class="tag" data-tag-bloque title="Va el mismo día que la fuerza, debajo de ella">Bloque complementario</span>' : ''}</div>
+              <div class="font-bold text-slate-900">${escapeHtml(r.nombre)}${typeof entEsBloque === 'function' && entEsBloque(r) ? ' <span class="tag" data-tag-bloque title="Va el mismo día que la fuerza, debajo de ella">Bloque complementario</span>' : ''}${entEtiquetaCicloHTML((_ent.cicloComp || {})[r.id])}</div>
               <div class="text-xs text-slate-500">
                 Día ${r.dia_orden}${entDiasTexto(r) ? ` · ${entDiasTexto(r)}` : ''}
                 · ${ejs.length} ejercicio${ejs.length === 1 ? '' : 's'}
@@ -4100,6 +4111,9 @@ function entListaRutinasHTML(fase, rutinas, ejerciciosPorRutina) {
             <button class="btn btn-ghost btn-sm" onclick="entBorrarRutina('${r.id}')">✕</button>
           </div>
         </div>
+        ${abierta && (_ent.cicloComp || {})[r.id]?.cambios.length ? `<div class="mt-3 text-xs rounded-xl p-2.5" data-cambios-ciclo style="background:#FEF5EE;color:#7A3E14">
+          <div class="font-bold mb-1">Cambios respecto al ciclo anterior</div>
+          ${_ent.cicloComp[r.id].cambios.map(t => `<div>${escapeHtml(t)}</div>`).join('')}</div>` : ''}
         ${abierta ? `<div class="mt-3 pt-3 border-t border-slate-100">${entResumenEjerciciosHTML(ejs, r)}</div>` : ''}
       </div>`;
   }).join('') + `
@@ -4107,6 +4121,55 @@ function entListaRutinasHTML(fase, rutinas, ejerciciosPorRutina) {
       <button class="btn btn-dark btn-sm" onclick="entNuevaRutina('${fase.id}', '${_ent.clienteId}')">+ Rutina nueva</button>
       <button class="btn btn-secondary btn-sm" onclick="entAsignarPlantilla('${fase.id}')">↓ Traer de la biblioteca</button>
     </div>`;
+}
+
+// Cada rutina contra su versión del ciclo anterior. La pareja es la rutina de
+// la que se copió (`origen_rutina_id`, al duplicar el ciclo); si no, la del
+// mismo nombre; si no, la del mismo día. Se compara lo que ve el cliente:
+// qué ejercicios, en qué orden, series, reps, peso y descanso.
+// Devuelve { rutinaId: { igual, cambios: [texto, …] } }; sin pareja, nada.
+function entCompararCiclo(rutinas, ejs, rutAnt, ejsAnt) {
+  const norm = (t) => String(t || '').trim().toLowerCase();
+  const nombreEj = (re) => entNombres(re.ejercicios || {}).grande || 'Ejercicio';
+  const usadas = new Set();
+  const pareja = (r) => {
+    const libre = (x) => !usadas.has(x.id);
+    return rutAnt.find(x => libre(x) && r.origen_rutina_id && x.id === r.origen_rutina_id)
+      || rutAnt.find(x => libre(x) && norm(x.nombre) === norm(r.nombre))
+      || rutAnt.find(x => libre(x) && x.dia_orden != null && x.dia_orden === r.dia_orden);
+  };
+  const out = {};
+  rutinas.forEach(r => {
+    const a = pareja(r);
+    if (!a) return;
+    usadas.add(a.id);
+    const ahora = ejs[r.id] || [], antes = ejsAnt[a.id] || [];
+    const cambios = [];
+    const idsAntes = antes.map(re => re.ejercicio_id), idsAhora = ahora.map(re => re.ejercicio_id);
+    ahora.filter(re => !idsAntes.includes(re.ejercicio_id)).forEach(re => cambios.push(`+ ${nombreEj(re)}`));
+    antes.filter(re => !idsAhora.includes(re.ejercicio_id)).forEach(re => cambios.push(`− ${nombreEj(re)}`));
+    const comunes = idsAhora.filter(id => idsAntes.includes(id));
+    const ordenAntes = idsAntes.filter(id => idsAhora.includes(id));
+    if (comunes.join() !== ordenAntes.join()) cambios.push('Orden de los ejercicios');
+    ahora.forEach(re => {
+      const v = antes.find(x => x.ejercicio_id === re.ejercicio_id);
+      if (!v) return;
+      const dif = [];
+      if ((v.series ?? null) !== (re.series ?? null)) dif.push(`${v.series ?? '—'}→${re.series ?? '—'} series`);
+      if (norm(v.reps) !== norm(re.reps)) dif.push(`reps ${v.reps || '—'}→${re.reps || '—'}`);
+      if (norm(v.peso_objetivo) !== norm(re.peso_objetivo)) dif.push(`peso ${v.peso_objetivo || '—'}→${re.peso_objetivo || '—'}`);
+      if ((v.descanso_seg ?? null) !== (re.descanso_seg ?? null)) dif.push(`descanso ${v.descanso_seg ?? '—'}→${re.descanso_seg ?? '—'}s`);
+      if (dif.length) cambios.push(`${nombreEj(re)}: ${dif.join(', ')}`);
+    });
+    out[r.id] = { igual: !cambios.length, cambios };
+  });
+  return out;
+}
+
+function entEtiquetaCicloHTML(c) {
+  if (!c) return '';
+  if (c.igual) return ' <span class="tag" data-tag-ciclo="igual" style="background:#E6F2E9;color:#2F6B3E" title="Mismos ejercicios, orden, series, reps, peso y descanso que en el ciclo anterior">Igual al ciclo anterior</span>';
+  return ` <span class="tag" data-tag-ciclo="cambios" style="background:#FDEBDC;color:#B5561A" title="${escapeHtml(c.cambios.join('\n'))}">Con cambios respecto al ciclo anterior</span>`;
 }
 
 // Los ejercicios en modo lectura: la prescripción tal como la verá el cliente.
