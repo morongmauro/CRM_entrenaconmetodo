@@ -336,6 +336,7 @@ function cxFilaHTML(f, i) {
     return `
       <button type="button" class="cx-op${on ? ' on' : ''}" data-cx-op="${x.e.id}" aria-pressed="${on}" ${usado ? 'disabled title="Ya lo elegiste en otro ejercicio"' : ''}
               onclick="cxElegir(${i}, '${x.e.id}')">
+        ${entMiniPreviewHTML(x.e)}
         <span class="cx-op-nombre">${escapeHtml(nx.grande)}</span>
         ${nx.chico ? `<span class="cx-op-chico">${escapeHtml(nx.chico)}</span>` : ''}
         <span class="cx-op-por">${escapeHtml([...x.porque.slice(0, 2), x.dif < 0 ? 'Más fácil' : x.dif > 0 ? 'Más difícil' : ''].filter(Boolean).join(' · '))}</span>

@@ -2049,6 +2049,32 @@ async function entPintarGaleriaCons() {
 // ventana, con sus músculos y, desde la galería, «+ Añadir a la rutina».
 const entTieneVideo = (e) => (e?.video_fuente === 'youtube' && !!e.video_ref) || (e?.video_fuente === 'archivo' && !!e.video_path);
 
+// Preview chico de un ejercicio (alternativas del agente y «Cambiar solo los
+// ejercicios»): la miniatura con ▶, y al tocarla el video corre AHÍ MISMO.
+// Abrir la ventana del video taparía la elección que el coach está haciendo.
+function entMiniPreviewHTML(e) {
+  if (!e) return '';
+  const foto = entMiniatura(e), video = entTieneVideo(e);
+  if (!foto && !video) return '';
+  return `<span class="ent-mini-prev${video ? ' ent-foto-video' : ''}" data-mini-prev="${e.id}"${video
+    ? ` role="button" tabindex="0" title="Ver el video" onclick="event.stopPropagation(); entMiniPreviewPlay(this, '${e.id}')"` : ''}>
+    ${foto ? `<img src="${escapeHtml(foto)}" alt="" loading="lazy" draggable="false">` : ''}${video ? '<span class="ent-play" aria-hidden="true">▶</span>' : ''}</span>`;
+}
+window.entMiniPreviewPlay = async (el, id) => {
+  const e = (_ent.ejercicios || []).find(x => x.id === id)
+    || (_ent.rutina?.ejercicios || []).map(x => x.ejercicios).find(x => x && x.id === id);
+  if (!e || !entTieneVideo(e)) return;
+  el.onclick = (ev) => ev.stopPropagation();
+  el.classList.add('reproduciendo');
+  if (e.video_fuente === 'youtube') {
+    const ini = Number(e.video_inicio_seg) > 0 ? `&start=${Number(e.video_inicio_seg)}` : '';
+    el.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(e.video_ref)}?autoplay=1&mute=1&rel=0&playsinline=1${ini}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+  } else {
+    const url = await entVideoFirmado(e.video_path);
+    el.innerHTML = url ? `<video src="${escapeHtml(url)}" autoplay muted loop playsinline controls></video>` : '<span class="ent-mini-nada">Sin video</span>';
+  }
+};
+
 window.entVerVideoEj = async (id, { anadir = false } = {}) => {
   const e = (await entDb.ejercicios()).find(x => x.id === id)
     || (_ent.rutina?.ejercicios || []).map(x => x.ejercicios).find(x => x && x.id === id);

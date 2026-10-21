@@ -399,7 +399,8 @@ function rutTarjetasHTML(m) {
       <div class="rut-op-titulo">Con qué cambiar <b>${escapeHtml(entNombres(t.sale).grande)}</b></div>
       ${t.opciones.map((o, i) => `
         <div class="rut-op${t.elegida === i ? ' elegida' : ''}${t.elegida != null && t.elegida !== i ? ' apagada' : ''}">
-          <div class="min-w-0">
+          ${typeof entMiniPreviewHTML === 'function' ? entMiniPreviewHTML(o.e) : ''}
+          <div class="min-w-0 flex-1">
             <div class="rut-op-nombre">${escapeHtml(entNombres(o.e).grande)}</div>
             ${entNombres(o.e).chico ? `<div class="rut-op-chico">${escapeHtml(entNombres(o.e).chico)}</div>` : ''}
             <div class="rut-op-por">${escapeHtml(o.por_que)}</div>
