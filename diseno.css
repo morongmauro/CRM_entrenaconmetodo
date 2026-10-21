@@ -241,3 +241,6 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):focus, select:foc
 .ent-mini-nada { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #8A8F98; }
 .cx-op .ent-mini-prev { width: 100%; max-width: 200px; margin-bottom: 4px; }
 .rut-op > .ent-mini-prev + div { flex: 1 1 auto; }
+.rut-op-sale { display: flex; align-items: center; gap: 10px; }
+.cx-ahora .ent-mini-prev { width: 84px; }
+.cx-ahora .ent-mini-prev.reproduciendo { width: 160px; }

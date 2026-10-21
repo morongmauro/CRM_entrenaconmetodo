@@ -396,7 +396,8 @@ window.rutPedirAlternativas = (reId) => {
 function rutTarjetasHTML(m) {
   return (m.tarjetas || []).map(t => t.clase === 'opciones' ? `
     <div class="rut-opciones" data-rut-opciones>
-      <div class="rut-op-titulo">Con qué cambiar <b>${escapeHtml(entNombres(t.sale).grande)}</b></div>
+      <div class="rut-op-sale" data-rut-sale>${typeof entMiniPreviewHTML === 'function' ? entMiniPreviewHTML(t.sale) : ''}
+        <div class="rut-op-titulo">Con qué cambiar <b>${escapeHtml(entNombres(t.sale).grande)}</b></div></div>
       ${t.opciones.map((o, i) => `
         <div class="rut-op${t.elegida === i ? ' elegida' : ''}${t.elegida != null && t.elegida !== i ? ' apagada' : ''}">
           ${typeof entMiniPreviewHTML === 'function' ? entMiniPreviewHTML(o.e) : ''}

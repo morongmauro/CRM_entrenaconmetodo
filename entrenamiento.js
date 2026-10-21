@@ -2054,6 +2054,8 @@ const entTieneVideo = (e) => (e?.video_fuente === 'youtube' && !!e.video_ref) ||
 // Abrir la ventana del video taparía la elección que el coach está haciendo.
 function entMiniPreviewHTML(e) {
   if (!e) return '';
+  // El ejercicio que viene pegado a la rutina no trae los campos del video.
+  e = (_ent.ejercicios || []).find(x => x.id === e.id) || e;
   const foto = entMiniatura(e), video = entTieneVideo(e);
   if (!foto && !video) return '';
   return `<span class="ent-mini-prev${video ? ' ent-foto-video' : ''}" data-mini-prev="${e.id}"${video

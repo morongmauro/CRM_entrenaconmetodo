@@ -348,6 +348,7 @@ function cxFilaHTML(f, i) {
     <div class="cx-fila${f.elegido ? ' cambia' : ''}" data-cx-fila="${f.reId}">
       <div class="cx-ahora">
         <span class="cx-n">${i + 1}</span>
+        ${entMiniPreviewHTML(f.src)}
         <div class="min-w-0">
           <div class="cx-nombre">${escapeHtml(n.grande)}</div>
           ${n.chico ? `<div class="cx-chico">${escapeHtml(n.chico)}</div>` : ''}
