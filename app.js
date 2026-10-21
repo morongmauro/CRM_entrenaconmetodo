@@ -4045,6 +4045,11 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
           <div class="mt-3" id="seg-vt"></div>
         </details>` : ''}
 
+        ${typeof pfPanel === 'function' ? `<details class="card" open data-seg-progreso>
+          <summary class="cursor-pointer text-xs font-bold text-slate-500 uppercase tracking-wider">📈 Progreso de fuerza · por ejercicio y por patrón</summary>
+          <div class="mt-3" id="seg-pf"></div>
+        </details>` : ''}
+
         <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider px-1 pt-2">Timeline · ${segs.length} semana(s)</h4>
         <div class="space-y-3 em-timeline">
           ${segs.length === 0 ? '<div class="card text-sm text-slate-500 text-center py-8">Sin registros aún. <button class="text-emerald-600 font-semibold" onclick="abrirNuevoSeguimiento(\''+cliente.id+'\')">+ Crear el primero</button></div>' : segs.map(s => seguimientoCard(s, coachPorSeg[s.id] || [])).join('')}
@@ -4054,6 +4059,7 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
   `;
   const sl = $('#seg-list'); if (sl && prevScroll) sl.scrollTop = prevScroll;
   if (typeof vtPanel === 'function') vtPanel('#seg-vt', cliente.id);
+  if (typeof pfPanel === 'function') pfPanel('#seg-pf', cliente.id);
 }
 
 function clienteSidebarItem(c, ult) {
@@ -7705,7 +7711,7 @@ window.verCliente = async (id) => {
   // Pagos · Journey · Perfil.
   const telWa = String(c.telefono || '').replace(/[^\d]/g, '');
   const pagoTxt = c.dia_pago ? `Pago el ${c.dia_pago} de cada mes` : 'Sin día de pago';
-  setTimeout(() => fichaPestanas(c), 40);
+  setTimeout(() => { fichaPestanas(c); if (typeof pfPanel === 'function') pfPanel('#ficha-pf', c.id); }, 40);
   openModal(modalShell('Ficha del cliente', `
     <div class="space-y-4" data-ficha>
       <div class="flex items-center gap-4 flex-wrap" data-ficha-cabecera>
@@ -7885,6 +7891,11 @@ window.verCliente = async (id) => {
           </div>`).join('')}
       </div>
 
+      ${typeof pfPanel === 'function' ? `<div class="sec sec-slate">
+        <div class="sec-title">📈 Progreso de fuerza</div>
+        <div id="ficha-pf"></div>
+      </div>` : ''}
+
       <div class="sec sec-slate">
         <div class="sec-title">🗓 Últimas semanas (${segs.length})</div>
         ${segs.length === 0 ? '<p class="text-xs text-slate-500">Sin registros.</p>' :
@@ -7982,7 +7993,7 @@ window.verCliente = async (id) => {
 // la lista se queda en «Perfil». Solo cambia qué se ve: todo sigue ahí.
 const FICHA_SECCIONES = [
   ['Adherencia rápida', 'resumen'], ['Alineación', 'resumen'], ['Pendientes', 'resumen'],
-  ['Nivel de actividad', 'entreno'], ['Últimas semanas', 'entreno'],
+  ['Nivel de actividad', 'entreno'], ['Últimas semanas', 'entreno'], ['Progreso de fuerza', 'entreno'],
   ['Meta nutricional', 'comida'],
   ['Composición corporal', 'cuerpo'], ['Historial de peso', 'cuerpo'],
   ['Últimos pagos', 'pagos'],
