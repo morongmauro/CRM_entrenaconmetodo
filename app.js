@@ -6477,7 +6477,20 @@ async function cargarPanelInstalaciones(clientes) {
   conApp.sort((a, b) => String(b.pwa).localeCompare(String(a.pwa)));
   nuevaInstalada.sort((a, b) => String(b.f).localeCompare(String(a.f)));
   const nombres = (l) => l.map(x => `<span class="cursor-pointer hover:underline" onclick="verCliente('${(x.c || x).id}')">${escapeHtml((x.c || x).nombre)}</span>`).join(' · ');
+  // La CUENTA de la app (correo + contraseña, clientes.app_clave_hash): quién
+  // ya la activó, quién no, y a quién le falta el correo en su ficha (sin
+  // correo no puede activarla).
+  const conClave = clientes.filter(c => c.app_clave_hash);
+  const sinClave = clientes.filter(c => !c.app_clave_hash && (c.email || '').trim());
+  const sinCorreo = clientes.filter(c => !c.app_clave_hash && !(c.email || '').trim());
   el2.innerHTML = `
+    <div data-cuenta-app-panel class="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3 mb-3">
+      <div class="text-sm font-bold text-slate-800">🔐 Cuenta de la app (correo + contraseña):
+        <span data-cuenta-con-clave class="text-emerald-700">${conClave.length} de ${clientes.length}</span></div>
+      ${conClave.length ? `<div class="text-xs text-slate-600 mt-1"><span class="font-semibold">Ya la activaron (${conClave.length}):</span> ${nombres(conClave)}</div>` : ''}
+      ${sinClave.length ? `<div data-cuenta-sin-clave class="text-xs text-slate-600 mt-1"><span class="font-semibold">Aún sin contraseña (${sinClave.length}):</span> ${nombres(sinClave)}<div class="opacity-80">Les sale al abrir la app; si la saltan, vuelve a salir la próxima vez.</div></div>` : ''}
+      ${sinCorreo.length ? `<div data-cuenta-sin-correo class="text-xs rounded-lg px-2 py-1.5 mt-1" style="background:#fef3c7;color:#92400e"><span class="font-semibold">Sin correo en su ficha (${sinCorreo.length}), no pueden activarla:</span> ${nombres(sinCorreo)}</div>` : ''}
+    </div>
     <div data-app-nueva-panel class="rounded-xl border border-blue-100 bg-blue-50/50 p-3 mb-3">
       <div class="text-sm font-bold text-slate-800">✨ App nueva (entrenaconmetodoapp) en su pantalla de inicio:
         <span data-cuenta-app-nueva class="text-blue-700">${nuevaInstalada.length} de ${clientes.length}</span></div>
