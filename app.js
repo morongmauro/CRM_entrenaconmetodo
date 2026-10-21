@@ -293,7 +293,7 @@ function renderRemindersMT() {
           const chip = compacta
             ? `<span class="tag" data-vista-ficha="compacta" style="background:#EAF1FB;color:#2D62B0" title="Ve la app compacta (solo Entrenamiento, Alimentación y Más) desde el ${fmt.fecha(String(v.desde).slice(0, 10))} · ${quien}">▦ vista compacta · ${fmt.fechaCorta(String(v.desde).slice(0, 10))}</span>`
             : `<span class="tag" data-vista-ficha="completa" style="background:#f1f5f9;color:#64748b" title="Ve la app completa">vista completa</span>`;
-          const puede = VISTA_COMPACTA_PRUEBA.includes(normalizeName(_mtRem.nombre || ''));
+          const puede = VISTA_COMPACTA_TODOS || VISTA_COMPACTA_PRUEBA.includes(normalizeName(_mtRem.nombre || ''));
           const boton = puede ? `<button type="button" data-cambiar-vista class="btn btn-secondary btn-sm" onclick="cambiarVistaMT('${compacta ? 'completa' : 'compacta'}')" title="Le cambia la vista la próxima vez que abra la app">${compacta ? 'Ponerle la completa' : 'Ponerle la compacta'}</button>` : '';
           return chip + (boton ? ' ' + boton : '');
         })(),
@@ -6517,6 +6517,8 @@ window.cliSoloCompacta = () => { _cliSoloCompacta = !_cliSoloCompacta; rerenderV
 // Quiénes pueden probar la vista compacta (igual que VISTA_COMPACTA_PRUEBA
 // en la app, src/vistaApp.js). Al resto la app no se la muestra todavía.
 const VISTA_COMPACTA_PRUEBA = ['mauro moron'];
+// Ya para todos (en la app, PRUEBA_TODOS de src/vistaApp.js).
+const VISTA_COMPACTA_TODOS = true;
 const vistaDe = (c) => { const m = _pwaInstallCache && _pwaInstallCache.rows; const d = m && m.get(normalizeName(c.nombre || '')); return (d && d.vista) || null; };
 window.cliSub = (k) => { _cliSub = k; rerenderView(); };
 
