@@ -185,6 +185,7 @@ function altTarjeta(x, enRutina, hechos) {
   const veces = hechos && hechos.get(e.id) ? hechos.get(e.id).size : 0;
   const nivel = (ENT_NIVELES.find(q => q[0] === e.nivel) || [null, ''])[1];
   const marcas = [
+    x.noSirve && window.nsEtiqueta ? nsEtiqueta(e.id) : '',
     enRutina.has(e.id) ? '<span class="alt-marca alt-ya">Ya está en la rutina</span>' : '',
     veces ? `<span class="alt-marca alt-hizo">Ya lo hizo${veces > 1 ? ` · ${veces} veces` : ''}</span>` : '',
   ].join('');
@@ -209,6 +210,9 @@ function altPintarLista() {
   if (!caja || !re) return;
   const src = re.ejercicios || {};
   const todos = altCandidatos(src, _ent.ejercicios || []);
+  // Los «No le sirve» de este cliente: con etiqueta y al final.
+  const cidNs = _ent.rutina?.cliente_id;
+  if (cidNs && window.nsTiene) { todos.forEach(x => { x.noSirve = nsTiene(cidNs, x.e.id); }); todos.sort((x, y) => (x.noSirve ? 1 : 0) - (y.noSirve ? 1 : 0)); }
   const lista = todos.filter(altPasaFiltros);
   const enRutina = new Set((_ent.rutina?.ejercicios || []).map(x => x.ejercicio_id));
   const hechos = _ent.rutina?.cliente_id ? _alt.hechos[_ent.rutina.cliente_id] : null;
@@ -267,6 +271,7 @@ window.altSustituir = async (ejercicioId) => {
   const re = altRE();
   const nuevo = (_ent.ejercicios || []).find(x => x.id === ejercicioId);
   if (!re || !nuevo) return;
+  if (window.nsConfirmarUso && _ent.rutina?.cliente_id && !nsConfirmarUso(nuevo.id, _ent.rutina.cliente_id)) return;
   const antes = entNombres(re.ejercicios || {}).grande;
   const ok = await entDb.actualizarRE(re.id, { ejercicio_id: nuevo.id }, { origen: 'alternativas' });
   if (ok === false) return;

@@ -2037,6 +2037,9 @@ async function entPintarGaleriaCons() {
   const seq = _ent.seqGal = (_ent.seqGal || 0) + 1;
   const todos = await entDb.ejercicios();
   const galeria = entFiltrar(todos);
+  // Los «No le sirve» de este cliente, al final (con su etiqueta roja).
+  const cidNs = _ent.rutina && _ent.rutina.cliente_id;
+  if (cidNs && window.nsTiene) galeria.sort((x, y) => (nsTiene(cidNs, x.id) ? 1 : 0) - (nsTiene(cidNs, y.id) ? 1 : 0));
   await entDb.firmarPosters(galeria.map(e => e.poster_path).filter(Boolean));
   const caja = $('#cons-gal-lista');
   if (!caja || seq !== _ent.seqGal) return;
@@ -2134,6 +2137,7 @@ function entTarjetaCons(e) {
       </div>
       <div class="font-bold text-slate-900 text-[13px] leading-tight ent-2lineas mt-1.5">${escapeHtml(entNombres(e).grande)}</div>
       ${entNombreChico(e)}
+      ${window.nsEtiqueta ? nsEtiqueta(e.id, null, { chica: true }) : ''}
       <div class="text-[11px] text-slate-500 truncate">${entLabel(ENT_TIPOS, e.tipo)} · ${entLabel(ENT_SEGMENTOS, e.segmento)}</div>
       ${prim.length ? `<div class="text-[11px] text-emerald-700 truncate">${escapeHtml(prim.join(' · '))}</div>` : ''}
       <div class="flex items-center justify-between gap-1 mt-1.5">
@@ -2310,6 +2314,7 @@ function entFilaRutina(re, i, total, bloques) {
         </div>
         <div class="flex gap-0.5 flex-shrink-0">
           ${window.ccBotonHTML && _ent.rutina && _ent.rutina.cliente_id ? ccBotonHTML(re) : ''}
+          ${window.nsBotonHTML && _ent.rutina && _ent.rutina.cliente_id ? nsBotonHTML(re) : ''}
           <button class="btn btn-ghost btn-sm ent-alt-btn" data-alternativas onclick="entAlternativas('${re.id}')" title="Alternativas: otro ejercicio parecido en su lugar">⇄<span class="txt"> Alternativas</span></button>
           <button class="btn btn-ghost btn-sm" onclick="entVerFicha('${e.id}')" title="Ver la ficha completa">👁</button>
           <button class="btn btn-ghost btn-sm" ${i === 0 ? 'disabled' : ''} onclick="entMoverRE('${re.id}', -1)">↑</button>
@@ -2356,6 +2361,8 @@ function entFilaRutina(re, i, total, bloques) {
 // en ese bloque (o suelto). Sin `donde`, al final y al bloque elegido arriba.
 window.entAgregarARutina = async (ejercicioId, donde = null) => {
   if (!_ent.rutinaId || !_ent.rutina) { toast('Abre una rutina primero'); return; }
+  // Con el tag «No le sirve» de este cliente: pregunta antes (tú decides).
+  if (window.nsConfirmarUso && _ent.rutina.cliente_id && !nsConfirmarUso(ejercicioId, _ent.rutina.cliente_id)) return;
   const lista = _ent.rutina.ejercicios.slice();
   const pos = donde && donde.pos != null ? Math.max(0, Math.min(donde.pos, lista.length)) : lista.length;
   const bloque = donde ? (donde.bloque || null) : (_ent.bloqueDestino || null);
@@ -3228,7 +3235,7 @@ async function entVistaClientes() {
     ['videos', '🎥 Videos de técnica'],
   ];
 
-  body.innerHTML = cabecera + avisoCiclo + selectorFase + `
+  body.innerHTML = cabecera + (window.nsListaClienteHTML ? nsListaClienteHTML(_ent.clienteId) : '') + avisoCiclo + selectorFase + `
     <div class="bg-slate-100 rounded-xl p-1 flex gap-1 mb-4 overflow-x-auto">
       ${subtabs.map(([id, lab]) => `
         <button class="px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap ${_ent.subtab === id ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}"

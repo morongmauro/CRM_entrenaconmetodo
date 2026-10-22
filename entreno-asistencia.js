@@ -450,13 +450,14 @@ function asiPanelHTML(r, an, cliente, cmp, todos, datos) {
   //    de los estancados (mismo patrón y segmento, mejor si tienen video).
   const rutDeFase = new Set(datos.rutinas.filter(x => x.fase_id === r.fase_id).map(x => x.id));
   const enFase = new Set(datos.lineas.filter(l => rutDeFase.has(l.rutina_id)).map(l => l.ejercicio_id));
-  const volver = [...an.porEj.values()].filter(a => a.tendencia === 'sube' && !enEsta.has(a.id) && !enFase.has(a.id) && a.ej && !a.ej.archivado)
+  const volver = [...an.porEj.values()].filter(a => a.tendencia === 'sube' && !enEsta.has(a.id) && !enFase.has(a.id) && a.ej && !a.ej.archivado && !(window.nsTiene && r.cliente_id && nsTiene(r.cliente_id, a.id)))
     .sort((a, b) => (b.ultimo?.fecha || '').localeCompare(a.ultimo?.fecha || '')).slice(0, 5);
   const usados = new Set([...an.porEj.keys()]);
   const variantes = r.ejercicios.map(re => an.porEj.get(re.ejercicio_id)).filter(a => a && (a.tendencia === 'estancado' || a.seguidos >= 3 || a.salto) && a.ej)
     .slice(0, 4).map(a => {
       const base = a.ej;
       const alt = todos.filter(e => !e.archivado && e.id !== base.id && !usados.has(e.id) && !enEsta.has(e.id)
+        && !(window.nsTiene && r.cliente_id && nsTiene(r.cliente_id, e.id))
         && e.patron && e.patron === base.patron && e.segmento === base.segmento
         && (!base.tipo || e.tipo === base.tipo))
         .sort((x, y) => ((y.video_fuente && y.video_fuente !== 'ninguno') - (x.video_fuente && x.video_fuente !== 'ninguno'))
