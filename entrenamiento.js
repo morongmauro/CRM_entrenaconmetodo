@@ -425,7 +425,7 @@ const entDb = {
   async fases(clienteId) {
     const q = sb.from('fases').select('*').order('orden');
     const { data } = clienteId ? await q.eq('cliente_id', clienteId) : await q.is('cliente_id', null);
-    return data || [];
+    return clienteId ? entCerrarCiclosPasados(data || []) : (data || []);
   },
   async crearFase(row) {
     const { data, error } = await sb.from('fases').insert(row).select().single();
@@ -3138,8 +3138,9 @@ async function entVistaClientes() {
 
   // Qué fase se está mirando: la que eligió el coach, o la activa, o la última.
   if (!fases.some(f => f.id === _ent.faseId)) {
-    _ent.faseId = (fases.find(f => f.estado === 'activa') || fases[fases.length - 1])?.id || null;
+    _ent.faseId = (entCicloVigente(fases) || fases.find(f => f.estado === 'activa') || fases[fases.length - 1])?.id || null;
   }
+  _ent.fasesCliente = fases;
   const fase = fases.find(f => f.id === _ent.faseId) || null;
   const rutinas = fase ? (rutinasPorFase[fase.id] || []) : [];
 
@@ -3220,7 +3221,7 @@ async function entVistaClientes() {
       <label class="!mb-0 !normal-case !text-xs">Fase</label>
       <select class="!w-auto min-w-[220px] text-sm" onchange="entVerFase(this.value)">
         ${fases.map(f => `<option value="${f.id}" ${f.id === _ent.faseId ? 'selected' : ''}>
-          ${escapeHtml(f.nombre)}${f.estado === 'activa' ? ' · activa' : ''}
+          ${escapeHtml(f.nombre)}${entEtiquetaCiclo(f, fases) ? ' · ' + entEtiquetaCiclo(f, fases) : ''}
         </option>`).join('')}
       </select>
     </div>` : '';
@@ -4259,6 +4260,43 @@ window.entVerCliente = (id) => {
 // OJO con `toISOString()` aquí: convierte a UTC, y en un navegador al este de
 // Greenwich la medianoche local del día correcto sale como el día ANTERIOR.
 // `evtSumarDias` (eventos.js) trabaja siempre en local.
+// ── El ciclo en curso lo decide la FECHA ────────────────────────────────
+// Entre los ciclos que ya empezaron, el de inicio más reciente (empate: el
+// de mayor orden). La app usa la misma regla, así que no hace falta marcar
+// nada a mano cuando arranca el siguiente.
+function entCicloVigente(fases, hoy = fmt.hoy()) {
+  const dia = (f) => String(f.fecha_inicio || '').slice(0, 10);
+  const lista = (fases || []).filter(f => f.estado !== 'archivada' && f.estado !== 'borrador' && dia(f) && dia(f) <= hoy)
+    .sort((a, b) => dia(b).localeCompare(dia(a)) || (b.orden || 0) - (a.orden || 0));
+  return lista.find(f => f.estado === 'activa' && f.visible_cliente) || lista[0] || null;
+}
+// Qué es cada ciclo respecto a hoy: en curso, el que viene, o terminado.
+function entEtiquetaCiclo(f, fases, hoy = fmt.hoy()) {
+  const v = entCicloVigente(fases, hoy);
+  if (v && v.id === f.id) return 'en curso';
+  const dia = String(f.fecha_inicio || '').slice(0, 10);
+  if (dia && dia > hoy) return `empieza el ${fmt.fecha ? fmt.fecha(dia) : dia}`;
+  if (dia && f.estado !== 'borrador') return 'terminado';
+  return '';
+}
+// Cuando el ciclo nuevo (enviado) ya arrancó, el anterior que seguía en
+// «activa» pasa solo a «finalizada». Solo cambia ese estado: no se borra ni
+// se toca nada más, y el historial de sesiones queda igual.
+async function entCerrarCiclosPasados(fases) {
+  try {
+    const hoy = fmt.hoy();
+    const v = entCicloVigente(fases, hoy);
+    if (!v || v.estado !== 'activa' || !v.visible_cliente) return fases;
+    const viejos = fases.filter(f => f.id !== v.id && f.estado === 'activa'
+      && String(f.fecha_inicio || '').slice(0, 10) < String(v.fecha_inicio).slice(0, 10));
+    for (const f of viejos) {
+      const { error } = await sb.from('fases').update({ estado: 'finalizada', updated_at: new Date().toISOString() }).eq('id', f.id);
+      if (!error) f.estado = 'finalizada';
+    }
+  } catch (e) { /* si falla, se queda como estaba */ }
+  return fases;
+}
+
 function entFechaFin(f) {
   if (!f.fecha_inicio || !f.semanas) return null;
   return evtSumarDias(f.fecha_inicio, f.semanas * 7 - 1);
@@ -4283,6 +4321,7 @@ function entTarjetaFase(f, rutinas) {
           <div class="flex items-center gap-2 flex-wrap">
             <span class="font-bold text-slate-900">${escapeHtml(f.nombre)}</span>
             <span class="tag ${estadoTag}">${escapeHtml(f.estado)}</span>
+            ${(() => { const e = entEtiquetaCiclo(f, _ent.fasesCliente || [f]); return e ? `<span class="tag" data-ciclo-etiqueta style="${e === 'en curso' ? 'background:#E3EEFB;color:#1F4E8C' : 'background:#f1f5f9;color:#64748b'}">${escapeHtml(e)}</span>` : ''; })()}
             ${chipEnvio}
           </div>
           <div class="text-xs text-slate-500 mt-0.5">
@@ -4358,6 +4397,7 @@ function entFormularioFase(f = {}, cliente = null) {
     </div>
     <div class="mb-3"><label>Estado</label>
       <select id="fa-estado">${entOpciones([['borrador','Borrador'],['activa','Activa'],['finalizada','Finalizada'],['archivada','Archivada']], f.estado || 'borrador', '—')}</select></div>
+    <p class="text-xs text-slate-400 -mt-2 mb-3">El ciclo en curso lo decide la fecha de inicio: cuando arranca el siguiente (ya enviado), este pasa solo a «finalizada».</p>
     <div><label>Notas de coach</label><textarea id="fa-notas" rows="2">${escapeHtml(f.notas_coach || '')}</textarea></div>
   `;
 }
@@ -4615,7 +4655,7 @@ window.entImportarFase = async (modo = 'ciclo') => {
         <div class="mb-3"><label>Qué rutina</label><select id="if-rutina"></select></div>
         <div class="mb-3"><label>A qué ciclo de este cliente</label>
           <select id="if-destino">
-            ${mios.length ? mios.map(f => `<option value="${f.id}" ${f.id === _ent.faseId ? 'selected' : ''}>${escapeHtml(f.nombre)}${f.estado === 'activa' ? ' · activa' : ''}</option>`).join('') : '<option value="">— este cliente no tiene ciclos: crea uno primero —</option>'}
+            ${mios.length ? mios.map(f => `<option value="${f.id}" ${f.id === _ent.faseId ? 'selected' : ''}>${escapeHtml(f.nombre)}${entEtiquetaCiclo(f, mios) ? ' · ' + entEtiquetaCiclo(f, mios) : ''}</option>`).join('') : '<option value="">— este cliente no tiene ciclos: crea uno primero —</option>'}
           </select></div>
         <label class="flex gap-2 items-start cursor-pointer" style="text-transform:none;letter-spacing:0;font-weight:400">
           <input type="checkbox" id="if-dias" checked style="width:auto" class="mt-0.5">
@@ -4649,10 +4689,11 @@ window.entCargarFasesOrigen = async (clienteId) => {
   const sel = $('#if-fase');
   if (!sel) return;
   const fases = await entDb.fases(clienteId || null);
-  // La activa primero: casi siempre es la que se quiere traer.
-  const orden = fases.slice().sort((a, b) => (b.estado === 'activa') - (a.estado === 'activa') || (b.orden || 0) - (a.orden || 0));
+  // La que está en curso primero: casi siempre es la que se quiere traer.
+  const vig = entCicloVigente(fases);
+  const orden = fases.slice().sort((a, b) => (b.id === vig?.id) - (a.id === vig?.id) || (b.estado === 'activa') - (a.estado === 'activa') || (b.orden || 0) - (a.orden || 0));
   sel.innerHTML = orden.length
-    ? orden.map(f => `<option value="${f.id}">${escapeHtml(f.nombre)} · ${f.semanas || '?'} sem${f.estado === 'activa' ? ' · activa' : ''}</option>`).join('')
+    ? orden.map(f => `<option value="${f.id}">${escapeHtml(f.nombre)} · ${f.semanas || '?'} sem${entEtiquetaCiclo(f, fases) ? ' · ' + entEtiquetaCiclo(f, fases) : ''}</option>`).join('')
     : '<option value="">— no hay ciclos ahí —</option>';
   entImpFase(sel.value || null);
 };
