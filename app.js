@@ -229,16 +229,16 @@ async function fetchRemindersMT(mtId) {
   if (mtApiBase()) {
     const res = await mtApiGet(`/api/coach-data?action=reminders&user_id=${encodeURIComponent(mtId)}`);
     if (res && Array.isArray(res.reminders)) {
-      return { list: res.reminders, device: { pwa: res.pwa_installed_at || null, push: res.push_enabled_at || null, upd: res.mt_updated_at || null, pwaNueva: res.pwa_nueva_at || null, abreEn: res.abre_en || null, abreEnAt: res.abre_en_at || null, vista: res.vista_app || null } };
+      return { list: res.reminders, device: { recorrido: res.recorrido_at || null, pwa: res.pwa_installed_at || null, push: res.push_enabled_at || null, upd: res.mt_updated_at || null, pwaNueva: res.pwa_nueva_at || null, abreEn: res.abre_en || null, abreEnAt: res.abre_en_at || null, vista: res.vista_app || null } };
     }
   }
   const mt = mtClient();
   if (mt) {
     const { data: row } = await mt.from('user_data')
-      .select('rem:data->coach_reminders,pwa:data->pwa_installed_at,push:data->push_enabled_at,pwaNueva:data->pwa_nueva_at,abreEn:data->abre_en,abreEnAt:data->abre_en_at,upd:updated_at')
+      .select('rem:data->coach_reminders,pwa:data->pwa_installed_at,push:data->push_enabled_at,recorrido:data->recorrido_at,pwaNueva:data->pwa_nueva_at,abreEn:data->abre_en,abreEnAt:data->abre_en_at,upd:updated_at')
       .eq('user_id', mtId).maybeSingle();
     if (row && Array.isArray(row.rem)) {
-      return { list: row.rem, device: { pwa: row.pwa || null, push: row.push || null, upd: row.upd || null, pwaNueva: row.pwaNueva || null, abreEn: row.abreEn || null, abreEnAt: row.abreEnAt || null } };
+      return { list: row.rem, device: { recorrido: row.recorrido || null, pwa: row.pwa || null, push: row.push || null, upd: row.upd || null, pwaNueva: row.pwaNueva || null, abreEn: row.abreEn || null, abreEnAt: row.abreEnAt || null } };
     }
   }
   return { list: [], device: null };
@@ -457,6 +457,7 @@ const JOURNEY_STEPS = [
   { id: 'faq',           label: 'Leyó preguntas frecuentes', auto: true, hint: 'Se marca solo cuando lee la sección FAQ del Centro de Recursos' },
   { id: 'app_instalada', label: 'App en su pantalla de inicio', auto: true, hint: 'Lo reporta su app al abrirla instalada' },
   { id: 'push',          label: 'Notificaciones push activadas', auto: true, hint: 'Lo reporta su app al aceptar los avisos' },
+  { id: 'recorrido',     label: 'Vio el recorrido de la app', auto: true, hint: 'Lo reporta su app al terminar el recorrido guiado' },
   { id: 'registra',      label: 'Usó el mealtracker por primera vez', auto: true, hint: 'Primera sincronización de su app' },
   { id: 'training',      label: 'Entrenamiento en marcha', auto: true, hint: 'Se marca solo con el primer seguimiento semanal en el CRM' },
   { id: 'guia',          label: 'Leyó la guía de alimentación', auto: true, hint: 'Se marca solo cuando lee capítulos de la guía en el Centro de Recursos' },
@@ -906,6 +907,7 @@ async function autollenarJourney(cliente, segs, meds) {
         if (r.device) {
           if (r.device.pwa) marca('app_instalada', r.device.pwa);
           if (r.device.push) marca('push', r.device.push);
+          if (r.device.recorrido) marca('recorrido', /^\d{4}-/.test(String(r.device.recorrido)) ? r.device.recorrido : null);
           // Primera vez que usó el tracker = existe sincronización (la cuenta
           // vinculada ya subió datos alguna vez)
           if (r.device.upd) marca('registra', r.device.upd);
@@ -6411,15 +6413,15 @@ async function fetchInstalacionesMT() {
   if (mtApiBase()) {
     const res = await mtApiGet('/api/coach-data?action=list');
     if (res && Array.isArray(res.clients)) {
-      filas = res.clients.map(c => ({ name: c.name, pwa: c.pwa_installed_at || null, push: c.push_enabled_at || null, nueva: c.app_nueva_at || null, pwaNueva: c.pwa_nueva_at || null, abreEn: c.abre_en || null, abreEnAt: c.abre_en_at || null, vista: c.vista_app || null }));
+      filas = res.clients.map(c => ({ name: c.name, recorrido: c.recorrido_at || null, pwa: c.pwa_installed_at || null, push: c.push_enabled_at || null, nueva: c.app_nueva_at || null, pwaNueva: c.pwa_nueva_at || null, abreEn: c.abre_en || null, abreEnAt: c.abre_en_at || null, vista: c.vista_app || null }));
     }
   }
   // Modo directo (anon key)
   if (!filas) {
     const mt = mtClient();
     if (mt) {
-      const { data } = await mt.from('user_data').select('name,pwa:data->pwa_installed_at,push:data->push_enabled_at,nueva:data->app_nueva_at,pwaNueva:data->pwa_nueva_at,abreEn:data->abre_en,abreEnAt:data->abre_en_at');
-      if (Array.isArray(data)) filas = data.map(r => ({ name: r.name, pwa: r.pwa || null, push: r.push || null, nueva: r.nueva || null, pwaNueva: r.pwaNueva || null, abreEn: r.abreEn || null, abreEnAt: r.abreEnAt || null }));
+      const { data } = await mt.from('user_data').select('name,recorrido:data->recorrido_at,pwa:data->pwa_installed_at,push:data->push_enabled_at,nueva:data->app_nueva_at,pwaNueva:data->pwa_nueva_at,abreEn:data->abre_en,abreEnAt:data->abre_en_at');
+      if (Array.isArray(data)) filas = data.map(r => ({ name: r.name, recorrido: r.recorrido || null, pwa: r.pwa || null, push: r.push || null, nueva: r.nueva || null, pwaNueva: r.pwaNueva || null, abreEn: r.abreEn || null, abreEnAt: r.abreEnAt || null }));
     }
   }
   if (!filas) return null;
@@ -6430,7 +6432,9 @@ async function fetchInstalacionesMT() {
     const n = normalizeName(f.name || '');
     if (!n) continue;
     const prev = porNombre.get(n);
-    if (!prev) { porNombre.set(n, { pwa: f.pwa, push: f.push, nueva: f.nueva, pwaNueva: f.pwaNueva, abreEn: f.abreEn, abreEnAt: f.abreEnAt, vista: f.vista || null }); continue; }
+    if (!prev) { porNombre.set(n, { recorrido: f.recorrido || null, pwa: f.pwa, push: f.push, nueva: f.nueva, pwaNueva: f.pwaNueva, abreEn: f.abreEn, abreEnAt: f.abreEnAt, vista: f.vista || null }); continue; }
+    // El recorrido: basta con que UN dispositivo lo haya visto (la fecha más antigua).
+    if (f.recorrido && (!prev.recorrido || String(f.recorrido) < String(prev.recorrido))) prev.recorrido = f.recorrido;
     // La vista de la app: la elegida más recientemente en cualquiera de sus dispositivos.
     if (f.vista && (!prev.vista || String(f.vista.desde || '') > String(prev.vista.desde || ''))) prev.vista = f.vista;
     // Cómo la abre: la señal MÁS RECIENTE de cualquiera de sus dispositivos.
@@ -6462,6 +6466,8 @@ async function cargarPanelInstalaciones(clientes) {
   // La cuenta de la APP NUEVA (entrenaconmetodoapp): instalada en la pantalla
   // de inicio desde ahí / la abrió pero no la instaló / sigue en la vieja.
   const nuevaInstalada = [], nuevaSinInstalar = [];
+  // El recorrido guiado de la app: quién ya lo vio (lo reporta la app al terminarlo).
+  const conRecorrido = [], sinRecorrido = [];
   // La abren en el NAVEGADOR (su última apertura no fue desde el ícono): a
   // estos hay que recordarles instalarla; en su Dash ya les sale la tarjeta.
   const enNavegador = [];
@@ -6471,6 +6477,7 @@ async function cargarPanelInstalaciones(clientes) {
     if (d && d.pwa) conApp.push({ c, pwa: d.pwa, push: d.push, nueva: d.nueva, pwaNueva: d.pwaNueva });
     else sinApp.push(c);
     if (d && d.nueva) enNueva.push(c); else sinMudar.push(c);
+    if (d && d.recorrido) conRecorrido.push({ c, f: /^\d{4}-/.test(String(d.recorrido)) ? d.recorrido : null }); else sinRecorrido.push(c);
     if (d && d.pwaNueva) nuevaInstalada.push({ c, f: d.pwaNueva, push: d.push });
     else if (d && d.nueva) nuevaSinInstalar.push({ c, f: d.nueva });
   }
@@ -6506,6 +6513,13 @@ async function cargarPanelInstalaciones(clientes) {
       ${nuevaSinInstalar.length ? `<div data-app-nueva-sin-instalar class="text-xs text-slate-600 mt-2"><span class="font-semibold">Abrieron la app nueva pero aún no la instalan (${nuevaSinInstalar.length}):</span> ${nombres(nuevaSinInstalar)}</div>` : ''}
       ${sinMudar.length ? `<div data-app-vieja class="text-xs text-slate-500 mt-1"><span class="font-semibold">Siguen en la app vieja (${sinMudar.length}):</span> ${nombres(sinMudar)}</div>` : ''}
       <div class="text-[11px] text-slate-400 mt-2">Se actualiza solo: cada cliente cuenta en cuanto abre la app nueva desde su pantalla de inicio (quien ya la tenía instalada, al abrirla la próxima vez).</div>
+    </div>
+    <div data-recorrido-panel class="rounded-xl border border-violet-100 bg-violet-50/40 p-3 mb-3">
+      <div class="text-sm font-bold text-slate-800">🧭 Recorrido guiado de la app:
+        <span data-recorrido-visto class="text-violet-700">${conRecorrido.length} de ${clientes.length}</span> lo vieron</div>
+      ${conRecorrido.length ? `<div class="text-xs text-slate-600 mt-1"><span class="font-semibold">Lo vieron (${conRecorrido.length}):</span> ${conRecorrido.map(({ c, f }) => `<span class="cursor-pointer hover:underline" onclick="verCliente('${c.id}')">${escapeHtml(c.nombre)}${f ? ` <span class="text-slate-400">${fmt.fechaCorta(String(f).slice(0, 10))}</span>` : ''}</span>`).join(' · ')}</div>` : ''}
+      ${sinRecorrido.length ? `<div data-recorrido-sin class="text-xs text-slate-500 mt-1"><span class="font-semibold">Aún no (${sinRecorrido.length}):</span> ${nombres(sinRecorrido)}</div>` : ''}
+      <div class="text-[11px] text-slate-400 mt-2">Cuenta en cuanto el cliente termina el recorrido en su app (y la app sincroniza). Puede volver a verlo desde Configuración → Recorrido de la app.</div>
     </div>
     <div class="text-xs text-slate-500 mb-2">${conApp.length} de ${clientes.length} clientes han abierto alguna vez la app desde su pantalla de inicio (vieja o nueva).</div>
     ${conApp.length ? `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
