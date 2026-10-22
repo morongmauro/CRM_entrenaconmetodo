@@ -2357,6 +2357,21 @@ function entFilaRutina(re, i, total, bloques) {
   `;
 }
 
+// Lo que trae un ejercicio recién puesto, para que el coach solo retoque:
+//   · fuerza y afines → 4 series · 6-12 reps · 50 s de descanso
+//   · los que van por tiempo (cardio, movilidad, estiramientos, calenta-
+//     miento, agilidad) → 4 series · 15-30 s · 30 s de descanso
+//   · dentro de un circuito, 1 serie (las vueltas las pone el circuito).
+const ENT_POR_TIEMPO = ['cardio', 'movilidad', 'estiramiento_pasivo', 'estiramiento_activo', 'calentamiento', 'agilidad'];
+function entValoresPorDefecto(ejercicio, enBloque) {
+  const porTiempo = ENT_POR_TIEMPO.includes(String(ejercicio?.tipo || ''));
+  return {
+    series: enBloque ? 1 : 4,
+    reps: porTiempo ? '15-30 s' : '6-12',
+    descanso_seg: porTiempo ? 30 : 50,
+  };
+}
+
 // `donde` = { pos, bloque } cuando llega arrastrado: entra en esa posición y
 // en ese bloque (o suelto). Sin `donde`, al final y al bloque elegido arriba.
 window.entAgregarARutina = async (ejercicioId, donde = null) => {
@@ -2366,10 +2381,11 @@ window.entAgregarARutina = async (ejercicioId, donde = null) => {
   const lista = _ent.rutina.ejercicios.slice();
   const pos = donde && donde.pos != null ? Math.max(0, Math.min(donde.pos, lista.length)) : lista.length;
   const bloque = donde ? (donde.bloque || null) : (_ent.bloqueDestino || null);
+  const ej = (_ent.ejercicios || []).find(x => x.id === ejercicioId) || null;
   const nuevo = await entDb.agregarEjercicio({
     rutina_id: _ent.rutinaId, ejercicio_id: ejercicioId, orden: pos + 1,
     bloque_id: bloque,
-    series: 3, reps: '10', descanso_seg: 90,
+    ...entValoresPorDefecto(ej, !!bloque),
   });
   if (!nuevo) return;
   if (!nuevo.id) return entRefrescarRutina({ asistencia: true });
@@ -2604,7 +2620,11 @@ async function entGuardarOrden(lista, bloques = {}) {
   lista.forEach((re, i) => {
     const parche = {};
     if (re.orden !== i + 1) parche.orden = i + 1;
-    if (re.id in bloques && (re.bloque_id || null) !== bloques[re.id]) parche.bloque_id = bloques[re.id];
+    if (re.id in bloques && (re.bloque_id || null) !== bloques[re.id]) {
+      parche.bloque_id = bloques[re.id];
+      // Al entrar a un circuito, 1 serie: las vueltas las pone el circuito.
+      if (bloques[re.id] && Number(re.series) !== 1) parche.series = 1;
+    }
     if (Object.keys(parche).length) {
       Object.assign(re, parche);
       escrituras.push(entDb.actualizarRE(re.id, parche));
