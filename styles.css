@@ -820,3 +820,14 @@ summary.list-none { list-style: none; }
   .ent-mesa { overflow-y: auto; }
   .ent-mesa .ent-col, .ent-mesa .ent-col-xl { height: auto; overflow: visible; }
 }
+
+/* «Dar más días» (Pagos → En su app): botones suaves, sin contorno. */
+.dar-dias-btn { margin-top: 4px; border: none; background: #EAF1FB; color: #2F6BBF; font: inherit; font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.dar-dias-btn:hover { background: #DCE8F8; }
+.dar-dias-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 16px; }
+.dar-dias-op { border: none; background: #F2F6FC; border-radius: 16px; padding: 14px 8px; cursor: pointer; font: inherit; display: flex; flex-direction: column; align-items: center; gap: 3px; transition: background .12s, transform .12s; }
+.dar-dias-op:hover { background: #E3EDFA; }
+.dar-dias-op:active { transform: scale(.97); }
+.dar-dias-n { font-size: 18px; font-weight: 800; color: #1F1F1F; letter-spacing: -0.01em; }
+.dar-dias-f { font-size: 12px; color: #5B6472; }
+.dar-dias-quitar { margin-top: 14px; border: none; background: transparent; color: #8A3A2C; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; padding: 6px 0; }

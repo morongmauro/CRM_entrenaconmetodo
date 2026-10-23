@@ -5770,14 +5770,73 @@ function celdaAvisoApp(c) {
     return `<td class="px-2 text-center text-xs text-slate-400" title="${escapeHtml(v.motivo || 'sin aviso')}">—</td>`;
   }
   const meses = (v.meses || []).map(m => fmt.mesEsLargo(m)).join(', ');
-  return `<td class="px-2 text-center">
+  return `<td class="px-2 text-center" style="min-width:150px">
     <span class="inline-flex flex-col items-center leading-tight" title="${escapeHtml(`Le cobra: ${meses}. ${v.motivo || ''}`)}">
       <span class="status-pill status-end" style="background:#fee2e2;color:#991b1b">📣 ${v.meses_deuda || 1} mes${(v.meses_deuda || 1) > 1 ? 'es' : ''}</span>
-      ${v.bloqueo ? `<span class="text-[10px] font-semibold mt-0.5" style="color:#991b1b" title="Pasaron más de 5 días del corte: su app está bloqueada hasta que marques el pago.">🔒 app bloqueada · ${v.dias_vencido} días</span>` : `<span class="text-[10px] text-slate-500 mt-0.5">aviso · día ${v.dias_vencido || 1} de 5</span>`}
+      ${estadoBloqueoApp(v)}
       <span class="text-[10px] ${v.visto ? 'text-slate-500' : 'text-amber-600'} mt-0.5">${escapeHtml(visto)}</span>
+      <button type="button" class="dar-dias-btn" onclick="event.stopPropagation(); abrirDarDias('${c.id}')">${v.prorroga_hasta ? 'Cambiar días' : 'Dar más días'}</button>
     </span>
   </td>`;
 }
+
+// Bloqueada, con prórroga o solo con el aviso. La regla (cuántos días, si la
+// prórroga cuenta) vive en la app: aquí solo se lee lo que la app respondió.
+function estadoBloqueoApp(v) {
+  const gracia = v.dias_gracia || 8;
+  if (v.bloqueo) {
+    return `<span class="text-[10px] font-semibold mt-0.5" style="color:#991b1b" title="Pasaron más de ${gracia} días del corte: su app está bloqueada hasta que marques el pago o le des más días.">App bloqueada · ${v.dias_vencido} días</span>`;
+  }
+  if (v.prorroga_hasta) {
+    return `<span class="text-[10px] font-semibold mt-0.5" style="color:#2F6BBF" title="Le diste más días: sigue viendo el aviso de pago, pero su app no se bloquea hasta esa fecha (incluida).">Prórroga hasta ${fechaCortaDia(v.prorroga_hasta)}</span>`;
+  }
+  return `<span class="text-[10px] text-slate-500 mt-0.5">aviso · día ${v.dias_vencido || 1} de ${gracia}</span>`;
+}
+
+// 'YYYY-MM-DD' → '30 oct' (sin pasar por la hora: el día es el día).
+function fechaCortaDia(ymd) {
+  const [y, m, d] = String(ymd).slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }).replace('.', '').replace(' de ', ' ');
+}
+function ymdLocal(fecha) {
+  return `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}-${String(fecha.getDate()).padStart(2, '0')}`;
+}
+
+// «Dar más días»: la app no se bloquea hasta HOY + N (incluido), el aviso de
+// pago sigue saliendo y la prórroga se vence sola. Si ya estaba bloqueada, se
+// desbloquea la próxima vez que el cliente abra su app.
+window.abrirDarDias = async (clienteId) => {
+  const c = (await db.clientes.list()).find(x => x.id === clienteId);
+  if (!c) return;
+  const v = (_avisosApp || {})[c.nombre] || {};
+  const hoy = new Date();
+  const opcion = (n) => {
+    const f = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + n);
+    return `<button type="button" class="dar-dias-op" onclick="guardarProrroga('${c.id}', '${ymdLocal(f)}')">
+      <span class="dar-dias-n">+${n} días</span><span class="dar-dias-f">hasta el ${fechaCortaDia(ymdLocal(f))}</span></button>`;
+  };
+  openModal(modalShell(`Dar más días · ${escapeHtml(c.nombre)}`, `
+    <p class="text-sm text-slate-600 leading-relaxed">Sigue viendo el aviso de pago pendiente, pero su app no se bloquea hasta la fecha que elijas. Se cuenta desde hoy y se vence sola.</p>
+    ${v.prorroga_hasta ? `<p class="text-sm mt-2" style="color:#2F6BBF">Ahora tiene prórroga hasta el ${fechaCortaDia(v.prorroga_hasta)}.</p>` : ''}
+    <div class="dar-dias-grid">${opcion(3)}${opcion(5)}${opcion(7)}</div>
+    ${v.prorroga_hasta ? `<button type="button" class="dar-dias-quitar" onclick="guardarProrroga('${c.id}', null)">Quitar la prórroga</button>` : ''}
+  `));
+};
+
+window.guardarProrroga = async (clienteId, hasta) => {
+  const { error } = await sb.from('clientes').update({ prorroga_hasta: hasta }).eq('id', clienteId);
+  if (error) {
+    toastError(/prorroga_hasta/.test(error.message || '')
+      ? 'Falta correr la SQL «migraciones/prorroga-pago.sql» en Supabase del CRM.'
+      : `No se pudo guardar: ${error.message}`);
+    return;
+  }
+  closeModal();
+  toast(hasta ? `Listo: su app no se bloquea hasta el ${fechaCortaDia(hasta)}.` : 'Prórroga quitada.');
+  invalidarCache('clientes');
+  olvidarAvisosApp();
+  routes.pagos();
+};
 
 window.switchPagView = (which) => { _pagosView = which; routes.pagos(); };
 window.cambiarAnio = (d) => { _pagosYear += d; routes.pagos(); };
@@ -5934,6 +5993,7 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
         <div class="mt-2 pt-2 border-t border-slate-200">
           <strong>En su app</strong>: se lo pregunta a la app del cliente, no lo calcula el CRM — es literalmente lo que él está viendo.
           📣 = le está saliendo el aviso; pasa el mouse por encima y te dice <em>qué meses</em> le cobra y por qué.
+          El aviso sale desde el día siguiente al corte y la app se bloquea desde el día 9 (8 días sin pago). Con <strong>Dar más días</strong> no se bloquea hasta la fecha que elijas, y el aviso sigue.
           ${_avisosAppError === 'sin-conexion'
             ? '<span class="text-amber-700">Falta poner la URL de tu app en Ajustes → Conexión Mealtracker.</span>'
             : _avisosAppError
