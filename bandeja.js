@@ -57,6 +57,8 @@ const BDJ_REGISTRO = {
   fotos:    { icono: '📸', titulo: 'Envió su registro fotográfico', corto: 'Fotos', detalle: 'míralas en tu WhatsApp' },
 };
 
+const BDJ_POSE = { frente: 'De frente', lado: 'De lado', espalda: 'De espalda', otra: 'Otra pose' };
+
 const BDJ_PRIORIDAD = { nota: 0, cierre: 0, salto: 1, medida: 1, rpe: 2, sinentreno: 2, sincomida: 3, prot: 3, estanc: 4 };
 
 // ═════════════════════════════════════════════════════════════════════
@@ -152,6 +154,24 @@ function bdjArmar(d) {
       titulo: q.titulo,
       detalle: [r.valor != null && tipo === 'peso' ? `${bdjNum(r.valor, 1)} kg` : null, r.nota ? `«${r.nota}»` : null, q.detalle]
         .filter(Boolean).join(' · '),
+    });
+  });
+
+  // ── 4c. Fotos de progreso que subió desde su app: una entrada por
+  //        cliente y día, con las poses (y el peso, si lo había registrado) ──
+  const fotosDia = {};
+  (d.fotos || []).forEach(f => {
+    if (f.fecha < bdjSumarDias(hoy, -13)) return;
+    (fotosDia[`${f.cliente_id}:${f.fecha}`] ||= []).push(f);
+  });
+  Object.entries(fotosDia).forEach(([k, l]) => {
+    const [cliente_id, fecha] = [k.slice(0, k.lastIndexOf(':')), k.slice(k.lastIndexOf(':') + 1)];
+    const poses = [...new Set(l.map(f => BDJ_POSE[f.pose] || f.pose))];
+    const peso = l.find(f => f.peso_kg != null);
+    add(atencion, {
+      id: `fotos:${cliente_id}:${fecha}:${l.length}`, tipo: 'medida', cliente_id, fecha, icono: '📸',
+      titulo: l.length > 1 ? `Subió ${l.length} fotos de progreso` : 'Subió una foto de progreso',
+      detalle: [poses.join(' · '), peso ? `${bdjNum(peso.peso_kg, 1)} kg` : null].filter(Boolean).join(' · ') + ' — míralas en Composición.',
     });
   });
 
@@ -292,6 +312,10 @@ function bdjArmar(d) {
     if (!q || r.estado === 'saltado' || !enVista(r.fecha)) return;
     fila(r.fecha, r.cliente_id).chips.push({ tipo: 'medida', tono: 'neutro', icono: q.icono, texto: q.corto + (r.valor != null && r.eventos.tipo === 'peso' ? ` · ${bdjNum(r.valor, 1)} kg` : '') });
   });
+  (d.fotos || []).forEach(f => {
+    if (!enVista(f.fecha)) return;
+    fila(f.fecha, f.cliente_id).chips.push({ tipo: 'medida', tono: 'neutro', icono: '📸', texto: `Foto ${String(BDJ_POSE[f.pose] || f.pose).toLowerCase()}` });
+  });
   (d.notas || []).forEach(n => {
     const f = n.fecha || String(n.created_at || '').slice(0, 10);
     if (!enVista(f)) return;
@@ -381,7 +405,7 @@ async function bdjCargar(forzar = false) {
       }
     };
 
-    const [clientes, fases, sesiones, notas, mediciones, actividades, registros] = await Promise.all([
+    const [clientes, fases, sesiones, notas, mediciones, actividades, registros, fotos] = await Promise.all([
       db.clientes.list(),
       leer('fases', sb.from('fases').select('id,cliente_id,fecha_inicio,semanas,dias_semana,estado,visible_cliente').eq('estado', 'activa').eq('visible_cliente', true)),
       leerTodo('sesiones', () => sb.from('sesiones').select('*').gte('fecha', desdeSeries).order('fecha', { ascending: false }).order('id')),
@@ -389,6 +413,8 @@ async function bdjCargar(forzar = false) {
       leerTodo('mediciones', () => sb.from('mediciones_corporales').select('*').gte('fecha', bdjSumarDias(hoy, -120)).order('fecha').order('id')),
       leerTodo('actividades', () => sb.from('actividades').select('*').gte('fecha', desde).order('fecha').order('id')),
       leer('evento_registros', sb.from('evento_registros').select('*, eventos(tipo,titulo)').gte('fecha', desde).order('fecha')),
+      // Fotos de progreso que subió desde su app (sin la tabla, la bandeja sigue).
+      leer('fotos_progreso', sb.from('fotos_progreso').select('id,cliente_id,fecha,pose,peso_kg,created_at').gte('fecha', desde).order('fecha')),
     ]);
     const rutIds = [...new Set(sesiones.map(s => s.rutina_id).concat(notas.map(n => n.rutina_id)).filter(Boolean))];
     const rutinas = [];
@@ -429,7 +455,7 @@ async function bdjCargar(forzar = false) {
     _bdj.datos = bdjArmar({
       hoy, clientes, fases, rutinas, sesiones, series,
       notas: notas.map(n => ({ ...n, ejercicio_nombre: n.ejercicios ? entNombres(n.ejercicios).grande : null })),
-      mediciones, actividades, comida, registros,
+      mediciones, actividades, comida, registros, fotos,
       lecturas: typeof entLecturasDatos === 'function' ? entLecturasDatos : null,
     });
     _bdj.datos.avisos = avisos;

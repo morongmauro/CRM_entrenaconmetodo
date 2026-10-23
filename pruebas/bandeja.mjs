@@ -68,6 +68,11 @@ const b = ctx.bdjArmar({
     { id: 'n1', cliente_id: 'eva', fecha: '2026-10-14', rutina_id: 'push', texto: 'No tengo esta máquina', ejercicio_nombre: 'Prensa', leida_en: null },
     { id: 'n2', cliente_id: 'eva', fecha: '2026-10-10', texto: 'vieja', leida_en: '2026-10-11T00:00:00Z' },
   ],
+  fotos: [
+    { id: 'fo1', cliente_id: 'beto', fecha: '2026-10-13', pose: 'frente', peso_kg: 82.4 },
+    { id: 'fo2', cliente_id: 'beto', fecha: '2026-10-13', pose: 'lado', peso_kg: 82.4 },
+    { id: 'fo3', cliente_id: 'dani', fecha: '2026-09-01', pose: 'frente' },
+  ],
   registros: [
     { id: 'rg1', cliente_id: 'eva', fecha: '2026-10-13', estado: 'hecho', valor: 71.4, eventos: { tipo: 'peso', titulo: 'Pesarse' } },
     { id: 'rg2', cliente_id: 'caro', fecha: '2026-10-12', estado: 'hecho', eventos: { tipo: 'fotos', titulo: 'Fotos de progreso' } },
@@ -130,6 +135,13 @@ ok('lo importado no sale como actividad del día', !dia('2026-10-12').filas.some
 
 // El nombre que sale es el de Trainerize (inglés), igual que en la galería.
 ok('el ejercicio estancado se nombra en inglés (el de Trainerize)', JSON.stringify(b).includes('Barbell Bench Press') && !JSON.stringify(b).includes('Press banca lleva'), JSON.stringify(b).match(/[^"]*lleva[^"]*/)?.[0]);
+
+// Fotos de progreso subidas desde la app: una entrada por cliente y día.
+const fotosBeto = b.atencion.filter(a => a.tipo === 'medida' && a.cliente === 'Beto' && /foto/.test(a.titulo));
+ok('las fotos que subió salen en «Atención» (una por día, con poses y peso)', fotosBeto.length === 1 && /Subió 2 fotos de progreso/.test(fotosBeto[0].titulo)
+  && /De frente · De lado · 82,4 kg/.test(fotosBeto[0].detalle), JSON.stringify(fotosBeto));
+ok('las fotos viejas (más de dos semanas) no salen', !b.atencion.some(a => a.cliente === 'Dani' && /foto/.test(a.titulo)));
+ok('y en el día a día queda la foto', (dia('2026-10-13')?.filas || []).some(f => f.cliente === 'Beto' && f.chips.some(c => /Foto de frente/.test(c.texto))));
 
 console.log(fallos ? `\n${fallos} FALLO(S)\n` : '\nTodo bien.\n');
 process.exit(fallos ? 1 : 0);
