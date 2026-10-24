@@ -1509,6 +1509,8 @@ let _segIrA = null;   // el cliente al que se llegó con «Hacer seguimiento» (
 let _segView = 'focus';
 let _segMovil = 'lista';
 // Mesa de trabajo de Seguimiento: a pantalla completa, en 3 columnas (se recuerda).
+// Seguimiento por cliente: «Semana» (sus datos y mensajes) o «Diálogo» (el guion del check-in).
+let _segModo = (() => { try { return localStorage.getItem('crm:segModo') === 'dialogo' ? 'dialogo' : 'semana'; } catch (e) { return 'semana'; } })();
 let _segMesa = (() => { try { return localStorage.getItem('crm:segMesa') === '1'; } catch (e) { return false; } })();   // en el teléfono, Seguimiento muestra la lista o el cliente
 // ¿Se está viendo la versión móvil? (movil.js pone la clase)
 const enMovil = () => document.body.classList.contains('modo-movil');
@@ -3468,6 +3470,11 @@ routes.dashboard = async () => {
       <div id="inicio-seg" class="text-sm text-slate-500">Calculando…</div>
     </div>
 
+    <div class="card mb-4" data-inicio-encuesta>
+      <h3 class="em-h3" style="margin-bottom:4px">Encuesta de la app</h3>
+      <div id="inicio-encuesta" class="text-sm text-slate-500">Calculando…</div>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
       ${false && vencidos.length > 0 ? `
@@ -3577,6 +3584,7 @@ routes.dashboard = async () => {
   if (typeof cicAviso === 'function') cicAviso('cic-aviso-inicio');
   if (typeof inicioEquipo === 'function') inicioEquipo('inicio-equipo');
   segPintarInicio(activos);
+  if (typeof encPintarInicio === 'function') encPintarInicio(activos, clientes);
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -4090,6 +4098,11 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
       ${mesa ? `<section class="seg-mesa-col">${sidebar}</section>` : sidebar}
       <div class="col-span-12 lg:col-span-8 space-y-4 ${mesa ? 'seg-mesa-col' : ''}">
         ${segCabeceraHTML(cliente)}
+        <div class="seg-modo" data-seg-modo>
+          <button type="button" class="${_segModo === 'semana' ? 'active' : ''}" data-seg-modo-btn="semana" onclick="segModo('semana')">Semana</button>
+          <button type="button" class="${_segModo === 'dialogo' ? 'active' : ''}" data-seg-modo-btn="dialogo" onclick="segModo('dialogo')">Diálogo</button>
+        </div>
+        ${_segModo === 'dialogo' ? '<div class="card" id="seg-dialogo"><div class="es-vacio">Armando su diálogo…</div></div>' : `
         ${esArmazonHTML(cliente, { sinMensajes: mesa })}
 
         <div class="text-xs font-bold text-slate-500 uppercase tracking-wider px-1 pt-2">Más de ${escapeHtml(String(cliente.nombre || '').split(/\s+/)[0])}</div>
@@ -4116,16 +4129,30 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
         <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider px-1 pt-2">Timeline · ${segs.length} semana(s)</h4>
         <div class="space-y-3 em-timeline">
           ${segs.length === 0 ? '<div class="card text-sm text-slate-500 text-center py-8">Sin registros aún. <button class="text-emerald-600 font-semibold" onclick="abrirNuevoSeguimiento(\''+cliente.id+'\')">+ Crear el primero</button></div>' : segs.map(s => seguimientoCard(s, coachPorSeg[s.id] || [])).join('')}
-        </div>
+        </div>`}
       </div>
       ${mesa ? '<section class="seg-mesa-col"><div class="es-card" data-es-mensajes><div class="es-k">Mensajes</div></div></section>' : ''}
     </div>${mesa ? '</div>' : ''}
   `;
   const sl = $('#seg-list'); if (sl && prevScroll) sl.scrollTop = prevScroll;
+  if (_segModo === 'dialogo') {
+    if (typeof dtPintar === 'function') dtPintar(cliente);
+    // En la mesa, la tercera columna sigue con los mensajes de la semana.
+    if (mesa && typeof esSemanaDe === 'function') esSemanaDe(cliente, esLunesDe(cliente, fmt.hoy())).then(S => {
+      const m = document.querySelector('[data-es-mensajes]');
+      if (m && m.isConnected) { _es.mensajes = esMensajes(cliente, S); m.innerHTML = `<div class="es-k">Mensajes</div>${esMensajesHTML(_es.mensajes)}`; }
+    }).catch(() => {});
+    return;
+  }
   if (typeof vtPanel === 'function') vtPanel('#seg-vt', cliente.id);
   if (typeof pfPanel === 'function') pfPanel('#seg-pf', cliente.id);
   esPintar(cliente);
 }
+window.segModo = (m) => {
+  _segModo = m === 'dialogo' ? 'dialogo' : 'semana';
+  try { localStorage.setItem('crm:segModo', _segModo); } catch (e) { /* sin almacenamiento */ }
+  repintarSeguimiento();
+};
 
 // La cabecera del cliente en Seguimiento: quién es, su ciclo y su pago, y los
 // atajos para ajustar (Entrenamiento, Alimentación), ver la ficha o escribirle.
