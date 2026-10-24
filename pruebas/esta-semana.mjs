@@ -54,7 +54,7 @@ function tablas() {
   ].filter(s => s.fecha <= HOY);
   const ejercicios = [{ id: 'e1', nombre: 'Remo con barra', alias: 'Barbell Row' }, { id: 'e2', nombre: 'Press banca', alias: 'Bench Press' }];
   const serie = (id, sesion_id, ejercicio_id, peso) => ({ id, sesion_id, ejercicio_id, serie_num: 1, reps: 8, peso, unidad: 'kg', completada: true, ejercicios: { nombre: ejercicios.find(e => e.id === ejercicio_id).nombre, alias: ejercicios.find(e => e.id === ejercicio_id).alias } });
-  const series_log = [serie('l1', 'p3', 'e1', 50), serie('l2', 's2', 'e1', 55), serie('l3', 'p1', 'e2', 57.5), serie('l4', 's1', 'e2', 60)].filter(x => sesiones.some(s => s.id === x.sesion_id));
+  const series_log = [serie('l1', 'p3', 'e1', 50), serie('l2', 's2', 'e1', 55), { ...serie('l5', 's2', 'e1', 55), serie_num: 2 }, serie('l3', 'p1', 'e2', 57.5), serie('l4', 's1', 'e2', 60)].filter(x => sesiones.some(s => s.id === x.sesion_id));
   const eventos = [
     { id: 'ev1', cliente_id: 'c0', fase_id: 'f1', tipo: 'actividad', titulo: 'Caminadora', dias_semana: ['M', 'J'], duracion_min: 25, visible_cliente: true, created_at: '2026-01-01' },
     { id: 'ev2', cliente_id: 'c0', fase_id: 'f1', tipo: 'peso', titulo: 'Peso', fecha: L(3), visible_cliente: true, created_at: '2026-01-01' },
@@ -70,6 +70,8 @@ function tablas() {
     eventos, evento_registros, actividades, notas_entreno,
     // Lo que se habló y se cambió esta semana
     comentarios_coach: [{ id: 'k1', user_id: 'coach-1', cliente_id: 'c0', ejercicio_id: 'e1', tipo: 'puntual', texto: 'Baja la barra más lento', creado_en: L(0) + 'T15:00:00Z', leido_en: null, quitado_en: null }],
+    rutina_ejercicios: [{ id: 're1', rutina_id: 'r3', ejercicio_id: 'e1', reps: '6-8', orden: 1 }],
+    videos_tecnica: [{ id: 'v1', cliente_id: 'c0', ejercicio_id: 'e2', ejercicio_nombre: 'Bench Press', estado: 'mejorar', pedido_en: P(0), revisado_en: L(0), nota: 'Baja la barra hasta tocar el pecho.', created_at: P(0) }],
     cambios_ejercicio: [{ id: 'x1', user_id: 'coach-1', cliente_id: 'c0', rutina_id: 'r1', rutina_nombre: 'Push', nombre_antes: 'Chest Press Machine', nombre_despues: 'Bench Press', origen: 'alternativas', creado_at: L(0) + 'T16:00:00Z' }],
     rutina_movimientos: [], rutina_extras: [], rutina_dias_quitados: [],
     comunidad_posts: [], comunidad_reacciones: [], comunidad_comentarios: [], comunidad_vistas: [],
@@ -153,11 +155,19 @@ ok('en pocas palabras: subió de peso respecto a la vez anterior', hoyOff < 4 ||
 ok('en pocas palabras: la proteína con su promedio y su meta', /Proteína promedio \d+ g de 140 g/.test(r.resumen) || hoyOff < 3, r.resumen);
 ok('la nota sin responder, con «Responder»', r.notas === '1' && /No tengo esta máquina/.test(r.resumen) && await p.locator('#seg-semana [data-es-resumen] .es-ojo-btn').count() === 1, r.resumen);
 ok('mensajes: primero el saludo del check-in, tal cual', r.msgs[0].sit === 'inicio' && r.msgs[0].texto === 'Hola Ana, ¿cómo vas? Espero que todo vaya bien, paso por acá al check-in periódico.', r.msgs[0].texto);
-ok('mensajes: después 2 o 3 sobre su semana, el primero sobre fuerza', r.msgs.length >= 3 && r.msgs.length <= 4 && r.msgs[1].sit === 'curso', JSON.stringify(r.msgs.map(m => m.sit)));
+const sits = r.msgs.map(m => m.sit), iCurso = sits.indexOf('curso');
+ok('mensajes: después del saludo, lo que tienes que avisarle (cambio, subir carga, pedir video, video revisado)', JSON.stringify(sits.slice(1, 5)) === JSON.stringify(['cambio', 'subir', 'pedirVideo', 'videoRevisado']), JSON.stringify(sits));
+ok('mensajes: luego el de su semana y hasta 2 más; al final la pregunta', iCurso === 5 && sits.length - iCurso - 2 <= 2 && sits[sits.length - 1] === 'pregunta', JSON.stringify(sits));
+const txt = (sit) => (r.msgs.find(m => m.sit === sit) || {}).texto || '';
+ok('avisar: «Te cambié el ejercicio» con los dos nombres y la rutina', /Chest Press Machine/.test(txt('cambio')) && /Bench Press/.test(txt('cambio')) && /Push/.test(txt('cambio')), txt('cambio'));
+ok('avisar: subir carga en el remo (todas las series al tope del rango, mismo peso)', hoyOff < 4 || (/Barbell Row/.test(txt('subir')) && /55 kg/.test(txt('subir')) && /(8 repeticiones|series de 8)/.test(txt('subir'))), txt('subir'));
+ok('avisar: pedir video del que más subió, por WhatsApp', hoyOff < 4 || (/Barbell Row/.test(txt('pedirVideo')) && /WhatsApp/.test(txt('pedirVideo'))), txt('pedirVideo'));
+ok('avisar: revisé tu video, con tu nota de qué corregir', /Bench Press/.test(txt('videoRevisado')) && /Baja la barra hasta tocar el pecho/.test(txt('videoRevisado')), txt('videoRevisado'));
+ok('avisar: marcados «Avísale»', await p.locator('#seg-semana [data-es-avisale]').count() === 4);
 ok('mensajes: los de después no repiten el saludo', r.msgs.slice(1).every(m => !/^(Hola|Qué tal|Ana,)/.test(m.texto) && /^[¡¿]?[A-ZÁÉÍÓÚÑ]/.test(m.texto)), JSON.stringify(r.msgs.map(m => m.texto.slice(0, 30))));
 ok('mensajes: con sus números, sin [huecos]', r.msgs.every(m => !/\[|undefined|null|NaN/.test(m.texto)), JSON.stringify(r.msgs));
 ok('mensajes: felicita el récord o la subida (con su número)', r.msgs.some(m => m.sit === 'avance' && /(60|55)/.test(m.texto)), JSON.stringify(r.msgs.map(m => m.sit)));
-ok('mensajes: el de la semana dice cuántos lleva', r.msgs[1].texto.includes(`${esperaF.hechas} de 4`), r.msgs[1].texto);
+ok('mensajes: el de la semana dice cuántos lleva', r.msgs[iCurso].texto.includes(`${esperaF.hechas} de 4`), r.msgs[iCurso].texto);
 const remo = r.sobre.find(x => /Barbell Row/.test(x.x)), banca = r.sobre.find(x => /Bench Press/.test(x.x));
 ok('pesos y reps: el remo subió de 50 a 55 kg (vez anterior y esta semana)', hoyOff < 4 || (remo && remo.t === 'peso' && /50 kg × 8/.test(remo.x) && /55 kg × 8/.test(remo.x) && /\+5 kg/.test(remo.x)), JSON.stringify(r.sobre));
 ok('pesos y reps: la banca subió de 57,5 a 60 kg', banca && banca.t === 'peso' && /57,5 kg × 8/.test(banca.x) && /60 kg × 8/.test(banca.x), JSON.stringify(r.sobre));
@@ -174,21 +184,31 @@ ok('historial: sin seguimientos aún, lo dice', /Aún no hay seguimientos guarda
 await p.locator('#seg-semana [data-es-copiar="0"]').click();
 await p.waitForTimeout(300);
 ok('Copiar el saludo: queda en el portapapeles', await p.evaluate(() => navigator.clipboard.readText()) === r.msgs[0].texto);
-await p.locator('#seg-semana [data-es-copiar="1"]').click();
+await p.locator(`#seg-semana [data-es-copiar="${iCurso}"]`).click();
 await p.waitForTimeout(400);
 const copiado = await p.evaluate(() => navigator.clipboard.readText());
-ok('Copiar: deja el mensaje tal cual en el portapapeles', copiado === r.msgs[1].texto, copiado);
+ok('Copiar: deja el mensaje tal cual en el portapapeles', copiado === r.msgs[iCurso].texto, copiado);
 const reg = await p.evaluate(() => (TABLAS_FALSAS.seguimiento_mensajes || []).map(x => ({ c: x.cliente_id, o: x.origen, t: x.titulo, x: x.texto })));
-ok('al copiar queda guardado solo: cliente, de dónde, título y el texto', reg.length === 2 && reg[1].c === 'c0' && reg[1].o === 'esta-semana' && reg[1].t === 'A mitad de semana' && reg[1].x === r.msgs[1].texto, JSON.stringify(reg));
+ok('al copiar queda guardado solo: cliente, de dónde, título y el texto', reg.length === 2 && reg[1].c === 'c0' && reg[1].o === 'esta-semana' && reg[1].t === 'A mitad de semana' && reg[1].x === r.msgs[iCurso].texto, JSON.stringify(reg));
 await p.waitForFunction(() => /Hoy/.test(document.querySelector('#seg-list [data-seg-li="c0"]')?.innerText || ''), null, { timeout: 5000 });
 ok('lista: Ana pasa a «Al día» con «Hoy»', /Al día/i.test(await p.locator('#seg-list').innerText()));
 const ult = await p.locator('#seg-semana [data-es-ultimo]').innerText();
 ok('la ficha dice «Último seguimiento: hoy» con el título', /Último seguimiento: hoy/.test(ult) && /A mitad de semana/.test(ult), ult);
-await p.locator('#seg-semana [data-es-copiar="1"]').click();
+await p.locator(`#seg-semana [data-es-copiar="${iCurso}"]`).click();
 await p.waitForTimeout(400);
 ok('copiar el mismo mensaje otra vez el mismo día no lo duplica', await p.evaluate(() => TABLAS_FALSAS.seguimiento_mensajes.length) === 2);
+// Copiar un aviso = ya se lo dijiste: pasa a «Ya se lo dijiste» y, al volver, va al final
+await p.locator('#seg-semana [data-es-msg="cambio"] .es-cp').click();
+await p.waitForTimeout(500);
+ok('aviso copiado: dice «Ya se lo dijiste · hoy»', /Ya se lo dijiste · hoy/.test(await p.locator('#seg-semana [data-es-msg="cambio"]').innerText()));
+await p.evaluate(() => { _es.lunesDe = null; Object.keys(_esCache).forEach(k => delete _esCache[k]); esPintar(_es.cliente); });
+await p.waitForFunction(() => document.querySelector('#seg-semana [data-es-msg="cambio"] [data-es-ya]'), null, { timeout: 10000 });
+const sits2 = await p.evaluate(() => [...document.querySelectorAll('#seg-semana [data-es-msg]')].map(m => m.dataset.esMsg));
+ok('al volver: el aviso ya dicho no se sugiere de nuevo, queda al final como hecho', sits2[sits2.length - 1] === 'cambio' && sits2[1] !== 'cambio', JSON.stringify(sits2));
+await p.locator(`[data-es-sem="${LUNES}"]`).click();
+await p.waitForTimeout(600);
 await p.locator('#seg-semana [data-es-ult-ver]').click();
-ok('«Lo que le dijiste» muestra el mensaje completo', (await p.locator('#seg-semana [data-es-ult-lista]').innerText()).includes(r.msgs[1].texto.split('\n')[0]));
+ok('«Lo que le dijiste» muestra el mensaje completo', (await p.locator('#seg-semana [data-es-ult-lista]').innerText()).includes(r.msgs[iCurso].texto.split('\n')[0]));
 await p.locator('#seg-semana').screenshot({ path: path.join(CAPTURAS, 'esta-semana-historial.png') });
 
 // Semana pasada: se cierra (3 de 4) y cambia el mensaje
@@ -196,19 +216,35 @@ await p.locator(`[data-es-sem="${mas(LUNES, -7)}"]`).click();
 await p.waitForFunction(() => document.querySelector('#seg-semana [data-es-fuerza] .es-n')?.textContent === '3/4', null, { timeout: 10000 });
 const r2 = await p.evaluate(() => ({ titulo: document.querySelector('[data-es-titulo]').textContent, msgs: [...document.querySelectorAll('#seg-semana [data-es-msg]')].map(m => ({ sit: m.dataset.esMsg, texto: m.querySelector('p').innerText })), resumen: document.querySelector('#seg-semana [data-es-resumen]').innerText }));
 ok('semana pasada: título y 3 de 4', /La semana pasada/.test(r2.titulo) && /3 de 4/.test(r2.resumen), r2.titulo + ' | ' + r2.resumen);
-ok('semana pasada: mensaje de semana a medias, que nombra lo que faltó', r2.msgs[1].sit === 'media' && /Legs/.test(r2.msgs[1].texto + r2.resumen), JSON.stringify(r2.msgs[1]));
+ok('semana pasada: mensaje de semana a medias, que nombra lo que faltó', (r2.msgs.find(m => m.sit === 'media') || {}).sit === 'media' && /Legs/.test(r2.msgs.find(m => m.sit === 'media').texto + r2.resumen), JSON.stringify(r2.msgs.map(m => m.sit)));
 await p.locator('#seg-semana').screenshot({ path: path.join(CAPTURAS, 'esta-semana-pasada.png') });
 ok('semana pasada: lo que hizo por su cuenta (fútbol)', /fútbol/.test(r2.resumen), r2.resumen);
 
 // Las versiones rotan: la de esta semana no es la misma que la de la semana siguiente.
 const rot = await p.evaluate(() => {
   const S = _es.semana, c = _es.cliente;
-  const a = esMensajes(c, S)[1].texto;
-  const b = esMensajes(c, { ...S, lunes: evtSumarDias(S.lunes, 7) })[1].texto;
-  const cc = esMensajes(c, { ...S, lunes: evtSumarDias(S.lunes, 14) })[1].texto;
+  const sem = (ms) => ms.find(m => m.sit !== 'inicio' && !m.informar).texto;
+  const a = sem(esMensajes(c, S));
+  const b = sem(esMensajes(c, { ...S, lunes: evtSumarDias(S.lunes, 7) }));
+  const cc = sem(esMensajes(c, { ...S, lunes: evtSumarDias(S.lunes, 14) }));
   return { distintas: a !== b && b !== cc };
 });
 ok('cada semana sale otra versión (nunca la misma que la anterior)', rot.distintas);
+// Los demás avisos y mensajes, con la semana ajustada a mano
+const otros = await p.evaluate(() => {
+  const c = _es.cliente, S = { ..._es.semana, cierre: false, subir: [], pedir: null, revisados: [], cambios: [], sobre: [], prog: [], rec: [], K: null, C: { ..._es.semana.C, faltaron: [] }, M: [] };
+  const sit = (ms) => ms.map(m => m.sit);
+  const fin = esMensajes(c, { ...S, semCiclo: Number(S.fase.semanas) });
+  const nuevo = esMensajes(c, { ...S, semCiclo: 1 });
+  const extra = esMensajes(c, { ...S, racha: 4, peso: { ahora: { fecha: S.fechas[2], peso: 82.4 }, antes: { fecha: '2026-09-28', peso: 83.6 } }, sobre: [{ nombre: 'Leg Press', tipo: 'baja', antes: { peso: 100, reps: 10, unidad: 'kg', f: '2026-10-01' }, ahora: { peso: 90, reps: 10, unidad: 'kg' } }] });
+  return { fin: fin.find(m => m.sit === 'cicloFin'), nuevo: nuevo.find(m => m.sit === 'cicloNuevo'), extra: extra.map(m => ({ s: m.sit, t: m.texto })) };
+});
+ok('avisar: última semana del ciclo', otros.fin && /(última semana de tu ciclo|Cerramos ciclo)/.test(otros.fin.texto), JSON.stringify(otros.fin));
+ok('avisar: ciclo nuevo', otros.nuevo && /ciclo nuevo/i.test(otros.nuevo.texto), JSON.stringify(otros.nuevo));
+ok('racha de 4 semanas y bajó en Leg Press (hasta 2 extra)', otros.extra.some(m => m.s === 'racha' && /4 semanas/.test(m.t)) && otros.extra.some(m => m.s === 'bajo' && /Leg Press/.test(m.t)), JSON.stringify(otros.extra));
+ok('al final siempre una pregunta', otros.extra[otros.extra.length - 1].s === 'pregunta' && /\?$/.test(otros.extra[otros.extra.length - 1].t), JSON.stringify(otros.extra));
+const soloPeso = await p.evaluate(() => { const S = { ..._es.semana, subir: [], pedir: null, revisados: [], cambios: [], sobre: [], prog: [], rec: [], K: null, racha: 0, C: { ..._es.semana.C, faltaron: [] }, M: [], peso: { ahora: { fecha: _es.semana.fechas[2], peso: 82.4 }, antes: { fecha: '2026-09-28', peso: 83.6 } } }; return (esMensajes(_es.cliente, S).find(m => m.sit === 'peso') || {}).texto || ''; });
+ok('registró su peso: con cuánto cambió desde el anterior', /82,4 kg/.test(soloPeso) && /(1,2 kg menos|Quedó tu peso registrado)/.test(soloPeso), soloPeso);
 
 // La ficha: resumen y edición. De la semana, solo la franja corta.
 await p.evaluate(() => verCliente('c0'));
@@ -238,7 +274,7 @@ await p.locator('[data-dlg-copiar]').first().waitFor({ timeout: 10000 });
 await p.locator('[data-dlg-copiar]').first().click();
 await p.waitForTimeout(500);
 const reg2 = await p.evaluate(() => TABLAS_FALSAS.seguimiento_mensajes.map(x => ({ o: x.origen, t: x.titulo })));
-ok('Diálogos: copiar también queda en su historial (con el título del diálogo)', reg2.length === 3 && reg2[2].o === 'dialogos' && !!reg2[2].t, JSON.stringify(reg2));
+ok('Diálogos: copiar también queda en su historial (con el título del diálogo)', reg2[reg2.length - 1].o === 'dialogos' && !!reg2[reg2.length - 1].t, JSON.stringify(reg2));
 await p.evaluate(() => closeModal());
 // Inicio: a quién hace rato no le escribes
 await p.evaluate(() => navigate('dashboard'));

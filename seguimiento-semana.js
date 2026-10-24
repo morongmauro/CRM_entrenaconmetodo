@@ -98,10 +98,12 @@ async function esLeer(c, lunes) {
     esLeerComida(c),
   ]);
 
-  // Los ciclos que tocan estas dos semanas y que el cliente ve.
+  // Los ciclos que tocan estas semanas y que el cliente ve (cinco atrás: la
+  // racha de semanas cumplidas necesita lo planeado de cada una).
   const fin = (f) => (f.fecha_inicio && f.semanas ? evtSumarDias(f.fecha_inicio, f.semanas * 7 - 1) : null);
+  const desdePlan = evtSumarDias(lunes, -35);
   const vigentes = (fases || []).filter(f => f.estado !== 'archivada' && f.visible_cliente !== false && f.fecha_inicio
-    && f.fecha_inicio <= hasta && (!fin(f) || fin(f) >= desde));
+    && f.fecha_inicio <= hasta && (!fin(f) || fin(f) >= desdePlan));
   const rutinas = vigentes.length ? (await leer(sb.from('rutinas').select('*').in('fase_id', vigentes.map(f => f.id)))) || [] : [];
   const planes = [];
   for (const f of vigentes) {
@@ -120,11 +122,18 @@ async function esLeer(c, lunes) {
   // (un comentario del domingo en la noche es del domingo, no del lunes UTC).
   const iniTs = evtDia(lunes).toISOString(), finTs = evtDia(evtSumarDias(lunes, 7)).toISOString();
   const rutIds = rutinas.map(r => String(r.id));
-  const [notasSem, coachSem, cambiosCli, cambiosRut] = await Promise.all([
+  const [notasSem, coachSem, cambiosCli, cambiosRut, prescritos, videos, coachVivos, pesoAntes, dichos] = await Promise.all([
     leer(sb.from('notas_entreno').select('*, ejercicios(nombre, alias)').eq('cliente_id', c.id).gte('created_at', iniTs).lt('created_at', finTs).order('created_at')),
     leer(sb.from('comentarios_coach').select('*').eq('cliente_id', String(c.id)).gte('creado_en', iniTs).lt('creado_en', finTs).order('creado_en')),
     leer(sb.from('cambios_ejercicio').select('*').eq('cliente_id', String(c.id)).gte('creado_at', iniTs).lt('creado_at', finTs)),
     rutIds.length ? leer(sb.from('cambios_ejercicio').select('*').in('rutina_id', rutIds).gte('creado_at', iniTs).lt('creado_at', finTs)) : [],
+    // Para los mensajes: el rango de reps recetado, los videos, tus
+    // comentarios vigentes, el peso anterior y lo que ya le dijiste.
+    rutIds.length ? leer(sb.from('rutina_ejercicios').select('rutina_id, ejercicio_id, reps').in('rutina_id', rutIds)) : [],
+    leer(sb.from('videos_tecnica').select('*').eq('cliente_id', c.id)),
+    leer(sb.from('comentarios_coach').select('ejercicio_id').eq('cliente_id', String(c.id)).is('quitado_en', null)),
+    leer(sb.from('mediciones_corporales').select('fecha, peso').eq('cliente_id', c.id).lt('fecha', lunes).not('peso', 'is', null).order('fecha', { ascending: false }).limit(1)),
+    leer(sb.from('seguimiento_mensajes').select('titulo, fecha').eq('cliente_id', c.id).gte('fecha', evtSumarDias(lunes, -180))),
   ]);
   const idsCoach = [...new Set((coachSem || []).map(x => x.ejercicio_id).filter(Boolean))];
   const ejsCoach = idsCoach.length ? (await leer(sb.from('ejercicios').select('id, nombre, alias').in('id', idsCoach))) || [] : [];
@@ -144,6 +153,8 @@ async function esLeer(c, lunes) {
     comida,
     notasSem: notasSem || [], coachSem: (coachSem || []).map(x => ({ ...x, ejercicios: ejPorId[String(x.ejercicio_id)] || null })),
     cambios, sinCambios: cambiosCli === null && cambiosRut === null,
+    prescritos: prescritos || [], videos: videos || [], coachVivos: coachVivos || [],
+    pesoAntes: (pesoAntes || [])[0] || null, dichos: dichos || [],
   };
 }
 
@@ -274,12 +285,65 @@ function esCalcular(D, lunes, hoy) {
 
   // Ciclo que corre en la semana (para «Ciclo 19 · semana 3 de 5»).
   const plan = D.planes.find(x => fechas[6] >= x.fase.fecha_inicio && (!x.fin || fechas[0] <= x.fin)) || null;
+  const semCiclo = plan ? Math.max(1, Math.floor((evtDia(fechas[0]) - evtDia(esLunes(plan.fase.fecha_inicio))) / 604800000) + 1) : null;
+
+  // Racha: semanas seguidas con todos los entrenos de fuerza del plan. La
+  // semana en curso cuenta solo si ya los completó.
+  let racha = 0;
+  for (let k = 0; k < 6; k++) {
+    const l = evtSumarDias(lunes, -7 * k);
+    const fs = Array.from({ length: 7 }, (_, i) => evtSumarDias(l, i));
+    const pl = fs.filter(f => rutinaPlan(f)).length;
+    const he = D.sesiones.filter(s => s.estado === 'completada' && fs.includes(dia10(s.fecha))).length;
+    if (pl > 0 && he >= pl) racha++;
+    else if (k === 0 && fechas[6] >= hoy) continue;
+    else break;
+  }
+
+  const sobre = esSobrecarga(D, sesFecha, lunes, fechas[6]);
+
+  // Subimos carga: en su última sesión de la semana hizo el tope del rango
+  // recetado en todas las series, con el mismo peso.
+  const tope = (txt) => { const m = String(txt || '').trim().match(/^(\d+)(?:\s*[-–a]\s*(\d+))?$/); return m ? Number(m[2] || m[1]) : null; };
+  const rec_ = {};
+  (D.prescritos || []).forEach(r => { const t = tope(r.reps); if (t) rec_[`${r.rutina_id}|${r.ejercicio_id}`] = t; });
+  const kg = (x) => (x.unidad === 'lb' ? Number(x.peso) * 0.4536 : Number(x.peso));
+  const subir = [];
+  const vistos = new Set();
+  sesSem.slice().sort((a, b) => dia10(b.fecha).localeCompare(dia10(a.fecha))).forEach(se => {
+    const porEjS = {};
+    D.series.filter(x => x.sesion_id === se.id && x.completada !== false && Number(x.reps) > 0 && Number(x.peso) > 0)
+      .forEach(x => (porEjS[x.ejercicio_id] ||= []).push(x));
+    Object.entries(porEjS).forEach(([ej, xs]) => {
+      if (vistos.has(ej)) return;
+      vistos.add(ej);
+      const t = rec_[`${se.rutina_id}|${ej}`];
+      if (!t || xs.length < 2) return;
+      if (xs.every(x => Number(x.reps) >= t) && xs.every(x => Math.abs(kg(x) - kg(xs[0])) < 0.01)) {
+        const e = xs[0].ejercicios || {};
+        subir.push({ ejercicio_id: ej, nombre: typeof entNombres === 'function' ? entNombres(e).grande : (e.nombre || 'Ejercicio'), series: xs.length, reps: t, peso: xs[0].peso, unidad: xs[0].unidad || 'kg' });
+      }
+    });
+  });
+
+  // Videos: los que revisaste esta semana y si ya le pediste del que más subió.
+  const vids = D.videos || [];
+  const revisados = vids.filter(v => ['bien', 'mejorar', 'mal'].includes(v.estado) && v.revisado_en && dia10(v.revisado_en) >= lunes && dia10(v.revisado_en) <= fechas[6]);
+  const pidioReciente = (ejId) => vids.some(v => String(v.ejercicio_id) === String(ejId) && dia10(v.pedido_en) >= evtSumarDias(lunes, -60));
+  const pedir = sobre.filter(x => x.tipo === 'peso' && x.ejercicio_id && !pidioReciente(x.ejercicio_id))
+    .sort((a, b) => (kg(b.ahora) - kg(b.antes)) / kg(b.antes) - (kg(a.ahora) - kg(a.antes)) / kg(a.antes))[0] || null;
+
+  // Peso corporal registrado en la semana, contra el registro anterior.
+  const pesoSem = (D.meds || []).filter(m => m.peso != null && dia10(m.fecha) >= lunes && dia10(m.fecha) <= fechas[6]).sort((a, b) => dia10(b.fecha).localeCompare(dia10(a.fecha)))[0] || null;
 
   return {
     lunes, fechas, hoy, dias, F, C, M, K, rec, prog, rpe, prev, ultimo, notas: D.notas, cierre: fechas[6] < hoy,
-    sobre: esSobrecarga(D, sesFecha, lunes, fechas[6]),
+    sobre,
     notasSem: D.notasSem || [], coachSem: D.coachSem || [], cambios: D.cambios || [], sinCambios: !!D.sinCambios,
-    fase: plan ? plan.fase : null,
+    fase: plan ? plan.fase : null, semCiclo, racha, subir, revisados, pedir,
+    coachVivos: new Set((D.coachVivos || []).map(x => String(x.ejercicio_id))),
+    peso: pesoSem ? { ahora: pesoSem, antes: D.pesoAntes } : null,
+    dichos: D.dichos || [],
   };
 }
 
@@ -295,7 +359,7 @@ function esSobrecarga(D, sesFecha, lunes, domingo) {
   D.series.forEach(x => {
     const f = sesFecha[x.sesion_id];
     if (!f || x.completada === false || !(Number(x.reps) > 0)) return;
-    const e = (porEj[x.ejercicio_id] ||= { ej: x.ejercicios || null, sem: null, antes: {} });
+    const e = (porEj[x.ejercicio_id] ||= { id: x.ejercicio_id, ej: x.ejercicios || null, sem: null, antes: {} });
     if (f >= lunes && f <= domingo) e.sem = mejor(e.sem, { ...x, f });
     else if (f < lunes) e.antes[f] = mejor(e.antes[f], { ...x, f });
   });
@@ -310,7 +374,7 @@ function esSobrecarga(D, sesFecha, lunes, domingo) {
       else tipo = dr > 0 ? 'reps' : dr < 0 ? 'baja' : 'igual';
     }
     const nombre = typeof entNombres === 'function' ? entNombres(e.ej || {}).grande : ((e.ej && e.ej.nombre) || 'Ejercicio');
-    return { nombre, antes: a, ahora: s, tipo };
+    return { ejercicio_id: e.id, nombre, antes: a, ahora: s, tipo };
   }).sort((x, y) => orden[x.tipo] - orden[y.tipo] || x.nombre.localeCompare(y.nombre));
 }
 
@@ -387,6 +451,26 @@ const ES_MSJ = {
     (d) => `${d.n}, el cardio ${d.semTxt} quedó en ${d.C.hechos} de ${d.C.plan}.${d.cardioMin ? ` No tiene que ser largo: con los ${d.cardioMin} minutos que te puse basta, si los haces.` : ' No tiene que ser largo, tiene que hacerse.'}`,
     (d) => `${d.n}, ojo con el cardio: ${d.C.hechos} de ${d.C.plan} ${d.semTxt}. Es la parte que más rápido se suelta y la que más ayuda a la recuperación entre entrenos.`,
   ],
+  // ─ Bajó respecto a la vez anterior ─
+  bajo: [
+    (d) => d.bajo ? `Vi que en ${d.bajo.nombre} esta vez fue ${esSerieTxt(d.bajo.ahora)} y la anterior ${esSerieTxt(d.bajo.antes)}. Pasa, no todos los días se rinde igual. ¿Dormiste bien o venías cansado?` : null,
+    (d) => d.bajo ? `${d.bajo.nombre} salió un poco por debajo de la vez anterior. Nada grave; ¿cómo venías de energía ese día?` : null,
+  ],
+  // ─ Semanas seguidas cumpliendo ─
+  racha: [
+    (d) => `Llevas ${d.racha} semanas seguidas cumpliendo todos tus entrenos. Eso es lo que más resultados da. Sigamos así.`,
+    (d) => `${d.racha} semanas sin fallar un entreno. Esa constancia es la base de todo lo demás.`,
+  ],
+  // ─ Registró su peso ─
+  peso: [
+    (d) => {
+      if (!d.peso || !d.peso.antes) return null;
+      const a = Number(d.peso.ahora.peso), b = Number(d.peso.antes.peso), dif = Math.round((a - b) * 10) / 10;
+      const cmp = dif === 0 ? `igual que el ${esFechaCorta(String(d.peso.antes.fecha).slice(0, 10))}` : `${esNum(Math.abs(dif))} kg ${dif < 0 ? 'menos' : 'más'} que el ${esFechaCorta(String(d.peso.antes.fecha).slice(0, 10))}`;
+      return `Gracias por registrar el peso: ${esNum(a)} kg, ${cmp}. Lo miramos en tendencia, no día a día.`;
+    },
+    (d) => d.peso ? `Quedó tu peso registrado (${esNum(d.peso.ahora.peso)} kg). Con varias mediciones vemos la tendencia real.` : null,
+  ],
   // ─ Peso, medidas o fotos pendientes ─
   medicion: [
     (d) => `${d.n}, te quedó pendiente ${d.medTxt}. Cuando puedas lo haces y lo marcas en la app: con eso reviso cómo va tu cuerpo y ajusto con datos.`,
@@ -398,6 +482,7 @@ const ES_TITULOS = {
   completa: 'Semana completa', media: 'Semana a medias', floja: 'Semana floja', retomar: 'Retomar',
   curso: 'A mitad de semana', registro: 'Volver a registrar', proteina: 'Subir la proteína', comidaBien: 'Comida bien',
   avance: 'Felicitar el avance', fatiga: 'Intensidad muy alta', cardio: 'Cardio pendiente', medicion: 'Registros pendientes',
+  bajo: 'Bajó el rendimiento', racha: 'Racha de constancia', peso: 'Registró su peso',
 };
 
 function esMensajes(c, S) {
@@ -458,27 +543,133 @@ function esMensajes(c, S) {
     const m = elegir(sit);
     if (m) out.push(m);
   }
-  // El de semana completa ya nombra el avance: no se repite aparte.
-  const usoAvance = out[0] && out[0].sit === 'completa' && !!d.detalle && !!(prog || rec);
-  // 2. Lo demás, por importancia
+  // El de semana completa ya nombra el avance: no se repite aparte. Tampoco
+  // si se le pide video de ese mismo ejercicio (ese mensaje ya lo nombra).
+  const usoAvance = (out[0] && out[0].sit === 'completa' && !!d.detalle && !!(prog || rec))
+    || (S.pedir && prog && S.pedir.nombre === prog.nombre && !rec);
+  // 2. Lo demás, por importancia (hasta 2)
   const candidatos = [];
   if ((prog || rec) && !usoAvance) candidatos.push('avance');
+  if (S.racha >= 3) candidatos.push('racha');
   if (S.K) {
     if (S.K.base >= 3 && S.K.dias / S.K.base < 0.6) candidatos.push('registro');
     else if (S.K.prot && S.K.prot.pct < 0.85) candidatos.push('proteina');
     else if (S.K.enMeta >= 4) candidatos.push('comidaBien');
   }
+  if ((S.sobre || []).some(x => x.tipo === 'baja')) candidatos.push('bajo');
   if (S.rpe && S.rpe.n >= 2 && S.rpe.prom >= 9) candidatos.push('fatiga');
   if (S.M.some(m => !m.hecho && m.pasado)) candidatos.push('medicion');
   if (S.C.faltaron.length) candidatos.push('cardio');
+  if (S.peso) candidatos.push('peso');
+  const otros = [];
+  d.bajo = (S.sobre || []).find(x => x.tipo === 'baja') || null;
+  d.racha = S.racha;
+  d.peso = S.peso;
   for (const sit of candidatos) {
-    if (out.length >= 3) break;
+    if (otros.length >= 2) break;
     const m = elegir(sit);
-    if (m) out.push(m);
+    if (m) otros.push(m);
   }
+
+  // Lo que tienes que informarle (cambios, carga, ciclo, videos): sale
+  // siempre hasta que lo copias; copiado, queda como «ya se lo dijiste».
+  const dicho = (titulo, dias = 400) => (S.dichos || []).find(x => x.titulo === titulo && String(x.fecha).slice(0, 10) >= evtSumarDias(S.lunes, -dias));
+  const avisos = esAvisos(c, S, n, semana).map(m => {
+    const ya = dicho(m.titulo, m.dias);
+    return ya ? { ...m, hecho: String(ya.fecha).slice(0, 10) } : m;
+  });
+  const pregunta = { sit: 'pregunta', titulo: 'Para cerrar', texto: ES_PREGUNTAS[(esHash(c.id + ':pregunta') + semana) % ES_PREGUNTAS.length] };
+
   // Siempre se abre con el saludo del check-in; los demás van después, así
   // que no repiten el «Hola Ana!» del comienzo.
-  return [{ sit: 'inicio', titulo: 'Saludo del check-in', texto: esSaludo(n) }, ...out.map(m => ({ ...m, texto: esSinSaludo(m.texto, n) }))];
+  const sinSaludo = (m) => ({ ...m, texto: esSinSaludo(m.texto, n) });
+  return [
+    { sit: 'inicio', titulo: 'Saludo del check-in', texto: esSaludo(n) },
+    ...avisos.filter(m => !m.hecho),
+    ...out.map(sinSaludo),
+    ...otros.map(sinSaludo),
+    pregunta,
+    ...avisos.filter(m => m.hecho),
+  ];
+}
+
+const ES_PREGUNTAS = [
+  '¿Cómo has dormido esta semana?',
+  'Del 1 al 10, ¿cómo está tu energía?',
+  '¿Algún dolor o molestia que deba saber?',
+  '¿Qué fue lo más difícil de la semana?',
+];
+
+// Lo que hay que informarle. El título es la marca de «ya se lo dijiste»:
+// lleva lo concreto (qué ejercicio, qué peso, qué ciclo) para que copiar uno
+// no apague otro distinto.
+function esAvisos(c, S, n, semana) {
+  const ver = (sit, vs) => vs[(esHash(c.id + ':' + sit) + semana) % vs.length];
+  const num = (x) => esNum(x);
+  const out = [];
+  // 1. Te cambié el ejercicio
+  const notasEj = new Set([...(S.notasSem || []), ...(S.notas || [])].map(x => String(x.ejercicio_id)));
+  const pares = [];
+  (S.cambios || []).forEach(x => {
+    if (!x.nombre_antes || !x.nombre_despues || x.nombre_antes === x.nombre_despues) return;
+    if (pares.some(p => p.antes === x.nombre_antes && p.despues === x.nombre_despues)) return;
+    pares.push({ antes: x.nombre_antes, despues: x.nombre_despues, rut: x.rutina_nombre || null, porNota: notasEj.has(String(x.ejercicio_antes)) });
+  });
+  if (pares.length) {
+    const ruts = [...new Set(pares.map(p => p.rut).filter(Boolean))];
+    const rut = ruts.length === 1 ? ruts[0] : null;
+    const porNota = pares.some(p => p.porNota);
+    const uno = pares.length === 1;
+    const texto = ver('cambio', [
+      `Te cambié ${esLista(pares.map(p => `${p.antes} por ${p.despues}`))}${rut ? ` en tu rutina ${rut}` : ''}${porNota ? ', por lo que me comentaste' : ''}. Ya lo ves en la app; cuéntame cómo te sientes con ${uno ? 'él' : 'ellos'} la primera vez.`,
+      uno
+        ? `Ojo con un cambio${rut ? ` en ${rut}` : ''}: en vez de ${pares[0].antes} ahora te toca ${pares[0].despues}. Si algo no te cuadra cuando lo hagas, me escribes en la nota del ejercicio.`
+        : `Ojo con unos cambios${rut ? ` en ${rut}` : ''}: ${esLista(pares.map(p => `en vez de ${p.antes} ahora te toca ${p.despues}`))}. Si algo no te cuadra cuando lo hagas, me escribes en la nota del ejercicio.`,
+    ]);
+    out.push({ sit: 'cambio', informar: true, titulo: `Te cambié el ejercicio · ${pares.map(p => `${p.antes} → ${p.despues}`).join('; ')}`, texto });
+  }
+  // 2. Subimos carga (hasta 2 ejercicios)
+  (S.subir || []).slice(0, 2).forEach(x => {
+    const p = `${num(x.peso)} ${x.unidad}`;
+    out.push({ sit: 'subir', informar: true, titulo: `Subimos carga · ${x.nombre} · ${p}`, texto: ver('subir', [
+      `En ${x.nombre} completaste las ${x.reps} repeticiones en todas las series con ${p}. La próxima vez sube un poco el peso y vuelve a empezar desde abajo del rango.`,
+      `${x.nombre} ya te quedó cómodo: ${x.series} series de ${x.reps} con ${p}. Toca subir: la próxima vez agrégale un poco de peso, aunque bajen las reps.`,
+    ]) });
+  });
+  // 3 y 4. Ciclo: última semana / primera semana
+  if (S.fase && S.semCiclo) {
+    const nom = S.fase.nombre || 'ciclo';
+    if (!S.cierre && Number(S.fase.semanas) > 1 && S.semCiclo === Number(S.fase.semanas)) {
+      out.push({ sit: 'cicloFin', informar: true, titulo: `Última semana del ciclo · ${nom}`, texto: ver('cicloFin', [
+        'Esta es la última semana de tu ciclo; la próxima arranca rutina nueva. ¿Hay algún ejercicio que te haya gustado, uno que no te cuadre o algo que quieras cambiar? Con eso armo el siguiente.',
+        'Cerramos ciclo esta semana. Antes de armarte el próximo, cuéntame: ¿qué te funcionó y qué no?',
+      ]) });
+    } else if (S.semCiclo === 1) {
+      out.push({ sit: 'cicloNuevo', informar: true, titulo: `Ciclo nuevo · ${nom}`, texto: ver('cicloNuevo', [
+        'Arrancaste ciclo nuevo. Cuéntame cómo te sentiste con los ejercicios nuevos: si alguno no te quedó claro o no tienes la máquina, lo cambiamos.',
+        'Primera semana del ciclo nuevo. ¿Cómo te fue con la rutina? Es el mejor momento para ajustar lo que no te encaje.',
+      ]) });
+    }
+  }
+  // 5. Pedir video del que más subió (si no se lo has pedido en 60 días)
+  if (S.pedir) {
+    const x = S.pedir;
+    out.push({ sit: 'pedirVideo', informar: true, dias: 60, titulo: `Pedir video · ${x.nombre}`, texto: ver('pedirVideo', [
+      `Vas subiendo bien en ${x.nombre} (${num(x.antes.peso)} → ${num(x.ahora.peso)} ${x.ahora.unidad || 'kg'}). Antes de seguir subiendo, ¿me mandas por WhatsApp un video de una serie la próxima vez que lo hagas? Quiero confirmar que la técnica acompaña la carga.`,
+      `${x.nombre} va progresando. Grábate una serie de perfil la próxima vez y me la mandas por WhatsApp; así lo seguimos subiendo con seguridad.`,
+    ]) });
+  }
+  // 6. Revisé tu video
+  (S.revisados || []).forEach(v => {
+    const nom = v.ejercicio_nombre || 'el ejercicio';
+    const nota = String(v.nota || '').trim().replace(/[.\s]+$/, '');
+    let texto = null;
+    if (v.estado === 'bien') texto = `Revisé tu video de ${nom}: la técnica está bien. Puedes seguir subiendo con confianza.`;
+    else if (nota) texto = `Revisé tu video de ${nom}.${v.estado === 'mejorar' ? ' Va bien encaminado; hay' : ' Hay'} un detalle por ajustar: ${nota}. Fíjate en eso la próxima vez y me mandas otro video.`;
+    else if (v.ejercicio_id && S.coachVivos.has(String(v.ejercicio_id))) texto = `Revisé tu video de ${nom}.${v.estado === 'mejorar' ? ' Va bien encaminado; hay' : ' Hay'} un detalle por ajustar y te lo dejé como comentario en el ejercicio. Fíjate en eso la próxima vez y me mandas otro video.`;
+    if (texto) out.push({ sit: 'videoRevisado', informar: true, titulo: `Revisé tu video · ${nom} · ${esFechaCorta(String(v.revisado_en).slice(0, 10))}`, texto: texto.replace(/\s{2,}/g, ' ') });
+  });
+  return out;
 }
 
 const esSaludo = (n) => `Hola ${n}, ¿cómo vas? Espero que todo vaya bien, paso por acá al check-in periódico.`;
@@ -574,13 +765,21 @@ function esCumplimientoHTML(S) {
 
 function esMensajesHTML(ms) {
   const pie = ms.length > 1
-    ? 'Primero el saludo y después los elegidos por cómo le fue, con sus números ya puestos. Cada semana sale otra versión.'
+    ? 'Primero el saludo; luego lo que tienes que avisarle (sale hasta que lo copias); después los elegidos por cómo le fue y al final una pregunta. Cada semana sale otra versión.'
     : 'Sin plan ni registros esta semana: no hay más mensajes que proponerte con datos reales. Usa los Diálogos.';
   return `<div class="es-msgs">${ms.map((m, i) => `
-    <div class="es-msg${m.sit === 'inicio' ? ' es-msg-inicio' : ''}" data-es-msg="${m.sit}">
-      <div class="es-msg-h"><b>${i ? `${i + 1}. ` : '1. '}${escapeHtml(m.titulo)}</b><button type="button" class="es-cp" data-es-copiar="${i}" onclick="esCopiar(${i})">Copiar</button></div>
+    <div class="es-msg${m.sit === 'inicio' ? ' es-msg-inicio' : ''}${m.informar ? ' es-msg-inf' : ''}${m.hecho ? ' es-msg-hecho' : ''}" data-es-msg="${m.sit}"${m.informar ? ' data-es-informar' : ''}>
+      <div class="es-msg-h"><b>${m.hecho ? '' : `${i + 1}. `}${escapeHtml(m.titulo)}</b><button type="button" class="es-cp" data-es-copiar="${i}" onclick="esCopiar(${i})">Copiar</button></div>
+      ${esMarcaAviso(m)}
       <p>${escapeHtml(m.texto)}</p>
     </div>`).join('')}</div><div class="es-varia">${pie}</div>`;
+}
+
+// Lo que tienes que informarle: «Avísale» hasta que lo copias; después,
+// «Ya se lo dijiste» con cuándo.
+function esMarcaAviso(m) {
+  if (m.hecho) return `<div class="es-ya" data-es-ya>Ya se lo dijiste · ${segHace(m.hecho).txt}</div>`;
+  return m.informar ? '<div class="es-avisale" data-es-avisale>Avísale</div>' : '';
 }
 
 // Pesos y repeticiones de la semana, ejercicio por ejercicio.
@@ -657,7 +856,19 @@ window.esCopiar = async (i) => {
   }
   const b = document.querySelector(`[data-es-copiar="${i}"]`);
   if (b) { b.textContent = 'Copiado'; setTimeout(() => { if (b.isConnected) b.textContent = 'Copiar'; }, 1800); }
-  if (_es.cliente && await segRegistrar(_es.cliente.id, { origen: 'esta-semana', titulo: m.titulo, texto: m.texto })) segPintarUltimo(_es.cliente);
+  if (_es.cliente && await segRegistrar(_es.cliente.id, { origen: 'esta-semana', titulo: m.titulo, texto: m.texto })) {
+    segPintarUltimo(_es.cliente);
+    if (m.informar && !m.hecho) {
+      m.hecho = fmt.hoy();
+      (_es.semana.dichos ||= []).push({ titulo: m.titulo, fecha: m.hecho });
+      const card = b && b.closest('[data-es-msg]');
+      if (card) {
+        card.classList.add('es-msg-hecho');
+        const marca = card.querySelector('[data-es-avisale]');
+        if (marca) marca.outerHTML = esMarcaAviso(m);
+      }
+    }
+  }
 };
 // La semana que abre: el lunes, la que acaba de terminar (es la que se revisa);
 // el resto de días, la que va.
