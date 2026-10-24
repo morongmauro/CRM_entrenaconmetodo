@@ -370,3 +370,14 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):focus, select:foc
 .es-ult-item + .es-ult-item { border-top: 1px solid #F1EFEA; }
 .es-ult-meta { font-size: 12px; font-weight: 700; color: #9A9AA0; margin-bottom: 3px; }
 .es-ult-txt { font-size: 13px; color: #45454A; white-space: pre-line; line-height: 1.45; }
+/* Check «Seguimiento hecho» */
+.seg-check { display: inline-flex; align-items: center; gap: 5px; flex: none; border: 0; border-radius: 999px; padding: 5px 11px; font: 700 12.5px Figtree, system-ui, sans-serif; background: #EAE8E2; color: #1F1F1F; cursor: pointer; white-space: nowrap; }
+.seg-check svg { color: #9A9AA0; }
+.seg-check:hover { background: #E2DFD8; }
+.seg-check-ok { background: #E7F3EA; color: #2F6F40; }
+.seg-check-ok svg { color: #46965A; }
+span.seg-check-ok { cursor: default; }
+/* Pagos: filas de totales (pagado / falta / total) */
+.pay-table tr.pagos-fila-pagado { background: #EEF6F0; color: #2F6F40; font-weight: 700; }
+.pay-table tr.pagos-fila-falta { background: #FDF4EA; color: #9A4F12; font-weight: 700; }
+.pay-table tr.pagos-fila-total { background: #1F1F1F; color: #fff; font-weight: 800; }

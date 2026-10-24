@@ -208,6 +208,29 @@ await p.locator('[data-inicio-seg]').screenshot({ path: path.join(CAPTURAS, 'ini
 ok('sin errores', errores.length === 0, errores.join(' | '));
 await ctx.close();
 
+// El check: «le hice seguimiento hoy» sin copiar nada
+const ck = await abrir(1440, 1000);
+await ck.p.evaluate(() => verCliente('c0'));
+await ck.p.locator('#ficha-semana [data-seg-check="marcar"]').waitFor({ timeout: 15000 });
+await ck.p.locator('#ficha-semana [data-seg-check="marcar"]').click();
+await ck.p.locator('#ficha-semana [data-seg-check="hecho"]').waitFor({ timeout: 5000 });
+const m1 = await ck.p.evaluate(() => TABLAS_FALSAS.seguimiento_mensajes.map(x => ({ o: x.origen, c: x.cliente_id })));
+ok('check en la ficha: marca el seguimiento de hoy (queda en el historial)', m1.length === 1 && m1[0].o === 'manual' && m1[0].c === 'c0', JSON.stringify(m1));
+ok('check en la ficha: dice «Último seguimiento: hoy»', /Último seguimiento: hoy/.test(await ck.p.locator('#ficha-semana [data-es-ultimo]').innerText()));
+await ck.p.locator('#ficha-semana').screenshot({ path: path.join(CAPTURAS, 'seguimiento-check.png'), clip: undefined });
+await ck.p.locator('#ficha-semana [data-seg-check="hecho"]').click();
+await ck.p.locator('#ficha-semana [data-seg-check="marcar"]').waitFor({ timeout: 5000 });
+ok('check: tocarlo otra vez quita la marca de hoy', await ck.p.evaluate(() => TABLAS_FALSAS.seguimiento_mensajes.length) === 0);
+await ck.p.evaluate(() => closeModal());
+await ck.p.evaluate(() => navigate('dashboard'));
+await ck.p.locator('#inicio-seg [data-seg-check-inicio="c0"]').waitFor({ timeout: 15000 });
+await ck.p.locator('[data-inicio-seg]').screenshot({ path: path.join(CAPTURAS, 'inicio-seguimientos-check.png') });
+await ck.p.locator('#inicio-seg [data-seg-check-inicio="c0"]').click();
+await ck.p.waitForFunction(() => /Hoy/.test(document.querySelector('#inicio-seg [data-seg-cliente="c0"]')?.innerText || ''), null, { timeout: 5000 });
+ok('check en Inicio: «Hecho» marca y la fila pasa a «Hoy»', await ck.p.evaluate(() => TABLAS_FALSAS.seguimiento_mensajes.filter(x => x.origen === 'manual').length) === 1);
+ok('check: sin errores', ck.errores.length === 0, ck.errores.join(' | '));
+await ck.ctx.close();
+
 // Sin la tabla (SQL sin correr): se copia igual y avisa qué correr
 const st = await abrir(1440, 1000);
 await st.p.evaluate(() => {

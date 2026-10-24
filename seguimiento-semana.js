@@ -649,8 +649,9 @@ window.segPintarUltimo = async (c) => {
     caja.innerHTML = `<span class="es-ult-t">Historial de seguimiento: falta correr <b>${SEG_SQL}</b> en Supabase.</span>`;
     return;
   }
+  const check = segCheckHTML(c.id, hist);
   if (!hist.length) {
-    caja.innerHTML = '<span class="es-ult-t" data-es-ult-dias="">Aún no hay seguimientos guardados. Se guardan solos cuando copias un mensaje (aquí o en Diálogos).</span>';
+    caja.innerHTML = `<div class="es-ult-fila"><span class="es-ult-t" data-es-ult-dias="">Aún no hay seguimientos guardados. Se guardan solos cuando copias un mensaje, o márcalo a mano.</span>${check}</div>`;
     return;
   }
   const u = hist[0], h = segHace(u.fecha);
@@ -658,6 +659,7 @@ window.segPintarUltimo = async (c) => {
   caja.innerHTML = `
     <div class="es-ult-fila">
       <span class="es-ult-t${tono}" data-es-ult-dias="${h.d}">Último seguimiento: <b>${h.txt}</b> (${esFechaCorta(String(u.fecha).slice(0, 10))})${u.titulo ? ` · ${escapeHtml(u.titulo)}` : ''}</span>
+      ${check}
       <button type="button" class="es-ult-btn" data-es-ult-ver onclick="this.closest('[data-es-ultimo]').classList.toggle('abierto')">Lo que le dijiste</button>
     </div>
     <div class="es-ult-lista" data-es-ult-lista>
@@ -665,10 +667,49 @@ window.segPintarUltimo = async (c) => {
     </div>`;
 };
 
+// ── El check: «le hice seguimiento hoy» sin copiar nada ──────────────────
+// Para cuando le escribiste directo por WhatsApp o lo viste en persona.
+// Queda en el mismo historial (origen «manual»). Tocarlo otra vez el mismo
+// día lo quita (solo la marca manual: lo copiado queda).
+const SEG_ICO_CHECK = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+function segCheckHTML(clienteId, hist) {
+  const hoy = fmt.hoy();
+  const deHoy = (hist || []).filter(x => String(x.fecha).slice(0, 10) === hoy);
+  const manual = deHoy.some(x => x.origen === 'manual');
+  if (deHoy.length && !manual) return `<span class="seg-check seg-check-ok" data-seg-check="auto" title="Hoy ya copiaste un mensaje para este cliente">${SEG_ICO_CHECK}Seguimiento hecho hoy</span>`;
+  return manual
+    ? `<button type="button" class="seg-check seg-check-ok" data-seg-check="hecho" onclick="segMarcar('${clienteId}', false)" title="Tócalo para quitar la marca de hoy">${SEG_ICO_CHECK}Seguimiento hecho hoy</button>`
+    : `<button type="button" class="seg-check" data-seg-check="marcar" onclick="segMarcar('${clienteId}', true)" title="Para cuando le escribiste directo por WhatsApp o lo viste en persona">${SEG_ICO_CHECK}Marcar seguimiento hecho</button>`;
+}
+
+window.segMarcar = async (clienteId, marcar = true) => {
+  const hoy = fmt.hoy();
+  try {
+    if (marcar) {
+      const { data: ya } = await sb.from('seguimiento_mensajes').select('id').eq('cliente_id', clienteId).eq('fecha', hoy).eq('origen', 'manual');
+      if (!(ya || []).length) {
+        const { error } = await sb.from('seguimiento_mensajes').insert({ cliente_id: clienteId, fecha: hoy, origen: 'manual', titulo: 'Marcado a mano', texto: 'Seguimiento hecho (marcado a mano).' });
+        if (error) throw error;
+      }
+      toast('Seguimiento marcado como hecho');
+    } else {
+      const { error } = await sb.from('seguimiento_mensajes').delete().eq('cliente_id', clienteId).eq('fecha', hoy).eq('origen', 'manual');
+      if (error) throw error;
+      toast('Marca de hoy quitada');
+    }
+  } catch (e) {
+    toast(segFaltaTabla(e) ? `Falta correr ${SEG_SQL} en Supabase` : 'No se pudo guardar (sin conexión)');
+    return;
+  }
+  if (_es.cliente && _es.cliente.id === clienteId && document.querySelector('#ficha-semana [data-es-ultimo]')) segPintarUltimo(_es.cliente);
+  if (document.getElementById('inicio-seg') && _seg.activos) segPintarInicio(_seg.activos);
+};
+
 // El Inicio: a quién hace rato no le escribes (desde tu último mensaje copiado).
 window.segPintarInicio = async (activos) => {
   const caja = document.getElementById('inicio-seg');
   if (!caja) return;
+  _seg.activos = activos;
   let filas;
   try {
     const desde = evtSumarDias(fmt.hoy(), -120);
@@ -680,25 +721,25 @@ window.segPintarInicio = async (activos) => {
     return;
   }
   if (!document.getElementById('inicio-seg')) return;
-  if (!filas.length) {
-    caja.innerHTML = '<div class="text-sm text-slate-500" data-seg-vacio>Aún no hay seguimientos guardados. Cada mensaje que copies desde la ficha del cliente o desde Diálogos queda guardado solo, y aquí verás a quién hace rato no le escribes.</div>';
-    return;
-  }
   const ultimo = {};
   filas.forEach(f => { if (!ultimo[f.cliente_id]) ultimo[f.cliente_id] = f; });
   const lista = activos.map(c => ({ c, u: ultimo[c.id] || null, d: ultimo[c.id] ? segHace(ultimo[c.id].fecha).d : null }))
     .sort((a, b) => (b.d ?? 9999) - (a.d ?? 9999));
   const tarde = lista.filter(x => x.d === null || x.d >= SEG_DIAS_AVISO);
+  const ayuda = filas.length ? '' : '<div class="text-[13px] text-slate-500 mb-1" data-seg-vacio>Se guarda solo cuando copias un mensaje (ficha o Diálogos). Si le escribiste directo, toca «Hecho».</div>';
   const fila = (x) => `
     <div class="flex items-center gap-3" style="border-top:1px solid #F1EFEA;padding:10px 0" data-seg-cliente="${x.c.id}" data-seg-dias="${x.d ?? ''}">
       <div class="flex-1 min-w-0">
         <div class="font-bold text-slate-900 truncate" style="font-size:15px">${escapeHtml(x.c.nombre)}</div>
         <div class="text-[13px] truncate ${x.d === null || x.d >= SEG_DIAS_AVISO ? 'text-[#B5611A]' : 'text-slate-500'}">${x.u ? `${segHace(x.u.fecha).txt}${x.u.titulo ? ` · ${escapeHtml(x.u.titulo)}` : ''}` : 'sin seguimiento guardado'}</div>
       </div>
+      ${x.d === 0
+        ? `<span class="seg-check seg-check-ok" title="Seguimiento hecho hoy">${SEG_ICO_CHECK}Hoy</span>`
+        : `<button type="button" class="seg-check" data-seg-check-inicio="${x.c.id}" onclick="segMarcar('${x.c.id}', true)" title="Marcar que hoy le hiciste seguimiento">${SEG_ICO_CHECK}Hecho</button>`}
       <button class="btn btn-secondary btn-sm" onclick="verCliente('${x.c.id}')">Abrir</button>
     </div>`;
   const ver = lista.slice(0, 6);
-  caja.innerHTML = `
+  caja.innerHTML = `${ayuda}
     <div class="text-sm text-slate-500 mb-1" data-seg-resumen>${tarde.length ? `${tarde.length} ${tarde.length === 1 ? 'cliente lleva' : 'clientes llevan'} ${SEG_DIAS_AVISO} días o más sin seguimiento` : `Todos con seguimiento en los últimos ${SEG_DIAS_AVISO} días`}</div>
     ${ver.map(fila).join('')}
     ${lista.length > ver.length ? `<details class="mt-1"><summary class="text-sm font-semibold text-slate-500" style="cursor:pointer;list-style:none;padding:8px 0">Ver los ${lista.length}</summary>${lista.slice(ver.length).map(fila).join('')}</details>` : ''}`;

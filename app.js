@@ -3121,6 +3121,14 @@ const db = {
 function copConv(monto, moneda) {
   return moneda === 'USD' ? Number(monto || 0) * _settings.usd_cop_rate : Number(monto || 0);
 }
+// Un pago en pesos. Hay cobros guardados sin moneda (los genera el mes
+// automático): esos van en la moneda del cliente, la misma que muestra su
+// celda. Antes se sumaban como pesos y un cliente en USD salía sin convertir.
+function copPago(p, porId) {
+  const c = porId && porId[p.cliente_id];
+  return copConv(p.monto, p.moneda || (c && c.moneda) || 'COP');
+}
+const porIdDe = (clientes) => Object.fromEntries((clientes || []).map(c => [c.id, c]));
 
 // =====================================================
 // ROUTER
@@ -3299,14 +3307,15 @@ routes.dashboard = async () => {
 
   // Cobrado y pendiente del mes
   const pagadosMes = pagosMes.filter(p => p.pagado);
-  const cobrado = pagadosMes.reduce((s, p) => s + copConv(p.monto, p.moneda), 0);
+  const cliPorId = porIdDe(clientes);
+  const cobrado = pagadosMes.reduce((s, p) => s + copPago(p, cliPorId), 0);
   const porCobrar = activos.reduce((s, c) => {
     const p = pagosMes.find(pp => pp.cliente_id === c.id);
     if (p && p.pagado) return s;
     if (p && Number(p.monto) === 0) return s; // monto 0 = mes sin cobro (premio, cortesía)
     // Si hay un pago pendiente registrado, usar su monto; si no, el de la ficha
     const monto = p && Number(p.monto) > 0 ? p.monto : c.monto;
-    const moneda = (p && p.moneda) || c.moneda;
+    const moneda = (p && Number(p.monto) > 0 && p.moneda) || c.moneda;
     return s + copConv(monto, moneda);
   }, 0);
 
@@ -5613,28 +5622,37 @@ routes.pagos = async () => {
     map[p.cliente_id][p.mes] = p;
   }
 
-  // Totales — pagados siempre suman; pendientes solo si el cliente está activo
-  const totalesMes = {};
+  // Totales por mes, todo en pesos (USD × tasa): lo pagado siempre suma; lo
+  // pendiente solo si el cliente está activo. Total = pagado + falta.
+  const cliPorId = porIdDe(clientes);
+  const totalesMes = {}, pagadoMesT = {}, faltaMesT = {};
   let totalAnio = 0;
   for (const mes of meses) {
-    let t = 0;
+    let pag = 0, fal = 0;
     for (const c of clientes) {
       const p = map[c.id]?.[mes];
       if (!p || Number(p.monto) <= 0) continue;
-      if (p.pagado) t += copConv(p.monto, p.moneda);
-      else if (c.estado === 'activo') t += copConv(p.monto, p.moneda);
+      if (p.pagado) pag += copPago(p, cliPorId);
+      else if (c.estado === 'activo') fal += copPago(p, cliPorId);
     }
-    totalesMes[mes] = t;
-    totalAnio += t;
+    pagadoMesT[mes] = pag; faltaMesT[mes] = fal; totalesMes[mes] = pag + fal;
+    totalAnio += pag + fal;
   }
 
   const mesActualNum = new Date().getMonth() + 1;
-  const cobradoMes = pagos.filter(p => p.mes === mesActual && p.pagado).reduce((s, p) => s + copConv(p.monto, p.moneda), 0);
-  const porCobrarMes = clientes.filter(c => c.estado === 'activo').filter(c => {
+  const cobradoMes = pagos.filter(p => p.mes === mesActual && p.pagado).reduce((s, p) => s + copPago(p, cliPorId), 0);
+  // Lo que falta este mes: lo pendiente registrado (con su monto) y, de los
+  // activos que aún no tienen cobro generado, el monto de su ficha.
+  let sinCobroMonto = 0;
+  const porCobrarMes = clientes.filter(c => c.estado === 'activo').reduce((s, c) => {
     const p = map[c.id]?.[mesActual];
-    if (p && (p.pagado || Number(p.monto) === 0)) return false; // pagado o mes sin cobro
-    return true;
-  }).reduce((s, c) => s + copConv(c.monto, c.moneda), 0);
+    if (p && (p.pagado || Number(p.monto) === 0)) return s; // pagado o mes sin cobro
+    if (p) return s + copPago(p, cliPorId);
+    const v = copConv(c.monto, c.moneda);
+    sinCobroMonto += v;
+    return s + v;
+  }, 0);
+  const totalMesActual = cobradoMes + porCobrarMes;
 
   // RED DE SEGURIDAD DEL MES NUEVO
   // Desde que la tabla es la única fuente de verdad, un mes sin cobros
@@ -5684,26 +5702,33 @@ routes.pagos = async () => {
     </div>` : ''}
 
     <div class="bg-gradient-to-br from-slate-900 to-slate-700 text-white rounded-2xl p-6 shadow-md mb-5">
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div>
-          <div class="text-xs uppercase tracking-wide text-slate-300 font-semibold">Cobrado ${fmt.mesEsLargo(mesActual)}</div>
-          <div class="text-3xl font-bold mt-1">${fmt.moneyCop(cobradoMes)}</div>
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-6" data-pagos-totales>
+        <div data-pagos-total-mes>
+          <div class="text-xs uppercase tracking-wide text-slate-300 font-semibold">Total a recibir ${fmt.mesEsLargo(mesActual)}</div>
+          <div class="text-3xl font-bold mt-1">${fmt.moneyCop(totalMesActual)}</div>
         </div>
-        <div>
-          <div class="text-xs uppercase tracking-wide text-slate-300 font-semibold">Por cobrar este mes</div>
+        <div data-pagos-cobrado>
+          <div class="text-xs uppercase tracking-wide text-slate-300 font-semibold">Ya pagaron</div>
+          <div class="text-3xl font-bold mt-1 text-emerald-300">${fmt.moneyCop(cobradoMes)}</div>
+          <div class="text-xs text-slate-300 mt-1">${totalMesActual > 0 ? Math.round((cobradoMes / totalMesActual) * 100) : 0}% del mes</div>
+        </div>
+        <div data-pagos-falta>
+          <div class="text-xs uppercase tracking-wide text-slate-300 font-semibold">Falta por pagar</div>
           <div class="text-3xl font-bold mt-1 text-amber-300">${fmt.moneyCop(porCobrarMes)}</div>
+          ${sinCobroMonto > 0 ? `<div class="text-xs text-slate-300 mt-1">incluye ${fmt.moneyCop(sinCobroMonto)} de cobros aún sin generar</div>` : ''}
         </div>
         <div>
           <div class="text-xs uppercase tracking-wide text-slate-300 font-semibold">Acumulado año</div>
           <div class="text-3xl font-bold mt-1">${fmt.moneyCop(totalAnio)}</div>
         </div>
       </div>
+      <div class="text-xs text-slate-300 mt-4">Todo en pesos: lo que está en USD se convierte a ${(_settings.usd_cop_rate || 0).toLocaleString('es-CO')} COP por dólar.</div>
     </div>
 
     <div id="pagos-content"></div>
   `;
 
-  if (_pagosView === 'table') renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActualNum);
+  if (_pagosView === 'table') renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActualNum, pagadoMesT, faltaMesT);
   else renderPagosCards(clientes, map, mesActual);
 
   // Lo que ve el cliente en su app se pide DESPUÉS de pintar, no antes: la
@@ -5712,7 +5737,7 @@ routes.pagos = async () => {
   if (_pagosView === 'table' && _avisosApp === null && !_avisosAppError) {
     await cargarAvisosApp(clientes.filter(c => c.estado !== 'finalizado'));
     if (_currentView === 'pagos' && _pagosView === 'table') {
-      renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActualNum);
+      renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActualNum, pagadoMesT, faltaMesT);
     }
   }
 };
@@ -5885,7 +5910,7 @@ function sortByEstado(a, b) {
   return d !== 0 ? d : a.nombre.localeCompare(b.nombre, 'es');
 }
 
-function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActualNum) {
+function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActualNum, pagadoMesT = {}, faltaMesT = {}) {
   const activos = clientes.filter(c => c.estado !== 'finalizado').sort(sortByEstado);
   const diaHoy = new Date().getDate();
   $('#pagos-content').innerHTML = `
@@ -5924,7 +5949,7 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
                   if (p && p.pagado) {
                     cls = 'pay-paid';
                     val = fmtVal(p.monto);
-                    totalFila += copConv(p.monto, p.moneda);
+                    totalFila += copConv(p.monto, monedaCel);
                   } else if (c.estado === 'pausa') {
                     // Cliente en pausa: rayita neutra salvo que el mes esté
                     // pagado (arriba). Nada de amarillos/rojos que ensucien.
@@ -5950,7 +5975,7 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
                     cls = vencido ? 'pay-overdue' : 'pay-pending';
                     val = fmtVal(p.monto);
                     // Solo sumar pendientes al total anual si el cliente está activo
-                    if (c.estado === 'activo') totalFila += copConv(p.monto, p.moneda);
+                    if (c.estado === 'activo') totalFila += copConv(p.monto, monedaCel);
                   } else if (monthNum < mesActualNum) {
                     // Mes pasado SIN cobro registrado. No es deuda: es un mes
                     // en el que esta persona no tuvo coaching. Antes se pintaba
@@ -5986,11 +6011,18 @@ function renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActual
                   </tr>
                 `;
               }).join('')}
-            <tr class="bg-slate-900 text-white font-bold">
-              <td style="position:sticky; left:0; background:#0f172a; z-index:2; padding:0.65rem 0.8rem;" colspan="4">Total mes (COP equivalente)</td>
-              ${meses.map(m => `<td class="px-2 py-3 text-right ${totalesMes[m] === 0 ? 'text-slate-500' : ''}">${totalesMes[m] > 0 ? totalesMes[m].toLocaleString('es-CO') : '—'}</td>`).join('')}
-              <td class="px-3 py-3 text-right text-emerald-300">${totalAnio.toLocaleString('es-CO')}</td>
-            </tr>
+            ${(() => {
+              const fila = (titulo, vals, total, clase, attr) => `
+            <tr class="${clase}" ${attr}>
+              <td style="position:sticky; left:0; background:inherit; z-index:2; padding:0.65rem 0.8rem;" colspan="4">${titulo}</td>
+              ${meses.map(m => `<td class="px-2 py-3 text-right ${vals[m] > 0 ? '' : 'opacity-50'}">${vals[m] > 0 ? Math.round(vals[m]).toLocaleString('es-CO') : '—'}</td>`).join('')}
+              <td class="px-3 py-3 text-right">${Math.round(total).toLocaleString('es-CO')}</td>
+            </tr>`;
+              const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
+              return fila('Ya pagaron (COP)', pagadoMesT, sum(pagadoMesT), 'pagos-fila-pagado', 'data-pagos-fila="pagado"')
+                + fila('Falta por pagar (COP)', faltaMesT, sum(faltaMesT), 'pagos-fila-falta', 'data-pagos-fila="falta"')
+                + fila('Total mes (COP)', totalesMes, totalAnio, 'pagos-fila-total', 'data-pagos-fila="total"');
+            })()}
           </tbody>
         </table>
       </div>
@@ -8378,9 +8410,10 @@ routes.negocio = async () => {
   })();
 
   // Cobrado mes / mes anterior
-  const cobradoMesActual = pagosAnio.filter(p => p.mes === mesActual && p.pagado).reduce((s, p) => s + copConv(p.monto, p.moneda), 0);
-  const cobradoMesAnterior = pagosAnio.filter(p => p.mes === mesAnt && p.pagado).reduce((s, p) => s + copConv(p.monto, p.moneda), 0);
-  const cobradoAnio = pagosAnio.filter(p => p.pagado).reduce((s, p) => s + copConv(p.monto, p.moneda), 0);
+  const cliPorId = porIdDe(clientes);
+  const cobradoMesActual = pagosAnio.filter(p => p.mes === mesActual && p.pagado).reduce((s, p) => s + copPago(p, cliPorId), 0);
+  const cobradoMesAnterior = pagosAnio.filter(p => p.mes === mesAnt && p.pagado).reduce((s, p) => s + copPago(p, cliPorId), 0);
+  const cobradoAnio = pagosAnio.filter(p => p.pagado).reduce((s, p) => s + copPago(p, cliPorId), 0);
   const crecMes = cobradoMesAnterior > 0 ? Math.round(((cobradoMesActual - cobradoMesAnterior) / cobradoMesAnterior) * 100) : 0;
 
   // Retención: clientes que pagaron en mes anterior y también en mes actual
@@ -8392,7 +8425,7 @@ routes.negocio = async () => {
   // LTV (de finalizados): suma HISTÓRICA de pagos por cliente (todos los años)
   const ltvPorCliente = {};
   for (const p of pagadosHist) {
-    ltvPorCliente[p.cliente_id] = (ltvPorCliente[p.cliente_id] || 0) + copConv(p.monto, p.moneda);
+    ltvPorCliente[p.cliente_id] = (ltvPorCliente[p.cliente_id] || 0) + copPago(p, cliPorId);
   }
   const ltvVals = finalizados.map(c => ltvPorCliente[c.id] || 0).filter(v => v > 0);
   const ltv = ltvVals.length ? ltvVals.reduce((a, b) => a + b, 0) / ltvVals.length : null;
