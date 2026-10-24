@@ -7806,7 +7806,7 @@ window.verCliente = async (id) => {
   // Pagos · Journey · Perfil.
   const telWa = String(c.telefono || '').replace(/[^\d]/g, '');
   const pagoTxt = c.dia_pago ? `Pago el ${c.dia_pago} de cada mes` : 'Sin día de pago';
-  setTimeout(() => { fichaPestanas(c); if (typeof pfPanel === 'function') pfPanel('#ficha-pf', c.id); }, 40);
+  setTimeout(() => { fichaPestanas(c); if (typeof pfPanel === 'function') pfPanel('#ficha-pf', c.id); esPintar(c); }, 40);
   openModal(modalShell('Ficha del cliente', `
     <div class="space-y-4" data-ficha>
       <div class="flex items-center gap-4 flex-wrap" data-ficha-cabecera>
@@ -7846,17 +7846,9 @@ window.verCliente = async (id) => {
           .map(([k, t], n) => `<button class="chip ${n ? '' : 'active'}" data-ficha-tab="${k}" onclick="fichaVerPestana('${k}')">${t}</button>`).join('')}
       </div>
 
-      <div data-ficha-sec="resumen" class="em-ficha-aros" id="ficha-aros">
-        <div class="card em-aro-card">${typeof entAro === 'function' ? entAro(null, '', 72) : ''}<div><div class="em-aro-t">Entrenamiento</div><div class="em-aro-d" id="ficha-aro-entreno">Calculando su ciclo…</div></div></div>
-        <div class="card em-aro-card">${typeof entAro === 'function' ? entAro(promAdh == null ? null : Math.round(promAdh * 10), '', 72) : ''}<div><div class="em-aro-t">Adherencia</div><div class="em-aro-d">${promAdh == null ? 'Sin seguimientos aún' : `${promAdh.toFixed(1)}/10 · últimas 4 semanas`}</div></div></div>
-        ${(() => {
-          const v = segs.slice(0, 4).map(s => s.score_alim_metas).filter(x => x != null);
-          const prom = v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null;
-          return `<div class="card em-aro-card">${typeof entAro === 'function' ? entAro(prom, '', 72) : ''}<div><div class="em-aro-t">Alimentación</div><div class="em-aro-d">${prom == null ? 'Sin datos de metas aún' : 'Metas · últimas 4 semanas'}</div></div></div>`;
-        })()}
-      </div>
+      ${esArmazonHTML(c)}
 
-      <div class="sec sec-slate" data-ficha-sec="resumen">
+      <div class="sec sec-slate" data-ficha-sec="perfil">
         <div class="sec-title">Datos</div>
         <div class="em-datos">
           <div><span>Estado</span><b>${escapeHtml(c.estado || '—')}</b></div>
