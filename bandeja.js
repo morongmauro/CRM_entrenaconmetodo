@@ -92,6 +92,8 @@ function bdjArmar(d) {
       id: `nota:${n.id}`, tipo: 'nota', cliente_id: n.cliente_id, fecha: n.fecha || String(n.created_at || '').slice(0, 10),
       icono: '💬', titulo: `Te escribió${n.rutina_id && rutinaDe[n.rutina_id] ? ` sobre ${rutinaDe[n.rutina_id]}` : ''}`,
       detalle: n.texto, nota_id: n.id, ejercicio: n.ejercicio_nombre || null, listo_en: n.leida_en || null,
+      // Para responder desde aquí, en la conversación de ese ejercicio.
+      responder: n.ejercicio_id ? { cliente_id: n.cliente_id, ejercicio_id: n.ejercicio_id, rutina_id: n.rutina_id || '', rutina_ejercicio_id: n.rutina_ejercicio_id || '' } : null,
     });
   });
 
@@ -506,6 +508,8 @@ routes.bandeja = async () => {
         ${a.detalle ? `<div class="text-xs text-slate-500 mt-0.5 leading-relaxed">${escapeHtml(a.detalle)}${a.ejercicio ? ` — <em>${escapeHtml(a.ejercicio)}</em>` : ''}</div>` : ''}
         <div class="text-[11px] text-slate-400 mt-0.5">${a.fecha === fmt.hoy() ? 'hoy' : fmt.fechaCorta(a.fecha)}${deshacer && a.listo_en ? ` · listo el ${fmt.fechaCorta(String(a.listo_en).slice(0, 10))}` : ''}</div>
       </div>
+      ${a.responder && typeof ccAbrirDesdeNota === 'function'
+        ? `<button class="btn btn-primary btn-sm flex-shrink-0" data-nota-responder onclick='ccAbrirDesdeNota(${escapeHtml(JSON.stringify(a.responder))})'>Responder</button>` : ''}
       ${deshacer
         ? `<button class="btn btn-ghost btn-sm flex-shrink-0" data-nota-deshacer onclick="bdjDeshacer('${a.id}'${a.nota_id ? `, '${a.nota_id}'` : ''})" title="Volver a pendientes">Deshacer</button>`
         : `<button class="btn btn-secondary btn-sm flex-shrink-0" onclick="bdjListo('${a.id}'${a.nota_id ? `, '${a.nota_id}'` : ''})">${accion}</button>`}

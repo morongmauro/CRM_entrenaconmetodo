@@ -63,8 +63,9 @@ function tablas() {
       { slug: 'otro', nombre: 'Otra actividad', categoria: 'otro', icono: '✨', orden: 900, activo: true },
     ],
     comunidad_posts: [], comunidad_reacciones: [], comunidad_comentarios: [], comunidad_vistas: [],
+    comentarios_coach: [],
     notas_entreno: [
-      { id: 'n1', user_id: 'coach-1', cliente_id: 'c0', fecha: hace(0), texto: 'No tengo esta máquina en mi gym', leida_en: null, created_at: hace(0) + 'T10:00:00Z', ejercicios: { nombre: 'Prensa', alias: 'Leg Press' } },
+      { id: 'n1', user_id: 'coach-1', cliente_id: 'c0', fecha: hace(0), texto: 'No tengo esta máquina en mi gym', leida_en: null, created_at: hace(0) + 'T10:00:00Z', ejercicio_id: fixture.ejercicios[0].id, rutina_id: fixture.rutinas[0].id, ejercicios: { nombre: 'Prensa', alias: 'Leg Press' } },
       { id: 'n2', user_id: 'coach-1', cliente_id: 'c0', fecha: hace(1), texto: 'Me molestó el hombro en el press', leida_en: null, created_at: hace(1) + 'T10:00:00Z', ejercicios: null },
       { id: 'n3', user_id: 'coach-1', cliente_id: 'c0', fecha: hace(4), texto: 'Esta semana viajo, entreno en el hotel', leida_en: hace(3) + 'T12:00:00Z', created_at: hace(4) + 'T10:00:00Z', ejercicios: null },
     ],
@@ -130,6 +131,24 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   c = await cuenta();
   ok(`${tag} · «Deshacer» la devuelve a Pendientes`, c.nListas === 1 && /máquina/.test(c.pendTxt) && /viajo/.test(c.listas), JSON.stringify(c));
   ok(`${tag} · no se borró ninguna nota`, await p.evaluate(() => TABLAS_FALSAS.notas_entreno.length) === 3);
+  // Responder desde la Bandeja: solo las notas de un ejercicio traen el botón;
+  // abre la conversación de ese ejercicio y lo que escribes le llega allí.
+  ok(`${tag} · «Responder» sale en la nota del ejercicio (y no en la de la rutina)`, (await p.locator('[data-notas-pendientes] [data-nota-responder]').count()) === 1
+    && /máquina/.test(await p.locator('[data-nota-responder]').locator('xpath=..').innerText()));
+  await p.locator('[data-nota-responder]').click();
+  await p.waitForSelector('#cc-texto', { timeout: 8000 }); await p.waitForTimeout(300);
+  ok(`${tag} · se abre la conversación con lo que te escribió`, /máquina/.test(await p.locator('#modal').innerText()));
+  if (tag === 'ancho') await p.screenshot({ path: path.join(CAPTURAS, 'bandeja-responder.png') });
+  await p.fill('#cc-texto', 'Hazla en la máquina de sentadilla hack, mismas series.');
+  await p.evaluate(() => ccEnviar()); await p.waitForTimeout(900);
+  const fila = await p.evaluate(() => TABLAS_FALSAS.comentarios_coach[0] || null);
+  ok(`${tag} · queda como «Para la próxima vez» en ese ejercicio de ese cliente`, !!fila && fila.tipo === 'puntual' && fila.cliente_id === 'c0'
+    && String(fila.ejercicio_id) === String(fixture.ejercicios[0].id), JSON.stringify(fila));
+  ok(`${tag} · la nota quedó leída (pasa a Listas)`, await p.evaluate(() => !!TABLAS_FALSAS.notas_entreno.find(n => n.id === 'n1').leida_en));
+  await p.evaluate(() => closeModal()); await p.waitForTimeout(800);
+  c = await cuenta();
+  ok(`${tag} · en la Bandeja ya no está pendiente`, !/máquina/.test(c.pendTxt) && /máquina/.test(c.listas), JSON.stringify(c));
+  await p.evaluate(() => { const n = TABLAS_FALSAS.notas_entreno.find(x => x.id === 'n1'); n.leida_en = null; TABLAS_FALSAS.comentarios_coach.length = 0; });
   await p.evaluate(() => bdjFiltro('todo'));
   ok(`${tag} · en «Todo» sigue como antes`, await p.locator('text=Necesita tu atención').count() === 1 && await p.locator('[data-notas-listas]').count() === 0);
   ok(`${tag} · sin scroll de lado`, await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));

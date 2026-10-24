@@ -96,7 +96,21 @@ window.ccAbrir = async (reId) => {
   const re = rut && (rut.ejercicios || []).find(x => String(x.id) === String(reId));
   if (!re || !rut.cliente_id) return toast('Abre la rutina de un cliente para escribirle');
   const e = re.ejercicios || {};
-  _cc.abierto = { cliente_id: rut.cliente_id, ejercicio_id: String(e.id || re.ejercicio_id), rutina_id: rut.id, rutina_ejercicio_id: re.id, e };
+  await ccAbrirCon({ cliente_id: rut.cliente_id, ejercicio_id: String(e.id || re.ejercicio_id), rutina_id: rut.id, rutina_ejercicio_id: re.id, e });
+};
+
+// Desde la Bandeja: la nota del cliente ya dice de qué ejercicio es. Abre la
+// misma conversación sin tener que entrar a su rutina; lo que respondas le
+// llega a ese ejercicio en su app (con el circulito y el aviso al teléfono).
+window.ccAbrirDesdeNota = async ({ cliente_id, ejercicio_id, rutina_id, rutina_ejercicio_id }) => {
+  if (!cliente_id || !ejercicio_id) return toast('Esta nota no es de un ejercicio: respóndele por WhatsApp');
+  const { data } = await sb.from('ejercicios').select('*').eq('id', ejercicio_id).maybeSingle().then(r => r, () => ({ data: null }));
+  await ccAbrirCon({ cliente_id, ejercicio_id: String(ejercicio_id), rutina_id: rutina_id || '', rutina_ejercicio_id: rutina_ejercicio_id || '', e: data || { id: ejercicio_id } });
+};
+
+async function ccAbrirCon(abierto) {
+  _cc.abierto = abierto;
+  const rut = { cliente_id: abierto.cliente_id };
   _cc.tipo = 'puntual';
   await ccCargar(rut.cliente_id, [_cc.abierto.ejercicio_id]).catch(() => {});
   ccPintarVentana();
@@ -107,8 +121,17 @@ window.ccAbrir = async (reId) => {
     await sb.from('notas_entreno').update({ leida_en: ahora }).in('id', nuevas.map(n => n.id)).then(() => {}, () => {});
     nuevas.forEach(n => { n.leida_en = ahora; });
     ccPintarFilas();
+    ccBandejaAlDia();
   }
-};
+}
+
+// Si la ventana se abrió desde la Bandeja, la Bandeja se vuelve a leer: la
+// nota pasa a «Listas» y la respuesta queda contada.
+function ccBandejaAlDia() {
+  try {
+    if (typeof _currentView !== 'undefined' && _currentView === 'bandeja' && typeof bdjRecargar === 'function') bdjRecargar();
+  } catch (e) { /* nada */ }
+}
 
 async function ccNombreCliente(id) {
   try { const c = (typeof db !== 'undefined' && db.clientes && db.clientes.get) ? await db.clientes.get(id) : null; return c ? c.nombre : ''; } catch (e) { return ''; }
@@ -201,7 +224,7 @@ window.ccEnviar = async () => {
     ? `Enviado: le saldrá el circulito en el ejercicio${aviso === true ? ' · aviso al teléfono enviado' : aviso === 'apagado' ? ' · tiene los avisos del coach apagados' : aviso === false ? ' · sin push activo en su app' : ''}`
     : 'Listo: queda fijo en su tarjeta del ejercicio');
   await ccCargar(a.cliente_id, [a.ejercicio_id]).catch(() => {});
-  ccPintarVentana(); ccPintarFilas();
+  ccPintarVentana(); ccPintarFilas(); ccBandejaAlDia();
 };
 
 window.ccQuitar = async (id) => {
