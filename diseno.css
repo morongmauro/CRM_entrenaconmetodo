@@ -486,6 +486,13 @@ span.seg-check-ok { cursor: default; }
 .es-cm-e { margin-top: 6px; display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: 11.5px; font-weight: 700; color: #6B6B70; }
 .es-cm-ok { color: #2F7A45; }
 .es-cm-pend { color: #B5611A; }
+/* Lo que le sale en su app */
+.es-rec-gris { color: #9A9AA0; font-weight: 600; }
+.es-rec-hoy { display: flex; flex-wrap: wrap; gap: 6px; }
+.es-rec-chip { font-size: 12.5px; font-weight: 600; color: #45454A; background: #F4F3EF; border-radius: 99px; padding: 5px 10px; }
+.es-rec-hecho { color: #2F7A45; background: #E6F2E9; }
+.es-rec-ya { font-size: 13px; color: #45454A; padding: 4px 0; }
+.es-rec-ya span { color: #9A9AA0; font-size: 12px; }
 .es-cb { padding: 7px 0; font-size: 13px; color: #2B2B2E; }
 .es-cb + .es-cb { border-top: 1px solid #F1EFEA; }
 .es-cb-de { color: #6B6B70; text-decoration: line-through; text-decoration-color: #C9C7C0; }

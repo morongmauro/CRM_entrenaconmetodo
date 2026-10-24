@@ -961,7 +961,7 @@ window.esPintar = async (c, lunes = null) => {
   // En la mesa de trabajo los mensajes van en su propia columna.
   const msjs = caja.querySelector('[data-es-mensajes]') || document.querySelector('[data-es-mensajes]');
   if (cuerpo) cuerpo.classList.add('es-cargando');
-  if (!caja.dataset.ultimoPintado) { caja.dataset.ultimoPintado = '1'; segPintarUltimo(c); }
+  if (!caja.dataset.ultimoPintado) { caja.dataset.ultimoPintado = '1'; segPintarUltimo(c); esPintarRecordatorios(c); }
   let S;
   try {
     const D = await esLeer(c, lunes);
@@ -990,6 +990,65 @@ window.esPintar = async (c, lunes = null) => {
   }
 };
 
+// ── Lo que le sale en su app como recordatorio ─────────────────────────
+// Lo reporta su app (api/recordatorios) cada vez que cambia lo que le
+// muestra el Dash: desde cuándo le sale, cuántos días le apareció en
+// pantalla (o si quedó escondido en «Ver todo»), si lo tocó y si lo hizo.
+async function esPintarRecordatorios(c) {
+  const caja = document.getElementById('seg-rec');
+  if (!caja) return;
+  const poner = (html) => { if (caja.isConnected && _es.cliente === c) caja.innerHTML = html; };
+  if (typeof mtConfigured === 'function' && !mtConfigured()) return poner('<div class="es-vacio">Conecta su app en Ajustes para ver lo que le sale.</div>');
+  let r = null;
+  try {
+    const mtId = await resolverMealtrackerId(c);
+    if (!mtId) return poner('<div class="es-vacio">Este cliente no está vinculado con su app.</div>');
+    r = await mtApiGet(`/api/coach-data?action=recordatorios&user_id=${encodeURIComponent(mtId)}`);
+  } catch (e) { r = null; }
+  poner(esRecordatoriosHTML(r));
+}
+window.esPintarRecordatorios = esPintarRecordatorios;
+
+function esRecordatoriosHTML(r) {
+  if (!r) return '<div class="es-vacio">No pude leer su app.</div>';
+  if (r.sinTabla) return '<div class="es-vacio">Falta correr <b>sql/recordatorios-app.sql</b> en el Supabase de la app (solo crea una tabla nueva).</div>';
+  const filas = Array.isArray(r.recordatorios) ? r.recordatorios : [];
+  if (!filas.length) return '<div class="es-vacio">Todavía no hay registro: aparece la próxima vez que abra su app.</div>';
+  const dia = (f) => String(f || '').slice(0, 10);
+  const ultimoDia = filas.reduce((m, f) => (dia(f.ultimo_dia) > m ? dia(f.ultimo_dia) : m), '');
+  const ultimaVez = filas.reduce((m, f) => (String(f.ultima_vez) > m ? String(f.ultima_vez) : m), '');
+  const hace = (iso) => (fmt.hace ? fmt.hace(iso) : esFechaCorta(dia(iso)));
+  const dias = (n) => `${n} día${n === 1 ? '' : 's'}`;
+  const deHoy = filas.filter(f => f.tipo === 'hoy' && String(f.rec_id).endsWith('@' + ultimoDia));
+  const ahora = filas.filter(f => f.tipo !== 'hoy' && dia(f.ultimo_dia) === ultimoDia)
+    .sort((a, b) => String(a.primera_vez).localeCompare(String(b.primera_vez)));
+  const yaNo = filas.filter(f => f.tipo !== 'hoy' && dia(f.ultimo_dia) < ultimoDia);
+  // Lo que hizo con él: lo tocó, lo tiene escondido, o lo ve y no lo toca.
+  const estado = (f) => {
+    if (f.toques > 0) return `<span class="es-cm-ok">Lo abrió${f.toques > 1 ? ` · ${f.toques} veces` : ''}</span>`;
+    if (!f.dias_pantalla) return '<span class="es-rec-gris">Solo en «Ver todo»: no le aparece a la vista</span>';
+    if (f.dias_lista >= 3) return `<span class="es-cm-pend" data-rec-ignora>Lo está ignorando · ${dias(f.dias_lista)} sin tocarlo</span>`;
+    return '<span class="es-rec-gris">Aún no lo toca</span>';
+  };
+  const fila = (f) => `
+    <div class="es-cm ${f.tipo === 'coach' ? 'es-cm-coach' : ''}" data-rec="${escapeHtml(String(f.rec_id))}">
+      <div class="es-cm-h"><b>${f.tipo === 'coach' ? 'Tuyo' : 'De la app'}</b><span>desde ${escapeHtml(hace(f.primera_vez))}</span></div>
+      <div class="es-cm-t">${escapeHtml(String(f.texto || ''))}</div>
+      <div class="es-cm-e">${estado(f)}<span>${f.dias_pantalla ? `a la vista ${dias(f.dias_pantalla)}` : ''}</span></div>
+    </div>`;
+  const hoyTxt = ultimoDia === fmt.hoy() ? 'Hoy' : esFechaCorta(ultimoDia);
+  return `
+    <div class="es-vacio" style="margin-bottom:10px">Abrió su inicio por última vez ${escapeHtml(hace(ultimaVez))}.</div>
+    ${deHoy.length ? `
+      <div class="es-k es-k2" style="margin-left:0">${hoyTxt} le sale</div>
+      <div class="es-rec-hoy">${deHoy.map(f => `<span class="es-rec-chip ${f.hecho_en ? 'es-rec-hecho' : ''}" data-rec-hoy>${f.hecho_en ? 'Hecho · ' : ''}${escapeHtml(String(f.texto || ''))}</span>`).join('')}</div>` : ''}
+    <div class="es-k es-k2" style="margin:12px 0 8px">Pendientes en su lista</div>
+    ${ahora.length ? ahora.map(fila).join('') : '<div class="es-vacio">Nada pendiente fuera de lo del día.</div>'}
+    ${yaNo.length ? `
+      <div class="es-k es-k2" style="margin:12px 0 8px">Ya no le sale (lo hizo o se quitó)</div>
+      ${yaNo.map(f => `<div class="es-rec-ya" data-rec-ya>${escapeHtml(String(f.texto || ''))} <span>· hasta el ${escapeHtml(esFechaCorta(dia(f.ultimo_dia)))}${f.toques > 0 ? ' · lo abrió' : ''}</span></div>`).join('')}` : ''}`;
+}
+
 window.esVerSemana = (lunes) => { if (_es.cliente) esPintar(_es.cliente, lunes); };
 
 // El armazón de Seguimiento (renderSegFocus lo pone y llama esPintar). Los
@@ -1014,6 +1073,10 @@ function esArmazonHTML(c, { sinMensajes = false } = {}) {
         <summary class="es-k">Videos de técnica · pedidos, por revisar y a mejorar</summary>
         <div id="seg-vt"></div>
       </details>` : ''}
+      <details class="es-card es-vt" open data-seg-recordatorios>
+        <summary class="es-k">Lo que le sale en su app · recordatorios</summary>
+        <div id="seg-rec"><div class="es-vacio">Leyendo su app…</div></div>
+      </details>
       ${sinMensajes ? '' : `<div class="es-card" data-es-mensajes><div class="es-k">Mensajes</div>${sk}</div>`}
     </div>`;
 }
