@@ -435,7 +435,7 @@ span.seg-check-ok { cursor: default; }
 
 /* ── Seguimiento: la semana completa ── */
 .es-k2 { text-transform: none; letter-spacing: 0; font-weight: 700; color: #6B6B70; margin-left: 6px; }
-.es-msgs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.es-msgs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; align-items: start; }
 .es-msgs .es-msg { margin-bottom: 0; }
 .es-msg-inicio { background: #EEF4FC; }
 .es-vt > summary { cursor: pointer; list-style: none; margin-bottom: 0; }
