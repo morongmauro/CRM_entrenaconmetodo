@@ -143,7 +143,8 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
     && await p.locator(`[data-vt-fila="${nuevo.id}"]`).count() === 1 && /2ª vez/.test(await p.locator(`[data-vt-fila="${nuevo.id}"]`).innerText()), JSON.stringify(f));
 
   // En Seguimiento, el mismo panel para ese cliente.
-  await p.evaluate(() => { _selectedClienteId = 'c0'; return navigate('seguimiento'); });
+  // (En el teléfono Seguimiento abre en la lista: se entra al cliente.)
+  await p.evaluate(() => { _selectedClienteId = 'c0'; _segMovil = 'cliente'; return navigate('seguimiento'); });
   await p.waitForSelector('[data-seg-videos] [data-vt-panel]', { timeout: 15000 });
   ok(`${tag} · en Seguimiento sale lo mismo (1 bien, 1 por llegar)`, /Bien · 1/.test(await p.locator('[data-seg-videos] [data-vt-cuenta="bien"]').innerText()) && /Por llegar · 1/.test(await p.locator('[data-seg-videos] [data-vt-cuenta="pedido"]').innerText()));
 

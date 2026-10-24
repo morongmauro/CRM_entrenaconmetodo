@@ -144,6 +144,13 @@ async function esLeer(c, lunes) {
   // Series de lo completado: para ver si subió de peso respecto a la vez anterior.
   const completadas = (sesiones || []).filter(s => s.estado === 'completada');
   const series = typeof entDb !== 'undefined' && completadas.length ? await entDb.seriesDeSesiones(completadas.map(s => s.id)) : [];
+  // La foto de cada ejercicio (la misma de la galería y de su app), para
+  // mostrarla en «Pesos y repeticiones» y poder mandársela.
+  const idsEj = [...new Set(series.map(x => x.ejercicio_id).filter(Boolean))];
+  const media = idsEj.length ? (await leer(sb.from('ejercicios').select('id, nombre, alias, video_fuente, video_ref, video_inicio_seg, poster_url, poster_path').in('id', idsEj))) || [] : [];
+  if (typeof entDb !== 'undefined' && entDb.firmarPosters) { try { await entDb.firmarPosters(media.map(m => m.poster_path).filter(Boolean)); } catch (e) { /* sin foto: solo el nombre */ } }
+  const fotosEj = {};
+  media.forEach(m => { const f = typeof entMiniatura === 'function' ? entMiniatura(m) : null; if (f) fotosEj[String(m.id)] = f; });
 
   const fasesPorId = Object.fromEntries((fases || []).map(f => [f.id, f]));
   return {
@@ -153,7 +160,7 @@ async function esLeer(c, lunes) {
     comida,
     notasSem: notasSem || [], coachSem: (coachSem || []).map(x => ({ ...x, ejercicios: ejPorId[String(x.ejercicio_id)] || null })),
     cambios, sinCambios: cambiosCli === null && cambiosRut === null,
-    prescritos: prescritos || [], videos: videos || [], coachVivos: coachVivos || [],
+    prescritos: prescritos || [], videos: videos || [], coachVivos: coachVivos || [], fotosEj,
     pesoAntes: (pesoAntes || [])[0] || null, dichos: dichos || [],
   };
 }
@@ -374,7 +381,7 @@ function esSobrecarga(D, sesFecha, lunes, domingo) {
       else tipo = dr > 0 ? 'reps' : dr < 0 ? 'baja' : 'igual';
     }
     const nombre = typeof entNombres === 'function' ? entNombres(e.ej || {}).grande : ((e.ej && e.ej.nombre) || 'Ejercicio');
-    return { ejercicio_id: e.id, nombre, antes: a, ahora: s, tipo };
+    return { ejercicio_id: e.id, nombre, antes: a, ahora: s, tipo, foto: (D.fotosEj || {})[String(e.id)] || null };
   }).sort((x, y) => orden[x.tipo] - orden[y.tipo] || x.nombre.localeCompare(y.nombre));
 }
 
@@ -803,13 +810,56 @@ function esSobrecargaHTML(S) {
   return `
     <div class="es-k">Pesos y repeticiones <span class="es-k2">${sube} de ${xs.length} subieron</span></div>
     <div class="es-sb">
-      ${xs.map(x => `
+      ${xs.map((x, i) => `
       <div class="es-sb-f" data-es-sobre="${x.tipo}">
-        <div class="es-sb-l"><span class="es-sb-n">${escapeHtml(x.nombre)}</span><span class="es-sb-t ${ES_SOBRE[x.tipo][1]}">${ES_SOBRE[x.tipo][0]}${delta(x)}</span></div>
-        <div class="es-sb-v">${x.antes ? `<span class="es-sb-a">${esSerieTxt(x.antes)} <i>(${esFechaCorta(x.antes.f)})</i></span> → ` : ''}<span class="es-sb-h">${esSerieTxt(x.ahora)}</span></div>
+        ${x.foto ? `<button type="button" class="es-sb-foto" data-es-foto="${i}" onclick="esVerFoto(${i})" title="Ver la foto para mandársela"><img src="${escapeHtml(x.foto)}" alt="" loading="lazy"></button>` : '<span class="es-sb-foto es-sb-sinfoto"></span>'}
+        <div class="es-sb-c">
+          <div class="es-sb-l"><span class="es-sb-n">${escapeHtml(x.nombre)}</span><span class="es-sb-t ${ES_SOBRE[x.tipo][1]}">${ES_SOBRE[x.tipo][0]}${delta(x)}</span></div>
+          <div class="es-sb-v">${x.antes ? `<span class="es-sb-a">${esSerieTxt(x.antes)} <i>(${esFechaCorta(x.antes.f)})</i></span> → ` : ''}<span class="es-sb-h">${esSerieTxt(x.ahora)}</span></div>
+        </div>
       </div>`).join('')}
     </div>`;
 }
+
+// La foto del ejercicio en grande, para mandársela por WhatsApp: en el
+// teléfono «Enviar» abre el menú de compartir con la imagen; en el
+// computador se copia (y se pega en WhatsApp Web). Si el navegador no deja,
+// se abre la imagen para guardarla.
+window.esVerFoto = (i) => {
+  const x = ((_es.semana || {}).sobre || [])[i];
+  if (!x || !x.foto) return;
+  const linea = `${x.nombre}: ${x.antes ? `${esSerieTxt(x.antes)} → ` : ''}${esSerieTxt(x.ahora)}`;
+  openModal(modalShell(escapeHtml(x.nombre), `
+    <img src="${escapeHtml(x.foto)}" alt="${escapeHtml(x.nombre)}" class="es-foto-grande" data-es-foto-grande>
+    <div class="es-foto-pie">${escapeHtml(linea)}</div>`,
+    `<a class="btn btn-secondary" href="${escapeHtml(x.foto)}" target="_blank" rel="noopener">Abrir imagen</a>
+     <button class="btn btn-primary" data-es-foto-enviar onclick="esEnviarFoto(${i})">${navigator.canShare ? 'Enviar' : 'Copiar imagen'}</button>`));
+};
+window.esEnviarFoto = async (i) => {
+  const x = ((_es.semana || {}).sobre || [])[i];
+  if (!x || !x.foto) return;
+  let blob = null;
+  try { const r = await fetch(x.foto, { mode: 'cors' }); if (r.ok) blob = await r.blob(); } catch (e) { blob = null; }
+  if (blob) {
+    const tipo = blob.type && blob.type.startsWith('image/') ? blob.type : 'image/jpeg';
+    const archivo = new File([blob], `${x.nombre.replace(/[^\p{L}\p{N} ]/gu, '').trim() || 'ejercicio'}.${tipo.split('/')[1] || 'jpg'}`, { type: tipo });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [archivo] })) { await navigator.share({ files: [archivo], text: x.nombre }); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+    try {
+      // El portapapeles solo acepta PNG: se convierte.
+      const bmp = await createImageBitmap(blob);
+      const cv = Object.assign(document.createElement('canvas'), { width: bmp.width, height: bmp.height });
+      cv.getContext('2d').drawImage(bmp, 0, 0);
+      const png = await new Promise(r => cv.toBlob(r, 'image/png'));
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+      toast('Imagen copiada. Pégala en WhatsApp');
+      return;
+    } catch (e) { /* sigue al plan C */ }
+  }
+  window.open(x.foto, '_blank', 'noopener');
+  toast('Se abrió la imagen: guárdala o compártela desde ahí');
+};
 
 // Comentarios de entrenamiento de la semana (sus notas y los tuyos) y los
 // ejercicios que se le cambiaron.
@@ -908,7 +958,8 @@ window.esPintar = async (c, lunes = null) => {
   caja.querySelector('[data-es-titulo]') && (caja.querySelector('[data-es-titulo]').textContent = `${titulo} · ${esFechaCorta(lunes)} al ${esFechaCorta(fin)}`);
   caja.querySelectorAll('[data-es-sem]').forEach(b => b.classList.toggle('active', b.dataset.esSem === lunes));
   const cuerpo = caja.querySelector('[data-es-cuerpo]');
-  const msjs = caja.querySelector('[data-es-mensajes]');
+  // En la mesa de trabajo los mensajes van en su propia columna.
+  const msjs = caja.querySelector('[data-es-mensajes]') || document.querySelector('[data-es-mensajes]');
   if (cuerpo) cuerpo.classList.add('es-cargando');
   if (!caja.dataset.ultimoPintado) { caja.dataset.ultimoPintado = '1'; segPintarUltimo(c); }
   let S;
@@ -943,7 +994,7 @@ window.esVerSemana = (lunes) => { if (_es.cliente) esPintar(_es.cliente, lunes);
 
 // El armazón de Seguimiento (renderSegFocus lo pone y llama esPintar). Los
 // videos de técnica van entre los datos y los mensajes; los pinta vtPanel.
-function esArmazonHTML(c) {
+function esArmazonHTML(c, { sinMensajes = false } = {}) {
   const hoy = fmt.hoy();
   const actual = esLunes(hoy), pasada = evtSumarDias(actual, -7);
   const ini = esLunesDe(c, hoy);
@@ -963,7 +1014,7 @@ function esArmazonHTML(c) {
         <summary class="es-k">Videos de técnica · pedidos, por revisar y a mejorar</summary>
         <div id="seg-vt"></div>
       </details>` : ''}
-      <div class="es-card" data-es-mensajes><div class="es-k">Mensajes</div>${sk}</div>
+      ${sinMensajes ? '' : `<div class="es-card" data-es-mensajes><div class="es-k">Mensajes</div>${sk}</div>`}
     </div>`;
 }
 

@@ -3177,6 +3177,8 @@ async function entVistaClientes() {
   _ent.fases = fases;
   _ent.faseCache = fase;
   _ent.rutinasCache = rutinas;
+  // Las de los otros ciclos: el calendario también los muestra.
+  _ent.rutinasPorFase = rutinasPorFase;
 
   // Los ejercicios de todas las rutinas de la fase, de un solo viaje: son los
   // que se despliegan al abrir cada rutina, y contarlos en la tarjeta.
@@ -3525,7 +3527,7 @@ function entRutinaPorFecha(fase, rutinas) {
   return { porDia, sinDia };
 }
 
-function entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina, sesionesPorFecha, eventosPorFecha, faltaTabla, rutinaDe = null) {
+function entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina, sesionesPorFecha, eventosPorFecha, faltaTabla, rutinaDe = null, otras = []) {
   const { porDia, sinDia } = entRutinaPorFecha(fase, rutinas);
   const semanaHoy = entSemanaActual(fase);
   const finFase = entFechaFin(fase);
@@ -3554,7 +3556,7 @@ function entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina, sesio
   const celdas = [];
   for (let f = arranque; f <= cierre; f = evtSumarDias(f, 1)) {
     celdas.push(entCeldaDia(f, { fase, finFase, hoy, mesNum, porDia, ejerciciosPorRutina,
-                                 sesionesPorFecha, eventosPorFecha, rutinaDe, corte: cortes.has(f) }));
+                                 sesionesPorFecha, eventosPorFecha, rutinaDe, corte: cortes.has(f), otras, arranque }));
   }
 
   const cabecera = `
@@ -3615,7 +3617,7 @@ function entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina, sesio
 // Una casilla del mes.
 function entCeldaDia(f, ctx) {
   const { fase, finFase, hoy, mesNum, porDia, ejerciciosPorRutina,
-          sesionesPorFecha, eventosPorFecha, rutinaDe, corte = false } = ctx;
+          sesionesPorFecha, eventosPorFecha, rutinaDe, corte = false, otras = [], arranque = null } = ctx;
   const dia = Number(f.slice(8, 10));
   const deOtroMes = Number(f.slice(5, 7)) !== mesNum;
   const dentroFase = !!fase.fecha_inicio && f >= fase.fecha_inicio && (!finFase || f <= finFase);
@@ -3630,21 +3632,39 @@ function entCeldaDia(f, ctx) {
     slot = r ? { r, fijada: slot && slot.r.id === r.id ? slot.fijada : true } : null;
   }
 
+  // Fuera de la fase abierta puede caer otro ciclo: se ve lo de ese ciclo,
+  // solo para leer (no se arrastra; tocarlo abre ese ciclo).
+  const otra = dentroFase ? null : otras.find(o => f >= o.fase.fecha_inicio && (!o.fin || f <= o.fin)) || null;
+
   const clases = ['ent-celda'];
   if (deOtroMes) clases.push('ent-celda-fuera');
   if (!dentroFase) clases.push('ent-celda-off');
+  if (otra) clases.push('ent-celda-otro');
   if (esHoy) clases.push('ent-celda-hoy');
 
   // Semana 1..N dentro de la fase — es como se habla de la planificación.
   let semana = null;
-  if (dentroFase) {
-    const off = Math.floor((evtDia(f) - evtDia(fase.fecha_inicio)) / 86400000);
+  const cicloDe = dentroFase ? fase : otra?.fase;
+  if (cicloDe) {
+    const off = Math.floor((evtDia(f) - evtDia(cicloDe.fecha_inicio)) / 86400000);
     semana = Math.floor(off / 7) + 1;
   }
 
+  // La línea del ciclo: corre por todos sus días y dice cuál es al empezar,
+  // cada lunes y en la primera casilla del mes.
+  let linea = '';
+  if (cicloDe) {
+    const ini = f === cicloDe.fecha_inicio;
+    const nombre = escapeHtml(cicloDe.nombre || 'Ciclo');
+    const accion = dentroFase ? '' : ` onclick="event.stopPropagation(); entVerFaseAqui('${cicloDe.id}')"`;
+    linea = (ini || codigo === 'L' || f === arranque)
+      ? `<div class="ent-ciclo-linea ${dentroFase ? '' : 'ent-ciclo-otro'}" data-cal-ciclo ${ini ? 'data-cal-inicio' : ''}${accion}
+              title="${ini ? 'Empieza ' : ''}${nombre}${dentroFase ? '' : ' · tócalo para abrir ese ciclo'}"><span>${ini ? '<b class="ent-ciclo-emp">Empieza </b>' : ''}${nombre}</span></div>`
+      : `<div class="ent-ciclo-linea ${dentroFase ? '' : 'ent-ciclo-otro'}" aria-hidden="true"></div>`;
+  }
+
   const trozos = [];
-  // Lo que el cliente también ve ese día: inicio y fin del ciclo.
-  if (dentroFase && f === fase.fecha_inicio) trozos.push('<div class="ent-chip ent-chip-marca" data-cal-inicio title="Empieza el ciclo">⚑ Empieza el ciclo</div>');
+  // Lo que el cliente también ve ese día: el fin del ciclo (el inicio lo dice la línea).
   if (dentroFase && finFase && f === finFase) trozos.push('<div class="ent-chip ent-chip-marca" data-cal-fin title="Último día del ciclo">⚑ Último día del ciclo</div>');
 
   if (slot) {
@@ -3666,6 +3686,20 @@ function entCeldaDia(f, ctx) {
         ${marca}<span class="ent-chip-txt">${quien === 'cliente' ? '<span class="ent-chip-quien" title="La movió o añadió tu cliente">↔</span> ' : ''}${escapeHtml(r.nombre)}</span>
         <button type="button" class="ent-chip-quitar" data-quitar-rutina="${r.id}" title="Quitar (este día o todos los ${ENT_DIA_PLURAL[codigo] || codigo})"
                 onclick="event.stopPropagation(); typeof fzQuitarRutina === 'function' ? fzQuitarRutina('${r.id}', '${f}') : entQuitarRutinaDia('${r.id}', '${codigo}')">✕</button>
+      </div>`);
+  }
+
+  // La fuerza del otro ciclo, como la verá (o la vio) él.
+  const rOtra = otra ? (otra.rutinaDe ? otra.rutinaDe(f) : otra.porDia[codigo]?.r || null) : null;
+  if (rOtra) {
+    const ses = sesionesPorFecha ? (sesionesPorFecha[f] || []).find(x => x.rutina_id === rOtra.id) : null;
+    const estado = ses ? (ses.estado === 'completada' ? 'hecha' : ses.estado === 'saltada' ? 'falto' : '') : f < hoy ? 'falto' : 'porhacer';
+    const marca = ses && ses.estado === 'completada' ? '' : entMarcaSesion(ses, f, hoy, true).replace(/<span class="ent-marca ent-marca-vacia"[^>]*>·<\/span>/, '');
+    trozos.push(`
+      <div class="ent-chip ent-chip-rutina ent-chip-otra ${estado ? 'ent-chip-' + estado : ''}" data-rutina-otra="${rOtra.id}"
+           onclick="event.stopPropagation(); entVerFaseAqui('${otra.fase.id}')"
+           title="${escapeHtml(rOtra.nombre)} · de ${escapeHtml(otra.fase.nombre || 'otro ciclo')}&#10;Tócala para abrir ese ciclo">
+        ${marca}<span class="ent-chip-txt">${escapeHtml(rOtra.nombre)}</span>
       </div>`);
   }
 
@@ -3701,7 +3735,7 @@ function entCeldaDia(f, ctx) {
   // Una sesión sin rutina asignada (el cliente entrenó por su cuenta) no
   // tendría dónde pintarse y se perdería. Se muestra igual.
   if (sesionesPorFecha) {
-    (sesionesPorFecha[f] || []).filter(x => (!x.rutina_id || !slot || x.rutina_id !== slot.r.id) && !bloques.some(b => b.id === x.rutina_id))
+    (sesionesPorFecha[f] || []).filter(x => (!x.rutina_id || !slot || x.rutina_id !== slot.r.id) && !(rOtra && x.rutina_id === rOtra.id) && !bloques.some(b => b.id === x.rutina_id))
       .forEach(x => trozos.push(`
         <div class="ent-chip ent-chip-suelta ${x.estado === 'completada' ? 'ent-chip-hecha' : ''}" title="Sesión registrada sin rutina del plan">
           ${x.estado === 'completada' ? '' : entMarcaSesion(x, f, hoy, true)}<span class="ent-chip-txt">${escapeHtml(x.rutinas?.nombre || 'Entrenó')}</span>
@@ -3717,6 +3751,7 @@ function entCeldaDia(f, ctx) {
         <span class="ent-celda-izq"><span class="ent-celda-num">${dia}</span>${sesionesPorFecha && (sesionesPorFecha[f] || []).some(x => x.estado === 'completada') ? '<span class="ent-celda-ok ent-marca-ok" data-cal-entreno title="Entrenó ese día"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#1F1F1F" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>' : ''}</span>
         ${semana && codigo === 'L' ? `<span class="ent-celda-sem">S${semana}</span>` : ''}
       </div>
+      ${linea}
       <div class="ent-celda-cuerpo">${trozos.join('')}</div>
     </div>`;
 }
@@ -4062,8 +4097,14 @@ async function entPintarCalendario(cliente, fase, rutinas, ejerciciosPorRutina) 
   const caja = $('#ent-cal');
   if (!caja || !fase) return;
 
-  const desde = fase.fecha_inicio || null;
-  const [sesiones, eventos, registros, hechasAct] = await Promise.all([
+  // El mes que se mira (con una semana de margen), por si empieza antes que
+  // la fase: lo del ciclo anterior también se ve.
+  const mesVis = entMesVisible(fase);
+  const [anioV, mesV] = mesVis.split('-').map(Number);
+  const iniMes = evtSumarDias(`${mesVis}-01`, -7);
+  const finMes = evtSumarDias(evtISO(new Date(anioV, mesV, 0)), 7);
+  const desde = fase.fecha_inicio ? (iniMes < fase.fecha_inicio ? iniMes : fase.fecha_inicio) : null;
+  const [sesiones, eventos, registros, hechasAct, otras] = await Promise.all([
     entDb.sesiones(cliente.id, { desde, limite: 400 }),
     evtDb.lista(cliente.id),
     evtDb.registros(cliente.id, desde),
@@ -4081,6 +4122,7 @@ async function entPintarCalendario(cliente, fase, rutinas, ejerciciosPorRutina) 
       try { return await leer('id, evento_id, fecha, tipo, titulo, duracion_min'); }
       catch (e) { try { return await leer('id, fecha, tipo, titulo, duracion_min'); } catch (e2) { return []; } }
     })(),
+    entOtrosCiclos(fase, iniMes, finMes),
   ]);
 
   _ent.eventosCache = eventos || [];
@@ -4114,9 +4156,39 @@ async function entPintarCalendario(cliente, fase, rutinas, ejerciciosPorRutina) 
   // fase), esto ya no es la pantalla vigente y escribir aquí la pisaría.
   if (!$('#ent-cal') || _ent.clienteId !== cliente.id) return;
   caja.innerHTML = entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina,
-                                        sesionesPorFecha, eventosPorFecha, eventos === null, rutinaDe);
+                                        sesionesPorFecha, eventosPorFecha, eventos === null, rutinaDe, otras);
   entCalVivo(cliente, fase, rutinas, ejerciciosPorRutina);
 }
+
+// Los otros ciclos del cliente que caen entre `ini` y `fin`, con la rutina
+// de cada fecha (también lo que se movió un solo día). Si dos se pisan, manda
+// el enviado sobre el borrador, y el más reciente.
+async function entOtrosCiclos(fase, ini, fin) {
+  const lista = (_ent.fases || []).filter(o => o.id !== fase.id && o.estado !== 'archivada' && o.fecha_inicio
+    && o.fecha_inicio <= fin && (entFechaFin(o) || o.fecha_inicio) >= ini)
+    .sort((a, b) => (a.estado === 'borrador') - (b.estado === 'borrador') || String(b.fecha_inicio).localeCompare(String(a.fecha_inicio)));
+  return Promise.all(lista.map(async o => {
+    const rut = (_ent.rutinasPorFase || {})[o.id] || [];
+    let rutinaDe = null;
+    try {
+      if (typeof fzDb !== 'undefined' && typeof entRutinaPorFechaDia === 'function') {
+        const c = await fzDb.cambios(o.id);
+        const porId = Object.fromEntries(rut.map(r => [r.id, r]));
+        const extras = (c.extras || []).filter(x => porId[x.rutina_id]).map(x => ({ fecha: String(x.fecha).slice(0, 10), rutina: porId[x.rutina_id], origen: x.origen || 'cliente' }));
+        rutinaDe = entRutinaPorFechaDia(o, fzPorDia(o, rut), c.movimientos, extras, c.quitados);
+      }
+    } catch (e) { rutinaDe = null; }
+    return { fase: o, fin: entFechaFin(o), porDia: entRepartirRutinas(o, rut).porDia, rutinaDe };
+  }));
+}
+
+// Abrir otro ciclo desde el calendario sin moverse del mes que se mira.
+window.entVerFaseAqui = (id) => {
+  const mes = entMesVisible(_ent.faseCache);
+  _ent.faseId = id; _ent.rutinaAbierta = null;
+  _ent.mes = mes;
+  entVistaClientes();
+};
 
 // En tiempo real: mientras miras el calendario de un cliente, se vuelve a
 // leer cada minuto (y al volver a la pestaña) lo que él marcó, movió o

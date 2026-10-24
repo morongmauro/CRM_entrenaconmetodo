@@ -80,7 +80,8 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
   console.log(`\n${tag} (${ancho}px)`);
   const { ctx, p, errores } = await abrir(ancho, alto);
 
-  // Inicio: el aviso
+  // Inicio: el aviso (en el teléfono el CRM abre en Seguimiento: se va a Inicio)
+  if (tag === 'telefono') await p.evaluate(() => navigate('dashboard'));
   await p.waitForSelector('#cic-aviso-inicio [data-aviso-ciclos]', { timeout: 8000 }).catch(() => {});
   const av = await p.locator('#cic-aviso-inicio').innerText().catch(() => '');
   ok(`${tag} · Inicio: avisa que 5 ciclos necesitan atención`, /5 ciclos necesitan tu atención/.test(av), av);

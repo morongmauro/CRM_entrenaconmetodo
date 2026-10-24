@@ -126,7 +126,9 @@ for (const [ancho, alto, tag] of TAMANOS) {
   for (const s of [...new Set([...SECCIONES, ...extra])]) {
     const btn = p.locator(`#main-nav [data-view="${s}"]`);
     if (!(await btn.count())) continue;
-    await btn.first().click();
+    // En el teléfono el menú lateral no está: se va por la barra de abajo o «Más».
+    if (await btn.first().isVisible()) await btn.first().click();
+    else await p.evaluate((v) => navigate(v), s);
     await p.waitForTimeout(900);
     await p.screenshot({ path: path.join(CAPTURAS, `crm-${tag}-${s}.png`), fullPage: tag !== 'telefono' });
     if (tag === 'ancho') console.log(`  alto ${s}: ${await p.evaluate(() => document.documentElement.scrollHeight)}`);

@@ -111,7 +111,7 @@ const txt = (f) => p.locator(`.ent-celda[data-fecha="${f}"]`).innerText();
 ok('su fecha de corte (día 5) sale como en su app', await p.locator('.ent-celda[data-fecha="2026-09-05"] [data-cal-corte]').count() === 1);
 ok('el cardio que registró por su cuenta sale con «+»', /\+ Caminata · 30 min/.test(await txt('2026-09-09')), await txt('2026-09-09'));
 ok('el peso que puso al marcar sale en el evento', /✓[\s\S]*Pesarse en ayunas · 82,4 kg/.test(await txt('2026-09-10')), await txt('2026-09-10'));
-ok('el inicio del ciclo se ve', /Empieza el ciclo/.test(await txt('2026-09-07')));
+ok('el inicio del ciclo se ve', /Empieza Ciclo 18/.test(await txt('2026-09-07')));
 ok('lo del cierre de ciclo dice que lo puso el sistema', /Registro fotográfico ·auto/.test(await txt('2026-09-28')), await txt('2026-09-28'));
 ok('la leyenda explica lo nuevo', /por su cuenta/.test(await p.locator('.ent-leyenda').innerText()) && /fecha de corte/.test(await p.locator('.ent-leyenda').innerText()));
 await p.locator('.ent-mes').screenshot({ path: path.join(CAPTURAS, 'calendario-como-cliente.png') }).catch(() => {});

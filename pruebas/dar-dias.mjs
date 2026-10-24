@@ -100,27 +100,29 @@ for (const [ancho, alto, nombre] of [[1500, 900, 'pc'], [390, 844, 'telefono']])
   const { ctx, p, errores } = await abrir(ancho, alto);
   await p.evaluate(() => navigate('pagos'));
   await p.waitForSelector('.dar-dias-btn', { timeout: 15000 }); await p.waitForTimeout(600);
-  const celda = async (n) => p.locator('tr', { hasText: n }).first().locator('td').nth(3).innerText();
+  // En el teléfono Pagos va en tarjetas: el aviso y el botón van dentro de cada una.
+  const fila = (n) => nombre === 'telefono' ? p.locator('.card', { hasText: n }).filter({ has: p.locator('[data-aviso-app-tarjeta]') }).first() : p.locator('tr', { hasText: n }).first();
+  const celda = async (n) => nombre === 'telefono' ? fila(n).locator('[data-aviso-app-tarjeta]').innerText() : fila(n).locator('td').nth(3).innerText();
   const ana = await celda('Ana Pérez'), bruno = await celda('Bruno Díaz'), carla = await celda('Carla Ruiz');
   ok(`${nombre}: bloqueada se ve «App bloqueada · 13 días» y sin emoji`, /App bloqueada · 13 días/.test(ana) && !/🔒/.test(ana), ana);
   ok(`${nombre}: aviso cuenta sobre 8 («día 3 de 8»)`, /aviso · día 3 de 8/.test(bruno), bruno);
   ok(`${nombre}: con prórroga se ve «Prórroga hasta 30 oct»`, /Prórroga hasta 30 oct/.test(carla) && /Cambiar días/.test(carla), carla);
   ok(`${nombre}: cada cliente con aviso trae su botón`, (await p.locator('.dar-dias-btn').count()) === 3);
-  await p.locator('tr', { hasText: 'Ana Pérez' }).first().screenshot({ path: path.join(CAPTURAS, `dar-dias-fila-${nombre}.png`) }).catch(() => {});
+  await fila('Ana Pérez').screenshot({ path: path.join(CAPTURAS, `dar-dias-fila-${nombre}.png`) }).catch(() => {});
   await p.screenshot({ path: path.join(CAPTURAS, `dar-dias-tabla-${nombre}.png`) });
   // Dar +5 a la bloqueada
-  await p.locator('tr', { hasText: 'Ana Pérez' }).first().locator('.dar-dias-btn').click();
+  await fila('Ana Pérez').locator('.dar-dias-btn').click();
   await p.waitForSelector('.dar-dias-op'); await p.waitForTimeout(300);
   const ops = await p.locator('.dar-dias-op').allInnerTexts();
   ok(`${nombre}: la ventana ofrece +3, +5 y +7 con su fecha`, ops.length === 3 && /\+3 días/.test(ops[0]) && /\+5 días/.test(ops[1]) && /\+7 días/.test(ops[2]) && /hasta el/.test(ops[1]), JSON.stringify(ops));
   ok(`${nombre}: la ventana explica que el aviso sigue`, /Sigue viendo el aviso de pago pendiente/.test(await p.locator('#modal').innerText()));
   await p.screenshot({ path: path.join(CAPTURAS, `dar-dias-ventana-${nombre}.png`) });
   await p.locator('.dar-dias-op').nth(1).click(); await p.waitForTimeout(700);
-  const fila = await p.evaluate(() => TABLAS_FALSAS.clientes.find(c => c.id === 'c0'));
-  ok(`${nombre}: guarda prorroga_hasta = hoy + 5`, fila.prorroga_hasta === ymd(5), JSON.stringify(fila.prorroga_hasta));
+  const guardada = await p.evaluate(() => TABLAS_FALSAS.clientes.find(c => c.id === 'c0'));
+  ok(`${nombre}: guarda prorroga_hasta = hoy + 5`, guardada.prorroga_hasta === ymd(5), JSON.stringify(guardada.prorroga_hasta));
   ok(`${nombre}: la ventana se cierra y vuelve a preguntarle a la app`, await p.locator('#modal').evaluate(m => m.classList.contains('hidden')));
   // Quitar la prórroga de Carla
-  await p.locator('tr', { hasText: 'Carla Ruiz' }).first().locator('.dar-dias-btn').click();
+  await fila('Carla Ruiz').locator('.dar-dias-btn').click();
   await p.waitForSelector('.dar-dias-quitar'); await p.locator('.dar-dias-quitar').click(); await p.waitForTimeout(600);
   ok(`${nombre}: «Quitar la prórroga» la deja vacía (sin borrar al cliente)`, await p.evaluate(() => { const c = TABLAS_FALSAS.clientes.find(x => x.id === 'c2'); return c && c.prorroga_hasta === null && TABLAS_FALSAS.clientes.length === 3; }));
   ok(`${nombre}: la página no se desborda a lo ancho`, await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));

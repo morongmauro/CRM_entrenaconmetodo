@@ -1507,7 +1507,9 @@ let _clientesCache = null;
 let _selectedClienteId = null;
 let _segIrA = null;   // el cliente al que se llegó con «Hacer seguimiento» (aunque no esté activo)
 let _segView = 'focus';
-let _segMovil = 'lista';   // en el teléfono, Seguimiento muestra la lista o el cliente
+let _segMovil = 'lista';
+// Mesa de trabajo de Seguimiento: a pantalla completa, en 3 columnas (se recuerda).
+let _segMesa = (() => { try { return localStorage.getItem('crm:segMesa') === '1'; } catch (e) { return false; } })();   // en el teléfono, Seguimiento muestra la lista o el cliente
 // ¿Se está viendo la versión móvil? (movil.js pone la clase)
 const enMovil = () => document.body.classList.contains('modo-movil');
 let _pagosView = 'table';
@@ -3239,6 +3241,7 @@ async function correrVista() {
 
 async function navigate(name) {
   _currentView = routes[name] ? name : 'dashboard';
+  if (_currentView !== 'seguimiento') document.body.classList.remove('seg-mesa-on');
   try { sessionStorage.setItem(VISTA_KEY, JSON.stringify({ vista: _currentView, y: 0 })); } catch (e) {}
   // La doble pantalla ensancha el marco: fuera de Seguimiento se quita.
   document.body.classList.toggle('split-on', _split.on && _currentView === 'seguimiento');
@@ -3950,6 +3953,7 @@ routes.seguimiento = async () => {
           <button class="toggle-btn ${_segView === 'focus' ? 'active' : ''}" onclick="switchSegView('focus')">Por cliente</button>
           <button class="toggle-btn ${_segView === 'board' ? 'active' : ''}" onclick="switchSegView('board')">Vista panel</button>
         </div>
+        <button class="btn btn-secondary" data-seg-mesa-btn onclick="segMesa(true)" title="Seguimiento a pantalla completa: clientes, su semana y los mensajes lado a lado (Esc para salir)">⛶ Mesa de trabajo</button>
         <button class="btn btn-split ${_split.on ? 'btn-primary' : 'btn-secondary'}" onclick="splitToggle()" title="Seguimiento a la izquierda y otra sección a la derecha, con el mismo cliente">
           ${_split.on ? '◧ Una pantalla' : '◫ Doble pantalla'}
         </button>
@@ -4074,12 +4078,19 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
   const points = segs.slice(0, 8).reverse().map(helpers.promedioAdh).filter(v => v !== null);
   const sparkPoints = points.length >= 2 ? points.map((v, i) => `${(i / (points.length - 1)) * 100},${24 - v * 2.4}`).join(' ') : '';
 
-  $('#seg-content').innerHTML = `
-    <div class="grid grid-cols-12 gap-4" data-seg-grid data-seg-movil="${_segMovil}">
-      ${sidebar}
-      <div class="col-span-12 lg:col-span-8 space-y-4">
+  const mesa = _segMesa && !enMovil();
+  document.body.classList.toggle('seg-mesa-on', mesa);
+  $('#seg-content').innerHTML = `${mesa ? `
+    <div class="seg-mesa" data-seg-mesa>
+      <div class="seg-mesa-bar">
+        <b>Seguimiento</b><span>Mesa de trabajo · arrastra la línea entre columnas para cambiar el ancho</span>
+        <button class="btn btn-primary btn-sm" data-seg-mesa-salir onclick="segMesa(false)">✕ Salir de la mesa</button>
+      </div>` : ''}
+    <div class="grid grid-cols-12 gap-4 ${mesa ? 'seg-mesa-grid' : ''}" data-seg-grid data-seg-movil="${_segMovil}">
+      ${mesa ? `<section class="seg-mesa-col">${sidebar}</section>` : sidebar}
+      <div class="col-span-12 lg:col-span-8 space-y-4 ${mesa ? 'seg-mesa-col' : ''}">
         ${segCabeceraHTML(cliente)}
-        ${esArmazonHTML(cliente)}
+        ${esArmazonHTML(cliente, { sinMensajes: mesa })}
 
         <div class="text-xs font-bold text-slate-500 uppercase tracking-wider px-1 pt-2">Más de ${escapeHtml(String(cliente.nombre || '').split(/\s+/)[0])}</div>
         <details class="card" data-seg-adherencia>
@@ -4107,7 +4118,8 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
           ${segs.length === 0 ? '<div class="card text-sm text-slate-500 text-center py-8">Sin registros aún. <button class="text-emerald-600 font-semibold" onclick="abrirNuevoSeguimiento(\''+cliente.id+'\')">+ Crear el primero</button></div>' : segs.map(s => seguimientoCard(s, coachPorSeg[s.id] || [])).join('')}
         </div>
       </div>
-    </div>
+      ${mesa ? '<section class="seg-mesa-col"><div class="es-card" data-es-mensajes><div class="es-k">Mensajes</div></div></section>' : ''}
+    </div>${mesa ? '</div>' : ''}
   `;
   const sl = $('#seg-list'); if (sl && prevScroll) sl.scrollTop = prevScroll;
   if (typeof vtPanel === 'function') vtPanel('#seg-vt', cliente.id);
@@ -4174,6 +4186,18 @@ window.seleccionarCliente = (id) => {
   repintarSeguimiento();
 };
 // En el teléfono: de vuelta a la lista, sin volver a cargar nada.
+// Mesa de trabajo de Seguimiento (Esc para salir). Con la doble pantalla
+// puesta, se quita: la mesa ya ocupa toda la pantalla.
+window.segMesa = (on = !_segMesa) => {
+  _segMesa = !!on;
+  try { localStorage.setItem('crm:segMesa', _segMesa ? '1' : '0'); } catch (e) {}
+  if (!_segMesa) document.body.classList.remove('seg-mesa-on');
+  if (_segMesa && _split.on) return splitToggle();
+  repintarSeguimiento();
+};
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && _segMesa && document.querySelector('[data-seg-mesa]') && $('#modal')?.classList.contains('hidden')) segMesa(false);
+});
 window.segVolverLista = () => {
   _segMovil = 'lista';
   document.querySelector('[data-seg-grid]')?.setAttribute('data-seg-movil', 'lista');
@@ -5803,9 +5827,11 @@ routes.pagos = async () => {
   // Lo que ve el cliente en su app se pide DESPUÉS de pintar, no antes: la
   // tabla de pagos es la pantalla que más se abre y no puede quedarse
   // esperando a una llamada a otro servidor. Llega, y la columna se rellena.
-  if (vistaPag === 'table' && _avisosApp === null && !_avisosAppError) {
+  // En el teléfono también: las tarjetas traen el aviso y «Dar más días».
+  if ((vistaPag === 'table' || enMovil()) && _avisosApp === null && !_avisosAppError) {
     await cargarAvisosApp(clientes.filter(c => c.estado !== 'finalizado'));
-    if (_currentView === 'pagos' && _pagosView === 'table') {
+    if (_currentView === 'pagos' && enMovil()) renderPagosCards(clientes, map, mesActual);
+    else if (_currentView === 'pagos' && _pagosView === 'table') {
       renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActualNum, pagadoMesT, faltaMesT);
     }
   }
@@ -5879,6 +5905,21 @@ function celdaAvisoApp(c) {
       <button type="button" class="dar-dias-btn" onclick="event.stopPropagation(); abrirDarDias('${c.id}')">${v.prorroga_hasta ? 'Cambiar días' : 'Dar más días'}</button>
     </span>
   </td>`;
+}
+
+// Lo mismo que la columna «En su app», dentro de la tarjeta (teléfono).
+function avisoAppTarjeta(c) {
+  const v = _avisosApp && _avisosApp[c.nombre];
+  if (!v || !v.due) return '';
+  const visto = v.visto ? `Lo vio ${fmt.hace(v.visto)}` : 'Todavía no lo ha abierto desde que le aparece';
+  return `<div class="rounded-xl p-3 mb-3 flex items-center justify-between gap-2" style="background:#FDF0EE" data-aviso-app-tarjeta>
+    <span class="flex flex-col leading-tight min-w-0">
+      <span class="text-xs font-bold" style="color:#991b1b">Aviso de pago en su app · ${v.meses_deuda || 1} mes${(v.meses_deuda || 1) > 1 ? 'es' : ''}</span>
+      ${estadoBloqueoApp(v)}
+      <span class="text-[10px] ${v.visto ? 'text-slate-500' : 'text-amber-600'} mt-0.5">${escapeHtml(visto)}</span>
+    </span>
+    <button type="button" class="dar-dias-btn" onclick="event.stopPropagation(); abrirDarDias('${c.id}')">${v.prorroga_hasta ? 'Cambiar días' : 'Dar más días'}</button>
+  </div>`;
 }
 
 // Bloqueada, con prórroga o solo con el aviso. La regla (cuántos días, si la
@@ -6160,6 +6201,7 @@ function renderPagosCards(clientes, map, mesActual) {
               <div class="text-2xl font-bold text-slate-900">${fmt.money(p?.monto || c.monto, c.moneda)}</div>
               ${p && p.fecha_pago ? `<div class="text-xs text-slate-500 mt-1">${fmt.fecha(p.fecha_pago)}${p.metodo ? ' · ' + p.metodo : ''}</div>` : ''}
             </div>
+            ${enMovil() ? avisoAppTarjeta(c) : ''}
             ${(estado === 'paid' || estado === 'free')
               ? `<button class="btn btn-secondary w-full" onclick="abrirPago('${c.id}', '${mesActual}')">Ver / editar</button>`
               : `<div class="flex gap-2">

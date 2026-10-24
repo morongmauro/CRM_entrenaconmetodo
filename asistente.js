@@ -671,7 +671,7 @@ function asisHiloHTML() {
   if (!_asis.visible.length) {
     return `
       <div class="text-center py-8">
-        <img src="/icons/logo.svg" alt="" class="em-logo em-logo-lg mx-auto mb-3" width="56" height="56">
+        <img src="/icons/app.svg?v=3" alt="" class="em-logo em-logo-lg mx-auto mb-3" width="56" height="56">
         <div class="text-sm text-slate-500 mb-1">Pregúntale a tus datos.</div>
         <div class="text-xs text-slate-400 mb-4">Lee tus clientes, seguimientos, mediciones, pagos, el registro de comidas y el Centro de Recursos.</div>
         <div class="flex flex-col gap-1.5 max-w-md mx-auto">

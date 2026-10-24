@@ -432,6 +432,22 @@ span.seg-check-ok { cursor: default; }
 .ent-mes-arrastrando .ent-celda:not(.ent-celda-off) { background: #FAFAF6; }
 .ent-celda-destino { background: #F4F3EF !important; box-shadow: inset 0 0 0 2px #1F1F1F; border-radius: 10px; }
 @media (max-width: 700px) { .ent-mes-scroll { padding: 8px 6px; border-radius: 18px; } .ent-celda-num { font-size: 13px; } .ent-chip { font-size: 10.5px; } }
+/* La línea de cada ciclo: corre por sus días y dice cuál es. La del ciclo
+   abierto va en azul; la de los otros, en gris (tocarla abre ese ciclo). */
+/* La cabecera de la casilla, de alto fijo: así la línea queda a la misma
+   altura en toda la fila (con el «S2» o el círculo de hoy). */
+.ent-mes .ent-celda-cab { min-height: 26px; }
+.ent-ciclo-linea { display: flex; align-items: center; gap: 5px; margin: 0 -5px; padding: 0; min-height: 13px; }
+.ent-ciclo-linea::after { content: ''; flex: 1; height: 2px; border-radius: 2px; background: #3C7BD6; opacity: .6; }
+.ent-ciclo-linea > span { margin-left: 5px; font-size: 10.5px; font-weight: 800; color: #3C7BD6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 85%; }
+.ent-ciclo-linea b { font-weight: 800; }
+.ent-ciclo-otro::after { background: #C9C7C0; }
+.ent-ciclo-otro > span { color: #6B6B70; cursor: pointer; }
+.ent-ciclo-otro > span:hover { color: #1F1F1F; }
+.ent-celda-otro:not(.ent-celda-hoy) .ent-celda-num { color: #6B6B70; }
+.ent-chip-otra { cursor: pointer; opacity: .7; }
+.ent-chip-otra:hover { opacity: 1; }
+@media (max-width: 700px) { .ent-ciclo-emp { display: none; } .ent-ciclo-linea > span { font-size: 9.5px; } }
 
 /* ── Seguimiento: la semana completa ── */
 .es-k2 { text-transform: none; letter-spacing: 0; font-weight: 700; color: #6B6B70; margin-left: 6px; }
@@ -443,7 +459,13 @@ span.seg-check-ok { cursor: default; }
 .es-vt[open] > summary { margin-bottom: 10px; }
 /* Pesos y repeticiones */
 .es-sb { font-size: 13px; }
-.es-sb-f { padding: 8px 0; }
+.es-sb-f { padding: 8px 0; display: flex; gap: 10px; align-items: center; }
+.es-sb-c { flex: 1; min-width: 0; }
+.es-sb-foto { flex: none; width: 52px; height: 52px; border-radius: 12px; overflow: hidden; border: 0; padding: 0; background: #F0EFEA; cursor: zoom-in; }
+.es-sb-foto img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.es-sb-sinfoto { cursor: default; }
+.es-foto-grande { display: block; width: 100%; max-height: 62vh; object-fit: contain; border-radius: 16px; background: #F4F3EF; }
+.es-foto-pie { margin-top: 10px; font: 600 14px Figtree, system-ui, sans-serif; color: #45454A; text-align: center; }
 .es-sb-f + .es-sb-f { border-top: 1px solid #F1EFEA; }
 .es-sb-l { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .es-sb-n { font-weight: 700; color: #1F1F1F; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -503,7 +525,7 @@ span.seg-check-ok { cursor: default; }
 body.modo-movil .em-side, body.modo-movil .em-footer { display: none !important; }
 body.modo-movil .em-shell { display: block; padding: 0.75rem 0.9rem calc(96px + env(safe-area-inset-bottom)); }
 body.modo-movil #app-screen > header { position: static; }
-.mv-barra { position: fixed; left: 10px; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 60; display: flex; gap: 4px; padding: 6px; border-radius: 26px; background: rgba(255,255,255,.9); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); box-shadow: 0 8px 30px rgba(30,30,20,.14); }
+.mv-barra { position: fixed; left: 10px; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 30; display: flex; gap: 4px; padding: 6px; border-radius: 26px; background: rgba(255,255,255,.9); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); box-shadow: 0 8px 30px rgba(30,30,20,.14); }
 .mv-tab { flex: 1; min-width: 0; min-height: 52px; border: 0; border-radius: 20px; background: transparent; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font: 650 11.5px Figtree, system-ui, sans-serif; color: #6B6B70; cursor: pointer; }
 .mv-tab span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mv-tab svg { width: 22px; height: 22px; flex: none; }
@@ -519,7 +541,7 @@ body.modo-movil #app-screen > header { position: static; }
 .mv-hoja-modo, .mv-hoja-salir { display: block; width: 100%; margin-top: 12px; border: 0; border-radius: 16px; padding: 13px; font: 700 14.5px Figtree, system-ui, sans-serif; cursor: pointer; }
 .mv-hoja-modo { background: #1F1F1F; color: #fff; }
 .mv-hoja-salir { background: #F4F3EF; color: #6B6B70; margin-top: 8px; }
-.mv-pildora { position: fixed; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 60; border: 0; border-radius: 999px; padding: 10px 16px; background: #1F1F1F; color: #fff; font: 700 13px Figtree, system-ui, sans-serif; box-shadow: 0 6px 20px rgba(0,0,0,.2); cursor: pointer; }
+.mv-pildora { position: fixed; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 30; border: 0; border-radius: 999px; padding: 10px 16px; background: #1F1F1F; color: #fff; font: 700 13px Figtree, system-ui, sans-serif; box-shadow: 0 6px 20px rgba(0,0,0,.2); cursor: pointer; }
 /* Seguimiento: la lista o el cliente, uno a la vez */
 .seg-volver { display: none; }
 body.modo-movil .seg-volver { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 0 0 2px; font: 700 15px Figtree, system-ui, sans-serif; color: #2F63B0; cursor: pointer; }
@@ -531,3 +553,32 @@ body.modo-movil .seg-cab-btns { flex-wrap: nowrap; overflow-x: auto; scrollbar-w
 body.modo-movil .seg-cab-btns::-webkit-scrollbar { display: none; }
 body.modo-movil .seg-cab-btns .btn { flex: none; }
 body.modo-movil .seg-li { padding: 11px 8px; }
+
+/* ═══ Más espacio (columnas.js) ═══ */
+.em-menu-toggle { display: none; }
+@media (min-width: 1024px) {
+  .em-menu-toggle { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex: none; border: 0; border-radius: 11px; background: transparent; color: #6B6B70; cursor: pointer; }
+  .em-menu-toggle:hover { background: rgba(0,0,0,.05); color: #1F1F1F; }
+  body.menu-oculto .em-menu-toggle { color: #1F1F1F; background: rgba(0,0,0,.05); }
+  body.menu-oculto:not(.modo-movil) .em-side { display: none !important; }
+  body.menu-oculto .em-shell, body.menu-oculto .em-topbar { max-width: none !important; }
+}
+body.modo-movil .em-menu-toggle { display: none !important; }
+.col-tirador { position: absolute; top: 0; bottom: 0; width: 14px; margin-left: -7px; z-index: 6; cursor: col-resize; touch-action: none; }
+.col-tirador::after { content: ''; position: absolute; left: 5px; top: 18px; bottom: 18px; width: 4px; border-radius: 4px; background: transparent; transition: background .15s; }
+.col-tirador:hover::after, .col-tirador.activo::after { background: rgba(60,123,214,.45); }
+body.col-arrastrando { cursor: col-resize; user-select: none; }
+body.col-arrastrando iframe { pointer-events: none; }
+/* Mesa de trabajo de Seguimiento */
+.seg-mesa { position: fixed; inset: 0; z-index: 35; background: var(--app-bg, #EDECE5); padding: 10px 16px 12px; display: flex; flex-direction: column; }
+.seg-mesa-bar { display: flex; align-items: center; gap: 14px; padding: 2px 4px 10px; }
+.seg-mesa-bar b { font: 800 21px Figtree, system-ui, sans-serif; letter-spacing: -.02em; color: #1F1F1F; }
+.seg-mesa-bar span { flex: 1; font-size: 13px; color: #6B6B70; }
+.seg-mesa-grid { flex: 1; min-height: 0; grid-template-columns: minmax(0, .85fr) minmax(0, 2.1fr) minmax(0, 1.25fr) !important; align-items: stretch !important; }
+.seg-mesa-grid > * { grid-column: auto !important; }
+.seg-mesa-col { min-height: 0; overflow-y: auto; padding-right: 4px; scrollbar-gutter: stable; }
+.seg-mesa-col > aside { height: auto; }
+.seg-mesa #seg-list { max-height: none !important; }
+.seg-mesa .es-msgs { grid-template-columns: minmax(0, 1fr); }
+body.seg-mesa-on { overflow: hidden; }
+body.modo-movil [data-seg-mesa-btn] { display: none !important; }

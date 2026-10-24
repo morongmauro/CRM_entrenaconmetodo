@@ -13,9 +13,9 @@
   <!-- El mismo ícono de la app nueva (entrenaconmetodoapp). El SVG manda en
        navegadores modernos; el PNG es el respaldo y el ícono de iOS al
        "Agregar a inicio". Nombres nuevos para que iOS no use el viejo guardado. -->
-  <link rel="icon" type="image/svg+xml" href="/icons/app.svg" />
-  <link rel="icon" type="image/png" sizes="192x192" href="/icons/app-192.png" />
-  <link rel="apple-touch-icon" href="/icons/app-apple-touch-icon.png" />
+  <link rel="icon" type="image/svg+xml" href="/icons/app.svg?v=3" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/app-192.png?v=3" />
+  <link rel="apple-touch-icon" href="/icons/app-apple-touch-icon.png?v=3" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Entrena con Método" />
@@ -47,7 +47,7 @@
   <div id="login-screen" class="hidden min-h-screen flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl shadow-lg max-w-sm w-full p-7">
       <div class="text-center mb-5">
-        <img src="/icons/logo.svg" alt="Entrena con Método" class="em-logo em-logo-lg mx-auto" width="56" height="56">
+        <img src="/icons/app.svg?v=3" alt="Entrena con Método" class="em-logo em-logo-lg mx-auto" width="56" height="56">
         <h1 class="text-xl font-bold mt-3 text-slate-900">Entrena con Método</h1>
         <p class="text-sm text-slate-500">Centro de control</p>
       </div>
@@ -74,7 +74,7 @@
     <header class="glass">
       <div class="em-topbar">
         <div class="em-brand">
-          <img src="/icons/logo.svg" alt="Entrena con Método" class="em-logo" width="40" height="40">
+          <img src="/icons/app.svg?v=3" alt="Entrena con Método" class="em-logo" width="40" height="40">
           <div class="em-brand-text">
             <h1>Entrena con Método</h1>
             <p>Centro de control</p>
@@ -115,7 +115,7 @@
 
   <!-- Loader inicial -->
   <div id="boot-screen" class="min-h-screen flex flex-col items-center justify-center gap-3">
-    <img src="/icons/logo.svg" alt="" class="em-logo em-logo-lg" width="56" height="56">
+    <img src="/icons/app.svg?v=3" alt="" class="em-logo em-logo-lg" width="56" height="56">
     <div class="text-slate-400 text-sm">Cargando…</div>
   </div>
 
@@ -207,6 +207,8 @@
   <script src="/marca-app.js"></script>
   <!-- Íconos de línea en todo el CRM (en vez de emojis). -->
   <script src="/iconos-linea.js"></script>
+  <!-- Más espacio: ocultar el menú y ajustar el ancho de las columnas. -->
+  <script src="/columnas.js"></script>
   <!-- El mismo CRM en el teléfono: versión móvil o escritorio (al final). -->
   <script src="/movil.js"></script>
 </body>

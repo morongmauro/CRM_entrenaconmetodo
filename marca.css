@@ -150,11 +150,11 @@ body::before {
 }
 #app-screen > header p { color: var(--em-text-mute) !important; }
 
-/* Logo de marca: la M dentro del anillo. La sombra suave lo despega del
+/* Logo de marca: el mismo ícono de la app. La sombra suave lo despega del
    crema sin ponerle un borde encima. */
 .em-logo {
-  box-shadow: 0 4px 14px rgba(31,31,31,.18);
-  background: #0B0B0A;
+  box-shadow: 0 4px 14px rgba(31,31,31,.14);
+  background: #F3F1EB;
 }
 .em-brand-text h1 {
   font-family: 'Bebas Neue', 'Inter', sans-serif !important;

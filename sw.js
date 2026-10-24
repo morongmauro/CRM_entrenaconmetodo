@@ -6,7 +6,7 @@
 // el resultado era el clásico "aprieto un botón y no hace nada… y al rato sí".
 // Ahora la red tiene 3,5 s; pasados esos, se sirve lo que haya en caché y la
 // respuesta de red, cuando llegue, solo se guarda para la próxima.
-const CACHE = 'ecm-crm-v2';
+const CACHE = 'ecm-crm-v3';
 const TIMEOUT_RED = 3500;
 
 self.addEventListener('install', () => self.skipWaiting());
