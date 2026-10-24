@@ -1,15 +1,22 @@
 // =====================================================
-// ESTA SEMANA · lo primero que ves al entrar a un cliente
+// ESTA SEMANA · el seguimiento se hace desde Seguimiento
 // =====================================================
-// Arriba del Resumen de la ficha, en tres partes:
+// En Seguimiento, con el cliente elegido:
 //   · Cumplimiento: fuerza, cardio y comida de la semana, en números y día
 //     por día (L–D). Color = lo hizo · borde rojo = le tocaba y no lo hizo ·
 //     rayas = no registró comida · punteado = le toca todavía.
 //   · En pocas palabras: lo mismo escrito, con sus números. Solo lo que está
 //     en los datos: si falta un dato, se dice que falta.
-//   · Mensajes para esta semana: 2 o 3, elegidos por cómo le fue, con sus
-//     números ya puestos y con la voz del coach. Cada situación tiene varias
-//     versiones y cada semana sale otra (nunca la misma que la semana pasada).
+//   · Pesos y repeticiones: cada ejercicio que hizo en la semana contra la
+//     vez anterior (subió de peso, de reps, igual o bajó).
+//   · Comentarios de entrenamiento (sus notas y los tuyos) y los ejercicios
+//     que se le cambiaron en la semana.
+//   · Videos de técnica (videos-tecnica.js).
+//   · Mensajes: primero el saludo del check-in y después 2 o 3 elegidos por
+//     cómo le fue, con sus números ya puestos y con la voz del coach. Cada
+//     situación tiene varias versiones y cada semana sale otra.
+// La ficha, Entrenamiento y Alimentación muestran solo una franja corta con
+// los números y el botón para venir aquí.
 //
 // Lo planeado sale de lo mismo que ve el cliente en su app: el reparto de
 // rutinas de su ciclo con lo que se movió un solo día (entreno-dias.js) y
@@ -109,6 +116,22 @@ async function esLeer(c, lunes) {
   }
   planes.sort((a, b) => b.fase.fecha_inicio.localeCompare(a.fase.fecha_inicio));
 
+  // Lo que se habló y se cambió en la semana. Los límites van en hora local
+  // (un comentario del domingo en la noche es del domingo, no del lunes UTC).
+  const iniTs = evtDia(lunes).toISOString(), finTs = evtDia(evtSumarDias(lunes, 7)).toISOString();
+  const rutIds = rutinas.map(r => String(r.id));
+  const [notasSem, coachSem, cambiosCli, cambiosRut] = await Promise.all([
+    leer(sb.from('notas_entreno').select('*, ejercicios(nombre, alias)').eq('cliente_id', c.id).gte('created_at', iniTs).lt('created_at', finTs).order('created_at')),
+    leer(sb.from('comentarios_coach').select('*').eq('cliente_id', String(c.id)).gte('creado_en', iniTs).lt('creado_en', finTs).order('creado_en')),
+    leer(sb.from('cambios_ejercicio').select('*').eq('cliente_id', String(c.id)).gte('creado_at', iniTs).lt('creado_at', finTs)),
+    rutIds.length ? leer(sb.from('cambios_ejercicio').select('*').in('rutina_id', rutIds).gte('creado_at', iniTs).lt('creado_at', finTs)) : [],
+  ]);
+  const idsCoach = [...new Set((coachSem || []).map(x => x.ejercicio_id).filter(Boolean))];
+  const ejsCoach = idsCoach.length ? (await leer(sb.from('ejercicios').select('id, nombre, alias').in('id', idsCoach))) || [] : [];
+  const ejPorId = Object.fromEntries(ejsCoach.map(e => [String(e.id), e]));
+  const cambios = [...new Map([...(cambiosCli || []), ...(cambiosRut || [])].map(x => [x.id || `${x.rutina_ejercicio_id}|${x.creado_at}`, x])).values()]
+    .sort((a, b) => String(a.creado_at).localeCompare(String(b.creado_at)));
+
   // Series de lo completado: para ver si subió de peso respecto a la vez anterior.
   const completadas = (sesiones || []).filter(s => s.estado === 'completada');
   const series = typeof entDb !== 'undefined' && completadas.length ? await entDb.seriesDeSesiones(completadas.map(s => s.id)) : [];
@@ -119,6 +142,8 @@ async function esLeer(c, lunes) {
     eventos: eventos || [], eventosPorFecha: eventos ? evtPorFecha(eventos.filter(e => e.visible_cliente !== false), fasesPorId) : {},
     registros: registros || [], actividades: actividades || [], notas: notas || [], meds: meds || [], fotos: fotos || [],
     comida,
+    notasSem: notasSem || [], coachSem: (coachSem || []).map(x => ({ ...x, ejercicios: ejPorId[String(x.ejercicio_id)] || null })),
+    cambios, sinCambios: cambiosCli === null && cambiosRut === null,
   };
 }
 
@@ -247,7 +272,46 @@ function esCalcular(D, lunes, hoy) {
   // El último entreno registrado (para «no veo entrenos desde…»)
   const ultimo = D.sesiones.filter(s => s.estado === 'completada').map(s => dia10(s.fecha)).sort().pop() || null;
 
-  return { lunes, fechas, hoy, dias, F, C, M, K, rec, prog, rpe, prev, ultimo, notas: D.notas, cierre: fechas[6] < hoy };
+  // Ciclo que corre en la semana (para «Ciclo 19 · semana 3 de 5»).
+  const plan = D.planes.find(x => fechas[6] >= x.fase.fecha_inicio && (!x.fin || fechas[0] <= x.fin)) || null;
+
+  return {
+    lunes, fechas, hoy, dias, F, C, M, K, rec, prog, rpe, prev, ultimo, notas: D.notas, cierre: fechas[6] < hoy,
+    sobre: esSobrecarga(D, sesFecha, lunes, fechas[6]),
+    notasSem: D.notasSem || [], coachSem: D.coachSem || [], cambios: D.cambios || [], sinCambios: !!D.sinCambios,
+    fase: plan ? plan.fase : null,
+  };
+}
+
+// ── Pesos y repeticiones: cada ejercicio de la semana contra la vez anterior ──
+// La mejor serie de cada sesión: la de más peso y, con el mismo peso, la de
+// más reps (sin peso, la de más reps). Se compara la mejor de la semana con
+// la de la última sesión anterior en que hizo ese ejercicio. En libras se
+// pasa a kg solo para comparar; se muestra tal como lo registró.
+function esSobrecarga(D, sesFecha, lunes, domingo) {
+  const kg = (s) => (s.unidad === 'lb' ? Number(s.peso) * 0.4536 : Number(s.peso)) || 0;
+  const mejor = (a, b) => !a || kg(b) > kg(a) || (kg(b) === kg(a) && Number(b.reps) > Number(a.reps)) ? b : a;
+  const porEj = {};
+  D.series.forEach(x => {
+    const f = sesFecha[x.sesion_id];
+    if (!f || x.completada === false || !(Number(x.reps) > 0)) return;
+    const e = (porEj[x.ejercicio_id] ||= { ej: x.ejercicios || null, sem: null, antes: {} });
+    if (f >= lunes && f <= domingo) e.sem = mejor(e.sem, { ...x, f });
+    else if (f < lunes) e.antes[f] = mejor(e.antes[f], { ...x, f });
+  });
+  const orden = { peso: 0, reps: 1, igual: 2, baja: 3, primera: 4 };
+  return Object.values(porEj).filter(e => e.sem).map(e => {
+    const fAnt = Object.keys(e.antes).sort().pop();
+    const a = fAnt ? e.antes[fAnt] : null, s = e.sem;
+    let tipo = 'primera';
+    if (a) {
+      const dk = kg(s) - kg(a), dr = Number(s.reps) - Number(a.reps);
+      if (Math.abs(dk) >= 0.01) tipo = dk > 0 ? 'peso' : 'baja';
+      else tipo = dr > 0 ? 'reps' : dr < 0 ? 'baja' : 'igual';
+    }
+    const nombre = typeof entNombres === 'function' ? entNombres(e.ej || {}).grande : ((e.ej && e.ej.nombre) || 'Ejercicio');
+    return { nombre, antes: a, ahora: s, tipo };
+  }).sort((x, y) => orden[x.tipo] - orden[y.tipo] || x.nombre.localeCompare(y.nombre));
 }
 
 // ── Los mensajes ────────────────────────────────────────────────────────
@@ -412,7 +476,16 @@ function esMensajes(c, S) {
     const m = elegir(sit);
     if (m) out.push(m);
   }
-  return out;
+  // Siempre se abre con el saludo del check-in; los demás van después, así
+  // que no repiten el «Hola Ana!» del comienzo.
+  return [{ sit: 'inicio', titulo: 'Saludo del check-in', texto: esSaludo(n) }, ...out.map(m => ({ ...m, texto: esSinSaludo(m.texto, n) }))];
+}
+
+const esSaludo = (n) => `Hola ${n}, ¿cómo vas? Espero que todo vaya bien, paso por acá al check-in periódico.`;
+function esSinSaludo(t, n) {
+  const nom = String(n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const x = t.replace(new RegExp(`^(Hola|Qué tal) ${nom}! `), '').replace(new RegExp(`^${nom}, (¿cómo estás\\? )?`), '');
+  return x.replace(/^([¡¿]?)(\p{L})/u, (m, a, b) => a + b.toUpperCase());
 }
 
 // ── En pocas palabras ───────────────────────────────────────────────────
@@ -500,12 +573,77 @@ function esCumplimientoHTML(S) {
 }
 
 function esMensajesHTML(ms) {
-  if (!ms.length) return '<div class="es-vacio">Sin plan ni registros esta semana: no hay mensajes que proponerte con datos reales. Usa los Diálogos.</div>';
-  return ms.map((m, i) => `
-    <div class="es-msg" data-es-msg="${m.sit}">
-      <div class="es-msg-h"><b>${escapeHtml(m.titulo)}</b><button type="button" class="es-cp" data-es-copiar="${i}" onclick="esCopiar(${i})">Copiar</button></div>
+  const pie = ms.length > 1
+    ? 'Primero el saludo y después los elegidos por cómo le fue, con sus números ya puestos. Cada semana sale otra versión.'
+    : 'Sin plan ni registros esta semana: no hay más mensajes que proponerte con datos reales. Usa los Diálogos.';
+  return `<div class="es-msgs">${ms.map((m, i) => `
+    <div class="es-msg${m.sit === 'inicio' ? ' es-msg-inicio' : ''}" data-es-msg="${m.sit}">
+      <div class="es-msg-h"><b>${i ? `${i + 1}. ` : '1. '}${escapeHtml(m.titulo)}</b><button type="button" class="es-cp" data-es-copiar="${i}" onclick="esCopiar(${i})">Copiar</button></div>
       <p>${escapeHtml(m.texto)}</p>
-    </div>`).join('') + '<div class="es-varia">Elegidos por cómo le fue, con sus números ya puestos. Cada semana sale otra versión.</div>';
+    </div>`).join('')}</div><div class="es-varia">${pie}</div>`;
+}
+
+// Pesos y repeticiones de la semana, ejercicio por ejercicio.
+const ES_SOBRE = {
+  peso: ['Subió de peso', 'es-sb-sube'], reps: ['Más reps', 'es-sb-sube'], igual: ['Igual', 'es-sb-igual'],
+  baja: ['Bajó', 'es-sb-baja'], primera: ['Primera vez', 'es-sb-igual'],
+};
+function esSerieTxt(s) {
+  if (!s) return '—';
+  return Number(s.peso) > 0 ? `${esNum(s.peso)} ${s.unidad || 'kg'} × ${s.reps}` : `${s.reps} reps`;
+}
+function esSobrecargaHTML(S) {
+  const xs = S.sobre || [];
+  if (!xs.length) return `<div class="es-k">Pesos y repeticiones</div><div class="es-vacio">${S.F.hechas ? 'Entrenó sin registrar series con peso o reps.' : 'Sin entrenos registrados en la semana.'}</div>`;
+  const sube = xs.filter(x => x.tipo === 'peso' || x.tipo === 'reps').length;
+  const delta = (x) => {
+    if (x.tipo === 'peso') { const d = Number(x.ahora.peso) - Number(x.antes.peso); return x.ahora.unidad === x.antes.unidad ? ` +${esNum(d)} ${x.ahora.unidad || 'kg'}` : ''; }
+    if (x.tipo === 'reps') return ` +${Number(x.ahora.reps) - Number(x.antes.reps)}`;
+    return '';
+  };
+  return `
+    <div class="es-k">Pesos y repeticiones <span class="es-k2">${sube} de ${xs.length} subieron</span></div>
+    <div class="es-sb">
+      ${xs.map(x => `
+      <div class="es-sb-f" data-es-sobre="${x.tipo}">
+        <div class="es-sb-l"><span class="es-sb-n">${escapeHtml(x.nombre)}</span><span class="es-sb-t ${ES_SOBRE[x.tipo][1]}">${ES_SOBRE[x.tipo][0]}${delta(x)}</span></div>
+        <div class="es-sb-v">${x.antes ? `<span class="es-sb-a">${esSerieTxt(x.antes)} <i>(${esFechaCorta(x.antes.f)})</i></span> → ` : ''}<span class="es-sb-h">${esSerieTxt(x.ahora)}</span></div>
+      </div>`).join('')}
+    </div>`;
+}
+
+// Comentarios de entrenamiento de la semana (sus notas y los tuyos) y los
+// ejercicios que se le cambiaron.
+function esComentariosHTML(c, S) {
+  const nom = escapeHtml(String(c.nombre || '').split(/\s+/)[0] || 'Cliente');
+  const hora = (iso) => { try { return new Date(iso).toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric' }); } catch (e) { return ''; } };
+  const ej = (x) => (x.ejercicios ? escapeHtml(entNombres(x.ejercicios).grande) : '');
+  const items = [
+    ...S.notasSem.map(n => ({ t: n.created_at, html: `
+      <div class="es-cm" data-es-cm="cliente">
+        <div class="es-cm-h"><b>${nom}</b>${ej(n) ? ` · ${ej(n)}` : ''}<span>${hora(n.created_at)}</span></div>
+        <div class="es-cm-t">«${escapeHtml(String(n.texto || '').slice(0, 220))}»</div>
+        <div class="es-cm-e">${n.leida_en ? '<span class="es-cm-ok">Vista</span>' : '<span class="es-cm-pend">Sin responder</span>'}
+          ${n.ejercicio_id && typeof ccAbrirDesdeNota === 'function' ? `<button type="button" class="es-ojo-btn es-cm-btn" onclick='ccAbrirDesdeNota(${JSON.stringify({ cliente_id: n.cliente_id, ejercicio_id: n.ejercicio_id || null, rutina_id: n.rutina_id || null, rutina_ejercicio_id: n.rutina_ejercicio_id || null }).replace(/'/g, '&#39;')})'>${n.leida_en ? 'Ver conversación' : 'Responder'}</button>` : ''}</div>
+      </div>` })),
+    ...S.coachSem.map(x => ({ t: x.creado_en, html: `
+      <div class="es-cm es-cm-coach" data-es-cm="coach">
+        <div class="es-cm-h"><b>Tú</b>${ej(x) ? ` · ${ej(x)}` : ''}<span>${hora(x.creado_en)}</span></div>
+        <div class="es-cm-t">«${escapeHtml(String(x.texto || '').slice(0, 220))}»</div>
+        <div class="es-cm-e">${x.quitado_en ? '<span>Quitado</span>' : x.tipo === 'siempre' ? '<span>Siempre presente</span>' : x.leido_en ? '<span class="es-cm-ok">Lo leyó</span>' : '<span>Aún no lo lee</span>'}</div>
+      </div>` })),
+  ].sort((a, b) => String(a.t).localeCompare(String(b.t)));
+  const origen = typeof ENT_ORIGEN_CAMBIO !== 'undefined' ? ENT_ORIGEN_CAMBIO : {};
+  const cambios = S.cambios.map(x => `
+      <div class="es-cb" data-es-cambio>
+        <div><span class="es-cb-de">${escapeHtml(x.nombre_antes || 'Ejercicio')}</span> → <b>${escapeHtml(x.nombre_despues || 'Ejercicio')}</b></div>
+        <div class="es-cb-m">${x.rutina_nombre ? `${escapeHtml(x.rutina_nombre)} · ` : ''}${origen[x.origen] || ''}${origen[x.origen] ? ' · ' : ''}${hora(x.creado_at)}</div>
+      </div>`).join('');
+  return `
+    <div class="es-k">Comentarios de entrenamiento</div>
+    ${items.length ? items.map(x => x.html).join('') : '<div class="es-vacio">Ni notas suyas ni comentarios tuyos esta semana.</div>'}
+    <div class="es-k" style="margin-top:16px">Ejercicios cambiados</div>
+    ${cambios || `<div class="es-vacio">${S.sinCambios ? 'Falta correr migraciones/cambios-ejercicio.sql para ver los cambios.' : 'Sin cambios de ejercicio esta semana.'}</div>`}`;
 }
 
 window.esCopiar = async (i) => {
@@ -521,7 +659,6 @@ window.esCopiar = async (i) => {
   if (b) { b.textContent = 'Copiado'; setTimeout(() => { if (b.isConnected) b.textContent = 'Copiar'; }, 1800); }
   if (_es.cliente && await segRegistrar(_es.cliente.id, { origen: 'esta-semana', titulo: m.titulo, texto: m.texto })) segPintarUltimo(_es.cliente);
 };
-
 // La semana que abre: el lunes, la que acaba de terminar (es la que se revisa);
 // el resto de días, la que va.
 function esLunesInicial(hoy) {
@@ -529,26 +666,46 @@ function esLunesInicial(hoy) {
   return evtCodigoDe(hoy) === 'L' ? evtSumarDias(l, -7) : l;
 }
 
+// Si ya elegiste otra semana para este cliente, al repintar se respeta.
+const esLunesDe = (c, hoy) => (_es.lunesDe && _es.lunesDe.id === c.id ? _es.lunesDe.lunes : esLunesInicial(hoy));
+
+// La semana calculada, guardada 2 minutos por cliente: la ficha, la franja
+// de Entrenamiento/Alimentación y Seguimiento la piden seguido.
+const _esCache = {};
+async function esSemanaDe(c, lunes) {
+  const k = `${c.id}|${lunes}`;
+  const x = _esCache[k];
+  if (x && Date.now() - x.en < 120000) return x.p;
+  // Se guarda la promesa: dos franjas pidiendo a la vez leen una sola vez.
+  const p = esLeer(c, lunes).then(D => esCalcular(D, lunes, fmt.hoy()));
+  _esCache[k] = { p, en: Date.now() };
+  p.catch(() => { delete _esCache[k]; });
+  return p;
+}
+
 window.esPintar = async (c, lunes = null) => {
-  const caja = document.getElementById('ficha-semana');
+  const caja = document.getElementById('seg-semana');
   if (!caja) return;
   const hoy = fmt.hoy();
   const actual = esLunes(hoy);
-  lunes = lunes || esLunesInicial(hoy);
+  lunes = lunes || esLunesDe(c, hoy);
   _es.cliente = c;
+  _es.lunesDe = { id: c.id, lunes };
   caja.dataset.lunes = lunes;
   const fin = evtSumarDias(lunes, 6);
   const titulo = lunes === actual ? 'Esta semana' : lunes === evtSumarDias(actual, -7) ? 'La semana pasada' : 'Semana';
   caja.querySelector('[data-es-titulo]') && (caja.querySelector('[data-es-titulo]').textContent = `${titulo} · ${esFechaCorta(lunes)} al ${esFechaCorta(fin)}`);
   caja.querySelectorAll('[data-es-sem]').forEach(b => b.classList.toggle('active', b.dataset.esSem === lunes));
   const cuerpo = caja.querySelector('[data-es-cuerpo]');
+  const msjs = caja.querySelector('[data-es-mensajes]');
   if (cuerpo) cuerpo.classList.add('es-cargando');
   if (!caja.dataset.ultimoPintado) { caja.dataset.ultimoPintado = '1'; segPintarUltimo(c); }
   let S;
   try {
     const D = await esLeer(c, lunes);
-    if (!document.getElementById('ficha-semana') || document.getElementById('ficha-semana').dataset.lunes !== lunes || _es.cliente !== c) return;
+    if (!document.getElementById('seg-semana') || document.getElementById('seg-semana').dataset.lunes !== lunes || _es.cliente !== c) return;
     S = esCalcular(D, lunes, hoy);
+    _esCache[`${c.id}|${lunes}`] = { p: Promise.resolve(S), en: Date.now() };
   } catch (e) {
     if (cuerpo) { cuerpo.classList.remove('es-cargando'); cuerpo.innerHTML = `<div class="es-vacio">No pude leer su semana (${escapeHtml(e.message || 'error')}).</div>`; }
     return;
@@ -559,19 +716,29 @@ window.esPintar = async (c, lunes = null) => {
   cuerpo.innerHTML = `
     <div class="es-card" data-es-cumplimiento>${esCumplimientoHTML(S)}</div>
     <div class="es-card es-txt" data-es-resumen><div class="es-k">En pocas palabras</div>${esResumenHTML(c, S)}</div>
-    <div class="es-card" data-es-mensajes><div class="es-k">Mensajes para esta semana</div>${esMensajesHTML(_es.mensajes)}</div>`;
+    <div class="es-card" data-es-sobrecarga>${esSobrecargaHTML(S)}</div>
+    <div class="es-card" data-es-comentarios>${esComentariosHTML(c, S)}</div>`;
+  if (msjs) msjs.innerHTML = `<div class="es-k">Mensajes para ${S.cierre ? 'su semana' : 'esta semana'}</div>${esMensajesHTML(_es.mensajes)}`;
+  const ciclo = document.querySelector('[data-seg-ciclo]');
+  if (ciclo && S.fase) {
+    const n = Math.floor((evtDia(S.fechas[0]) - evtDia(S.fase.fecha_inicio)) / 604800000) + 1;
+    const antes = ciclo.previousSibling && ciclo.previousSibling.textContent.trim() ? ' · ' : '';
+    ciclo.textContent = `${antes}${S.fase.nombre || 'Ciclo'} · semana ${Math.max(1, n)}${S.fase.semanas ? ` de ${S.fase.semanas}` : ''}`;
+    ciclo.hidden = false;
+  }
 };
 
 window.esVerSemana = (lunes) => { if (_es.cliente) esPintar(_es.cliente, lunes); };
 
-// El armazón que va en la ficha (verCliente lo pone y llama esPintar).
+// El armazón de Seguimiento (renderSegFocus lo pone y llama esPintar). Los
+// videos de técnica van entre los datos y los mensajes; los pinta vtPanel.
 function esArmazonHTML(c) {
   const hoy = fmt.hoy();
   const actual = esLunes(hoy), pasada = evtSumarDias(actual, -7);
-  const ini = esLunesInicial(hoy);
+  const ini = esLunesDe(c, hoy);
   const sk = '<div class="es-card es-sk"></div>';
   return `
-    <div class="es-sem" id="ficha-semana" data-ficha-sec="resumen" data-lunes="${ini}">
+    <div class="es-sem" id="seg-semana" data-lunes="${ini}">
       <div class="es-semh">
         <b data-es-titulo>${ini === actual ? 'Esta semana' : 'La semana pasada'} · ${esFechaCorta(ini)} al ${esFechaCorta(evtSumarDias(ini, 6))}</b>
         <div class="es-tog">
@@ -580,8 +747,60 @@ function esArmazonHTML(c) {
         </div>
       </div>
       <div class="es-ultimo" data-es-ultimo></div>
-      <div class="es-grid" data-es-cuerpo>${sk}${sk}${sk}</div>
-    </div>
+      <div class="es-grid" data-es-cuerpo>${sk}${sk}</div>
+      ${typeof vtPanel === 'function' ? `<details class="es-card es-vt" open data-seg-videos>
+        <summary class="es-k">Videos de técnica · pedidos, por revisar y a mejorar</summary>
+        <div id="seg-vt"></div>
+      </details>` : ''}
+      <div class="es-card" data-es-mensajes><div class="es-k">Mensajes</div>${sk}</div>
+    </div>`;
+}
+
+// ── La franja corta: ficha, Entrenamiento y Alimentación ───────────────
+// Solo para mirar: sus números de la semana y el botón para ir a Seguimiento.
+function esFranjaHTML(c, modo) {
+  if (!c || !c.id) return '';
+  setTimeout(() => esPintarFranja(c, modo), 30);
+  return `<div class="es-franja" data-es-franja="${modo}" data-cliente="${escapeHtml(String(c.id))}"><span class="es-franja-k">Su semana</span><span class="es-franja-c">Leyendo…</span></div>`;
+}
+async function esPintarFranja(c, modo) {
+  const caja = document.querySelector(`[data-es-franja="${modo}"][data-cliente="${CSS.escape(String(c.id))}"]`);
+  if (!caja) return;
+  let S, hist;
+  try { [S, hist] = await Promise.all([esSemanaDe(c, esLunesInicial(fmt.hoy())), segHistorial(c.id, 1)]); }
+  catch (e) { caja.querySelector('.es-franja-c').textContent = 'No pude leer su semana.'; return; }
+  if (!caja.isConnected) return;
+  const n = (v, col, lab) => `<span class="es-franja-n"><b style="color:${col}">${v}</b>${lab}</span>`;
+  const partes = [];
+  if (modo !== 'comida') {
+    partes.push(n(`${S.F.hechas}/${S.F.plan}`, '#2F63B0', 'fuerza'));
+    if (S.C.plan) partes.push(n(`${S.C.hechos}/${S.C.plan}`, '#2F7A45', 'cardio'));
+  }
+  if (modo !== 'entreno') partes.push(n(S.K ? `${S.K.dias}/${S.K.base}` : '—', '#B5611A', 'comida'));
+  const det = [];
+  if (modo !== 'comida') {
+    if (S.rpe) det.push(`Intensidad ${esNum(S.rpe.prom)}`);
+    const sube = (S.sobre || []).filter(x => x.tipo === 'peso' || x.tipo === 'reps').length;
+    if (sube) det.push(`${sube} ${sube === 1 ? 'ejercicio subió' : 'ejercicios subieron'}`);
+    if (S.F.faltaron.length) det.push(`le faltó ${esLista(S.F.faltaron.map(x => escapeHtml(x.rut)))}`);
+  }
+  if (modo !== 'entreno' && S.K) {
+    if (S.K.conMeta) det.push(`${S.K.enMeta} días en su meta`);
+    if (S.K.prot) det.push(`proteína ${S.K.prot.prom} de ${S.K.prot.meta} g`);
+  }
+  const ult = hist === null ? '' : hist.length ? `Último seguimiento: ${segHace(hist[0].fecha).txt}` : 'Sin seguimiento guardado';
+  caja.innerHTML = `
+    <span class="es-franja-k">${S.cierre ? 'Semana pasada' : 'Su semana'}</span>
+    ${partes.join('')}
+    ${det.length ? `<span class="es-franja-d">${det.join(' · ')}</span>` : ''}
+    ${ult ? `<span class="es-franja-d">${ult}</span>` : ''}
+    <button type="button" class="es-franja-btn" onclick="segIr('${escapeHtml(String(c.id))}')">${modo === 'ficha' ? 'Hacer seguimiento' : 'Ir a Seguimiento'}</button>`;
+}
+
+// La ficha: la franja + las tarjetas que llevan a cada pestaña.
+function esFichaHTML(c) {
+  return `
+    <div data-ficha-sec="resumen" id="ficha-franja">${esFranjaHTML(c, 'ficha')}</div>
     <div class="es-mas" data-ficha-sec="resumen">
       <button type="button" onclick="fichaVerPestana('entreno')"><b>Entrenamiento</b>Ciclo, récords e historial</button>
       <button type="button" onclick="fichaVerPestana('comida')"><b>Alimentación</b>Metas, promedios y días</button>
@@ -589,6 +808,15 @@ function esArmazonHTML(c) {
       <button type="button" onclick="fichaVerPestana('perfil')"><b>Datos</b>Pago, inicio, canal, contraseña</button>
     </div>`;
 }
+
+// Ir al seguimiento de un cliente desde cualquier parte.
+window.segIr = (clienteId) => {
+  if (typeof closeModal === 'function') closeModal();
+  _selectedClienteId = clienteId;
+  _segIrA = clienteId;
+  _segView = 'focus';
+  repintarSeguimiento();
+};
 
 // =====================================================
 // LO QUE LE DIJISTE · el registro se hace solo al copiar
@@ -601,7 +829,7 @@ function esArmazonHTML(c) {
 // dijiste, y el Inicio, a quién hace rato no le escribes.
 const SEG_SQL = 'migraciones/seguimiento-mensajes.sql';
 const SEG_DIAS_AVISO = 7;
-const _seg = { sinTabla: false, avisado: false };
+const _seg = { sinTabla: false, avisado: false, ult: null, lista: null };
 
 window.segRegistrar = async (clienteId, { origen = null, titulo = null, texto } = {}) => {
   texto = String(texto || '').trim();
@@ -614,6 +842,8 @@ window.segRegistrar = async (clienteId, { origen = null, titulo = null, texto } 
     if ((ya || []).some(x => String(x.texto || '').trim() === texto)) return true;
     const { error } = await sb.from('seguimiento_mensajes').insert({ cliente_id: clienteId, fecha: hoy, origen, titulo, texto });
     if (error) throw error;
+    _seg.ult = null;
+    if (document.getElementById('seg-list')) segPintarLista();
     return true;
   } catch (e) {
     if (segFaltaTabla(e)) {
@@ -641,7 +871,7 @@ function segHace(fecha, hoy = fmt.hoy()) {
 
 // La línea de la ficha: «Último seguimiento: hace 6 días · Semana a medias» + historial.
 window.segPintarUltimo = async (c) => {
-  const caja = document.querySelector('#ficha-semana [data-es-ultimo]');
+  const caja = document.querySelector('#seg-semana [data-es-ultimo]');
   if (!caja || !c) return;
   const hist = await segHistorial(c.id);
   if (!caja.isConnected) return;
@@ -701,7 +931,9 @@ window.segMarcar = async (clienteId, marcar = true) => {
     toast(segFaltaTabla(e) ? `Falta correr ${SEG_SQL} en Supabase` : 'No se pudo guardar (sin conexión)');
     return;
   }
-  if (_es.cliente && _es.cliente.id === clienteId && document.querySelector('#ficha-semana [data-es-ultimo]')) segPintarUltimo(_es.cliente);
+  _seg.ult = null;
+  if (document.getElementById('seg-list')) segPintarLista();
+  if (_es.cliente && _es.cliente.id === clienteId && document.querySelector('#seg-semana [data-es-ultimo]')) segPintarUltimo(_es.cliente);
   if (document.getElementById('inicio-seg') && _seg.activos) segPintarInicio(_seg.activos);
 };
 
@@ -736,7 +968,7 @@ window.segPintarInicio = async (activos) => {
       ${x.d === 0
         ? `<span class="seg-check seg-check-ok" title="Seguimiento hecho hoy">${SEG_ICO_CHECK}Hoy</span>`
         : `<button type="button" class="seg-check" data-seg-check-inicio="${x.c.id}" onclick="segMarcar('${x.c.id}', true)" title="Marcar que hoy le hiciste seguimiento">${SEG_ICO_CHECK}Hecho</button>`}
-      <button class="btn btn-secondary btn-sm" onclick="verCliente('${x.c.id}')">Abrir</button>
+      <button class="btn btn-secondary btn-sm" onclick="segIr('${x.c.id}')">Abrir</button>
     </div>`;
   const ver = lista.slice(0, 6);
   caja.innerHTML = `${ayuda}
@@ -744,3 +976,61 @@ window.segPintarInicio = async (activos) => {
     ${ver.map(fila).join('')}
     ${lista.length > ver.length ? `<details class="mt-1"><summary class="text-sm font-semibold text-slate-500" style="cursor:pointer;list-style:none;padding:8px 0">Ver los ${lista.length}</summary>${lista.slice(ver.length).map(fila).join('')}</details>` : ''}`;
 };
+
+// ── La lista de Seguimiento: por días sin seguimiento ───────────────────
+// Arriba los que te tocan (7 días o más, o nunca), después los que están al
+// día; los que no están activos, al final. Con «Marcar» al lado de cada uno.
+async function segUltimos() {
+  if (_seg.ult && Date.now() - _seg.ult.en < 60000) return _seg.ult;
+  try {
+    const desde = evtSumarDias(fmt.hoy(), -180);
+    const [m, n] = await Promise.all([
+      sb.from('seguimiento_mensajes').select('cliente_id, fecha, titulo, created_at').gte('fecha', desde).order('created_at', { ascending: false }).limit(5000),
+      sb.from('notas_entreno').select('cliente_id').is('leida_en', null).limit(2000),
+    ]);
+    if (m.error) throw m.error;
+    const ultimo = {}, notas = {};
+    (m.data || []).forEach(f => { if (!ultimo[f.cliente_id]) ultimo[f.cliente_id] = f; });
+    ((n && n.data) || []).forEach(x => { notas[x.cliente_id] = (notas[x.cliente_id] || 0) + 1; });
+    _seg.ult = { ultimo, notas, en: Date.now() };
+    return _seg.ult;
+  } catch (e) { return null; }
+}
+
+function segListaHTML(clientes, U, sel) {
+  const filas = clientes.map(c => {
+    const u = U.ultimo[c.id] || null;
+    return { c, u, d: u ? segHace(u.fecha).d : null, notas: U.notas[c.id] || 0 };
+  });
+  const tarde = (x) => x.d === null || x.d >= SEG_DIAS_AVISO;
+  const orden = (a, b) => (b.d ?? 9999) - (a.d ?? 9999) || String(a.c.nombre).localeCompare(String(b.c.nombre));
+  const item = (x) => {
+    const cuando = x.u ? segHace(x.u.fecha).txt.replace(/^./, m => m.toUpperCase()) : 'Sin seguimiento';
+    const notas = x.notas ? ` · ${x.notas === 1 ? '1 nota' : x.notas + ' notas'} sin responder` : '';
+    return `
+    <div class="seg-li${x.c.id === sel ? ' activo' : ''}" role="button" tabindex="0" data-nombre="${escapeHtml(String(x.c.nombre || '').toLowerCase())}" data-seg-li="${x.c.id}" data-seg-dias="${x.d ?? ''}" onclick="seleccionarCliente('${x.c.id}')">
+      ${helpers.avatar(x.c.nombre, 10)}
+      <div class="seg-li-txt"><b>${escapeHtml(x.c.nombre)}</b><span class="${x.c.estado === 'activo' && tarde(x) ? 'seg-li-tarde' : ''}">${cuando}${notas}</span></div>
+      ${x.d === 0
+        ? `<span class="seg-check seg-check-ok seg-li-ck" title="Seguimiento hecho hoy">${SEG_ICO_CHECK}Hoy</span>`
+        : `<button type="button" class="seg-check seg-li-ck" data-seg-li-marcar="${x.c.id}" onclick="event.stopPropagation(); segMarcar('${x.c.id}', true)" title="Marcar que hoy le hiciste seguimiento">${SEG_ICO_CHECK}Marcar</button>`}
+    </div>`;
+  };
+  const activos = filas.filter(x => x.c.estado === 'activo');
+  const grupos = [
+    ['Te toca', activos.filter(tarde)],
+    ['Al día', activos.filter(x => !tarde(x))],
+    ['No activos', filas.filter(x => x.c.estado !== 'activo')],
+  ].filter(([, xs]) => xs.length);
+  return grupos.map(([t, xs]) => `<div class="seg-li-grp" data-seg-grupo="${t}">${t} · ${xs.length}</div>${xs.sort(orden).map(item).join('')}`).join('');
+}
+
+async function segPintarLista() {
+  const caja = document.getElementById('seg-list');
+  if (!caja || !_seg.lista) return;
+  const U = await segUltimos();
+  if (!U || !caja.isConnected) return;
+  const q = (document.getElementById('seg-buscar') || {}).value || '';
+  caja.innerHTML = segListaHTML(_seg.lista, U, _selectedClienteId);
+  if (q && typeof filtrarClientesSidebar === 'function') filtrarClientesSidebar(q);
+}

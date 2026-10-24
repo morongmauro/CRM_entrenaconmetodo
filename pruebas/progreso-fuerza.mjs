@@ -84,6 +84,9 @@ async function abrir(ancho, alto) {
 
 const { ctx, p, errores } = await abrir(1440, 900);
 await p.evaluate(() => navigate('seguimiento'));
+// En Seguimiento las gráficas van plegadas bajo «Más de…»: se abren.
+await p.locator('[data-seg-progreso]').waitFor({ timeout: 20000 });
+await p.evaluate(() => { document.querySelector('[data-seg-progreso]').open = true; });
 await p.locator('#seg-pf [data-pf-tab]').first().waitFor({ timeout: 20000 });
 await p.waitForTimeout(400);
 const r1 = await p.evaluate(() => {

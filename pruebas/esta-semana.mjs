@@ -67,7 +67,10 @@ function tablas() {
     settings: [{ user_id: 'coach-1', usd_cop_rate: 4000, nombre_coach: 'Mauro', mealtracker_app_url: 'https://mt.prueba', mealtracker_coach_password: 'x' }],
     metas_historial: [], nutricion_insights: [], ia_uso: [], push_pago_log: [],
     fases: [fase], rutinas, rutina_ejercicios: [], rutina_bloques: [], sesiones, series_log, ejercicios,
-    eventos, evento_registros, actividades, notas_entreno, comentarios_coach: [],
+    eventos, evento_registros, actividades, notas_entreno,
+    // Lo que se habló y se cambió esta semana
+    comentarios_coach: [{ id: 'k1', user_id: 'coach-1', cliente_id: 'c0', ejercicio_id: 'e1', tipo: 'puntual', texto: 'Baja la barra más lento', creado_en: L(0) + 'T15:00:00Z', leido_en: null, quitado_en: null }],
+    cambios_ejercicio: [{ id: 'x1', user_id: 'coach-1', cliente_id: 'c0', rutina_id: 'r1', rutina_nombre: 'Push', nombre_antes: 'Chest Press Machine', nombre_despues: 'Bench Press', origen: 'alternativas', creado_at: L(0) + 'T16:00:00Z' }],
     rutina_movimientos: [], rutina_extras: [], rutina_dias_quitados: [],
     comunidad_posts: [], comunidad_reacciones: [], comunidad_comentarios: [], comunidad_vistas: [],
   };
@@ -110,18 +113,19 @@ async function abrir(ancho, alto, conComida = true) {
 }
 
 const { ctx, p, errores } = await abrir(1440, 1000);
-await p.evaluate(() => verCliente('c0'));
-await p.locator('#ficha-semana').waitFor({ timeout: 15000 });
+await p.evaluate(() => segIr('c0'));
+await p.locator('#seg-semana').waitFor({ timeout: 15000 });
 // Siempre «Esta semana» para la prueba (el lunes abre en la pasada).
 await p.locator(`[data-es-sem="${LUNES}"]`).click();
-await p.locator('#ficha-semana [data-es-cumplimiento]').waitFor({ timeout: 15000 });
+await p.locator('#seg-semana [data-es-cumplimiento]').waitFor({ timeout: 15000 });
 await p.waitForTimeout(300);
 const hoyOff = offset(HOY);
 const esperaF = { hechas: [0, 4].filter(k => k <= hoyOff).length, plan: 4 };
 const r = await p.evaluate(() => {
-  const s = document.getElementById('ficha-semana');
+  const s = document.getElementById('seg-semana');
   return {
-    primero: [...document.querySelector('[data-ficha]').children].find(el => el.dataset.fichaSec === 'resumen' && el.offsetParent !== null)?.id,
+    enSeguimiento: !!document.querySelector('#seg-content #seg-semana') && _currentView === 'seguimiento',
+    cabecera: document.querySelector('[data-seg-cabecera]')?.innerText || '',
     fuerza: s.querySelector('[data-es-fuerza] .es-n').textContent,
     cardio: s.querySelector('[data-es-cardio] .es-n').textContent,
     comida: s.querySelector('[data-es-comida] .es-n').textContent,
@@ -129,10 +133,15 @@ const r = await p.evaluate(() => {
     resumen: s.querySelector('[data-es-resumen]').innerText,
     msgs: [...s.querySelectorAll('[data-es-msg]')].map(m => ({ sit: m.dataset.esMsg, texto: m.querySelector('p').innerText })),
     notas: s.querySelector('[data-es-notas]')?.dataset.esNotas,
-    datosEnResumen: [...document.querySelectorAll('[data-ficha] .sec-title')].some(t => t.textContent.trim() === 'Datos' && t.offsetParent !== null),
+    sobre: [...s.querySelectorAll('[data-es-sobre]')].map(f => ({ t: f.dataset.esSobre, x: f.innerText.replace(/\s+/g, ' ') })),
+    coment: s.querySelector('[data-es-comentarios]').innerText,
+    videos: !!s.querySelector('[data-seg-videos] #seg-vt'),
+    ordenMsjDespuesVideos: !!s.querySelector('[data-seg-videos] ~ [data-es-mensajes]'),
   };
 });
-ok('ficha: lo primero del Resumen es «Esta semana»', r.primero === 'ficha-semana', r.primero);
+ok('la semana completa está en Seguimiento, con el cliente elegido', r.enSeguimiento);
+ok('cabecera: atajos para ajustar entreno y alimentación, ficha y Diálogos', /Ajustar entreno/.test(r.cabecera) && /Ajustar alimentación/.test(r.cabecera) && /Ficha/.test(r.cabecera) && /Diálogos/.test(r.cabecera), r.cabecera);
+ok('cabecera: su ciclo y en qué semana va', /Ciclo 19 · semana 3 de 5/.test(r.cabecera), r.cabecera);
 ok(`fuerza: ${esperaF.hechas}/4 (lo que entrenó de lo que le toca)`, r.fuerza === `${esperaF.hechas}/4`, r.fuerza);
 ok('fuerza día por día: lunes hecho; miércoles falta (si ya pasó)', r.celdasF[0] === 'es-f-hecho' && r.celdasF[2] === (hoyOff > 2 ? 'es-f-falto' : hoyOff === 2 ? 'es-f-pendiente' : 'es-f-pendiente'), JSON.stringify(r.celdasF));
 ok('cardio: lo que marcó de lo que le pusiste', r.cardio === `${hoyOff >= 1 ? 1 : 0}/2`, r.cardio);
@@ -142,62 +151,94 @@ ok('en pocas palabras: la semana anterior para comparar', /La semana anterior: 3
 ok('en pocas palabras: récord e intensidad (solo lo que hay en los datos)', /1 récord/.test(r.resumen) && /Press banca 60 kg × 8/.test(r.resumen) && /Intensidad promedio/.test(r.resumen), r.resumen);
 ok('en pocas palabras: subió de peso respecto a la vez anterior', hoyOff < 4 || /Remo con barra \+5 kg/.test(r.resumen), r.resumen);
 ok('en pocas palabras: la proteína con su promedio y su meta', /Proteína promedio \d+ g de 140 g/.test(r.resumen) || hoyOff < 3, r.resumen);
-ok('la nota sin responder, con «Responder»', r.notas === '1' && /No tengo esta máquina/.test(r.resumen) && await p.locator('#ficha-semana .es-ojo-btn').count() === 1, r.resumen);
-ok('mensajes: entre 2 y 3, el primero sobre su semana', r.msgs.length >= 2 && r.msgs.length <= 3 && r.msgs[0].sit === 'curso', JSON.stringify(r.msgs.map(m => m.sit)));
-ok('mensajes: con su nombre y sus números, sin [huecos]', r.msgs.every(m => /Ana/.test(m.texto) && !/\[|undefined|null|NaN/.test(m.texto)), JSON.stringify(r.msgs));
+ok('la nota sin responder, con «Responder»', r.notas === '1' && /No tengo esta máquina/.test(r.resumen) && await p.locator('#seg-semana [data-es-resumen] .es-ojo-btn').count() === 1, r.resumen);
+ok('mensajes: primero el saludo del check-in, tal cual', r.msgs[0].sit === 'inicio' && r.msgs[0].texto === 'Hola Ana, ¿cómo vas? Espero que todo vaya bien, paso por acá al check-in periódico.', r.msgs[0].texto);
+ok('mensajes: después 2 o 3 sobre su semana, el primero sobre fuerza', r.msgs.length >= 3 && r.msgs.length <= 4 && r.msgs[1].sit === 'curso', JSON.stringify(r.msgs.map(m => m.sit)));
+ok('mensajes: los de después no repiten el saludo', r.msgs.slice(1).every(m => !/^(Hola|Qué tal|Ana,)/.test(m.texto) && /^[¡¿]?[A-ZÁÉÍÓÚÑ]/.test(m.texto)), JSON.stringify(r.msgs.map(m => m.texto.slice(0, 30))));
+ok('mensajes: con sus números, sin [huecos]', r.msgs.every(m => !/\[|undefined|null|NaN/.test(m.texto)), JSON.stringify(r.msgs));
 ok('mensajes: felicita el récord o la subida (con su número)', r.msgs.some(m => m.sit === 'avance' && /(60|55)/.test(m.texto)), JSON.stringify(r.msgs.map(m => m.sit)));
-ok('mensajes: el de la semana dice cuántos lleva', r.msgs[0].texto.includes(`${esperaF.hechas} de 4`), r.msgs[0].texto);
-ok('Datos ya no está en el Resumen (está en Perfil)', !r.datosEnResumen);
-await p.locator('#ficha-semana').screenshot({ path: path.join(CAPTURAS, 'esta-semana.png') });
-await p.screenshot({ path: path.join(CAPTURAS, 'esta-semana-ficha.png') });
+ok('mensajes: el de la semana dice cuántos lleva', r.msgs[1].texto.includes(`${esperaF.hechas} de 4`), r.msgs[1].texto);
+const remo = r.sobre.find(x => /Barbell Row/.test(x.x)), banca = r.sobre.find(x => /Bench Press/.test(x.x));
+ok('pesos y reps: el remo subió de 50 a 55 kg (vez anterior y esta semana)', hoyOff < 4 || (remo && remo.t === 'peso' && /50 kg × 8/.test(remo.x) && /55 kg × 8/.test(remo.x) && /\+5 kg/.test(remo.x)), JSON.stringify(r.sobre));
+ok('pesos y reps: la banca subió de 57,5 a 60 kg', banca && banca.t === 'peso' && /57,5 kg × 8/.test(banca.x) && /60 kg × 8/.test(banca.x), JSON.stringify(r.sobre));
+ok('comentarios: su nota (sin responder) y el tuyo, con el ejercicio', /No tengo esta máquina/.test(r.coment) && /Sin responder/.test(r.coment) && /Baja la barra más lento/.test(r.coment) && /Barbell Row/.test(r.coment), r.coment);
+ok('ejercicios cambiados: antes → después, en qué rutina y cómo', /Chest Press Machine/.test(r.coment) && /Bench Press/.test(r.coment) && /Push/.test(r.coment) && /Alternativas/.test(r.coment), r.coment);
+ok('videos de técnica en la semana, antes de los mensajes', r.videos && r.ordenMsjDespuesVideos);
+await p.locator('#seg-semana').screenshot({ path: path.join(CAPTURAS, 'esta-semana.png') });
+await p.screenshot({ path: path.join(CAPTURAS, 'seguimiento.png'), fullPage: true });
+const lista = await p.locator('#seg-list').innerText();
+ok('lista: por días sin seguimiento, Ana en «Te toca» con su nota sin responder', /Te toca/i.test(lista) && /Ana Pérez/.test(lista) && /Sin seguimiento · 1 nota sin responder/.test(lista), lista);
 
 // Copiar
-ok('historial: sin seguimientos aún, lo dice', /Aún no hay seguimientos guardados/.test(await p.locator('#ficha-semana [data-es-ultimo]').innerText()));
-await p.locator('#ficha-semana [data-es-copiar="0"]').click();
+ok('historial: sin seguimientos aún, lo dice', /Aún no hay seguimientos guardados/.test(await p.locator('#seg-semana [data-es-ultimo]').innerText()));
+await p.locator('#seg-semana [data-es-copiar="0"]').click();
+await p.waitForTimeout(300);
+ok('Copiar el saludo: queda en el portapapeles', await p.evaluate(() => navigator.clipboard.readText()) === r.msgs[0].texto);
+await p.locator('#seg-semana [data-es-copiar="1"]').click();
 await p.waitForTimeout(400);
 const copiado = await p.evaluate(() => navigator.clipboard.readText());
-ok('Copiar: deja el mensaje tal cual en el portapapeles', copiado === r.msgs[0].texto, copiado);
+ok('Copiar: deja el mensaje tal cual en el portapapeles', copiado === r.msgs[1].texto, copiado);
 const reg = await p.evaluate(() => (TABLAS_FALSAS.seguimiento_mensajes || []).map(x => ({ c: x.cliente_id, o: x.origen, t: x.titulo, x: x.texto })));
-ok('al copiar queda guardado solo: cliente, de dónde, título y el texto', reg.length === 1 && reg[0].c === 'c0' && reg[0].o === 'esta-semana' && reg[0].t === 'A mitad de semana' && reg[0].x === r.msgs[0].texto, JSON.stringify(reg));
-const ult = await p.locator('#ficha-semana [data-es-ultimo]').innerText();
+ok('al copiar queda guardado solo: cliente, de dónde, título y el texto', reg.length === 2 && reg[1].c === 'c0' && reg[1].o === 'esta-semana' && reg[1].t === 'A mitad de semana' && reg[1].x === r.msgs[1].texto, JSON.stringify(reg));
+await p.waitForFunction(() => /Hoy/.test(document.querySelector('#seg-list [data-seg-li="c0"]')?.innerText || ''), null, { timeout: 5000 });
+ok('lista: Ana pasa a «Al día» con «Hoy»', /Al día/i.test(await p.locator('#seg-list').innerText()));
+const ult = await p.locator('#seg-semana [data-es-ultimo]').innerText();
 ok('la ficha dice «Último seguimiento: hoy» con el título', /Último seguimiento: hoy/.test(ult) && /A mitad de semana/.test(ult), ult);
-await p.locator('#ficha-semana [data-es-copiar="0"]').click();
+await p.locator('#seg-semana [data-es-copiar="1"]').click();
 await p.waitForTimeout(400);
-ok('copiar el mismo mensaje otra vez el mismo día no lo duplica', await p.evaluate(() => TABLAS_FALSAS.seguimiento_mensajes.length) === 1);
-await p.locator('#ficha-semana [data-es-ult-ver]').click();
-ok('«Lo que le dijiste» muestra el mensaje completo', (await p.locator('#ficha-semana [data-es-ult-lista]').innerText()).includes(r.msgs[0].texto.split('\n')[0]));
-await p.locator('#ficha-semana').screenshot({ path: path.join(CAPTURAS, 'esta-semana-historial.png') });
+ok('copiar el mismo mensaje otra vez el mismo día no lo duplica', await p.evaluate(() => TABLAS_FALSAS.seguimiento_mensajes.length) === 2);
+await p.locator('#seg-semana [data-es-ult-ver]').click();
+ok('«Lo que le dijiste» muestra el mensaje completo', (await p.locator('#seg-semana [data-es-ult-lista]').innerText()).includes(r.msgs[1].texto.split('\n')[0]));
+await p.locator('#seg-semana').screenshot({ path: path.join(CAPTURAS, 'esta-semana-historial.png') });
 
 // Semana pasada: se cierra (3 de 4) y cambia el mensaje
 await p.locator(`[data-es-sem="${mas(LUNES, -7)}"]`).click();
-await p.waitForFunction(() => document.querySelector('#ficha-semana [data-es-fuerza] .es-n')?.textContent === '3/4', null, { timeout: 10000 });
-const r2 = await p.evaluate(() => ({ titulo: document.querySelector('[data-es-titulo]').textContent, msgs: [...document.querySelectorAll('#ficha-semana [data-es-msg]')].map(m => ({ sit: m.dataset.esMsg, texto: m.querySelector('p').innerText })), resumen: document.querySelector('#ficha-semana [data-es-resumen]').innerText }));
+await p.waitForFunction(() => document.querySelector('#seg-semana [data-es-fuerza] .es-n')?.textContent === '3/4', null, { timeout: 10000 });
+const r2 = await p.evaluate(() => ({ titulo: document.querySelector('[data-es-titulo]').textContent, msgs: [...document.querySelectorAll('#seg-semana [data-es-msg]')].map(m => ({ sit: m.dataset.esMsg, texto: m.querySelector('p').innerText })), resumen: document.querySelector('#seg-semana [data-es-resumen]').innerText }));
 ok('semana pasada: título y 3 de 4', /La semana pasada/.test(r2.titulo) && /3 de 4/.test(r2.resumen), r2.titulo + ' | ' + r2.resumen);
-ok('semana pasada: mensaje de semana a medias, que nombra lo que faltó', r2.msgs[0].sit === 'media' && /Legs/.test(r2.msgs[0].texto + r2.resumen), JSON.stringify(r2.msgs[0]));
-await p.locator('#ficha-semana').screenshot({ path: path.join(CAPTURAS, 'esta-semana-pasada.png') });
+ok('semana pasada: mensaje de semana a medias, que nombra lo que faltó', r2.msgs[1].sit === 'media' && /Legs/.test(r2.msgs[1].texto + r2.resumen), JSON.stringify(r2.msgs[1]));
+await p.locator('#seg-semana').screenshot({ path: path.join(CAPTURAS, 'esta-semana-pasada.png') });
 ok('semana pasada: lo que hizo por su cuenta (fútbol)', /fútbol/.test(r2.resumen), r2.resumen);
 
 // Las versiones rotan: la de esta semana no es la misma que la de la semana siguiente.
 const rot = await p.evaluate(() => {
   const S = _es.semana, c = _es.cliente;
-  const a = esMensajes(c, S)[0].texto;
-  const b = esMensajes(c, { ...S, lunes: evtSumarDias(S.lunes, 7) })[0].texto;
-  const cc = esMensajes(c, { ...S, lunes: evtSumarDias(S.lunes, 14) })[0].texto;
+  const a = esMensajes(c, S)[1].texto;
+  const b = esMensajes(c, { ...S, lunes: evtSumarDias(S.lunes, 7) })[1].texto;
+  const cc = esMensajes(c, { ...S, lunes: evtSumarDias(S.lunes, 14) })[1].texto;
   return { distintas: a !== b && b !== cc };
 });
 ok('cada semana sale otra versión (nunca la misma que la anterior)', rot.distintas);
 
-// Las tarjetas de abajo llevan a cada pestaña
+// La ficha: resumen y edición. De la semana, solo la franja corta.
+await p.evaluate(() => verCliente('c0'));
+await p.locator('[data-es-franja="ficha"] .es-franja-btn').waitFor({ timeout: 15000 });
+const fr = await p.locator('[data-es-franja="ficha"]').innerText();
+ok('ficha: la franja con fuerza, cardio, comida y el último seguimiento', new RegExp(`${esperaF.hechas}/4`).test(fr) && /fuerza/.test(fr) && /comida/.test(fr) && /Último seguimiento: hoy/.test(fr) && /Hacer seguimiento/.test(fr), fr);
+ok('ficha: ya no trae la semana completa', await p.locator('[data-ficha] #seg-semana').count() === 0);
+await p.locator('[data-ficha]').screenshot({ path: path.join(CAPTURAS, 'ficha-franja.png') });
 await p.locator('.es-mas button', { hasText: 'Datos' }).click();
 ok('«Datos» abre Perfil y ahí están los datos', await p.locator('[data-ficha-tab="perfil"].active').count() === 1 && await p.locator('[data-ficha] .sec-title', { hasText: /^Datos$/ }).isVisible());
 await p.locator('[data-ficha-tab="resumen"]').click();
+await p.locator('[data-es-franja="ficha"] .es-franja-btn').click();
+await p.locator('#seg-content #seg-semana').waitFor({ timeout: 15000 });
+ok('«Hacer seguimiento» lleva a Seguimiento con ese cliente', await p.evaluate(() => _currentView === 'seguimiento' && _selectedClienteId === 'c0' && !document.querySelector('[data-ficha]')));
+// Entrenamiento: para crear y ajustar; arriba solo la franja
+await p.locator('[data-seg-ir="entreno"]').click();
+await p.locator('[data-es-franja="entreno"] .es-franja-btn').waitFor({ timeout: 15000 });
+const fe = await p.locator('[data-es-franja="entreno"]').innerText();
+ok('Entrenamiento: «Ajustar entreno» abre su calendario con la franja de su semana', /fuerza/.test(fe) && /Ir a Seguimiento/.test(fe) && await p.evaluate(() => _ent.clienteId === 'c0'), fe);
+await p.screenshot({ path: path.join(CAPTURAS, 'entrenamiento-franja.png'), clip: { x: 0, y: 0, width: 1440, height: 760 } });
+await p.locator('[data-es-franja="entreno"] .es-franja-btn').click();
+await p.locator('#seg-content #seg-semana').waitFor({ timeout: 15000 });
+ok('«Ir a Seguimiento» vuelve con el mismo cliente', await p.evaluate(() => _currentView === 'seguimiento' && _selectedClienteId === 'c0'));
 // Diálogos también queda guardado
 await p.evaluate(() => abrirDialogos('c0'));
 await p.locator('[data-dlg-copiar]').first().waitFor({ timeout: 10000 });
 await p.locator('[data-dlg-copiar]').first().click();
 await p.waitForTimeout(500);
 const reg2 = await p.evaluate(() => TABLAS_FALSAS.seguimiento_mensajes.map(x => ({ o: x.origen, t: x.titulo })));
-ok('Diálogos: copiar también queda en su historial (con el título del diálogo)', reg2.length === 2 && reg2[1].o === 'dialogos' && !!reg2[1].t, JSON.stringify(reg2));
+ok('Diálogos: copiar también queda en su historial (con el título del diálogo)', reg2.length === 3 && reg2[2].o === 'dialogos' && !!reg2[2].t, JSON.stringify(reg2));
 await p.evaluate(() => closeModal());
 // Inicio: a quién hace rato no le escribes
 await p.evaluate(() => navigate('dashboard'));
@@ -205,23 +246,30 @@ await p.locator('#inicio-seg [data-seg-cliente="c0"]').waitFor({ timeout: 15000 
 const ini = await p.locator('#inicio-seg').innerText();
 ok('Inicio: «Seguimientos» con Ana y hace cuánto', /Ana Pérez/.test(ini) && /hoy/.test(ini), ini);
 await p.locator('[data-inicio-seg]').screenshot({ path: path.join(CAPTURAS, 'inicio-seguimientos.png') });
+await p.locator('#inicio-seg [data-seg-cliente="c0"] button', { hasText: 'Abrir' }).click();
+await p.locator('#seg-content #seg-semana').waitFor({ timeout: 15000 });
+ok('Inicio: «Abrir» lleva a su seguimiento', await p.evaluate(() => _currentView === 'seguimiento' && _selectedClienteId === 'c0'));
 ok('sin errores', errores.length === 0, errores.join(' | '));
 await ctx.close();
 
 // El check: «le hice seguimiento hoy» sin copiar nada
 const ck = await abrir(1440, 1000);
-await ck.p.evaluate(() => verCliente('c0'));
-await ck.p.locator('#ficha-semana [data-seg-check="marcar"]').waitFor({ timeout: 15000 });
-await ck.p.locator('#ficha-semana [data-seg-check="marcar"]').click();
-await ck.p.locator('#ficha-semana [data-seg-check="hecho"]').waitFor({ timeout: 5000 });
+await ck.p.evaluate(() => segIr('c0'));
+await ck.p.locator('#seg-semana [data-seg-check="marcar"]').waitFor({ timeout: 15000 });
+await ck.p.locator('#seg-semana [data-seg-check="marcar"]').click();
+await ck.p.locator('#seg-semana [data-seg-check="hecho"]').waitFor({ timeout: 5000 });
 const m1 = await ck.p.evaluate(() => TABLAS_FALSAS.seguimiento_mensajes.map(x => ({ o: x.origen, c: x.cliente_id })));
-ok('check en la ficha: marca el seguimiento de hoy (queda en el historial)', m1.length === 1 && m1[0].o === 'manual' && m1[0].c === 'c0', JSON.stringify(m1));
-ok('check en la ficha: dice «Último seguimiento: hoy»', /Último seguimiento: hoy/.test(await ck.p.locator('#ficha-semana [data-es-ultimo]').innerText()));
-await ck.p.locator('#ficha-semana').screenshot({ path: path.join(CAPTURAS, 'seguimiento-check.png'), clip: undefined });
-await ck.p.locator('#ficha-semana [data-seg-check="hecho"]').click();
-await ck.p.locator('#ficha-semana [data-seg-check="marcar"]').waitFor({ timeout: 5000 });
+ok('check en Seguimiento: marca el seguimiento de hoy (queda en el historial)', m1.length === 1 && m1[0].o === 'manual' && m1[0].c === 'c0', JSON.stringify(m1));
+ok('check en Seguimiento: dice «Último seguimiento: hoy»', /Último seguimiento: hoy/.test(await ck.p.locator('#seg-semana [data-es-ultimo]').innerText()));
+await ck.p.locator('#seg-semana').screenshot({ path: path.join(CAPTURAS, 'seguimiento-check.png'), clip: undefined });
+await ck.p.locator('#seg-semana [data-seg-check="hecho"]').click();
+await ck.p.locator('#seg-semana [data-seg-check="marcar"]').waitFor({ timeout: 5000 });
 ok('check: tocarlo otra vez quita la marca de hoy', await ck.p.evaluate(() => TABLAS_FALSAS.seguimiento_mensajes.length) === 0);
-await ck.p.evaluate(() => closeModal());
+await ck.p.locator('#seg-list [data-seg-li-marcar="c0"]').click();
+await ck.p.waitForFunction(() => /Hoy/.test(document.querySelector('#seg-list [data-seg-li="c0"]')?.innerText || ''), null, { timeout: 5000 });
+ok('check en la lista: «Marcar» deja a Ana en «Hoy» sin salir de donde estás', await ck.p.evaluate(() => TABLAS_FALSAS.seguimiento_mensajes.filter(x => x.origen === 'manual').length) === 1);
+await ck.p.evaluate(() => segMarcar('c0', false));
+await ck.p.waitForTimeout(300);
 await ck.p.evaluate(() => navigate('dashboard'));
 await ck.p.locator('#inicio-seg [data-seg-check-inicio="c0"]').waitFor({ timeout: 15000 });
 await ck.p.locator('[data-inicio-seg]').screenshot({ path: path.join(CAPTURAS, 'inicio-seguimientos-check.png') });
@@ -242,11 +290,11 @@ await st.p.evaluate(() => {
     return q;
   };
 });
-await st.p.evaluate(() => verCliente('c0'));
-await st.p.locator('#ficha-semana [data-es-copiar="0"]').waitFor({ timeout: 15000 });
+await st.p.evaluate(() => segIr('c0'));
+await st.p.locator('#seg-semana [data-es-copiar="0"]').waitFor({ timeout: 15000 });
 await st.p.waitForTimeout(300);
-ok('sin la tabla: la ficha dice qué SQL correr', /seguimiento-mensajes\.sql/.test(await st.p.locator('#ficha-semana [data-es-ultimo]').innerText()));
-await st.p.locator('#ficha-semana [data-es-copiar="0"]').click();
+ok('sin la tabla: Seguimiento dice qué SQL correr', /seguimiento-mensajes\.sql/.test(await st.p.locator('#seg-semana [data-es-ultimo]').innerText()));
+await st.p.locator('#seg-semana [data-es-copiar="0"]').click();
 await st.p.waitForTimeout(300);
 ok('sin la tabla: copiar funciona igual', (await st.p.evaluate(() => navigator.clipboard.readText())).length > 20);
 ok('sin la tabla: sin errores', st.errores.length === 0, st.errores.join(' | '));
@@ -254,20 +302,20 @@ await st.ctx.close();
 
 // Teléfono: una columna, sin desbordar
 const t = await abrir(390, 844);
-await t.p.evaluate(() => verCliente('c0'));
-await t.p.locator('#ficha-semana [data-es-cumplimiento]').waitFor({ timeout: 15000 });
+await t.p.evaluate(() => segIr('c0'));
+await t.p.locator('#seg-semana [data-es-cumplimiento]').waitFor({ timeout: 15000 });
 await t.p.waitForTimeout(300);
-const desb = await t.p.evaluate(() => { const s = document.getElementById('ficha-semana'); return { ancho: s.scrollWidth, caja: s.clientWidth }; });
+const desb = await t.p.evaluate(() => { const s = document.getElementById('seg-semana'); return { ancho: s.scrollWidth, caja: s.clientWidth }; });
 ok('teléfono: el bloque cabe sin desbordar', desb.ancho <= desb.caja + 1, JSON.stringify(desb));
-await t.p.locator('#ficha-semana').screenshot({ path: path.join(CAPTURAS, 'esta-semana-telefono.png') });
+await t.p.locator('#seg-semana').screenshot({ path: path.join(CAPTURAS, 'esta-semana-telefono.png') });
 ok('teléfono: sin errores', t.errores.length === 0, t.errores.join(' | '));
 await t.ctx.close();
 
 // Sin datos de comida: lo dice, no inventa
 const s = await abrir(1440, 1000, false);
-await s.p.evaluate(() => verCliente('c0'));
-await s.p.locator('#ficha-semana [data-es-resumen]').waitFor({ timeout: 15000 });
-const sr = await s.p.locator('#ficha-semana [data-es-resumen]').innerText();
+await s.p.evaluate(() => segIr('c0'));
+await s.p.locator('#seg-semana [data-es-resumen]').waitFor({ timeout: 15000 });
+const sr = await s.p.locator('#seg-semana [data-es-resumen]').innerText();
 ok('sin datos de comida: lo dice tal cual', /Comida: sin datos/.test(sr), sr);
 await s.ctx.close();
 

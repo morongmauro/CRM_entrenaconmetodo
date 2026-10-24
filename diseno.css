@@ -317,10 +317,12 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):focus, select:foc
 .es-tog { display: flex; gap: 3px; padding: 3px; background: #EAE8E2; border-radius: 999px; }
 .es-tog button { border: 0; background: transparent; border-radius: 999px; padding: 5px 12px; font: 700 12.5px Figtree, system-ui, sans-serif; color: #6B6B70; cursor: pointer; }
 .es-tog button.active { background: #fff; color: #1F1F1F; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-.es-grid { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr) minmax(0, 330px); gap: 14px; transition: opacity .2s; }
+.es-sem { container-type: inline-size; }
+.es-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 14px; transition: opacity .2s; }
 .es-grid.es-cargando { opacity: .55; }
-@media (max-width: 980px) { .es-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .es-grid > [data-es-mensajes] { grid-column: 1 / -1; } }
-@media (max-width: 680px) { .es-grid { grid-template-columns: minmax(0, 1fr); } .es-sem { padding: 12px; border-radius: 20px; } }
+.es-sem > .es-card { margin-top: 14px; }
+@container (max-width: 640px) { .es-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 680px) { .es-sem { padding: 12px; border-radius: 20px; } }
 .es-card { background: #fff; border-radius: 20px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 18px rgba(40,40,30,.05); min-width: 0; }
 .es-sk { min-height: 210px; background: linear-gradient(90deg, #fff 0%, #F7F6F2 50%, #fff 100%); background-size: 200% 100%; animation: es-brillo 1.2s linear infinite; }
 @keyframes es-brillo { to { background-position: -200% 0; } }
@@ -430,3 +432,63 @@ span.seg-check-ok { cursor: default; }
 .ent-mes-arrastrando .ent-celda:not(.ent-celda-off) { background: #FAFAF6; }
 .ent-celda-destino { background: #F4F3EF !important; box-shadow: inset 0 0 0 2px #1F1F1F; border-radius: 10px; }
 @media (max-width: 700px) { .ent-mes-scroll { padding: 8px 6px; border-radius: 18px; } .ent-celda-num { font-size: 13px; } .ent-chip { font-size: 10.5px; } }
+
+/* ── Seguimiento: la semana completa ── */
+.es-k2 { text-transform: none; letter-spacing: 0; font-weight: 700; color: #6B6B70; margin-left: 6px; }
+.es-msgs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.es-msgs .es-msg { margin-bottom: 0; }
+.es-msg-inicio { background: #EEF4FC; }
+.es-vt > summary { cursor: pointer; list-style: none; margin-bottom: 0; }
+.es-vt > summary::-webkit-details-marker { display: none; }
+.es-vt[open] > summary { margin-bottom: 10px; }
+/* Pesos y repeticiones */
+.es-sb { font-size: 13px; }
+.es-sb-f { padding: 8px 0; }
+.es-sb-f + .es-sb-f { border-top: 1px solid #F1EFEA; }
+.es-sb-l { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.es-sb-n { font-weight: 700; color: #1F1F1F; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.es-sb-v { margin-top: 2px; color: #6B6B70; }
+.es-sb-a i { font-style: normal; font-size: 11.5px; color: #9A9AA0; }
+.es-sb-h { font-weight: 700; color: #1F1F1F; }
+.es-sb-t { flex: none; font-size: 11.5px; font-weight: 800; border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+.es-sb-sube { background: #E7F3EA; color: #2F7A45; }
+.es-sb-igual { background: #F0EFEA; color: #6B6B70; }
+.es-sb-baja { background: #FCEDE6; color: #B5611A; }
+/* Comentarios y cambios */
+.es-cm { background: #F7F6F2; border-radius: 14px; padding: 9px 11px; margin-bottom: 8px; font-size: 13px; }
+.es-cm-coach { background: #EEF4FC; }
+.es-cm-h { color: #6B6B70; }
+.es-cm-h b { color: #1F1F1F; }
+.es-cm-h span { float: right; font-size: 11.5px; color: #9A9AA0; }
+.es-cm-t { margin-top: 3px; color: #2B2B2E; line-height: 1.45; }
+.es-cm-e { margin-top: 6px; display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: 11.5px; font-weight: 700; color: #6B6B70; }
+.es-cm-ok { color: #2F7A45; }
+.es-cm-pend { color: #B5611A; }
+.es-cb { padding: 7px 0; font-size: 13px; color: #2B2B2E; }
+.es-cb + .es-cb { border-top: 1px solid #F1EFEA; }
+.es-cb-de { color: #6B6B70; text-decoration: line-through; text-decoration-color: #C9C7C0; }
+.es-cb-m { font-size: 11.5px; color: #9A9AA0; margin-top: 2px; }
+/* La franja corta (ficha, Entrenamiento, Alimentación) */
+.es-franja { display: flex; align-items: center; gap: 8px 18px; flex-wrap: wrap; background: #fff; border-radius: 18px; padding: 11px 16px; margin: 4px 0 14px; box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 18px rgba(40,40,30,.05); font-size: 13px; color: #6B6B70; }
+.es-franja-k { font-size: 11px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: #9A9AA0; }
+.es-franja-n { white-space: nowrap; }
+.es-franja-n b { font-size: 18px; font-weight: 800; letter-spacing: -.02em; margin-right: 4px; }
+.es-franja-d { font-size: 12.5px; }
+.es-franja-btn { margin-left: auto; border: 0; border-radius: 999px; padding: 8px 14px; background: #1F1F1F; color: #fff; font: 700 13px Figtree, system-ui, sans-serif; cursor: pointer; }
+/* Cabecera del cliente en Seguimiento */
+.seg-cab { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.seg-cab-txt { flex: 1; min-width: 200px; }
+.seg-cab-n { font-size: 22px; font-weight: 800; letter-spacing: -.02em; color: #1F1F1F; }
+.seg-cab-s { font-size: 13px; color: #6B6B70; }
+.seg-cab-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.seg-pt { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+/* Lista de Seguimiento por días sin seguimiento */
+.seg-li-grp { font-size: 11px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: #9A9AA0; padding: 10px 8px 4px; }
+.seg-li { display: flex; align-items: center; gap: 10px; padding: 9px 8px; border-radius: 14px; cursor: pointer; }
+.seg-li:hover { background: #F7F6F2; }
+.seg-li.activo { background: #EEF4FC; }
+.seg-li-txt { flex: 1; min-width: 0; }
+.seg-li-txt b { display: block; font-size: 14px; font-weight: 650; color: #1F1F1F; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seg-li-txt span { display: block; font-size: 12px; color: #6B6B70; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seg-li-txt .seg-li-tarde { color: #B5611A; }
+.seg-li-ck { flex: none; font-size: 11.5px; padding: 4px 9px; }

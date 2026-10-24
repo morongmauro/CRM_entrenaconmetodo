@@ -1505,6 +1505,7 @@ let _settings = { usd_cop_rate: 4000, nombre_coach: 'Coach', mealtracker_url: ''
                   guia_alimentacion: '', guia_entrenamiento: '', guia_mealtracker: '' };
 let _clientesCache = null;
 let _selectedClienteId = null;
+let _segIrA = null;   // el cliente al que se llegó con «Hacer seguimiento» (aunque no esté activo)
 let _segView = 'focus';
 let _pagosView = 'table';
 // Lo que la app del cliente le está mostrando AHORA sobre su pago. Se pide al
@@ -3922,7 +3923,8 @@ routes.seguimiento = async () => {
   // Solo ACTIVOS. Un cliente en pausa o finalizado no es trabajo de esta
   // semana; llenaba la lista y obligaba a buscar entre gente con la que no
   // se está trabajando. Están en Clientes, en su subsección.
-  const clientes = todos.filter(c => c.estado === 'activo');
+  // Excepción: si vienes de la ficha de uno que no está activo, ese sí.
+  const clientes = todos.filter(c => c.estado === 'activo' || (_segIrA && c.id === _segIrA));
   // Si el que estaba abierto pasó a pausa o se finalizó, se suelta la
   // selección en vez de dejar la pantalla en blanco.
   if (_selectedClienteId && !clientes.some(c => c.id === _selectedClienteId)) _selectedClienteId = null;
@@ -3938,7 +3940,7 @@ routes.seguimiento = async () => {
     <div class="flex items-baseline justify-between mb-5 flex-wrap gap-3">
       <div>
         <h2 class="text-2xl font-bold text-slate-900">Seguimiento</h2>
-        <p class="text-sm text-slate-500">Bitácora semanal por cliente</p>
+        <p class="text-sm text-slate-500">Tu seguimiento de la semana, cliente por cliente</p>
       </div>
       <div class="flex items-center gap-3 flex-wrap">
         <div class="bg-slate-200 rounded-xl p-1 flex gap-1">
@@ -4027,6 +4029,10 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
     }
   }
 
+  // La lista va por días sin seguimiento (seguimiento-semana.js). Sin la
+  // tabla del historial, como antes: por estado y última semana registrada.
+  const U = typeof segUltimos === 'function' ? await segUltimos() : null;
+  if (U) _seg.lista = clientes;
   const sidebar = `
     <aside class="col-span-12 lg:col-span-4 card h-fit">
       <div class="relative mb-3">
@@ -4034,7 +4040,7 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
         <span class="absolute left-3 top-2.5 text-slate-400 text-sm">🔍</span>
       </div>
       <div id="seg-list" class="space-y-1 max-h-[600px] overflow-y-auto scrollbar-thin">
-        ${ordenados.map(c => clienteSidebarItem(c, ultPorCliente[c.id])).join('')}
+        ${U ? segListaHTML(clientes, U, _selectedClienteId) : ordenados.map(c => clienteSidebarItem(c, ultPorCliente[c.id])).join('')}
       </div>
     </aside>
   `;
@@ -4069,7 +4075,14 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
     <div class="grid grid-cols-12 gap-4">
       ${sidebar}
       <div class="col-span-12 lg:col-span-8 space-y-4">
-        ${clienteHeaderCard(cliente, segs, promAdh, tend, tendColor, sparkPoints)}
+        ${segCabeceraHTML(cliente)}
+        ${esArmazonHTML(cliente)}
+
+        <div class="text-xs font-bold text-slate-500 uppercase tracking-wider px-1 pt-2">Más de ${escapeHtml(String(cliente.nombre || '').split(/\s+/)[0])}</div>
+        <details class="card" data-seg-adherencia>
+          <summary class="cursor-pointer text-xs font-bold text-slate-500 uppercase tracking-wider">Adherencia y alineación · últimas semanas</summary>
+          <div class="mt-3">${clienteHeaderCard(cliente, segs, promAdh, tend, tendColor, sparkPoints)}</div>
+        </details>
 
         <details class="card">
           <summary class="cursor-pointer text-xs font-bold text-slate-500 uppercase tracking-wider">🥗 Historial de meta nutricional y macros</summary>
@@ -4081,13 +4094,8 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
           <div class="mt-3">${historialCorporalHTML(cliente, medsCliente, {})}</div>
         </details>
 
-        ${typeof vtPanel === 'function' ? `<details class="card" open data-seg-videos>
-          <summary class="cursor-pointer text-xs font-bold text-slate-500 uppercase tracking-wider">🎥 Videos de técnica · pedidos, por revisar y a mejorar</summary>
-          <div class="mt-3" id="seg-vt"></div>
-        </details>` : ''}
-
-        ${typeof pfPanel === 'function' ? `<details class="card" open data-seg-progreso>
-          <summary class="cursor-pointer text-xs font-bold text-slate-500 uppercase tracking-wider">📈 Progreso de fuerza · por ejercicio y por patrón</summary>
+        ${typeof pfPanel === 'function' ? `<details class="card" data-seg-progreso>
+          <summary class="cursor-pointer text-xs font-bold text-slate-500 uppercase tracking-wider">📈 Progreso de fuerza · gráficas por ejercicio y por patrón</summary>
           <div class="mt-3" id="seg-pf"></div>
         </details>` : ''}
 
@@ -4101,6 +4109,29 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
   const sl = $('#seg-list'); if (sl && prevScroll) sl.scrollTop = prevScroll;
   if (typeof vtPanel === 'function') vtPanel('#seg-vt', cliente.id);
   if (typeof pfPanel === 'function') pfPanel('#seg-pf', cliente.id);
+  esPintar(cliente);
+}
+
+// La cabecera del cliente en Seguimiento: quién es, su ciclo y su pago, y los
+// atajos para ajustar (Entrenamiento, Alimentación), ver la ficha o escribirle.
+function segCabeceraHTML(c) {
+  const telWa = String(c.telefono || '').replace(/[^\d]/g, '');
+  const sub = [c.objetivo, c.dia_pago ? `pago el ${c.dia_pago}` : null].filter(Boolean).map(escapeHtml).join(' · ');
+  return `
+    <div class="card seg-cab" data-seg-cabecera>
+      ${helpers.avatarBig(c.nombre)}
+      <div class="seg-cab-txt">
+        <div class="seg-cab-n">${escapeHtml(c.nombre)}</div>
+        <div class="seg-cab-s">${sub}<span data-seg-ciclo hidden></span></div>
+      </div>
+      <div class="seg-cab-btns">
+        <button class="btn btn-secondary btn-sm" data-seg-ir="entreno" onclick="verEntrenamientoCliente('${c.id}')"><i class="seg-pt" style="background:#5F6670"></i>Ajustar entreno</button>
+        <button class="btn btn-secondary btn-sm" data-seg-ir="comida" onclick="verNutricionCliente('${c.id}')"><i class="seg-pt" style="background:#46965A"></i>Ajustar alimentación</button>
+        <button class="btn btn-secondary btn-sm" data-seg-ir="ficha" onclick="verCliente('${c.id}')">Ficha</button>
+        <button class="btn btn-secondary btn-sm" onclick="abrirDialogos('${c.id}')">Diálogos</button>
+        ${telWa ? `<a class="btn btn-primary btn-sm" style="background:#25A35A!important" href="https://wa.me/${telWa}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+      </div>
+    </div>`;
 }
 
 function clienteSidebarItem(c, ult) {
@@ -4127,7 +4158,7 @@ function clienteSidebarItem(c, ult) {
 
 window.filtrarClientesSidebar = (q) => {
   const ql = q.toLowerCase().trim();
-  $$('#seg-list button').forEach(b => {
+  $$('#seg-list [data-nombre]').forEach(b => {
     b.style.display = !ql || b.dataset.nombre.includes(ql) ? '' : 'none';
   });
 };
@@ -7866,7 +7897,7 @@ window.verCliente = async (id) => {
   // Pagos · Journey · Perfil.
   const telWa = String(c.telefono || '').replace(/[^\d]/g, '');
   const pagoTxt = c.dia_pago ? `Pago el ${c.dia_pago} de cada mes` : 'Sin día de pago';
-  setTimeout(() => { fichaPestanas(c); if (typeof pfPanel === 'function') pfPanel('#ficha-pf', c.id); esPintar(c); }, 40);
+  setTimeout(() => { fichaPestanas(c); if (typeof pfPanel === 'function') pfPanel('#ficha-pf', c.id); }, 40);
   openModal(modalShell('Ficha del cliente', `
     <div class="space-y-4" data-ficha>
       <div class="flex items-center gap-4 flex-wrap" data-ficha-cabecera>
@@ -7906,7 +7937,7 @@ window.verCliente = async (id) => {
           .map(([k, t], n) => `<button class="chip ${n ? '' : 'active'}" data-ficha-tab="${k}" onclick="fichaVerPestana('${k}')">${t}</button>`).join('')}
       </div>
 
-      ${esArmazonHTML(c)}
+      ${esFichaHTML(c)}
 
       <div class="sec sec-slate" data-ficha-sec="perfil">
         <div class="sec-title">Datos</div>

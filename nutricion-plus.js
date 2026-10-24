@@ -1195,7 +1195,8 @@ routes.nutricion = async () => {
         <p class="text-xs text-slate-500">Todo lo que registró en su app, en vivo. Semanas ISO (lunes a domingo), las mismas del seguimiento.</p>
       </div>
       ${selector}
-    </div>`;
+    </div>
+    ${typeof esFranjaHTML === 'function' ? esFranjaHTML(cliente, 'comida') : ''}`;
 
   if (_nut.cargando) { view.innerHTML = `${cabecera}<div class="card">Leyendo el Mealtracker…</div>`; return; }
 

@@ -596,7 +596,7 @@ routes.entrenamiento = async () => {
   view.innerHTML = `
     <div class="mb-4">
       <h2 class="text-2xl font-bold text-slate-900">Entrenamiento</h2>
-      <p class="text-sm text-slate-500">Tus clientes y sus ciclos. Toca uno para armar su calendario, sus rutinas y sus ciclos.</p>
+      <p class="text-sm text-slate-500">Crear y ajustar: calendario, rutinas, ciclos, plantillas y galería. El seguimiento de la semana está en Seguimiento.</p>
     </div>
     <!-- Aviso de ciclos por vencer (ciclos-vencen.js); vacío si no hay nada. -->
     ${_ent.tab !== 'ciclos' ? '<div id="cic-aviso"></div>' : ''}
@@ -3211,7 +3211,8 @@ async function entVistaClientes() {
         <button class="btn btn-secondary btn-sm" data-traer-btn onclick="entImportarFase()" title="Una rutina de fuerza o el ciclo completo, con su calendario">⇄ Traer de otro cliente</button>
         <button class="btn btn-primary btn-sm" onclick="entNuevaFase()">+ Nueva fase</button>
       </div>
-    </div>`;
+    </div>
+    ${typeof esFranjaHTML === 'function' ? esFranjaHTML(cliente, 'entreno') : ''}`;
 
   // Su ciclo: si vence pronto, ya venció o no está enviado, se dice aquí
   // arriba con el botón para resolverlo (ciclos-vencen.js).
