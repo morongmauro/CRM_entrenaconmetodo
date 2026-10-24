@@ -118,8 +118,11 @@ function pfCalcular(sesiones, series, ejs) {
 // Por ejercicio: línea del peso (o de las reps si es de peso corporal) y
 // barras de las reps de la mejor serie de cada sesión.
 function pfGraficaEjercicio(e, color) {
+  // Como las líneas de la app: del color de entreno, sin rejilla, picos y el
+  // valor en cada punto.
+  color = (window.EM_COLOR && EM_COLOR.entreno) || '#5F6670';
   const pts = e.puntos.slice(-16);
-  const W = 640, H = 230, izq = 38, der = 12, arr = 26, abj = 34;
+  const W = 640, H = 230, izq = 22, der = 22, arr = 26, abj = 34;
   const ancho = W - izq - der, alto = H - arr - abj;
   const paso = pts.length > 1 ? ancho / (pts.length - 1) : 0;
   const x = (i) => izq + (pts.length > 1 ? i * paso : ancho / 2);
@@ -137,22 +140,25 @@ function pfGraficaEjercicio(e, color) {
   }).join('') : '';
   const linea = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(ys[i]).toFixed(1)}`).join(' ');
   const area = `${linea} L${x(pts.length - 1).toFixed(1)} ${arr + alto} L${x(0).toFixed(1)} ${arr + alto} Z`;
-  const guias = [0, 0.5, 1].map(f => { const v = lo + (hi - lo) * f; return `<line x1="${izq}" x2="${W - der}" y1="${y(v)}" y2="${y(v)}" stroke="#EEF0F3"/><text x="${izq - 6}" y="${y(v) + 3.5}" text-anchor="end" font-size="10" fill="#9AA0A8">${pfNum(v)}</text>`; }).join('');
-  const puntos = pts.map((p, i) => `<circle cx="${x(i)}" cy="${y(ys[i])}" r="4.5" fill="#fff" stroke="${color}" stroke-width="2.5"/>
-    <text x="${x(i)}" y="${y(ys[i]) - 10}" text-anchor="middle" font-size="11" font-weight="800" fill="#1F1F1F">${e.conPeso ? pfNum(p.peso) : p.reps}</text>`).join('');
+  const guias = `<line x1="${izq}" x2="${W - der}" y1="${arr + alto}" y2="${arr + alto}" stroke="#EFEDE8" stroke-width="1.5"/>`;
+  const puntos = pts.map((p, i) => i === pts.length - 1
+    ? `<circle cx="${x(i)}" cy="${y(ys[i])}" r="5.5" fill="${color}" stroke="#fff" stroke-width="2.5"/>
+    <text x="${x(i)}" y="${y(ys[i]) - 11}" text-anchor="middle" font-size="12" font-weight="800" fill="#1F1F1F" paint-order="stroke" stroke="#fff" stroke-width="3.5">${e.conPeso ? pfNum(p.peso) : p.reps}</text>`
+    : `<circle cx="${x(i)}" cy="${y(ys[i])}" r="3.2" fill="#fff" stroke="${color}" stroke-width="2"/>
+    <text x="${x(i)}" y="${y(ys[i]) - 10}" text-anchor="middle" font-size="11" font-weight="700" fill="#45454A" paint-order="stroke" stroke="#fff" stroke-width="3.5">${e.conPeso ? pfNum(p.peso) : p.reps}</text>`).join('');
   const cada = Math.ceil(pts.length / 8);
   const fechas = pts.map((p, i) => (i % cada === 0 || i === pts.length - 1) ? `<text x="${x(i)}" y="${H - 12}" text-anchor="middle" font-size="10" fill="#8E8E93">${pfFecha(p.fecha)}</text>` : '').join('');
   const id = 'pfg' + String(e.id).replace(/[^a-z0-9]/gi, '').slice(0, 10);
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Progreso de ${escapeHtml(e.nombre)}" data-pf-grafica-ejercicio style="display:block;max-width:820px">
-    <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".20"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
-    ${guias}${barras}<path d="${area}" fill="url(#${id})"/><path d="${linea}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>${puntos}${fechas}
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".16"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
+    ${guias}${barras}<path d="${area}" fill="url(#${id})"/><path d="${linea}" fill="none" stroke="${color}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>${puntos}${fechas}
   </svg>`;
 }
 
 // Por patrón: el % de cambio semana a semana, con la raya del 0 (su inicio).
 function pfGraficaPatron(g) {
   const s = g.serie.slice(-12);
-  const W = 300, H = 120, izq = 6, der = 6, arr = 14, abj = 18;
+  const W = 300, H = 130, izq = 6, der = 6, arr = 22, abj = 18;
   if (s.length < 2) return `<div class="text-xs text-slate-400 py-6 text-center">Aún pocas semanas para ver la curva.</div>`;
   const ancho = W - izq - der, alto = H - arr - abj;
   let lo = Math.min(0, ...s.map(p => p.pct)), hi = Math.max(0, ...s.map(p => p.pct));
@@ -164,7 +170,8 @@ function pfGraficaPatron(g) {
     <line x1="${izq}" x2="${W - der}" y1="${y(0)}" y2="${y(0)}" stroke="#D9DCE1" stroke-dasharray="3 4"/>
     <path d="${linea} L${x(s.length - 1)} ${y(lo)} L${x(0)} ${y(lo)} Z" fill="${g.tinta}"/>
     <path d="${linea}" fill="none" stroke="${g.color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-    ${s.map((p, i) => `<circle cx="${x(i)}" cy="${y(p.pct)}" r="${i === s.length - 1 ? 4.5 : 2.6}" fill="${i === s.length - 1 ? '#fff' : g.color}" stroke="${g.color}" stroke-width="2"/>`).join('')}
+    ${s.map((p, i) => `<circle cx="${x(i)}" cy="${y(p.pct)}" r="${i === s.length - 1 ? 4.5 : 2.8}" fill="${i === s.length - 1 ? g.color : '#fff'}" stroke="${i === s.length - 1 ? '#fff' : g.color}" stroke-width="2"/>
+      <text x="${x(i)}" y="${y(p.pct) - 7}" text-anchor="${i === 0 ? 'start' : i === s.length - 1 ? 'end' : 'middle'}" font-size="${i === s.length - 1 ? 10.5 : 9}" font-weight="${i === s.length - 1 ? 800 : 700}" fill="${i === s.length - 1 ? '#1F1F1F' : '#6B6B70'}" paint-order="stroke" stroke="#fff" stroke-width="3">${pfSigno(Math.round(p.pct), '%')}</text>`).join('')}
     <text x="${izq}" y="${H - 4}" font-size="9.5" fill="#9AA0A8">${pfFecha(s[0].semana)}</text>
     <text x="${W - der}" y="${H - 4}" text-anchor="end" font-size="9.5" fill="#9AA0A8">${pfFecha(s[s.length - 1].semana)}</text>
   </svg>`;
@@ -206,7 +213,7 @@ function pfHTML(d, clave) {
   const lista = d.ejercicios.filter(e => _pf.patron === 'todos' || (_pf.patron === 'otros' ? !e.grupo : e.grupo === _pf.patron));
   if (!lista.some(e => e.id === _pf.ej)) _pf.ej = (lista.find(e => e.puntos.length >= 2) || lista[0] || {}).id || null;
   const e = lista.find(x => x.id === _pf.ej);
-  const color = e ? pfColor(e.grupo) : '#1F1F1F';
+  const color = (window.EM_COLOR && EM_COLOR.entreno) || '#5F6670';   // el de entreno, como la app
   const filtros = [['todos', 'Todos'], ...PF_GRUPOS.map(g => [g.id, g.nombre]), ['otros', 'Otros']]
     .filter(([id]) => id === 'todos' || d.ejercicios.some(x => (id === 'otros' ? !x.grupo : x.grupo === id)));
   const a = e && e.puntos[0], z = e && e.puntos[e.puntos.length - 1];

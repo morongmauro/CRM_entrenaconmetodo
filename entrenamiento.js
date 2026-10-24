@@ -3021,15 +3021,22 @@ function entAvatar(nombre) {
   let h = 0; for (const ch of String(nombre || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return `<span style="flex:none;display:grid;place-items:center;border-radius:999px;color:#fff;font-weight:800;width:40px;height:40px;font-size:14px;background:${tonos[h % tonos.length]}">${escapeHtml(ini)}</span>`;
 }
-// El aro de cumplimiento, como los de la app: verde ≥ 80 %, naranja ≥ 50 %, rojo debajo.
-function entAro(pct, titulo = '', t = 54) {
-  const g = t >= 80 ? 9 : 6, r = (t - g) / 2, c = 2 * Math.PI * r;
-  const color = pct == null ? '#C7C7CC' : pct >= 80 ? '#46965A' : pct >= 50 ? '#EE8434' : '#D64541';
+// Los colores de cada módulo, los mismos de la app del cliente
+// (Reconocimiento.jsx · COLOR_MODULO). Adherencia y cuerpo van en el azul de
+// la marca. Así un aro o una línea dicen de qué son con solo verlos.
+const EM_COLOR = { entreno: '#5F6670', comida: '#46965A', aprende: '#EE8434', adherencia: '#3C7BD6', cuerpo: '#3C7BD6', global: '#1F1F1F', meta: '#C9C7C0' };
+window.EM_COLOR = EM_COLOR;
+// El aro de cumplimiento, como los de la app: grueso, del color del módulo,
+// con el punto blanco al final y el número al centro. Cómo va lo dice el %.
+function entAro(pct, titulo = '', t = 54, color = EM_COLOR.entreno) {
+  const g = t >= 80 ? 11 : t >= 60 ? 9 : 6, r = (t - g) / 2, c = 2 * Math.PI * r;
   const v = pct == null ? 0 : Math.max(0, Math.min(100, pct));
+  const ang = (v / 100) * 2 * Math.PI, px = t / 2 + r * Math.cos(ang), py = t / 2 + r * Math.sin(ang);
   return `<span style="flex:none;position:relative;display:block;width:${t}px;height:${t}px" data-aro-cumplimiento="${pct ?? ''}" title="${escapeHtml(titulo)}">
-    <svg width="${t}" height="${t}" style="transform:rotate(-90deg)"><circle cx="${t / 2}" cy="${t / 2}" r="${r}" stroke="#EEECE7" stroke-width="${g}" fill="none"/>
-    <circle cx="${t / 2}" cy="${t / 2}" r="${r}" stroke="${color}" stroke-width="${g}" fill="none" stroke-linecap="round" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${(c * (1 - v / 100)).toFixed(1)}"/></svg>
-    <span style="position:absolute;inset:0;display:grid;place-items:center;font-weight:800;font-size:${t >= 80 ? 20 : 13}px;letter-spacing:-.02em">${pct == null ? '—' : pct + '%'}</span></span>`;
+    <svg width="${t}" height="${t}" style="transform:rotate(-90deg)"><circle cx="${t / 2}" cy="${t / 2}" r="${r}" stroke="#EFEDE8" stroke-width="${g}" fill="none"/>
+    ${v > 0 ? `<circle cx="${t / 2}" cy="${t / 2}" r="${r}" stroke="${color}" stroke-width="${g}" fill="none" stroke-linecap="round" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${(c * (1 - v / 100)).toFixed(1)}"/>
+    <circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${Math.max(1.6, g * 0.3).toFixed(1)}" fill="#fff" style="filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.25))"/>` : ''}</svg>
+    <span style="position:absolute;inset:0;display:grid;place-items:center;font-weight:800;font-size:${t >= 80 ? 22 : t >= 60 ? 17 : 12}px;letter-spacing:-.03em;color:#1F1F1F">${pct == null ? '—' : pct + '%'}</span></span>`;
 }
 
 function entTarjetaCiclo(r, e) {
@@ -3644,9 +3651,13 @@ function entCeldaDia(f, ctx) {
     const n = (ejerciciosPorRutina[r.id] || []).length;
     // Lo que el cliente marcó ese día, si ya llegó de la red.
     const ses = sesionesPorFecha ? (sesionesPorFecha[f] || []).find(x => x.rutina_id === r.id) : null;
-    const marca = entMarcaSesion(ses, f, hoy, dentroFase);
+    // Como en la app: negra = hecha, gris = por hacer, borde rojo = le
+    // tocaba y no la hizo. El ✓ del día va junto al número.
+    const estado = ses ? (ses.estado === 'completada' ? 'hecha' : ses.estado === 'saltada' ? 'falto' : '')
+      : dentroFase && f < hoy ? 'falto' : 'porhacer';
+    const marca = ses && ses.estado === 'completada' ? '' : entMarcaSesion(ses, f, hoy, dentroFase).replace(/<span class="ent-marca ent-marca-vacia"[^>]*>·<\/span>/, '');
     trozos.push(`
-      <div class="ent-chip ent-chip-rutina ${slot.fijada ? '' : 'ent-chip-sugerida'} ${quien ? 'ent-chip-un-dia' : ''}"
+      <div class="ent-chip ent-chip-rutina ${estado ? 'ent-chip-' + estado : ''} ${slot.fijada ? '' : 'ent-chip-sugerida'} ${quien ? 'ent-chip-un-dia' : ''}"
            draggable="true" data-rutina="${r.id}" data-dia="${codigo}" ${quien ? `data-cambio="${quien}"` : ''}
            ondragstart="entCalDragStart(event)" ondragend="entCalDragEnd(event)"
            onclick="event.stopPropagation(); entAbrirRutinaDesdeCalendario('${r.id}')"
@@ -3691,8 +3702,8 @@ function entCeldaDia(f, ctx) {
   if (sesionesPorFecha) {
     (sesionesPorFecha[f] || []).filter(x => (!x.rutina_id || !slot || x.rutina_id !== slot.r.id) && !bloques.some(b => b.id === x.rutina_id))
       .forEach(x => trozos.push(`
-        <div class="ent-chip ent-chip-suelta" title="Sesión registrada sin rutina del plan">
-          ${entMarcaSesion(x, f, hoy, true)}<span class="ent-chip-txt">${escapeHtml(x.rutinas?.nombre || 'Entrenó')}</span>
+        <div class="ent-chip ent-chip-suelta ${x.estado === 'completada' ? 'ent-chip-hecha' : ''}" title="Sesión registrada sin rutina del plan">
+          ${x.estado === 'completada' ? '' : entMarcaSesion(x, f, hoy, true)}<span class="ent-chip-txt">${escapeHtml(x.rutinas?.nombre || 'Entrenó')}</span>
         </div>`));
   }
 
@@ -3702,7 +3713,7 @@ function entCeldaDia(f, ctx) {
          onclick="entDiaPanel('${f}')"
          title="Clic para ver y añadir lo de este día">
       <div class="ent-celda-cab">
-        <span class="ent-celda-num">${dia}</span>
+        <span class="ent-celda-izq"><span class="ent-celda-num">${dia}</span>${sesionesPorFecha && (sesionesPorFecha[f] || []).some(x => x.estado === 'completada') ? '<span class="ent-celda-ok ent-marca-ok" data-cal-entreno title="Entrenó ese día"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#1F1F1F" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>' : ''}</span>
         ${semana && codigo === 'L' ? `<span class="ent-celda-sem">S${semana}</span>` : ''}
       </div>
       <div class="ent-celda-cuerpo">${trozos.join('')}</div>

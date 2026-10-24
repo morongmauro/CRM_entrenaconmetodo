@@ -381,3 +381,52 @@ span.seg-check-ok { cursor: default; }
 .pay-table tr.pagos-fila-pagado { background: #EEF6F0; color: #2F6F40; font-weight: 700; }
 .pay-table tr.pagos-fila-falta { background: #FDF4EA; color: #9A4F12; font-weight: 700; }
 .pay-table tr.pagos-fila-total { background: #1F1F1F; color: #fff; font-weight: 800; }
+/* ── Gráficas con el aspecto de la app ─────────────────────────────────── */
+.em-barra { height: 9px; border-radius: 9px; background: #EFEDE8; overflow: hidden; }
+.em-barra > i { display: block; height: 100%; border-radius: 9px; }
+.em-barra-fina { height: 7px; }
+.em-qa { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.em-qa-col { background: #fff; border-radius: 16px; padding: 12px 12px 10px; box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 16px rgba(40,40,30,.05); min-width: 0; }
+.em-qa-zona { position: relative; height: 92px; display: flex; align-items: flex-end; gap: 10px; }
+.em-qa-meta { position: absolute; left: 0; right: 0; top: 0; border-top: 2.5px dotted rgba(31,31,31,.45); }
+.em-qa-barra { width: 34px; border-radius: 10px; flex: none; }
+.em-qa-num { font-size: 20px; font-weight: 800; letter-spacing: -.02em; color: #1F1F1F; line-height: 1; padding-bottom: 2px; }
+.em-qa-num small { display: block; font-size: 12px; font-weight: 700; color: #6B6B70; margin-top: 3px; letter-spacing: 0; }
+.em-qa-sem { font-size: 12px; font-weight: 700; color: #9A9AA0; margin-top: 8px; }
+.em-qa-com { font-size: 12.5px; color: #45454A; margin-top: 4px; display: flex; align-items: center; gap: 6px; }
+.em-qa-com i { width: 7px; height: 7px; border-radius: 9px; flex: none; }
+@media (max-width: 560px) { .em-qa { gap: 8px; } .em-qa-col { padding: 10px 8px; } .em-qa-barra { width: 22px; } .em-qa-num { font-size: 16px; } }
+/* ── Calendario del cliente con el aspecto de la app (Mes) ─────────────── */
+.ent-mes-scroll { background: #fff; border-radius: 22px; padding: 12px 14px 8px; box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 22px rgba(40,40,30,.05); }
+.ent-mes-cabecera { gap: 0; margin: 0; border-bottom: 1px solid #EEECE7; }
+.ent-mes-cabecera > div { font-size: 12.5px; font-weight: 700; text-transform: none; letter-spacing: 0; color: #6B6B70; text-align: left; padding: 0 6px 8px; }
+.ent-mes { gap: 0; }
+.ent-celda { background: transparent; border: 0; border-bottom: 1px solid #F1EFEA; border-radius: 0; min-height: 6.2rem; padding: 7px 5px 6px; gap: 4px; }
+.ent-celda:hover { background: #FAF9F6; border-color: #F1EFEA; }
+.ent-celda-off { background: transparent; border-style: solid; }
+.ent-celda-off .ent-celda-num { color: #C9C7C0; }
+.ent-celda-fuera { opacity: .42; }
+.ent-celda-hoy { box-shadow: none; border-color: #F1EFEA; }
+.ent-celda-izq { display: inline-flex; align-items: center; gap: 5px; }
+.ent-celda-num { font-size: 15px; font-weight: 700; color: #1F1F1F; line-height: 1; }
+.ent-celda-hoy .ent-celda-num { color: #fff; background: #1F1F1F; width: 26px; height: 26px; border-radius: 99px; display: inline-grid; place-items: center; }
+.ent-celda-ok { width: 17px; height: 17px; border-radius: 99px; background: #F2C94C; display: inline-grid; place-items: center; flex: none; }
+.ent-celda-sem { font-size: 10.5px; font-weight: 800; color: #9A9AA0; background: #F4F3EF; padding: 1px 7px; }
+.ent-chip { font-size: 11.5px; border-radius: 7px; padding: 3px 6px; }
+.ent-chip-rutina { background: #F1F0EC; color: #6B6B70; font-weight: 800; border: 0; }
+.ent-chip-rutina.ent-chip-hecha, .ent-chip-suelta.ent-chip-hecha { background: #1F1F1F; color: #fff; font-style: normal; font-weight: 800; }
+.ent-chip-rutina.ent-chip-falto { background: #fff; color: #A3301B; box-shadow: inset 0 0 0 1.5px #F0B6A8; }
+.ent-chip-rutina.ent-chip-sugerida { background: #fff; outline: 1.5px dashed #C9C7C0; outline-offset: -1.5px; }
+.ent-chip-un-dia { box-shadow: none; outline: 1.5px dashed #1F1F1F; outline-offset: -1.5px; }
+.ent-chip-rutina.ent-chip-falto.ent-chip-un-dia { box-shadow: inset 0 0 0 1.5px #F0B6A8; }
+.ent-chip-hecha .ent-chip-quien { color: #9CC0F0; }
+.ent-chip-hecha .ent-chip-quitar { color: #fff; }
+.ent-chip-evento { font-size: 11px; color: #45454A; font-weight: 600; }
+.ent-chip-evento::before { width: 6px; height: 6px; }
+.ent-chip-suya { font-size: 11px; color: #46965A; }
+.ent-chip-pago { background: transparent; color: #C9672B; font-size: 11px; }
+.ent-chip-marca { font-size: 10.5px; color: #9A9AA0; }
+.ent-chip-bloque { font-size: 10.5px; border: 0; background: #F4F3EF; }
+.ent-mes-arrastrando .ent-celda:not(.ent-celda-off) { background: #FAFAF6; }
+.ent-celda-destino { background: #F4F3EF !important; box-shadow: inset 0 0 0 2px #1F1F1F; border-radius: 10px; }
+@media (max-width: 700px) { .ent-mes-scroll { padding: 8px 6px; border-radius: 18px; } .ent-celda-num { font-size: 13px; } .ent-chip { font-size: 10.5px; } }

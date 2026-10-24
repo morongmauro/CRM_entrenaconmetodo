@@ -1273,27 +1273,32 @@ async function quickAdherencia3Sem(c, contId, segsPre) {
       getMealtrackerDataMerged(c).catch(() => null),
     ]);
     const bySem = new Map((segs || []).map(s => [s.semana, s]));
-    const pctColor = (p) => p == null ? 'text-slate-400' : p >= 85 ? 'text-emerald-600' : p >= 60 ? 'text-amber-600' : 'text-red-500';
+    // Como las barras de la app: una barra por semana del color de entreno,
+    // la raya punteada es lo planeado; debajo, la comida de esa semana.
+    const C = window.EM_COLOR || { entreno: '#5F6670', comida: '#46965A' };
     const cols = semanas.map((sem, i) => {
       const tag = i === 2 ? 'En curso' : i === 1 ? 'Pasada' : 'Hace 2';
       const sg = bySem.get(sem);
       const entPct = sg && sg.dias_planeados ? Math.round(((sg.dias_asistidos || 0) / sg.dias_planeados) * 100) : null;
       const ent = sg && sg.dias_planeados ? `${sg.dias_asistidos ?? 0}/${sg.dias_planeados}` : '—';
-      let ali = '—', aliPct = null;
+      let ali = null, aliPct = null;
       if (mtData) {
         const r = resumenSemanaDeData(mtData, sem);
         ali = `${r.dias}/7`;
         const g = goalsDeSemanaMT(mtData, sem);
         if (r.kcal_avg != null && g && g.kcal) aliPct = Math.round((r.kcal_avg / g.kcal) * 100);
       }
-      return `<div class="flex-1 min-w-[120px] bg-white rounded-xl border border-slate-200 p-2.5 text-center">
-        <div class="text-[10px] uppercase tracking-wide text-slate-400 font-bold">${tag} · ${fmt.labelSemana(sem)}</div>
-        <div class="mt-1.5 text-[11px] text-slate-500">🏋️ <span class="font-bold ${pctColor(entPct)}">${ent}</span>${entPct != null ? ` <span class="${pctColor(entPct)}">(${entPct}%)</span>` : ''}</div>
-        <div class="mt-1 text-[11px] text-slate-500">🍽 <span class="font-bold text-slate-700">${ali}</span>${aliPct != null ? ` · <span class="${pctColor(aliPct)}">${aliPct}% kcal</span>` : ''}</div>
+      const alto = entPct == null ? 0 : Math.min(100, entPct);
+      return `<div class="em-qa-col" data-em-qa="${i}">
+        <div class="em-qa-zona"><span class="em-qa-meta"></span>
+          <span class="em-qa-barra" style="height:${Math.max(alto, entPct == null ? 0 : 4)}%;background:${C.entreno};opacity:${entPct != null && entPct >= 100 ? 1 : .45}"></span>
+          <span class="em-qa-num">${ent}${entPct != null ? `<small>${entPct} %</small>` : ''}</span></div>
+        <div class="em-qa-sem">${tag} · ${fmt.labelSemana(sem)}</div>
+        <div class="em-qa-com"><i style="background:${C.comida}"></i>${ali ? `Comida ${ali}${aliPct != null ? ` · ${aliPct} % kcal` : ''}` : 'Comida sin datos'}</div>
       </div>`;
     });
-    el.innerHTML = `<div class="flex gap-2 flex-wrap">${cols.join('')}</div>
-      <div class="text-[10px] text-slate-400 mt-1.5">🏋️ entrenos asistidos/planeados (seguimiento) · 🍽 días con registro/7 y % kcal vs la meta de ESA semana (mealtracker, en vivo)</div>`;
+    el.innerHTML = `<div class="em-qa">${cols.join('')}</div>
+      <div class="text-[11px] text-slate-400 mt-2">Barra: entrenos asistidos de los planeados (la raya punteada es lo planeado). Comida: días con registro de 7 y % de kcal contra la meta de esa semana.</div>`;
   } catch (e) {
     el.innerHTML = '<div class="text-xs text-slate-400">No se pudo cargar la adherencia rápida</div>';
   }
@@ -2216,6 +2221,24 @@ function _pasoBonito(rango, objetivo = 4) {
   return paso * mag;
 }
 
+// El color de cada línea, según de qué es: los de los módulos de la app
+// (entreno grafito, comida verde, cuerpo azul de marca). Las leyendas
+// (legendDot) usan la misma regla, así la línea y su punto coinciden.
+function emColorSerie(label, color) {
+  const t = String(label || '').toLowerCase();
+  const C = window.EM_COLOR || { entreno: '#5F6670', comida: '#46965A', cuerpo: '#3C7BD6', global: '#1F1F1F', meta: '#C9C7C0' };
+  if (/prote/.test(t)) return '#EE8434';
+  if (/carbo/.test(t)) return '#D9A21B';
+  if (/^grasas?$/.test(t)) return '#3C7BD6';
+  if (/registro/.test(t) && /alim/.test(t)) return '#9CC9A6';
+  if (/aliment|kcal|comida|^alim/.test(t)) return C.comida;
+  if (/entren|asist|fuerza|cumplim/.test(t)) return C.entreno;
+  if (/global/.test(t)) return C.global;
+  if (/^meta|planead/.test(t)) return C.meta;
+  if (/peso|grasa|cintura|cadera|pecho|m[uú]sculo|masa|pal\b|imc/.test(t)) return C.cuerpo;
+  return color;
+}
+
 function lineChart(series, xLabels = [], opts = {}) {
   const uid = `c${++_chartSeq}`;
   // En el teléfono el lienzo se estrecha a propósito. El SVG se escala al
@@ -2234,7 +2257,7 @@ function lineChart(series, xLabels = [], opts = {}) {
   const num = (v) => Number(v).toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: dec });
   const conUnidad = (v) => `${num(v)}${unidad ? (unidad === '%' ? '%' : ' ' + unidad) : ''}`;
 
-  const limpias = (series || []).filter(s => s && Array.isArray(s.points));
+  const limpias = (series || []).filter(s => s && Array.isArray(s.points)).map(s => ({ ...s, color: emColorSerie(s.label, s.color) }));
   const todos = limpias.flatMap(s => s.points).filter(v => v !== null && v !== undefined && isFinite(v));
   if (!todos.length) return '<p class="text-xs text-slate-400">Todavía no hay datos suficientes para dibujar la evolución.</p>';
 
@@ -2264,10 +2287,7 @@ function lineChart(series, xLabels = [], opts = {}) {
   for (let v = Math.ceil(lo / paso) * paso; v <= hi + paso / 1000; v += paso) marcas.push(+v.toFixed(6));
   if (marcas.length < 3) marcas = [lo, (lo + hi) / 2, hi];
 
-  // El margen izquierdo depende de cuánto ocupa la etiqueta más larga: con
-  // "1.850" fijo en 32px los números se salían del lienzo.
-  const anchoEtiqueta = Math.max(...marcas.map(v => num(v).length)) * 6.2 + 12;
-  const pad = { top: 20, right: 18, bottom: 34, left: Math.max(34, Math.min(70, anchoEtiqueta)) };
+  const pad = { top: 26, right: 22, bottom: 34, left: 24 };   // sin números en el eje: todo el ancho para la línea
   const iw = w - pad.left - pad.right;
   const ih = h - pad.top - pad.bottom;
   const n = Math.max(...limpias.map(s => s.points.length), 1);
@@ -2276,22 +2296,20 @@ function lineChart(series, xLabels = [], opts = {}) {
 
   let svg = `<svg viewBox="0 0 ${w} ${h}" class="w-full h-auto" preserveAspectRatio="xMidYMid meet" role="img">`;
   svg += `<defs><linearGradient id="${uid}-area" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="${limpias[0]?.color || '#8A9558'}" stop-opacity="0.22"/>
+      <stop offset="0" stop-color="${limpias[0]?.color || '#8A9558'}" stop-opacity="0.16"/>
       <stop offset="1" stop-color="${limpias[0]?.color || '#8A9558'}" stop-opacity="0"/>
     </linearGradient></defs>`;
 
   // ── Rejilla + eje Y con unidad ────────────────────────────────────────
-  for (const v of marcas) {
-    const yy = sy(v);
-    svg += `<line x1="${pad.left}" y1="${yy.toFixed(1)}" x2="${w - pad.right}" y2="${yy.toFixed(1)}" stroke="#e6e2d8" stroke-width="1"/>`;
-    svg += `<text x="${pad.left - 8}" y="${(yy + 3.5).toFixed(1)}" text-anchor="end" font-size="10.5" fill="#9A9A9A">${num(v)}</text>`;
-  }
+  // Como en la app: sin rejilla ni números en el eje, solo la base. Los
+  // valores van sobre cada punto, que es lo que se lee de verdad.
+  svg += `<line x1="${pad.left}" y1="${(pad.top + ih).toFixed(1)}" x2="${w - pad.right}" y2="${(pad.top + ih).toFixed(1)}" stroke="#EFEDE8" stroke-width="1.5"/>`;
   if (unidad) {
     svg += `<text x="${w - pad.right}" y="${pad.top - 7}" text-anchor="end" font-size="9.5" font-weight="700" fill="#9A9A9A" letter-spacing="0.5">${escapeHtml(unidad.toUpperCase())}</text>`;
   }
 
   // ── Área bajo la primera serie ────────────────────────────────────────
-  const conArea = opts.area ?? (limpias.length === 1);
+  const conArea = opts.sinArea ? false : true;
   if (conArea && limpias[0]) {
     const pts = limpias[0].points
       .map((y, i) => (y === null || y === undefined || !isFinite(y)) ? null : [sx(i), sy(y)])
@@ -2303,12 +2321,13 @@ function lineChart(series, xLabels = [], opts = {}) {
   }
 
   // ── Series ────────────────────────────────────────────────────────────
-  const pocosPuntos = n <= 10;
+  const pocosPuntos = n <= 16;
+  const cadaCuanto = Math.max(1, Math.ceil(n / 12));
   limpias.forEach((s, si) => {
     const pts = s.points
       .map((y, i) => (y === null || y === undefined || !isFinite(y)) ? null : `${sx(i).toFixed(1)},${sy(y).toFixed(1)}`)
       .filter(Boolean).join(' ');
-    if (pts) svg += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>`;
+    if (pts) svg += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>`;
 
     const idxValidos = s.points.map((y, i) => (y === null || y === undefined || !isFinite(y)) ? null : i).filter(i => i !== null);
     const ultimo = idxValidos[idxValidos.length - 1];
@@ -2317,14 +2336,19 @@ function lineChart(series, xLabels = [], opts = {}) {
       if (y === null || y === undefined || !isFinite(y)) return;
       const esUltimo = i === ultimo;
       const x = sx(i), yy = sy(y);
-      svg += `<circle cx="${x.toFixed(1)}" cy="${yy.toFixed(1)}" r="${esUltimo ? 5 : 3.5}" fill="${s.color}" stroke="#fff" stroke-width="${esUltimo ? 2.5 : 1.5}">`;
+      svg += esUltimo
+        ? `<circle cx="${x.toFixed(1)}" cy="${yy.toFixed(1)}" r="5.5" fill="${s.color}" stroke="#fff" stroke-width="2.5">`
+        : `<circle cx="${x.toFixed(1)}" cy="${yy.toFixed(1)}" r="3.2" fill="#fff" stroke="${s.color}" stroke-width="2">`;
       svg += `<title>${escapeHtml(s.label || '')}${s.label ? ' · ' : ''}${escapeHtml(xLabels[i] || '')}: ${conUnidad(y)}</title></circle>`;
       // El valor sobre el punto: con pocas mediciones se ponen todos (que es
       // el caso real de un cliente); con muchas, solo el último para no
       // convertir la gráfica en una sopa de números.
-      if (pocosPuntos || esUltimo) {
-        const arriba = yy > pad.top + 16;
-        svg += `<text x="${x.toFixed(1)}" y="${(arriba ? yy - 9 : yy + 15).toFixed(1)}" text-anchor="middle" font-size="${esUltimo ? 11 : 10}" font-weight="${esUltimo ? 700 : 600}" fill="${esUltimo ? s.color : '#5A5A5A'}" paint-order="stroke" stroke="#fff" stroke-width="3.5">${num(y)}</text>`;
+      // Con varias líneas los números no se pisan: la primera los lleva
+      // arriba del punto, la segunda abajo; de la tercera, solo el último.
+      const muestra = si >= 2 ? esUltimo : (pocosPuntos || esUltimo || i % cadaCuanto === 0);
+      if (muestra) {
+        const arriba = limpias.length > 1 && si === 1 ? yy > h - pad.bottom - 18 : yy > pad.top + 16;
+        svg += `<text x="${x.toFixed(1)}" y="${(arriba ? yy - 10 : yy + 16).toFixed(1)}" text-anchor="middle" font-size="${esUltimo ? 12 : 11}" font-weight="${esUltimo ? 800 : 700}" fill="${esUltimo ? '#1F1F1F' : '#45454A'}" paint-order="stroke" stroke="#fff" stroke-width="3.5">${num(y)}</text>`;
       }
     });
   });
@@ -2413,7 +2437,7 @@ window.cambiarRangoGrafica = (id, k) => {
 };
 
 function legendDot(color, label) {
-  return `<span class="inline-flex items-center gap-1.5 text-xs text-slate-600 mr-3"><span class="w-2.5 h-2.5 rounded-full" style="background:${color}"></span>${label}</span>`;
+  return `<span class="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 mr-2 em-leyenda"><span class="w-2 h-2 rounded-full" style="background:${emColorSerie(label, color)}"></span>${label}</span>`;
 }
 
 // ===== Días de entreno =====
@@ -4150,15 +4174,14 @@ function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
     const adhVal = adherencia !== null ? adherencia.toFixed(1) : '—';
     const scorePct = score !== null ? Math.round(score) : null;
     const barWidth = score !== null ? Math.round(score) : (adherencia !== null ? adherencia * 10 : 0);
-    const barColor = barWidth >= 75 ? 'bg-emerald-500' : barWidth >= 50 ? 'bg-amber-500' : 'bg-red-500';
-    return `<div class="flex-1 min-w-[140px]">
-      <div class="flex items-center justify-between mb-1">
-        <span class="text-xs font-semibold text-slate-600">${label}</span>
-        <span class="text-xs font-bold" style="color:${color}">${scorePct !== null ? scorePct + '%' : adhVal + '/10'}</span>
+    // Como las barras de macros de la app: gruesas y del color del módulo.
+    const col = emColorSerie(label, color);
+    return `<div class="flex-1 min-w-[140px]" data-em-barra>
+      <div class="flex items-center justify-between mb-1.5">
+        <span class="text-[13px] font-bold text-slate-800">${label}</span>
+        <span class="text-[13px] font-extrabold text-slate-900">${scorePct !== null ? scorePct + ' %' : adhVal === '—' ? '<span class="font-semibold text-slate-400">sin datos</span>' : adhVal + '/10'}</span>
       </div>
-      <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
-        <div class="h-full rounded-full ${barColor}" style="width:${barWidth}%"></div>
-      </div>
+      <div class="em-barra"><i style="width:${barWidth}%;background:${col}"></i></div>
       ${scorePct !== null && adherencia !== null ? `<div class="text-right text-[10px] text-slate-400 mt-0.5">subjetivo: ${adhVal}/10</div>` : ''}
     </div>`;
   };
@@ -4268,12 +4291,10 @@ function seguimientoCard(s, coachPends = []) {
         // la semana es vieja y solo tiene adherencia, se usa esa ×10.
         const pilar = (nombre, score, adh) => {
           const val = score != null ? Math.round(score) : (adh != null ? adh * 10 : null);
-          const cls = val == null ? 'text-slate-300' : val >= 75 ? 'text-emerald-600' : val >= 50 ? 'text-amber-600' : 'text-red-600';
-          const bar = val == null ? 'bg-slate-200' : val >= 75 ? 'bg-emerald-500' : val >= 50 ? 'bg-amber-500' : 'bg-red-500';
           return `
-          <div>
-            <div class="flex items-center justify-between mb-1"><span class="text-slate-400">${nombre}</span><span class="font-bold ${cls}">${val == null ? 'sin datos' : val + '%'}</span></div>
-            <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full rounded-full ${bar}" style="width:${val || 0}%"></div></div>
+          <div data-em-barra>
+            <div class="flex items-center justify-between mb-1"><span class="text-slate-500 font-semibold">${nombre}</span><span class="font-extrabold ${val == null ? 'text-slate-300' : 'text-slate-900'}">${val == null ? 'sin datos' : val + ' %'}</span></div>
+            <div class="em-barra em-barra-fina"><i style="width:${val || 0}%;background:${emColorSerie(nombre)}"></i></div>
           </div>`;
         };
         return `
@@ -10002,20 +10023,22 @@ function nutBarras(dias, key, meta, colorBajo, unidad = '', opts = {}) {
   let svg = `<svg viewBox="0 0 ${w} ${h}" class="w-full h-auto" preserveAspectRatio="xMidYMid meet">`;
   for (let i = 0; i <= 3; i++) {
     const v = (top / 3) * i, yy = y(v);
-    svg += `<line x1="${pad.l}" y1="${yy}" x2="${w - pad.r}" y2="${yy}" stroke="#e2e8f0" stroke-width="1"/>`;
-    svg += `<text x="${pad.l - 5}" y="${yy + 3}" text-anchor="end" font-size="9" fill="#94a3b8">${Math.round(v)}</text>`;
+    svg += `<line x1="${pad.l}" y1="${yy}" x2="${w - pad.r}" y2="${yy}" stroke="#F1EFEA" stroke-width="1"/>`;
+    svg += `<text x="${pad.l - 5}" y="${yy + 3}" text-anchor="end" font-size="9" fill="#9A9AA0">${Math.round(v)}</text>`;
   }
   dias.forEach((d, i) => {
     const v = d[key] || 0;
     const md = metaDe(d);
     const x = pad.l + i * bw + bw * 0.18;
     const bwidth = bw * 0.64;
-    let color = '#cbd5e1';
+    // Colores de la app: verde = en meta, naranja = por encima, azul = por debajo.
+    const bajo = /^#(3b82f6|2563eb|60a5fa)$/i.test(colorBajo) ? '#3C7BD6' : colorBajo;
+    let color = '#E4E2DC';
     if (d.registrado && v > 0) {
-      if (!md) color = colorBajo;
-      else if (v >= md * 0.9 && v <= md * 1.1) color = '#10b981';
-      else if (v > md * 1.1) color = '#f59e0b';
-      else color = colorBajo;
+      if (!md) color = bajo;
+      else if (v >= md * 0.9 && v <= md * 1.1) color = '#46965A';
+      else if (v > md * 1.1) color = '#EE8434';
+      else color = bajo;
     }
     const altoB = v > 0 ? Math.max(3, ih - (y(v) - pad.t)) : 3;
     const yy = v > 0 ? y(v) : pad.t + ih - 3;
@@ -10027,7 +10050,7 @@ function nutBarras(dias, key, meta, colorBajo, unidad = '', opts = {}) {
     // Zona de toque de toda la columna: en el teléfono la barra sola es
     // demasiado delgada para acertarle con el dedo.
     if (clic) svg += `<rect x="${pad.l + i * bw}" y="${pad.t}" width="${bw}" height="${ih}" fill="transparent"/>`;
-    svg += `<rect x="${x}" y="${yy}" width="${bwidth}" height="${altoB}" rx="3" fill="${color}"/>`;
+    svg += `<rect x="${x}" y="${yy}" width="${bwidth}" height="${altoB}" rx="${Math.min(7, bwidth / 2).toFixed(1)}" fill="${color}"/>`;
     if (v > 0) svg += `<text x="${x + bwidth / 2}" y="${yy - 5}" text-anchor="middle" font-size="9" font-weight="600" fill="${color}">${Math.round(v)}</text>`;
     svg += `<text x="${x + bwidth / 2}" y="${h - 12}" text-anchor="middle" font-size="10" fill="${d.registrado ? '#475569' : '#cbd5e1'}">${d.dow}</text>`;
     if (!d.registrado) svg += `<text x="${x + bwidth / 2}" y="${h - 2}" text-anchor="middle" font-size="8" fill="#cbd5e1">sin dato</text>`;
@@ -10035,8 +10058,8 @@ function nutBarras(dias, key, meta, colorBajo, unidad = '', opts = {}) {
   });
   if (meta) {
     const ym = y(meta);
-    svg += `<line x1="${pad.l}" y1="${ym}" x2="${w - pad.r}" y2="${ym}" stroke="#0f766e" stroke-width="1.5" stroke-dasharray="5 4"/>`;
-    svg += `<text x="${w - pad.r}" y="${ym - 5}" text-anchor="end" font-size="9" font-weight="700" fill="#0f766e">meta ${meta}${unidad}</text>`;
+    svg += `<line x1="${pad.l}" y1="${ym}" x2="${w - pad.r}" y2="${ym}" stroke="#1F1F1F" stroke-opacity=".55" stroke-width="2" stroke-dasharray="2 5" stroke-linecap="round"/>`;
+    svg += `<text x="${w - pad.r}" y="${ym - 6}" text-anchor="end" font-size="9.5" font-weight="800" fill="#1F1F1F">meta ${meta}${unidad}</text>`;
   }
   svg += '</svg>';
   return svg;
@@ -10100,9 +10123,9 @@ function nutAnillo(p, c, g, titulo) {
   const tot = kp + kc + kg;
   if (!tot) return `<div class="text-xs text-slate-400 text-center py-6">Sin datos</div>`;
   const segs = [
-    { v: kp / tot, color: '#3b82f6', label: 'Proteína', g: Math.round(p) },
-    { v: kc / tot, color: '#f59e0b', label: 'Carbos', g: Math.round(c) },
-    { v: kg / tot, color: '#8b5cf6', label: 'Grasas', g: Math.round(g) },
+    { v: kp / tot, color: '#EE8434', label: 'Proteína', g: Math.round(p) },
+    { v: kc / tot, color: '#E3B341', label: 'Carbos', g: Math.round(c) },
+    { v: kg / tot, color: '#3C7BD6', label: 'Grasas', g: Math.round(g) },
   ];
   const r = 42, cx = 60, cy = 60, circ = 2 * Math.PI * r;
   let off = 0;
