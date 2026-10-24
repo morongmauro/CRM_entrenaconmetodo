@@ -49,7 +49,10 @@ vm.runInContext((''
   + trozo('function marcaDe(', '\n}') + '\n'
   + trozo('function superaMarca(', '\n}') + '\n'
   + trozo('const TOPE_SESIONES', 'const TOPE_HISTORIAL = 12;') + '\n'
+  // ultimasSeries lee las series de mil en mil con todas()
+  + trozo('async function todas(', '\n  return out;\n}') + '\n'
   + trozo('async function ultimasSeries(', '\n  return out;\n}') + '\n'
+  + trozo('function resumenDeDias(', '\n}') + '\n'
   + trozo('function recordsBatidos(', '\n  return batidos;\n}') + '\n'
   + 'globalThis.ultimasSeries = ultimasSeries; globalThis.recordsBatidos = recordsBatidos;'
   ).replace(/^export /gm, ''),   // son módulos ES; aquí se evalúan sueltos
