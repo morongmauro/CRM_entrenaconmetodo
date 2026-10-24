@@ -1025,6 +1025,7 @@ window.segIr = (clienteId) => {
   if (typeof closeModal === 'function') closeModal();
   _selectedClienteId = clienteId;
   _segIrA = clienteId;
+  _segMovil = 'cliente';
   _segView = 'focus';
   repintarSeguimiento();
 };

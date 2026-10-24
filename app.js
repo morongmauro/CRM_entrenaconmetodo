@@ -1507,6 +1507,9 @@ let _clientesCache = null;
 let _selectedClienteId = null;
 let _segIrA = null;   // el cliente al que se llegó con «Hacer seguimiento» (aunque no esté activo)
 let _segView = 'focus';
+let _segMovil = 'lista';   // en el teléfono, Seguimiento muestra la lista o el cliente
+// ¿Se está viendo la versión móvil? (movil.js pone la clase)
+const enMovil = () => document.body.classList.contains('modo-movil');
 let _pagosView = 'table';
 // Lo que la app del cliente le está mostrando AHORA sobre su pago. Se pide al
 // Mealtracker en una sola llamada (no una por cliente) y se guarda aquí.
@@ -2802,7 +2805,7 @@ async function volverDondeEstaba() {
   // Las secciones (entrenamiento.js y las demás) cargan después de este
   // archivo: con la sesión guardada, esto puede llegar antes de que existan.
   if (document.readyState === 'loading') await new Promise(r => document.addEventListener('DOMContentLoaded', r, { once: true }));
-  const vista = g && routes[g.vista] ? g.vista : 'dashboard';
+  const vista = g && routes[g.vista] ? g.vista : (enMovil() ? 'seguimiento' : 'dashboard');
   await navigate(vista);
   // La página se pinta en dos pasadas (lo que tarda llega después): se
   // vuelve a la misma altura cuando ya hay dónde.
@@ -3942,7 +3945,7 @@ routes.seguimiento = async () => {
         <h2 class="text-2xl font-bold text-slate-900">Seguimiento</h2>
         <p class="text-sm text-slate-500">Tu seguimiento de la semana, cliente por cliente</p>
       </div>
-      <div class="flex items-center gap-3 flex-wrap">
+      <div class="flex items-center gap-3 flex-wrap" data-seg-controles>
         <div class="bg-slate-200 rounded-xl p-1 flex gap-1">
           <button class="toggle-btn ${_segView === 'focus' ? 'active' : ''}" onclick="switchSegView('focus')">Por cliente</button>
           <button class="toggle-btn ${_segView === 'board' ? 'active' : ''}" onclick="switchSegView('board')">Vista panel</button>
@@ -3956,7 +3959,7 @@ routes.seguimiento = async () => {
     <div id="seg-content"></div>
   `;
 
-  if (_segView === 'focus') renderSegFocus(clientes, allSegs, ultPorCliente);
+  if (_segView === 'focus' || enMovil()) renderSegFocus(clientes, allSegs, ultPorCliente);
   else renderSegBoard(clientes, allSegs);
   };
 
@@ -4046,7 +4049,7 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
   `;
 
   if (!cliente) {
-    $('#seg-content').innerHTML = sidebar + '<div class="col-span-12 lg:col-span-8 card text-slate-500">Selecciona un cliente.</div>';
+    $('#seg-content').innerHTML = `<div class="grid grid-cols-12 gap-4" data-seg-grid data-seg-movil="lista">${sidebar}<div class="col-span-12 lg:col-span-8 card text-slate-500">Selecciona un cliente.</div></div>`;
     const sl0 = $('#seg-list'); if (sl0 && prevScroll) sl0.scrollTop = prevScroll;
     return;
   }
@@ -4072,7 +4075,7 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
   const sparkPoints = points.length >= 2 ? points.map((v, i) => `${(i / (points.length - 1)) * 100},${24 - v * 2.4}`).join(' ') : '';
 
   $('#seg-content').innerHTML = `
-    <div class="grid grid-cols-12 gap-4">
+    <div class="grid grid-cols-12 gap-4" data-seg-grid data-seg-movil="${_segMovil}">
       ${sidebar}
       <div class="col-span-12 lg:col-span-8 space-y-4">
         ${segCabeceraHTML(cliente)}
@@ -4119,6 +4122,7 @@ function segCabeceraHTML(c) {
   const sub = [c.objetivo, c.dia_pago ? `pago el ${c.dia_pago}` : null].filter(Boolean).map(escapeHtml).join(' · ');
   return `
     <div class="card seg-cab" data-seg-cabecera>
+      <button type="button" class="seg-volver" data-seg-volver onclick="segVolverLista()">‹ Clientes</button>
       ${helpers.avatarBig(c.nombre)}
       <div class="seg-cab-txt">
         <div class="seg-cab-n">${escapeHtml(c.nombre)}</div>
@@ -4163,7 +4167,18 @@ window.filtrarClientesSidebar = (q) => {
   });
 };
 
-window.seleccionarCliente = (id) => { _selectedClienteId = id; repintarSeguimiento(); };
+window.seleccionarCliente = (id) => {
+  _selectedClienteId = id;
+  _segMovil = 'cliente';
+  if (enMovil()) window.scrollTo({ top: 0, behavior: 'instant' });
+  repintarSeguimiento();
+};
+// En el teléfono: de vuelta a la lista, sin volver a cargar nada.
+window.segVolverLista = () => {
+  _segMovil = 'lista';
+  document.querySelector('[data-seg-grid]')?.setAttribute('data-seg-movil', 'lista');
+  window.scrollTo({ top: 0, behavior: 'instant' });
+};
 
 function clienteHeaderCard(c, segs, promAdh, tend, tendColor, sparkPoints) {
   const edad = helpers.edadDe(c.fecha_nacimiento);
@@ -5725,7 +5740,7 @@ routes.pagos = async () => {
         <p class="text-sm text-slate-500">Estado de cobros</p>
       </div>
       <div class="flex items-center gap-3 flex-wrap">
-        <div class="bg-slate-200 rounded-xl p-1 flex gap-1">
+        <div class="bg-slate-200 rounded-xl p-1 flex gap-1" data-pagos-vistas>
           <button class="toggle-btn ${_pagosView === 'table' ? 'active' : ''}" onclick="switchPagView('table')">Tabla anual</button>
           <button class="toggle-btn ${_pagosView === 'cards' ? 'active' : ''}" onclick="switchPagView('cards')">Cards del mes</button>
         </div>
@@ -5780,13 +5795,15 @@ routes.pagos = async () => {
     <div id="pagos-content"></div>
   `;
 
-  if (_pagosView === 'table') renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActualNum, pagadoMesT, faltaMesT);
+  // En el teléfono la tabla anual no cabe: van las tarjetas del mes.
+  const vistaPag = enMovil() ? 'cards' : _pagosView;
+  if (vistaPag === 'table') renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActualNum, pagadoMesT, faltaMesT);
   else renderPagosCards(clientes, map, mesActual);
 
   // Lo que ve el cliente en su app se pide DESPUÉS de pintar, no antes: la
   // tabla de pagos es la pantalla que más se abre y no puede quedarse
   // esperando a una llamada a otro servidor. Llega, y la columna se rellena.
-  if (_pagosView === 'table' && _avisosApp === null && !_avisosAppError) {
+  if (vistaPag === 'table' && _avisosApp === null && !_avisosAppError) {
     await cargarAvisosApp(clientes.filter(c => c.estado !== 'finalizado'));
     if (_currentView === 'pagos' && _pagosView === 'table') {
       renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActualNum, pagadoMesT, faltaMesT);
