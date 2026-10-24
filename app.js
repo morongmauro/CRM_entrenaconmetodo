@@ -3423,6 +3423,11 @@ routes.dashboard = async () => {
       </div>
     </div>
 
+    <div class="card mb-4" data-inicio-seg>
+      <h3 class="em-h3" style="margin-bottom:4px">Seguimientos</h3>
+      <div id="inicio-seg" class="text-sm text-slate-500">Calculando…</div>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
       ${false && vencidos.length > 0 ? `
@@ -3531,6 +3536,7 @@ routes.dashboard = async () => {
   `;
   if (typeof cicAviso === 'function') cicAviso('cic-aviso-inicio');
   if (typeof inicioEquipo === 'function') inicioEquipo('inicio-equipo');
+  segPintarInicio(activos);
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -5576,6 +5582,7 @@ window.copiarMensajeWhatsApp = async (cliente_id) => {
     // Fallback: prompt
     prompt('Copia manualmente:', texto);
   }
+  if (typeof segRegistrar === 'function') segRegistrar(cliente_id, { origen: 'seguimiento', titulo: 'Seguimiento de la semana', texto });
 };
 
 window.eliminarSeguimiento = async (id, clienteId) => {

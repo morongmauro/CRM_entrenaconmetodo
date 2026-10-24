@@ -357,3 +357,16 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):focus, select:foc
 .es-mas button { text-align: left; border: 0; background: #F4F3EF; border-radius: 16px; padding: 12px 14px; font: 600 13px Figtree, system-ui, sans-serif; color: #6B6B70; cursor: pointer; }
 .es-mas button:hover { background: #EDEBE6; }
 .es-mas b { display: block; color: #1F1F1F; font-size: 14px; margin-bottom: 2px; }
+/* «Último seguimiento» en la ficha */
+.es-ultimo { margin: -4px 0 12px; font-size: 13.5px; color: #6B6B70; }
+.es-ultimo:empty { display: none; }
+.es-ult-fila { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.es-ult-t b { color: #1F1F1F; font-weight: 750; }
+.es-ult-tarde b { color: #B5611A; }
+.es-ult-btn { border: 0; background: #EAE8E2; border-radius: 999px; padding: 4px 11px; font: 700 12.5px Figtree, system-ui, sans-serif; color: #1F1F1F; cursor: pointer; }
+.es-ult-lista { display: none; margin-top: 10px; background: #fff; border-radius: 16px; padding: 4px 14px; box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 18px rgba(40,40,30,.05); max-height: 320px; overflow: auto; }
+.es-ultimo.abierto .es-ult-lista { display: block; }
+.es-ult-item { padding: 10px 0; }
+.es-ult-item + .es-ult-item { border-top: 1px solid #F1EFEA; }
+.es-ult-meta { font-size: 12px; font-weight: 700; color: #9A9AA0; margin-bottom: 3px; }
+.es-ult-txt { font-size: 13px; color: #45454A; white-space: pre-line; line-height: 1.45; }

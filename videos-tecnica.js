@@ -241,6 +241,7 @@ window.vtCopiarMensaje = async (soloEstos = null) => {
   const texto = lineas.join('\n');
   try { await navigator.clipboard.writeText(texto); toast('Mensaje copiado: pégalo en WhatsApp'); }
   catch (e) { openModal(modalShell('Copia el mensaje', `<textarea rows="10" style="width:100%">${escapeHtml(texto)}</textarea>`, '<button class="btn btn-primary" onclick="closeModal()">Listo</button>')); }
+  if (_vt.clienteId && typeof segRegistrar === 'function') segRegistrar(_vt.clienteId, { origen: 'videos', titulo: 'Pedir video', texto });
   return texto;
 };
 

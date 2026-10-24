@@ -152,10 +152,21 @@ await p.locator('#ficha-semana').screenshot({ path: path.join(CAPTURAS, 'esta-se
 await p.screenshot({ path: path.join(CAPTURAS, 'esta-semana-ficha.png') });
 
 // Copiar
+ok('historial: sin seguimientos aún, lo dice', /Aún no hay seguimientos guardados/.test(await p.locator('#ficha-semana [data-es-ultimo]').innerText()));
 await p.locator('#ficha-semana [data-es-copiar="0"]').click();
-await p.waitForTimeout(200);
+await p.waitForTimeout(400);
 const copiado = await p.evaluate(() => navigator.clipboard.readText());
 ok('Copiar: deja el mensaje tal cual en el portapapeles', copiado === r.msgs[0].texto, copiado);
+const reg = await p.evaluate(() => (TABLAS_FALSAS.seguimiento_mensajes || []).map(x => ({ c: x.cliente_id, o: x.origen, t: x.titulo, x: x.texto })));
+ok('al copiar queda guardado solo: cliente, de dónde, título y el texto', reg.length === 1 && reg[0].c === 'c0' && reg[0].o === 'esta-semana' && reg[0].t === 'A mitad de semana' && reg[0].x === r.msgs[0].texto, JSON.stringify(reg));
+const ult = await p.locator('#ficha-semana [data-es-ultimo]').innerText();
+ok('la ficha dice «Último seguimiento: hoy» con el título', /Último seguimiento: hoy/.test(ult) && /A mitad de semana/.test(ult), ult);
+await p.locator('#ficha-semana [data-es-copiar="0"]').click();
+await p.waitForTimeout(400);
+ok('copiar el mismo mensaje otra vez el mismo día no lo duplica', await p.evaluate(() => TABLAS_FALSAS.seguimiento_mensajes.length) === 1);
+await p.locator('#ficha-semana [data-es-ult-ver]').click();
+ok('«Lo que le dijiste» muestra el mensaje completo', (await p.locator('#ficha-semana [data-es-ult-lista]').innerText()).includes(r.msgs[0].texto.split('\n')[0]));
+await p.locator('#ficha-semana').screenshot({ path: path.join(CAPTURAS, 'esta-semana-historial.png') });
 
 // Semana pasada: se cierra (3 de 4) y cambia el mensaje
 await p.locator(`[data-es-sem="${mas(LUNES, -7)}"]`).click();
@@ -180,8 +191,43 @@ ok('cada semana sale otra versión (nunca la misma que la anterior)', rot.distin
 await p.locator('.es-mas button', { hasText: 'Datos' }).click();
 ok('«Datos» abre Perfil y ahí están los datos', await p.locator('[data-ficha-tab="perfil"].active').count() === 1 && await p.locator('[data-ficha] .sec-title', { hasText: /^Datos$/ }).isVisible());
 await p.locator('[data-ficha-tab="resumen"]').click();
+// Diálogos también queda guardado
+await p.evaluate(() => abrirDialogos('c0'));
+await p.locator('[data-dlg-copiar]').first().waitFor({ timeout: 10000 });
+await p.locator('[data-dlg-copiar]').first().click();
+await p.waitForTimeout(500);
+const reg2 = await p.evaluate(() => TABLAS_FALSAS.seguimiento_mensajes.map(x => ({ o: x.origen, t: x.titulo })));
+ok('Diálogos: copiar también queda en su historial (con el título del diálogo)', reg2.length === 2 && reg2[1].o === 'dialogos' && !!reg2[1].t, JSON.stringify(reg2));
+await p.evaluate(() => closeModal());
+// Inicio: a quién hace rato no le escribes
+await p.evaluate(() => navigate('dashboard'));
+await p.locator('#inicio-seg [data-seg-cliente="c0"]').waitFor({ timeout: 15000 });
+const ini = await p.locator('#inicio-seg').innerText();
+ok('Inicio: «Seguimientos» con Ana y hace cuánto', /Ana Pérez/.test(ini) && /hoy/.test(ini), ini);
+await p.locator('[data-inicio-seg]').screenshot({ path: path.join(CAPTURAS, 'inicio-seguimientos.png') });
 ok('sin errores', errores.length === 0, errores.join(' | '));
 await ctx.close();
+
+// Sin la tabla (SQL sin correr): se copia igual y avisa qué correr
+const st = await abrir(1440, 1000);
+await st.p.evaluate(() => {
+  const orig = sb.from.bind(sb);
+  sb.from = (n) => {
+    if (n !== 'seguimiento_mensajes') return orig(n);
+    const err = { data: null, error: { message: 'relation "seguimiento_mensajes" does not exist', code: '42P01' } };
+    const q = new Proxy({}, { get: (t, k) => k === 'then' ? (ok) => Promise.resolve(err).then(ok) : () => q });
+    return q;
+  };
+});
+await st.p.evaluate(() => verCliente('c0'));
+await st.p.locator('#ficha-semana [data-es-copiar="0"]').waitFor({ timeout: 15000 });
+await st.p.waitForTimeout(300);
+ok('sin la tabla: la ficha dice qué SQL correr', /seguimiento-mensajes\.sql/.test(await st.p.locator('#ficha-semana [data-es-ultimo]').innerText()));
+await st.p.locator('#ficha-semana [data-es-copiar="0"]').click();
+await st.p.waitForTimeout(300);
+ok('sin la tabla: copiar funciona igual', (await st.p.evaluate(() => navigator.clipboard.readText())).length > 20);
+ok('sin la tabla: sin errores', st.errores.length === 0, st.errores.join(' | '));
+await st.ctx.close();
 
 // Teléfono: una columna, sin desbordar
 const t = await abrir(390, 844);

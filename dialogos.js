@@ -400,7 +400,16 @@ window.dlgCopiar = async (id) => {
   if (!dlgAvisarHuecos(texto)) return dlgUsar(id);
   try { await navigator.clipboard.writeText(texto); toast('✓ Copiado, pégalo en WhatsApp'); }
   catch (e) { prompt('Copia manualmente:', texto); }
+  dlgRegistrar(id, texto);
 };
+
+// Queda en su historial de seguimiento (seguimiento-semana.js).
+function dlgRegistrar(id, texto) {
+  const c = _dlg.cliente;
+  if (!c || !c.id || typeof segRegistrar !== 'function') return;
+  const titulo = document.querySelector(`.dlg-card[data-dlg="${id}"] .font-bold`)?.textContent.trim() || null;
+  segRegistrar(c.id, { origen: 'dialogos', titulo, texto });
+}
 
 window.dlgWhatsApp = (id) => {
   const c = _dlg.cliente;
@@ -408,6 +417,7 @@ window.dlgWhatsApp = (id) => {
   if (!dlgAvisarHuecos(texto)) return dlgUsar(id);
   const tel = String((c && c.telefono) || '').replace(/[^\d]/g, '');
   window.open(`https://wa.me/${tel}?text=${encodeURIComponent(texto)}`, '_blank');
+  dlgRegistrar(id, texto);
 };
 
 // ── Editar la galería ──

@@ -519,6 +519,7 @@ window.esCopiar = async (i) => {
   }
   const b = document.querySelector(`[data-es-copiar="${i}"]`);
   if (b) { b.textContent = 'Copiado'; setTimeout(() => { if (b.isConnected) b.textContent = 'Copiar'; }, 1800); }
+  if (_es.cliente && await segRegistrar(_es.cliente.id, { origen: 'esta-semana', titulo: m.titulo, texto: m.texto })) segPintarUltimo(_es.cliente);
 };
 
 // La semana que abre: el lunes, la que acaba de terminar (es la que se revisa);
@@ -542,6 +543,7 @@ window.esPintar = async (c, lunes = null) => {
   caja.querySelectorAll('[data-es-sem]').forEach(b => b.classList.toggle('active', b.dataset.esSem === lunes));
   const cuerpo = caja.querySelector('[data-es-cuerpo]');
   if (cuerpo) cuerpo.classList.add('es-cargando');
+  if (!caja.dataset.ultimoPintado) { caja.dataset.ultimoPintado = '1'; segPintarUltimo(c); }
   let S;
   try {
     const D = await esLeer(c, lunes);
@@ -577,6 +579,7 @@ function esArmazonHTML(c) {
           <button type="button" class="${ini === actual ? 'active' : ''}" data-es-sem="${actual}" onclick="esVerSemana('${actual}')">Esta semana</button>
         </div>
       </div>
+      <div class="es-ultimo" data-es-ultimo></div>
       <div class="es-grid" data-es-cuerpo>${sk}${sk}${sk}</div>
     </div>
     <div class="es-mas" data-ficha-sec="resumen">
@@ -586,3 +589,117 @@ function esArmazonHTML(c) {
       <button type="button" onclick="fichaVerPestana('perfil')"><b>Datos</b>Pago, inicio, canal, contraseña</button>
     </div>`;
 }
+
+// =====================================================
+// LO QUE LE DIJISTE · el registro se hace solo al copiar
+// =====================================================
+// Cada vez que copias un mensaje para un cliente (aquí, en Diálogos, en el
+// seguimiento de la semana o al pedirle videos) se guarda qué le dijiste y
+// cuándo (tabla seguimiento_mensajes, migraciones/seguimiento-mensajes.sql).
+// Sin esa tabla todo sigue funcionando: solo no se guarda.
+// Con eso: la ficha dice «Último seguimiento: hace N días» con lo que le
+// dijiste, y el Inicio, a quién hace rato no le escribes.
+const SEG_SQL = 'migraciones/seguimiento-mensajes.sql';
+const SEG_DIAS_AVISO = 7;
+const _seg = { sinTabla: false, avisado: false };
+
+window.segRegistrar = async (clienteId, { origen = null, titulo = null, texto } = {}) => {
+  texto = String(texto || '').trim();
+  if (!clienteId || !texto || _seg.sinTabla) return false;
+  const hoy = fmt.hoy();
+  try {
+    // El mismo mensaje copiado dos veces el mismo día cuenta una vez.
+    const { data: ya, error: e1 } = await sb.from('seguimiento_mensajes').select('id, texto').eq('cliente_id', clienteId).eq('fecha', hoy);
+    if (e1) throw e1;
+    if ((ya || []).some(x => String(x.texto || '').trim() === texto)) return true;
+    const { error } = await sb.from('seguimiento_mensajes').insert({ cliente_id: clienteId, fecha: hoy, origen, titulo, texto });
+    if (error) throw error;
+    return true;
+  } catch (e) {
+    if (segFaltaTabla(e)) {
+      _seg.sinTabla = true;
+      if (!_seg.avisado) { _seg.avisado = true; setTimeout(() => toast(`Copiado. Para guardarlo en su historial falta correr ${SEG_SQL} en Supabase`), 1200); }
+    } else setTimeout(() => toast('Copiado, pero no se pudo guardar en su historial (sin conexión)'), 1200);
+    return false;
+  }
+};
+function segFaltaTabla(e) { return /seguimiento_mensajes|relation|schema cache|42P01|PGRST20/i.test(String((e && (e.message || e.code)) || '')); }
+
+async function segHistorial(clienteId, limite = 12) {
+  try {
+    const { data, error } = await sb.from('seguimiento_mensajes').select('id, fecha, origen, titulo, texto, created_at')
+      .eq('cliente_id', clienteId).order('created_at', { ascending: false }).limit(limite);
+    if (error) { if (segFaltaTabla(error)) _seg.sinTabla = true; return null; }
+    return data || [];
+  } catch (e) { return null; }
+}
+
+function segHace(fecha, hoy = fmt.hoy()) {
+  const d = Math.round((evtDia(hoy) - evtDia(String(fecha).slice(0, 10))) / 86400000);
+  return { d, txt: d <= 0 ? 'hoy' : d === 1 ? 'ayer' : `hace ${d} días` };
+}
+
+// La línea de la ficha: «Último seguimiento: hace 6 días · Semana a medias» + historial.
+window.segPintarUltimo = async (c) => {
+  const caja = document.querySelector('#ficha-semana [data-es-ultimo]');
+  if (!caja || !c) return;
+  const hist = await segHistorial(c.id);
+  if (!caja.isConnected) return;
+  if (hist === null) {
+    caja.innerHTML = `<span class="es-ult-t">Historial de seguimiento: falta correr <b>${SEG_SQL}</b> en Supabase.</span>`;
+    return;
+  }
+  if (!hist.length) {
+    caja.innerHTML = '<span class="es-ult-t" data-es-ult-dias="">Aún no hay seguimientos guardados. Se guardan solos cuando copias un mensaje (aquí o en Diálogos).</span>';
+    return;
+  }
+  const u = hist[0], h = segHace(u.fecha);
+  const tono = h.d >= SEG_DIAS_AVISO ? ' es-ult-tarde' : '';
+  caja.innerHTML = `
+    <div class="es-ult-fila">
+      <span class="es-ult-t${tono}" data-es-ult-dias="${h.d}">Último seguimiento: <b>${h.txt}</b> (${esFechaCorta(String(u.fecha).slice(0, 10))})${u.titulo ? ` · ${escapeHtml(u.titulo)}` : ''}</span>
+      <button type="button" class="es-ult-btn" data-es-ult-ver onclick="this.closest('[data-es-ultimo]').classList.toggle('abierto')">Lo que le dijiste</button>
+    </div>
+    <div class="es-ult-lista" data-es-ult-lista>
+      ${hist.map(x => `<div class="es-ult-item"><div class="es-ult-meta">${esFechaCorta(String(x.fecha).slice(0, 10))} · ${segHace(x.fecha).txt}${x.titulo ? ` · ${escapeHtml(x.titulo)}` : ''}</div><div class="es-ult-txt">${escapeHtml(x.texto)}</div></div>`).join('')}
+    </div>`;
+};
+
+// El Inicio: a quién hace rato no le escribes (desde tu último mensaje copiado).
+window.segPintarInicio = async (activos) => {
+  const caja = document.getElementById('inicio-seg');
+  if (!caja) return;
+  let filas;
+  try {
+    const desde = evtSumarDias(fmt.hoy(), -120);
+    const { data, error } = await sb.from('seguimiento_mensajes').select('cliente_id, fecha, titulo, created_at').gte('fecha', desde).order('created_at', { ascending: false }).limit(3000);
+    if (error) throw error;
+    filas = data || [];
+  } catch (e) {
+    caja.innerHTML = `<div class="text-sm text-slate-500">Para ver a quién le toca seguimiento, corre <b>${SEG_SQL}</b> en Supabase. Desde ahí, cada mensaje que copies queda guardado solo.</div>`;
+    return;
+  }
+  if (!document.getElementById('inicio-seg')) return;
+  if (!filas.length) {
+    caja.innerHTML = '<div class="text-sm text-slate-500" data-seg-vacio>Aún no hay seguimientos guardados. Cada mensaje que copies desde la ficha del cliente o desde Diálogos queda guardado solo, y aquí verás a quién hace rato no le escribes.</div>';
+    return;
+  }
+  const ultimo = {};
+  filas.forEach(f => { if (!ultimo[f.cliente_id]) ultimo[f.cliente_id] = f; });
+  const lista = activos.map(c => ({ c, u: ultimo[c.id] || null, d: ultimo[c.id] ? segHace(ultimo[c.id].fecha).d : null }))
+    .sort((a, b) => (b.d ?? 9999) - (a.d ?? 9999));
+  const tarde = lista.filter(x => x.d === null || x.d >= SEG_DIAS_AVISO);
+  const fila = (x) => `
+    <div class="flex items-center gap-3" style="border-top:1px solid #F1EFEA;padding:10px 0" data-seg-cliente="${x.c.id}" data-seg-dias="${x.d ?? ''}">
+      <div class="flex-1 min-w-0">
+        <div class="font-bold text-slate-900 truncate" style="font-size:15px">${escapeHtml(x.c.nombre)}</div>
+        <div class="text-[13px] truncate ${x.d === null || x.d >= SEG_DIAS_AVISO ? 'text-[#B5611A]' : 'text-slate-500'}">${x.u ? `${segHace(x.u.fecha).txt}${x.u.titulo ? ` · ${escapeHtml(x.u.titulo)}` : ''}` : 'sin seguimiento guardado'}</div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="verCliente('${x.c.id}')">Abrir</button>
+    </div>`;
+  const ver = lista.slice(0, 6);
+  caja.innerHTML = `
+    <div class="text-sm text-slate-500 mb-1" data-seg-resumen>${tarde.length ? `${tarde.length} ${tarde.length === 1 ? 'cliente lleva' : 'clientes llevan'} ${SEG_DIAS_AVISO} días o más sin seguimiento` : `Todos con seguimiento en los últimos ${SEG_DIAS_AVISO} días`}</div>
+    ${ver.map(fila).join('')}
+    ${lista.length > ver.length ? `<details class="mt-1"><summary class="text-sm font-semibold text-slate-500" style="cursor:pointer;list-style:none;padding:8px 0">Ver los ${lista.length}</summary>${lista.slice(ver.length).map(fila).join('')}</details>` : ''}`;
+};
