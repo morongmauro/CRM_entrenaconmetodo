@@ -122,6 +122,54 @@ nuevos = await p.evaluate(() => TABLAS.eventos.filter(e => e.fase_id === 'f9'));
 aviso = await p.evaluate(() => toasts.at(-1));
 ok('como plantilla no crea eventos sin cliente y lo dice', nuevos.length === 0 && aviso.includes('como plantilla'), aviso);
 
+// ── Comentarios del coach: el «Siempre presente» viaja solo si lo marcas ──
+const comentarios = () => p.evaluate(() => {
+  TABLAS.rutina_ejercicios = [
+    { id: 're1', rutina_id: 'r1', ejercicio_id: 'e1', orden: 1, ejercicios: { id: 'e1', nombre: 'Bench press', alias: 'Press banca' } },
+    { id: 're2', rutina_id: 'r2', ejercicio_id: 'e2', orden: 1, ejercicios: { id: 'e2', nombre: 'Back squat', alias: 'Sentadilla' } },
+    { id: 're3', rutina_id: 'r3', ejercicio_id: 'e3', orden: 1, ejercicios: { id: 'e3', nombre: 'Lat pulldown', alias: 'Jalón al pecho' } },
+  ];
+  TABLAS.comentarios_coach = [
+    { id: 'k0', cliente_id: 'c1', ejercicio_id: 'e1', rutina_id: 'r1', tipo: 'siempre', texto: 'Viejo', creado_en: '2026-09-01T10:00:00Z', quitado_en: null },
+    { id: 'k1', cliente_id: 'c1', ejercicio_id: 'e1', rutina_id: 'r1', tipo: 'siempre', texto: 'Escápulas juntas y abajo.', creado_en: '2026-09-29T10:00:00Z', quitado_en: null },
+    { id: 'k2', cliente_id: 'c1', ejercicio_id: 'e2', rutina_id: 'r2', tipo: 'siempre', texto: 'Baja controlado 3 s.', creado_en: '2026-09-29T10:00:00Z', quitado_en: null },
+    { id: 'k3', cliente_id: 'c1', ejercicio_id: 'e3', rutina_id: 'r3', tipo: 'puntual', texto: 'Hoy sube a 45 kg.', creado_en: '2026-10-01T10:00:00Z', quitado_en: null },
+    { id: 'k4', cliente_id: 'c1', ejercicio_id: 'e3', rutina_id: 'r3', tipo: 'siempre', texto: 'Quitado', creado_en: '2026-09-02T10:00:00Z', quitado_en: '2026-09-10T10:00:00Z' },
+    { id: 'k5', cliente_id: 'c2', ejercicio_id: 'e2', rutina_id: 'x', tipo: 'siempre', texto: 'El suyo de Bruno', creado_en: '2026-09-29T10:00:00Z', quitado_en: null },
+  ];
+});
+const deBruno = () => p.evaluate(() => TABLAS.comentarios_coach.filter(c => c.cliente_id === 'c2' && c.id !== 'k5'));
+await preparar(); await comentarios();
+await p.evaluate(() => entCopiarFaseA('f1'));
+await p.waitForSelector('[data-cp-fijos]');
+const txtFijos = await p.locator('[data-cp-fijos]').innerText();
+ok('ofrece incluir los «Siempre presente» vigentes (no los quitados ni los de una vez)', /los 2 comentarios «Siempre presente»/.test(txtFijos) && /Press banca, Sentadilla/.test(txtFijos) && !/Jalón/.test(txtFijos), txtFijos);
+ok('viene desmarcado', !(await p.locator('[data-cp-fijos] input').isChecked()));
+await p.selectOption('#cf-cliente', 'c2');
+await p.evaluate(() => entConfirmarCopiarFase('f1'));
+ok('sin marcar, no se copia ningún comentario', (await deBruno()).length === 0, JSON.stringify(await deBruno()));
+
+await preparar(); await comentarios();
+await p.evaluate(() => entCopiarFaseA('f1'));
+await p.waitForSelector('[data-cp-fijos]');
+await p.locator('[data-cp-fijos] input').check();
+await p.selectOption('#cf-cliente', 'c2');
+await p.evaluate(() => entConfirmarCopiarFase('f1'));
+let fij = await deBruno();
+ok('marcado: copia el último «Siempre presente» a Bruno, con la rutina nueva', fij.length === 1 && fij[0].ejercicio_id === 'e1' && fij[0].texto === 'Escápulas juntas y abajo.' && fij[0].tipo === 'siempre' && fij[0].rutina_id === 'nr1', JSON.stringify(fij));
+ok('si Bruno ya tenía uno en ese ejercicio, se respeta el suyo', await p.evaluate(() => TABLAS.comentarios_coach.filter(c => c.cliente_id === 'c2' && c.ejercicio_id === 'e2').length === 1));
+ok('los de Ana no se tocan', await p.evaluate(() => TABLAS.comentarios_coach.filter(c => c.cliente_id === 'c1').length === 5));
+aviso = await p.evaluate(() => toasts.at(-1));
+ok('el aviso dice cuántos comentarios copió', aviso.includes('1 comentario «Siempre presente»'), aviso);
+
+// Al importar hacia el mismo cliente no se duplican (ya los ve).
+await preparar(); await comentarios();
+await p.evaluate(() => entCopiarFaseA('f1'));
+await p.waitForSelector('[data-cp-fijos]');
+await p.locator('[data-cp-fijos] input').check();
+await p.evaluate(() => cicloCopiarAOtro('f1', 'c1', null, null));
+ok('copiar al mismo cliente no duplica los comentarios', await p.evaluate(() => TABLAS.comentarios_coach.length === 6));
+
 // ── Traer UNA rutina de fuerza de Ana al ciclo de Bruno ──
 await preparar();
 await p.evaluate(() => {

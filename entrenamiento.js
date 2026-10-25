@@ -1950,14 +1950,12 @@ const entMin = (seg) => (seg < 60 ? `${Math.max(1, Math.round(seg))} s` : `${Mat
 function entTiempoCabHTML(r) {
   const { total } = entEstimarTiempo(r);
   if (!total) return '';
-  const real = _ent.tiempoReal && _ent.tiempoReal.rutinaId === r.id ? _ent.tiempoReal : null;
-  const plan = r.duracion_estimada_min;
+  // Un solo número: el sugerido, el mismo que ve el cliente en la app. Lo real
+  // lo marcan sus timers al terminar la sesión.
   return `
-    <div class="ent-tiempo" data-tiempo-total title="Series × (reps al tempo + preparación) + descansos + cambios entre ejercicios">
+    <div class="ent-tiempo" data-tiempo-total title="Series × (reps al tempo + preparación) + descansos + cambios de peso o máquina entre ejercicios">
       <span class="ent-tiempo-num">⏱ ≈ ${Math.round(total / 60)} min</span>
-      <span class="ent-tiempo-rango">entre ${Math.round(total * 0.9 / 60)} y ${Math.round(total * 1.15 / 60)} min</span>
-      ${real ? `<span class="ent-tiempo-real" title="Lo que tardó de verdad (mediana de ${real.n} sesión${real.n === 1 ? '' : 'es'} terminadas)">· real: ~${real.min} min (${real.n} vez${real.n === 1 ? '' : 'es'})</span>` : ''}
-      ${plan ? `<span class="ent-tiempo-rango">· pusiste ${plan} min</span>` : ''}
+      <span class="ent-tiempo-rango">· tiempo sugerido</span>
     </div>`;
 }
 

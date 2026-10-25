@@ -361,30 +361,52 @@ window.entDcGuardar = async () => {
 //   · el cardio, los deportes y los demás eventos, con sus días y semanas;
 //     los de un solo día se corren lo mismo que se corrió la fecha de inicio,
 //     y los días que le quitaste a una serie, también.
+//   · si lo marcas, los comentarios «Siempre presente» del coach de esos
+//     ejercicios (comentarios-coach.js). Los «Para la próxima vez» y las notas
+//     que el cliente te dejó son de esa conversación y nunca viajan.
 // No se copia nada del historial (sesiones, marcas, registros): eso es del
 // cliente original. La copia queda en borrador hasta que la envíes.
 
-const _cp = { faseId: null, fase: null, rutinas: [], eventos: [], copiarEv: {} };
+const _cp = { faseId: null, fase: null, rutinas: [], eventos: [], copiarEv: {}, fijos: [], copiarFijos: false };
 // Lo personal de un cliente (una cita médica) no se marca solo para otro.
 const CICLO_NO_MARCAR = new Set(['cita']);
 
 window.cicloPrevia = async (faseId) => {
   const caja = $('#cp-previa');
   if (!caja) return;
-  if (!faseId) { caja.innerHTML = ''; Object.assign(_cp, { faseId: null, fase: null, rutinas: [], eventos: [], copiarEv: {} }); return; }
+  if (!faseId) { caja.innerHTML = ''; Object.assign(_cp, { faseId: null, fase: null, rutinas: [], eventos: [], copiarEv: {}, fijos: [], copiarFijos: false }); return; }
   caja.innerHTML = '<p class="text-xs text-slate-400">Leyendo el ciclo…</p>';
   const { data: fase } = await sb.from('fases').select('*').eq('id', faseId).maybeSingle();
   const [rutinas, eventos] = await Promise.all([
     entDb.rutinasDeFase(faseId),
     cicloLeer(sb.from('eventos').select('*').eq('fase_id', faseId).order('created_at')),
   ]);
+  const fijos = await cicloFijosDe(fase, rutinas);
   if (!$('#cp-previa')) return;
   Object.assign(_cp, {
     faseId, fase: fase || null, rutinas, eventos: (eventos || []).filter(e => !e.auto),
     copiarEv: Object.fromEntries((eventos || []).map(e => [e.id, !CICLO_NO_MARCAR.has(e.tipo)])),
+    fijos, copiarFijos: false,
   });
   cicloPreviaPintar();
 };
+
+// Los «Siempre presente» vigentes del cliente de origen en los ejercicios de
+// este ciclo: el último de cada ejercicio (escribir otro reemplaza al anterior).
+async function cicloFijosDe(fase, rutinas) {
+  if (!fase?.cliente_id || !rutinas.length) return [];
+  const porRutina = await entDb.ejerciciosDeRutinas(rutinas.map(r => r.id));
+  const nombre = {};
+  Object.values(porRutina).flat().forEach(re => { if (re.ejercicio_id) nombre[re.ejercicio_id] = re.ejercicios?.alias || re.ejercicios?.nombre || ''; });
+  const ids = Object.keys(nombre);
+  if (!ids.length) return [];
+  const { data, error } = await sb.from('comentarios_coach').select('*')
+    .eq('cliente_id', String(fase.cliente_id)).in('ejercicio_id', ids).is('quitado_en', null).order('creado_en');
+  if (error) return [];
+  const ultimo = {};
+  (data || []).filter(c => c.tipo === 'siempre').forEach(c => { ultimo[c.ejercicio_id] = c; });
+  return Object.values(ultimo).map(c => ({ ...c, nombre: nombre[c.ejercicio_id] }));
+}
 
 function cicloPreviaPintar() {
   const caja = $('#cp-previa');
@@ -412,10 +434,19 @@ function cicloPreviaPintar() {
             <span class="text-xs text-slate-500"> · ${escapeHtml(evtLabel(e.tipo).replace(/^\S+\s/, ''))} · ${escapeHtml(cuando(e))}</span></span>
         </label>`).join('')}`
       : '<p class="text-xs text-slate-400">Este ciclo no tiene cardio ni eventos en el calendario.</p>'}
+    ${_cp.fijos.length ? `
+      <div class="sec-title mt-4">Comentarios del coach</div>
+      <label class="flex gap-2 items-start py-1.5 cursor-pointer" style="margin:0;text-transform:none;letter-spacing:0;font-weight:400" data-cp-fijos>
+        <input type="checkbox" class="mt-0.5" style="width:auto" ${_cp.copiarFijos ? 'checked' : ''} onchange="cicloPreviaFijos(this.checked)">
+        <span class="min-w-0 text-sm text-slate-800"><b>Incluir ${_cp.fijos.length === 1 ? 'el comentario «Siempre presente»' : `los ${_cp.fijos.length} comentarios «Siempre presente»`}</b>
+          <span class="text-xs text-slate-500"> · ${escapeHtml(_cp.fijos.map(c => c.nombre).filter(Boolean).join(', '))}</span>
+          <span class="block text-xs text-slate-500 mt-0.5">Los de «Para la próxima vez» y las notas que el cliente te dejó no se copian.</span></span>
+      </label>` : ''}
     <p class="text-xs text-slate-500 mt-3">No se copia el historial: lo entrenado y marcado sigue siendo del cliente original.</p>`;
 }
 
 window.cicloPreviaEvento = (id, si) => { _cp.copiarEv[id] = !!si; };
+window.cicloPreviaFijos = (si) => { _cp.copiarFijos = !!si; };
 
 // Hace la copia. Devuelve el texto del aviso, o null si no se pudo.
 window.cicloCopiarAOtro = async (faseId, clienteDestino, inicio, nombre) => {
@@ -484,6 +515,26 @@ window.cicloCopiarAOtro = async (faseId, clienteDestino, inicio, nombre) => {
       }
     }
   }
+  // Los «Siempre presente» marcados. Al mismo cliente no hace falta: ya los
+  // ve en el ciclo nuevo. Si el destino ya tiene uno en ese ejercicio, se
+  // respeta el suyo.
+  let nFijos = 0;
+  if (_cp.copiarFijos && _cp.fijos.length && clienteDestino && String(clienteDestino) !== String(origen?.cliente_id)) {
+    const ids = _cp.fijos.map(c => c.ejercicio_id);
+    const { data: ya, error } = await sb.from('comentarios_coach').select('*')
+      .eq('cliente_id', String(clienteDestino)).in('ejercicio_id', ids).is('quitado_en', null);
+    const tiene = new Set((ya || []).filter(c => c.tipo === 'siempre').map(c => c.ejercicio_id));
+    const nuevoId = Object.fromEntries(copiadas.map(r => [r.origen_rutina_id, r.id]));
+    const filas = error ? [] : _cp.fijos.filter(c => !tiene.has(c.ejercicio_id)).map(c => ({
+      cliente_id: String(clienteDestino), ejercicio_id: c.ejercicio_id,
+      rutina_id: String(nuevoId[c.rutina_id] || ''), rutina_ejercicio_id: '', tipo: 'siempre', texto: c.texto,
+    }));
+    if (filas.length) {
+      const { error: e2 } = await sb.from('comentarios_coach').insert(filas);
+      if (e2) avisoEv += ' · no pude copiar los comentarios «Siempre presente»: ' + e2.message;
+      else nFijos = filas.length;
+    }
+  }
   const nR = copiadas.length;
-  return `✓ Ciclo copiado en borrador · ${nR} rutina${nR === 1 ? '' : 's'} con sus días${nEv ? ` · ${nEv} de cardio y eventos` : ''}${nDia ? ` · ${nDia} cambio${nDia === 1 ? '' : 's'} de un solo día` : ''}${avisoEv}`;
+  return `✓ Ciclo copiado en borrador · ${nR} rutina${nR === 1 ? '' : 's'} con sus días${nEv ? ` · ${nEv} de cardio y eventos` : ''}${nDia ? ` · ${nDia} cambio${nDia === 1 ? '' : 's'} de un solo día` : ''}${nFijos ? ` · ${nFijos} comentario${nFijos === 1 ? '' : 's'} «Siempre presente»` : ''}${avisoEv}`;
 };
