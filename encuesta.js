@@ -3,7 +3,7 @@
 // =====================================================
 // Lo que respondió cada cliente en su app (una sola vez, desde su segunda
 // semana): qué tan útil, qué tan fácil y qué tan agradable se ve (1 a 5), y
-// si la recomendaría (0 a 10). De ahí sale el NPS: % que pone 9-10
+// si la recomendaría (0 a 10), y lo que mejoraría (opcional). De ahí sale el NPS: % que pone 9-10
 // (promotores) menos % que pone 0-6 (detractores).
 // Tabla: migraciones/encuesta-app.sql (la escribe la app, api/training).
 // =====================================================
@@ -78,7 +78,8 @@ function encInicioHTML(filas, activos, hoy, clientes = []) {
       <td>${escapeHtml(fmt.fechaCorta ? fmt.fechaCorta(String(f.fecha).slice(0, 10)) : String(f.fecha))}${f.semana ? ` · sem ${f.semana}` : ''}</td>
       <td>${f.util ?? '—'}</td><td>${f.facil ?? '—'}</td><td>${f.agradable ?? '—'}</td>
       <td><span class="enc-p enc-p-${t}">${f.recomienda}</span></td>
-      <td class="enc-cat">${t === 'pro' ? 'Promotor' : t === 'det' ? 'Detractor' : 'Pasivo'}</td></tr>`;
+      <td class="enc-cat">${t === 'pro' ? 'Promotor' : t === 'det' ? 'Detractor' : 'Pasivo'}</td>
+      <td class="enc-mej">${f.mejoraria ? escapeHtml(f.mejoraria) : '<span class="text-slate-400">—</span>'}</td></tr>`;
   };
   return `
     <div class="enc-top">
@@ -94,9 +95,11 @@ function encInicioHTML(filas, activos, hoy, clientes = []) {
       <div><div class="enc-k">¿La recomendarías? · cuántos pusieron cada nota</div>${barras}</div>
       <div><div class="enc-k">NPS por mes</div>${grafica}</div>
     </div>
+    ${filas.some(f => f.mejoraria) ? `<div class="enc-mejoras" data-enc-mejoras><div class="enc-k">Qué mejorarían</div>${filas.filter(f => f.mejoraria).slice().reverse().slice(0, 6).map(f => `
+      <div class="enc-mej-i"><b>${escapeHtml(nombre(String(f.cliente_id)))}</b> <span class="enc-p enc-p-${encTipo(Number(f.recomienda))}">${f.recomienda}</span><p>«${escapeHtml(f.mejoraria)}»</p></div>`).join('')}</div>` : ''}
     <details class="enc-det" data-enc-tabla>
       <summary>Ver la respuesta de cada cliente (${filas.length})</summary>
-      <div class="overflow-x-auto"><table class="enc-tabla"><thead><tr><th>Cliente</th><th>Fecha</th><th>Útil</th><th>Fácil</th><th>Agradable</th><th>Recomienda</th><th></th></tr></thead>
+      <div class="overflow-x-auto"><table class="enc-tabla"><thead><tr><th>Cliente</th><th>Fecha</th><th>Útil</th><th>Fácil</th><th>Agradable</th><th>Recomienda</th><th></th><th>Qué mejoraría</th></tr></thead>
       <tbody>${filas.slice().reverse().map(fila).join('')}</tbody></table></div>
     </details>
     ${pie}`;

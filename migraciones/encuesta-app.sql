@@ -7,7 +7,7 @@
 --
 -- Qué guarda: lo que respondió cada cliente en su app: qué tan útil, qué
 -- tan fácil, qué tan agradable se ve (1 a 5) y si la recomendaría (0 a 10,
--- el NPS). La escribe la app (api/training, accion 'encuesta_responder') y
+-- el NPS), y qué mejoraría (texto, opcional). La escribe la app (api/training, accion 'encuesta_responder') y
 -- el CRM la muestra en Inicio. Una sola respuesta por cliente y encuesta.
 -- ═══════════════════════════════════════════════════════════════════════
 
@@ -22,9 +22,12 @@ create table if not exists encuesta_app (
   facil       int check (facil between 1 and 5),
   agradable   int check (agradable between 1 and 5),
   recomienda  int check (recomienda between 0 and 10),
+  mejoraria   text,           -- «¿Qué mejorarías?» (opcional)
   creado_at   timestamptz not null default now(),
   unique (cliente_id, encuesta)
 );
+-- Si ya la habías creado sin la pregunta abierta, se le agrega (no borra nada).
+alter table encuesta_app add column if not exists mejoraria text;
 alter table encuesta_app enable row level security;
 
 do $$ begin

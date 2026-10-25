@@ -120,7 +120,7 @@ const OTROS = [
 ];
 const RESP = [
   { id: 'r1', user_id: 'coach-1', cliente_id: 'c0', encuesta: 'app-1', fecha: '2026-09-14', semana: 37, util: 5, facil: 4, agradable: 5, recomienda: 10 },
-  { id: 'r2', user_id: 'coach-1', cliente_id: 'c1', encuesta: 'app-1', fecha: '2026-10-06', semana: 19, util: 4, facil: 3, agradable: 4, recomienda: 6 },
+  { id: 'r2', user_id: 'coach-1', cliente_id: 'c1', encuesta: 'app-1', fecha: '2026-10-06', semana: 19, util: 4, facil: 3, agradable: 4, recomienda: 6, mejoraria: 'Que el chat de comida sea más rápido' },
   { id: 'r3', user_id: 'coach-1', cliente_id: 'c2', encuesta: 'app-1', fecha: '2026-10-13', semana: 15, util: 5, facil: 5, agradable: 4, recomienda: 9 },
 ];
 for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
@@ -142,6 +142,7 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
     await p.locator('[data-enc-tabla] summary').click();
     await p.locator('[data-inicio-encuesta]').screenshot({ path: path.join(CAPTURAS, 'inicio-encuesta.png') });
   }
+  ok(`${tag} · «Qué mejorarían» muestra lo que escribió (con su nota)`, /Qué mejorarían/i.test(r.txt) && /Que el chat de comida sea más rápido/.test(r.txt), r.txt);
   ok(`${tag} · la página no se desborda a lo ancho`, await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   // Sin la tabla: pide correr el SQL.
   await p.evaluate(() => { delete TABLAS_FALSAS.encuesta_app; return navigate('dashboard'); });
