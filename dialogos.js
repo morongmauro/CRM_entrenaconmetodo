@@ -281,7 +281,7 @@ function dlgTrato(c) {
 
 function dlgRellenar(texto, c) {
   return String(texto || '')
-    .replace(/\{nombre\}/g, dlgTrato(c))
+    .replace(/\{nombre\}/g, c ? dlgTrato(c) : '[nombre]')
     .replace(/\{coach\}/g, (typeof _settings !== 'undefined' && _settings.nombre_coach) || '');
 }
 
@@ -292,18 +292,21 @@ function dlgHtml(texto) {
 
 const dlgHuecos = (texto) => (String(texto).match(/\[[^\]]+\]/g) || []);
 
-window.abrirDialogos = async (clienteId) => {
-  const [c] = await Promise.all([db.clientes.get(clienteId), dlgCargarCustom()]);
-  if (!c) return toast('No encuentro el cliente');
-  _dlg.cliente = c; _dlg.q = ''; _dlg.editando = null;
-  openModal(modalShell(`💬 Diálogos · ${escapeHtml(c.nombre)}`, `
+const DLG_ESTILOS = `
     <style>
       .dlg-hueco { background: #FEF3C7; color: #92400E; border-radius: 4px; padding: 0 2px; }
       .dlg-chip { border: 1px solid #e2e8f0; border-radius: 999px; padding: .3rem .7rem; font-size: .8rem; font-weight: 600; background: #fff; color: #334155; white-space: nowrap; }
       .dlg-chip.on { background: #1D1D1F; border-color: #1D1D1F; color: #fff; }
       .dlg-card { border: 1px solid #e2e8f0; border-radius: 14px; padding: .8rem .9rem; background: #fff; }
       .dlg-texto { white-space: pre-line; font-size: .875rem; color: #334155; line-height: 1.45; }
-    </style>
+    </style>`;
+
+window.abrirDialogos = async (clienteId) => {
+  const [c] = await Promise.all([db.clientes.get(clienteId), dlgCargarCustom()]);
+  if (!c) return toast('No encuentro el cliente');
+  _dlg.cliente = c; _dlg.q = ''; _dlg.editando = null;
+  openModal(modalShell(`💬 Diálogos · ${escapeHtml(c.nombre)}`, `
+    ${DLG_ESTILOS}
     <div class="space-y-3">
       <div class="flex items-end gap-2 flex-wrap bg-slate-50 rounded-xl p-3">
         <div class="flex-1 min-w-[180px]">
@@ -483,6 +486,62 @@ window.dlgOcultar = async (id) => {
   if (propio) c.propios = c.propios.filter(d => d.id !== id);
   else if (!c.ocultos.includes(id)) c.ocultos.push(id);
   if (await dlgGuardarCustom()) { _dlg.editando = null; dlgPintar(); }
+};
+
+// =====================================================
+// LA SECCIÓN «DIÁLOGOS» DEL MENÚ
+// =====================================================
+// Todo en un sitio, sin tener que entrar a un cliente:
+//   · «Galería»: las plantillas para todos (editarlas, crear las tuyas). Sin
+//     cliente, {nombre} sale como [nombre] para rellenar.
+//   · Eligiendo un cliente: la galería con su nombre, y «Diálogo de su
+//     semana», el guion de 6 pasos de Seguimiento → Diálogo (dialogo-tipo.js).
+const _dlgV = { clienteId: '', modo: 'galeria' };
+
+routes.dialogos = async () => {
+  cargando();
+  const [clientes] = await Promise.all([db.clientes.list(), dlgCargarCustom()]);
+  finCargando();
+  const activos = clientes.filter(c => c.estado === 'activo').sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es'));
+  const c = activos.find(x => String(x.id) === String(_dlgV.clienteId)) || null;
+  if (!c) { _dlgV.clienteId = ''; _dlgV.modo = 'galeria'; }
+  _dlg.cliente = c; _dlg.q = ''; _dlg.editando = null;
+  const pestana = (k, t) => `<button type="button" class="dlg-chip ${_dlgV.modo === k ? 'on' : ''}" data-dlgv-modo="${k}" onclick="dlgVista({ modo: '${k}' })">${t}</button>`;
+  view.innerHTML = `
+    ${DLG_ESTILOS}
+    <div class="flex items-baseline justify-between flex-wrap gap-3 mb-5">
+      <div>
+        <h2 class="text-2xl font-bold text-slate-900">Diálogos</h2>
+        <p class="text-sm text-slate-500">Las plantillas para todos y, eligiendo un cliente, sus diálogos con su nombre</p>
+      </div>
+    </div>
+    <div class="card mb-4" data-dlgv>
+      <div class="flex items-end gap-3 flex-wrap">
+        <div class="min-w-[220px]">
+          <label>Cliente</label>
+          <select id="dlgv-cliente" onchange="dlgVista({ clienteId: this.value })">
+            <option value="">Todos · solo las plantillas</option>
+            ${activos.map(x => `<option value="${x.id}" ${c && x.id === c.id ? 'selected' : ''}>${escapeHtml(x.nombre)}</option>`).join('')}
+          </select>
+        </div>
+        ${c ? `<div class="flex gap-1.5 pb-1">${pestana('galeria', 'Galería')}${pestana('semana', 'Diálogo de su semana')}</div>` : ''}
+      </div>
+    </div>
+    ${_dlgV.modo === 'semana' && c
+      ? '<div class="card" id="seg-dialogo"><div class="es-vacio">Armando su diálogo…</div></div>'
+      : `<div class="card space-y-3">
+          <input id="dlg-q" placeholder="Buscar un diálogo…" oninput="_dlg.q = this.value; dlgPintar()">
+          <div class="flex gap-1.5 overflow-x-auto pb-1" id="dlg-cats"></div>
+          <div id="dlg-lista" class="space-y-2"></div>
+        </div>`}`;
+  if (_dlgV.modo === 'semana' && c) { if (typeof dtPintar === 'function') dtPintar(c); }
+  else dlgPintar();
+};
+
+window.dlgVista = (cambio) => {
+  Object.assign(_dlgV, cambio);
+  if ('clienteId' in cambio && !cambio.modo) _dlgV.modo = 'galeria';
+  rerenderView();
 };
 
 window.DLG_BASE = DLG_BASE;
