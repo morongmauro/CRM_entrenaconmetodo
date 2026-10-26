@@ -20,6 +20,7 @@
 const DLG_CATS = [
   ['saludos', '👋', 'Saludos'],
   ['semana', '📅', 'Seguimiento semanal'],
+  ['explicar', '🧭', 'Explicar el plan'],
   ['tecnica', '🎯', 'Revisión de ejercicio'],
   ['video', '🎥', 'Pedir video'],
   ['peso', '🏋️', 'Peso y progresión'],
@@ -88,6 +89,40 @@ No hace falta hacerlo perfecto, hace falta hacerlo seguido. Para esta semana te 
 Pasa, y es parte del proceso. Lo importante es no soltarlo todo: con [N] entrenos y registrar lo principal ya mantienes el avance.
 
 Si necesitas que ajuste la rutina a menos tiempo, me dices y lo hago.` },
+
+  // ── EXPLICAR EL PLAN ── (el porqué de un ciclo o una alimentación nueva)
+  { id: 'exp-ciclo', cat: 'explicar', titulo: 'Por qué cambia el ciclo', texto:
+`Hola {nombre}. Ya tienes el ciclo nuevo en la app.
+
+Te explico el porqué. En estas [N] semanas tu cuerpo ya se adaptó a lo que veníamos haciendo: [lo que logró, ej. pasaste de 50 a 60 kg en press banca]. Si seguimos igual, el progreso se frena. Por eso cambio el estímulo.
+
+Qué cambia: [qué cambia, ej. bajamos un poco las repeticiones y subimos la carga en los básicos]. [Ejercicio nuevo] entra en lugar de [el que sale] porque [razón concreta, ej. te deja cargar más sin molestar el hombro].
+
+Las dos primeras sesiones son de reconocimiento: técnica limpia, peso cómodo y anota todo. Con esos datos ajusto la carga la semana siguiente.` },
+  { id: 'exp-primeros', cat: 'explicar', titulo: 'Por qué estos primeros ejercicios', texto:
+`Hola {nombre}. Ya está tu primera rutina en la app.
+
+La armé con lo que me contaste: [objetivo], [N] días por semana y [contexto, ej. la molestia en la rodilla]. Por eso ves pocos ejercicios y bien escogidos: los básicos que más rinden para tu objetivo, más [accesorio] para [razón].
+
+Estas primeras semanas la meta es que aprendas cada movimiento bien y que yo vea cómo respondes. Usa un peso con el que te sobren 2 o 3 repeticiones y anota todo. Con eso subo la carga con criterio, no a ojo.
+
+Si un ejercicio te molesta o no tienes la máquina, me dices y lo cambio.` },
+  { id: 'exp-alimentacion', cat: 'explicar', titulo: 'Por qué cambia la alimentación', texto:
+`Hola {nombre}. Te ajusté la alimentación en la app.
+
+Revisé tus últimas [N] semanas: [qué vi, ej. bajaste 2,1 kg y la fuerza se mantuvo]. [Lectura, ej. vamos bien, pero el ritmo se está frenando]. Por eso [el cambio, ej. bajo 150 kcal y subo la proteína a 150 g].
+
+[Por qué ese cambio, ej. la proteína alta es la que protege el músculo mientras sigues bajando grasa].
+
+En tu día a día casi no se nota: [ej. una porción menos de arroz en la cena y un yogur griego en la tarde]. Lo revisamos en [N] semanas con tus números.` },
+  { id: 'exp-primera-alimentacion', cat: 'explicar', titulo: 'Por qué esta meta de alimentación', texto:
+`Hola {nombre}. Ya tienes tu plan de alimentación en la app.
+
+Tu meta la calculé con tu composición. Hoy estás en [peso] kg con [%] % de grasa, o sea [masa magra] kg de masa magra. Con tu actividad gastas cerca de [kcal] kcal al día.
+
+Por eso tu meta es [kcal meta] kcal, [déficit/superávit] de [diferencia] kcal: suficiente para [bajar grasa / ganar músculo] a un ritmo que se sostiene, sin pasar hambre ni perder lo que entrenas. La proteína va en [g] g porque es la que [protege/construye] tu músculo.
+
+Las primeras dos semanas no busques perfección: registra todo, aunque te salgas. Con eso ajusto con tus números reales.` },
 
   // ── REVISIÓN DE EJERCICIO ──
   { id: 'tec-bien', cat: 'tecnica', titulo: 'Técnica bien hecha', texto:

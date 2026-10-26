@@ -7,7 +7,7 @@
 // elección se recuerda en ese aparato. En el computador no cambia nada.
 //
 // La versión móvil es la misma app con otra forma: abajo una barra con lo
-// del día a día (Seguimiento, Pagos, Bandeja) y «Más» con todas las demás
+// del día a día (Seguimiento, Diálogos, Pagos, Bandeja) y «Más» con todas las demás
 // secciones; no se quita ninguna. Seguimiento muestra la lista o el cliente,
 // uno a la vez (app.js), y Pagos abre en las tarjetas del mes.
 //
@@ -16,7 +16,7 @@
 
 const MV_KEY = 'crm:modo';
 const MV_ANCHO = 760;
-const MV_TABS = ['seguimiento', 'pagos', 'bandeja'];
+const MV_TABS = ['seguimiento', 'dialogos', 'pagos', 'bandeja'];
 const MV_ICONO_MAS = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>';
 
 function mvElegido() { try { return localStorage.getItem(MV_KEY); } catch (e) { return null; } }

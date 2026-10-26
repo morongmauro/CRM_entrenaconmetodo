@@ -124,7 +124,7 @@ async function abrir(ancho, alto, conComida = true) {
     lado: getComputedStyle(document.querySelector('.em-side')).display,
   }));
   ok('teléfono: versión móvil sola, abre en Seguimiento', e1.movil && e1.vista === 'seguimiento', JSON.stringify(e1));
-  ok('teléfono: barra abajo con Seguimiento, Pagos, Bandeja y Más; sin el menú de arriba', e1.barra[0] === 'Seguimiento' && e1.barra[1] === 'Pagos' && /^Bandeja/.test(e1.barra[2]) && e1.barra[3] === 'Más' && e1.lado === 'none', JSON.stringify(e1));
+  ok('teléfono: barra abajo con Seguimiento, Diálogos, Pagos, Bandeja y Más; sin el menú de arriba', e1.barra[0] === 'Seguimiento' && e1.barra[1] === 'Diálogos' && e1.barra[2] === 'Pagos' && /^Bandeja/.test(e1.barra[3]) && e1.barra[4] === 'Más' && e1.lado === 'none', JSON.stringify(e1));
   await p.locator('#seg-list [data-seg-li="c0"]').waitFor({ timeout: 15000 });
   ok('Seguimiento: primero la lista, sin el cliente al lado', await p.locator('[data-seg-cabecera]').count() === 0 || !(await p.locator('[data-seg-cabecera]').isVisible()));
   await p.locator('#seg-list [data-seg-li="c0"] .seg-li-txt').click();
