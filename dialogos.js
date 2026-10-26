@@ -19,6 +19,7 @@
 
 const DLG_CATS = [
   ['saludos', '👋', 'Saludos'],
+  ['inicio', '🏁', 'Mensajes de inicio'],
   ['semana', '📅', 'Seguimiento semanal'],
   ['explicar', '🧭', 'Explicar el plan'],
   ['tecnica', '🎯', 'Revisión de ejercicio'],
@@ -61,6 +62,46 @@ No pasa nada. La idea es retomar sin querer recuperar todo de golpe. Esta semana
 `{nombre}, te quería decir algo: llevas [N] semanas sin soltar el proceso, y eso se nota en tus datos.
 
 La constancia es lo que menos se ve y lo que más resultado da. Gracias por tomártelo en serio. Seguimos.` },
+
+  // ── MENSAJES DE INICIO ── (los del coach al arrancar: pautas, metas y punto de partida)
+  { id: 'ini-entreno', cat: 'inicio', titulo: 'Pautas del entrenamiento', texto:
+`Hola {nombre}! Para que el proceso de entrenamiento sea fluido y seguro, ten en cuenta estas pautas:
+
+La rutina está estructurada en [un día de cuerpo completo, uno de tren inferior y uno de tren superior]. Cada uno con su bloque de calentamiento y movilidad, fuerza y resistencia, y cardio moderado.
+
+Estos primeros días nos sirven para medir sensaciones, identificar tus capacidades físicas y ver cómo responde tu cuerpo. No busques exigirte al límite desde la primera sesión; iremos adaptando la carga y aumentando la intensidad progresivamente.
+
+Respeta la secuencia: la rutina está diseñada con una lógica específica, así que intenta seguir el orden de los ejercicios tal cual aparece en la pantalla, en la medida que te sea posible. (Si una máquina no está disponible en tu gym, me avisas para calibrar otra alternativa.)
+
+El bloque inicial de movilidad es infaltable. Nos ayuda a preparar las articulaciones, mejorar el rango de movimiento y prevenir cualquier molestia.
+
+Si sientes que la sesión se te hace muy larga o no se ajusta a tu tiempo disponible, avísame y calibramos el volumen.
+
+Si algún movimiento te molesta de forma aguda, te causa dolor o no te sientes [seguro/segura] con la técnica, por favor me lo informas a la brevedad para hacer revisión del caso.
+
+Estoy por acá para acompañarte en cada paso. ¡A darle con toda! 🔥` },
+  { id: 'ini-metas', cat: 'inicio', titulo: 'Tus metas de alimentación', texto:
+`Hola {nombre}! Tus metas son completamente individuales porque contemplan tu nivel de actividad, edad, peso actual y sexo. Así quedan tus números objetivo:
+
+* Meta: [1800] kcal ([déficit del 15 %, para pérdida de grasa y aumento de masa muscular])
+* Proteína: [165] g
+* Carbohidratos: [185] g
+* Grasas: [45] g
+
+[Nota personal, si aplica. Ej.: por los motivos de salud y tu % de grasa actual, tu meta es un poco más restrictiva. Sin embargo, si llegas a sentir hambre o algo de ansiedad me avisas para que lo revisemos; la idea es tomar el camino donde te sientas bien y no haya sufrimiento.]
+
+La idea es mantenernos lo más cerca posible a la meta diaria. La distribución de gramos de macronutrientes está diseñada para cumplir los rangos que permiten las funciones fisiológicas:
+- Grasas: garantizar un funcionamiento hormonal y metabólico normal.
+- Proteína: asegurar el mantenimiento y la construcción de tejido muscular.
+- Carbohidratos: garantizar energía biodisponible en forma de glucosa para tus entrenamientos y las actividades del día a día.` },
+  { id: 'ini-partida-musculo', cat: 'inicio', titulo: 'Punto de partida · ganar músculo', texto:
+`Te comparto también una pequeña retroalimentación sobre tu estado actual y punto de partida:
+
+Te encuentras con un peso de [57,8] kg y un porcentaje de grasa corporal del [18,8] %, el cual se encuentra dentro de un rango [de atletas (14–20 %)]. Cuentas con [46,9] kg de masa libre de grasa, por lo que tienes una buena base muscular para tu peso. Vamos a enfocarnos en seguir desarrollando masa muscular, manteniendo y evitando una reducción adicional de grasa. La prioridad será generar las condiciones necesarias para aumentar masa magra y músculo, manteniendo niveles de grasa adecuados y cuidando tu rendimiento, energía y recuperación.` },
+  { id: 'ini-partida-grasa', cat: 'inicio', titulo: 'Punto de partida · bajar grasa (recomposición)', texto:
+`Te comparto también una pequeña retroalimentación sobre tu estado actual y punto de partida:
+
+Te encuentras con un peso de [80,5] kg y un porcentaje de grasa corporal del [30,8] % ([alto: 26 % o más]). Cuentas con [55,7] kg de masa libre de grasa, por lo que tienes también una base muscular de soporte con la que vamos a trabajar. Vamos a enfocarnos en optimizar la recomposición corporal mediante un déficit calórico eficiente, priorizando la reducción de grasa mientras mantenemos tu masa magra. La prioridad será generar un entorno favorable para perder tejido graso de forma sostenible, cuidando tu rendimiento en los entrenamientos, tu energía diaria y tu recuperación.` },
 
   // ── SEGUIMIENTO SEMANAL ──
   { id: 'sem-pregunta', cat: 'semana', titulo: 'Pedir el reporte de la semana', texto:
