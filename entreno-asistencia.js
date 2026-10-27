@@ -13,9 +13,11 @@
 //
 // 2. La foto de Trainerize (tabla `trainerize_resumen`, la llena
 //    carga-trainerize-10oct.sql) AL LADO de lo que tú anotaste en el CRM:
-//    cumplimiento, días de fuerza y cardio. No se mezcla con lo tuyo: se
-//    muestra junto y tú decides (con un botón para pasar sus días a la ficha
-//    si los de Trainerize son los buenos).
+//    cumplimiento, días de fuerza y cardio. No se mezcla con lo tuyo (con un
+//    botón para pasar sus días a la ficha si los de Trainerize son los
+//    buenos). Ya no va en el constructor: queda guardada en la ficha, al
+//    final de la pestaña Entreno, cerrada, como «Historial de la app
+//    anterior», por si hace falta.
 //
 // Nada de esto escribe solo. Las sugerencias son sugerencias; lo que se
 // añade a la rutina es con tu clic.
@@ -372,7 +374,11 @@ window.asiPintarCompara = async (cliente, contenedorId, segs) => {
   try {
     const datos = await asiDatos(cliente.id);
     const cmp = await asiCompara(cliente, segs || await db.seguimientos.listCliente(cliente.id), datos);
-    caja.innerHTML = cmp ? asiComparaHTML(cliente, cmp) : '';
+    caja.innerHTML = cmp ? `
+      <details class="sec sec-slate" data-historial-app-anterior>
+        <summary class="sec-title cursor-pointer" style="margin-bottom:0">Historial de la app anterior (Trainerize)</summary>
+        <div class="mt-3">${asiComparaHTML(cliente, cmp)}</div>
+      </details>` : '';
   } catch (e) { caja.innerHTML = ''; }
 };
 
@@ -477,7 +483,6 @@ function asiPanelHTML(r, an, cliente, cmp, todos, datos) {
 
   return `
     <div class="text-sm font-bold text-slate-700 mb-2">🧭 Asistencia · ${escapeHtml(cliente?.nombre || '')}</div>
-    ${cmp ? `<div class="mb-3">${asiComparaHTML(cliente, cmp, { compacto: true })}</div>` : ''}
     ${sec('En esta rutina', an.faseRef ? `Lo que se sabe de cada ejercicio, hasta ${escapeHtml(an.faseRef.nombre)}. La carga para arrancar es la del último registro.` : 'Todavía no hay sesiones registradas de este cliente.',
       filas || '<div class="text-xs text-slate-400 py-2">Añade ejercicios y aquí sale su historial.</div>')}
     ${sec('🔁 Los que más se le repiten', 'Ciclos en los que ha estado cada uno. Muchos seguidos = pensar en variarlo, salvo que siga subiendo.',

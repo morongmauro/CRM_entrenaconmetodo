@@ -8123,9 +8123,6 @@ window.verCliente = async (id) => {
           ${c.actividades_complementarias ? `<div><span class="text-slate-500">Complementarias:</span> <strong>${escapeHtml(c.actividades_complementarias)}</strong> <span class="text-xs text-slate-400">(suman bonus al score, sin meta fija)</span></div>` : ''}
         </div>` : ''}
 
-      <!-- Trainerize al lado de lo tuyo (entreno-asistencia.js) -->
-      <div id="tz-compara-ficha"></div>
-
       <!-- 6. CONDICIONES MÉDICAS / LESIONES -->
       ${c.restricciones_lesiones || c.patologias || c.lesion_actual || c.suplementos ? `
         <div class="sec sec-red">
@@ -8248,6 +8245,10 @@ window.verCliente = async (id) => {
             <div class="text-slate-700 whitespace-pre-line text-xs bg-white rounded-lg p-3 mt-2 max-h-96 overflow-y-auto">${escapeHtml(c.notas)}</div>
           </details>
         </div>` : ''}
+
+      <!-- Historial de la app anterior: Trainerize al lado de lo tuyo, guardado
+           al final de la pestaña Entreno y cerrado (entreno-asistencia.js) -->
+      <div id="tz-compara-ficha"></div>
     </div>
   `, `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>`), { wide: true });
 };

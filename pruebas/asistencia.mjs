@@ -93,8 +93,7 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
   ok(`${tag} · constructor: una fila de asistencia por ejercicio de la rutina (${nFilas})`, nFilas === 6);
   const txt = await p.locator('#asi-panel').innerText().catch(() => '');
   ok(`${tag} · constructor: trae el último registro con peso`, /Último: .*@ .*kg/.test(txt), txt.slice(0, 300));
-  ok(`${tag} · constructor: Trainerize al lado (18/25)`, txt.includes('18/25'), txt.slice(0, 300));
-  ok(`${tag} · constructor: lo anotado en el CRM al lado (16/20)`, txt.includes('16/20'), txt.slice(0, 400));
+  ok(`${tag} · constructor: ya no trae la tarjeta de Trainerize (quedó en la ficha)`, (await p.locator('#asi-panel [data-tz-compara]').count()) === 0 && !txt.includes('18/25'), txt.slice(0, 300));
   ok(`${tag} · constructor: hay sugerencias con tono`, await p.locator('#asi-panel [data-asi-ej] .rounded-lg.border').count() === 6);
   if (tag === 'ancho') {
     const caja = await p.locator('#asi-panel').boundingBox();
@@ -128,8 +127,14 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
   await p.waitForTimeout(300);
   await p.locator('[data-ficha-tab="entreno"]').click().catch(() => {});   // está en la pestaña Entrenamiento
   await p.waitForFunction(() => document.querySelector('#tz-compara-ficha [data-tz-compara]'), null, { timeout: 8000 }).catch(() => {});
+  const hist = p.locator('#tz-compara-ficha [data-historial-app-anterior]');
+  ok(`${tag} · ficha: «Historial de la app anterior», cerrado, al final de la pestaña Entreno`, (await hist.count()) === 1
+    && !(await hist.evaluate(d => d.open)) && await p.evaluate(() => { const r = document.querySelector('[data-ficha]'); return r && r.lastElementChild && r.lastElementChild.id === 'tz-compara-ficha' && r.lastElementChild.dataset.fichaSec === 'entreno'; }));
+  await hist.evaluate(el => el.scrollIntoView({ block: 'center' }));
+  if (tag === 'ancho') await p.screenshot({ path: path.join(CAPTURAS, 'historial-app-anterior-cerrado.png') });
+  await hist.locator('summary').click(); await p.waitForTimeout(200);
   const ficha = await p.locator('#tz-compara-ficha').innerText().catch(() => '');
-  ok(`${tag} · ficha: Trainerize al lado de lo tuyo`, /trainerize al lado/i.test(ficha) && /tu ficha/i.test(ficha), ficha.slice(0, 200));
+  ok(`${tag} · ficha: al abrirlo, Trainerize al lado de lo tuyo (18/25 y 16/20)`, /trainerize al lado/i.test(ficha) && /tu ficha/i.test(ficha) && ficha.includes('18/25') && ficha.includes('16/20'), ficha.slice(0, 300));
   await p.locator('#tz-compara-ficha [data-tz-compara]').screenshot({ path: path.join(CAPTURAS, `trainerize-ficha-${tag}.png`) }).catch(() => {});
   await p.locator('#tz-compara-ficha [data-usar-dias-tz]').click();
   await p.waitForTimeout(500);
