@@ -127,13 +127,8 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   const { ctx, p, errores } = await abrir(ancho, 1100);
   await p.evaluate(() => { try { localStorage.setItem('crm:segModo', 'semana'); } catch (e) {} segIr('c0'); });
   await p.locator('#seg-semana').waitFor({ timeout: 15000 });
-  // Arriba en Seguimiento: todas tus tareas, como recordatorios.
-  const glob = p.locator('[data-tc-global]');
-  await glob.locator('[data-tc-global-tarea]').first().waitFor({ timeout: 10000 }).catch(() => {});
-  const gtxt = await glob.innerText().catch(() => '');
-  ok(`${tag} · arriba en Seguimiento, «Mis tareas»: la lista con qué hacer, con quién y cuándo`, (await glob.locator('[data-tc-global-tarea]').count()) === 2
-    && /Revisar su técnica de sentadilla/.test(gtxt) && /Ana Pérez/.test(gtxt) && /Vencida/.test(gtxt) && /1 para hoy/i.test(gtxt) && !/Mandar fotos/.test(gtxt), gtxt.slice(0, 300));
-  if (tag === 'ancho') await glob.screenshot({ path: path.join(CAPTURAS, 'tareas-coach-global.png') });
+  // Ya no hay una lista de todas arriba: en Seguimiento salen las del cliente elegido.
+  ok(`${tag} · Seguimiento muestra solo las tareas del cliente elegido (sin la lista de todas)`, (await p.locator('[data-tc-global]').count()) === 0);
   const card = p.locator('[data-seg-tareas]');
   await card.locator('[data-tc-tarea]').first().waitFor({ timeout: 10000 }).catch(() => {});
   const ids = await card.locator('[data-tc-tarea]').evaluateAll(els => els.map(e => e.dataset.tcTarea));
@@ -163,7 +158,6 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   const p1 = await p.evaluate(() => window.TABLAS_FALSAS.pendientes.find(t => t.id === 'p1'));
   ok(`${tag} · marcar: queda completada con su fecha, no se borra`, p1 && p1.estado === 'completado' && p1.completado_en === HOY, JSON.stringify(p1));
   ok(`${tag} · marcar: sigue a la vista, tachada`, await card.locator('[data-tc-tarea="p1"].tc-hecha').count() === 1);
-  ok(`${tag} · «Mis tareas» de arriba se actualiza: sale la hecha y entra la nueva`, (await glob.locator('[data-tc-global-tarea="p1"]').count()) === 0 && /Mandarle la rutina nueva/.test(await glob.innerText()));
   if (tag === 'ancho') await card.screenshot({ path: path.join(CAPTURAS, 'tareas-coach-tarjeta-2.png') });
   ok(`${tag} · sin errores de JavaScript`, errores.length === 0, errores.join(' | '));
   await ctx.close();

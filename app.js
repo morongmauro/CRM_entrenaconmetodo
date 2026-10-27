@@ -3248,6 +3248,7 @@ async function navigate(name) {
   // La doble pantalla ensancha el marco: fuera de Seguimiento se quita.
   document.body.classList.toggle('split-on', _split.on && _currentView === 'seguimiento');
   $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === _currentView));
+  if (typeof segBarraFuera === 'function') segBarraFuera();
   // En el teléfono la tira de secciones se desliza: si la sección activa
   // queda fuera de la vista no sabes dónde estás parado.
   const activo = $(`.nav-item[data-view="${_currentView}"]`);
@@ -3968,11 +3969,8 @@ routes.seguimiento = async () => {
         <button class="btn btn-primary" onclick="abrirNuevoSeguimiento(_selectedClienteId)">+ Nueva semana</button>
       </div>
     </div>
-    <div id="seg-mis-tareas" data-seg-mis-tareas></div>
     <div id="seg-content"></div>
   `;
-  // Tus tareas de todos los clientes, como recordatorios (tareas-coach.js).
-  if (typeof tcPintarGlobal === 'function') tcPintarGlobal();
 
   if (_segView === 'focus' || enMovil()) renderSegFocus(clientes, allSegs, ultPorCliente);
   else renderSegBoard(clientes, allSegs);
@@ -4019,6 +4017,36 @@ routes.seguimiento = async () => {
 const repintarSeguimiento = () => (_currentView === 'seguimiento' ? rerenderView() : navigate('seguimiento'));
 window.switchSegView = (which) => { _segView = which; repintarSeguimiento(); };
 
+// ¿La lista de clientes va en la barra lateral? Solo en el computador, con
+// la barra a la vista (ni escondida ni hecha tira arriba) y fuera de la mesa
+// de trabajo, que tiene su propia columna.
+function segListaEnBarra(mesa) {
+  return !mesa && !enMovil() && window.innerWidth >= 1024 && !document.body.classList.contains('menu-oculto')
+    && !!document.querySelector('#main-nav .nav-item[data-view="seguimiento"]');
+}
+// La lista en la barra: debajo del botón «Seguimiento», con el buscador.
+// Usa los mismos #seg-buscar y #seg-list: filtrar y repintar funcionan igual.
+function segPintarBarra(html) {
+  let sub = document.querySelector('#main-nav [data-nav-sub="seguimiento"]');
+  if (html == null) { if (sub) sub.remove(); return; }
+  const prev = sub ? (sub.querySelector('#seg-list') || {}).scrollTop || 0 : 0;
+  const q = sub ? (sub.querySelector('#seg-buscar') || {}).value || '' : '';
+  if (!sub) {
+    sub = document.createElement('div');
+    sub.className = 'seg-barra';
+    sub.dataset.navSub = 'seguimiento';
+    const item = document.querySelector('#main-nav .nav-item[data-view="seguimiento"]');
+    item.after(sub);
+  }
+  sub.innerHTML = `
+    <input id="seg-buscar" class="seg-barra-buscar" placeholder="Buscar cliente…" value="${escapeHtml(q)}" oninput="filtrarClientesSidebar(this.value)">
+    <div id="seg-list" class="seg-barra-lista scrollbar-thin">${html}</div>`;
+  const l = sub.querySelector('#seg-list'); if (l && prev) l.scrollTop = prev;
+  if (q) filtrarClientesSidebar(q);
+}
+// Fuera de Seguimiento la lista de la barra se quita (vuelve al entrar).
+window.segBarraFuera = () => { if (_currentView !== 'seguimiento') segPintarBarra(null); };
+
 async function renderSegFocus(clientes, allSegs, ultPorCliente) {
   // Conservar la posición de scroll del sidebar entre re-renders (al
   // seleccionar un cliente la lista no debe saltar al inicio).
@@ -4051,20 +4079,29 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
   // tabla del historial, como antes: por estado y última semana registrada.
   const U = typeof segUltimos === 'function' ? await segUltimos() : null;
   if (U) _seg.lista = clientes;
-  const sidebar = `
+  // En el computador la lista va en la barra lateral, debajo de
+  // «Seguimiento»: la página queda en dos pantallas (el cliente y, con la
+  // doble pantalla, la otra sección). En el teléfono, en la mesa de trabajo
+  // o con la barra escondida, sigue aquí.
+  const mesaYa = _segMesa && !enMovil();
+  const enBarra = segListaEnBarra(mesaYa);
+  const listaHTML = U ? segListaHTML(clientes, U, _selectedClienteId) : ordenados.map(c => clienteSidebarItem(c, ultPorCliente[c.id])).join('');
+  segPintarBarra(enBarra ? listaHTML : null);
+  const sidebar = enBarra ? '' : `
     <aside class="col-span-12 lg:col-span-4 card h-fit">
       <div class="relative mb-3">
         <input id="seg-buscar" class="pl-9" placeholder="Buscar cliente…" oninput="filtrarClientesSidebar(this.value)">
         <span class="absolute left-3 top-2.5 text-slate-400 text-sm">🔍</span>
       </div>
       <div id="seg-list" class="space-y-1 max-h-[600px] overflow-y-auto scrollbar-thin">
-        ${U ? segListaHTML(clientes, U, _selectedClienteId) : ordenados.map(c => clienteSidebarItem(c, ultPorCliente[c.id])).join('')}
+        ${listaHTML}
       </div>
     </aside>
   `;
+  const anchoCliente = enBarra ? 'col-span-12' : 'col-span-12 lg:col-span-8';
 
   if (!cliente) {
-    $('#seg-content').innerHTML = `<div class="grid grid-cols-12 gap-4" data-seg-grid data-seg-movil="lista">${sidebar}<div class="col-span-12 lg:col-span-8 card text-slate-500">Selecciona un cliente.</div></div>`;
+    $('#seg-content').innerHTML = `<div class="grid grid-cols-12 gap-4" data-seg-grid data-seg-movil="lista">${sidebar}<div class="${anchoCliente} card text-slate-500">Selecciona un cliente${enBarra ? ' en la barra de la izquierda' : ''}.</div></div>`;
     const sl0 = $('#seg-list'); if (sl0 && prevScroll) sl0.scrollTop = prevScroll;
     return;
   }
@@ -4099,7 +4136,7 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
       </div>` : ''}
     <div class="grid grid-cols-12 gap-4 ${mesa ? 'seg-mesa-grid' : ''}" data-seg-grid data-seg-movil="${_segMovil}">
       ${mesa ? `<section class="seg-mesa-col">${sidebar}</section>` : sidebar}
-      <div class="col-span-12 lg:col-span-8 space-y-4 ${mesa ? 'seg-mesa-col' : ''}">
+      <div class="${anchoCliente} space-y-4 ${mesa ? 'seg-mesa-col' : ''}">
         ${segCabeceraHTML(cliente)}
         <div class="seg-modo" data-seg-modo>
           <button type="button" class="${_segModo === 'semana' ? 'active' : ''}" data-seg-modo-btn="semana" onclick="segModo('semana')">Semana</button>

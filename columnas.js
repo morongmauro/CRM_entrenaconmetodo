@@ -154,6 +154,9 @@ window.menuAlternar = () => {
   try { localStorage.setItem(MENU_KEY, oculto ? '1' : '0'); } catch (e) {}
   menuPintar();
   colPedir();
+  // En Seguimiento la lista de clientes va en el menú: al esconderlo vuelve
+  // a la página (y al mostrarlo, al menú).
+  if (typeof _currentView !== 'undefined' && _currentView === 'seguimiento' && typeof repintarSeguimiento === 'function') repintarSeguimiento();
 };
 (() => {
   const marca = document.querySelector('.em-topbar .em-brand');

@@ -69,11 +69,15 @@
       const deEste = vistas.map(v => botones.find(b => b.dataset.view === v)).filter(Boolean);
       if (i === 2) botones.filter(b => !conocidos.has(b.dataset.view)).forEach(b => deEste.push(b));
       if (!deEste.length) return;
-      orden.push({ titulo, fin: !titulo }, ...deEste);
+      // Lo que se despliega debajo de un botón (la lista de clientes de
+      // Seguimiento) va pegado a su botón.
+      const conSub = deEste.flatMap(b => { const sub = nav.querySelector(`:scope > [data-nav-sub="${b.dataset.view}"]`); return sub ? [b, sub] : [b]; });
+      orden.push({ titulo, fin: !titulo }, ...conSub);
     });
     // ¿Ya está así? Entonces no se toca (evita bucles con el observador).
-    const actual = [...nav.children].map(n => n.dataset.view || ('g:' + (n.dataset.grupo || ''))).join(',');
-    const quiero = orden.map(o => (o.dataset ? o.dataset.view : 'g:' + (o.titulo || 'fin'))).join(',');
+    const clave = (n) => n.dataset.view || (n.dataset.navSub ? 'sub:' + n.dataset.navSub : 'g:' + (n.dataset.grupo || ''));
+    const actual = [...nav.children].map(clave).join(',');
+    const quiero = orden.map(o => (o.dataset ? clave(o) : 'g:' + (o.titulo || 'fin'))).join(',');
     if (actual === quiero) return;
     ordenando = true;
     nav.querySelectorAll(':scope > .em-nav-grupo').forEach(g => g.remove());

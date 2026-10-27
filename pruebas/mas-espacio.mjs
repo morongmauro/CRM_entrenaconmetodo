@@ -128,10 +128,16 @@ await p.screenshot({ path: path.join(CAPTURAS, 'menu-oculto.png') });
 await p.locator('#menu-toggle').click();
 await p.waitForTimeout(300);
 ok('menú: vuelve con el mismo botón', await p.evaluate(() => getComputedStyle(document.querySelector('.em-side')).display !== 'none'));
-// 2. Seguimiento: la línea entre la lista y el cliente se arrastra
+// 2. Seguimiento: con la barra a la vista, la lista de clientes va en la
+// barra (dos pantallas). Con la barra escondida vuelve a la página, y ahí la
+// línea entre la lista y el cliente se arrastra.
 await p.evaluate(() => segIr('c0'));
 await p.locator('#seg-semana [data-es-sobrecarga] [data-es-sobre]').first().waitFor({ timeout: 15000 });
+ok('Seguimiento: con la barra a la vista, la lista de clientes va en la barra', await p.evaluate(() => !!document.querySelector('#main-nav [data-nav-sub="seguimiento"] #seg-list') && !document.querySelector('[data-seg-grid] > aside')));
+await p.locator('#menu-toggle').click();
+await p.locator('#seg-semana [data-es-sobrecarga] [data-es-sobre]').first().waitFor({ timeout: 15000 });
 await p.waitForTimeout(600);
+ok('al esconder el menú, la lista vuelve a la página al instante', await p.evaluate(() => !!document.querySelector('[data-seg-grid] > aside #seg-list') && !document.querySelector('[data-nav-sub="seguimiento"]')));
 const t = p.locator('[data-col-tirador="seguimiento:0"]');
 ok('Seguimiento: hay una línea entre la lista y el cliente', await t.count() === 1);
 const antes = await p.evaluate(() => document.querySelector('[data-seg-grid] > aside').getBoundingClientRect().width);
@@ -146,6 +152,10 @@ ok('su semana (2 columnas) también se ajusta', tSem === 1);
 await t.dblclick();
 await p.waitForTimeout(300);
 ok('doble clic: vuelve al ancho de siempre', Math.abs(await p.evaluate(() => document.querySelector('[data-seg-grid] > aside').getBoundingClientRect().width) - antes) < 4);
+await p.locator('#menu-toggle').click();
+await p.waitForTimeout(300);
+await p.evaluate(() => segIr('c0'));
+await p.locator('#seg-semana [data-es-sobrecarga] [data-es-sobre]').first().waitFor({ timeout: 15000 });
 // 3. Foto del ejercicio en «Pesos y repeticiones»
 const fotos = await p.locator('#seg-semana [data-es-sobrecarga] [data-es-foto] img').count();
 ok('pesos y reps: cada ejercicio con su foto', fotos >= 1, String(fotos));
