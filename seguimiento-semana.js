@@ -961,7 +961,7 @@ window.esPintar = async (c, lunes = null) => {
   // En la mesa de trabajo los mensajes van en su propia columna.
   const msjs = caja.querySelector('[data-es-mensajes]') || document.querySelector('[data-es-mensajes]');
   if (cuerpo) cuerpo.classList.add('es-cargando');
-  if (!caja.dataset.ultimoPintado) { caja.dataset.ultimoPintado = '1'; segPintarUltimo(c); esPintarRecordatorios(c); if (typeof tcPintar === 'function') tcPintar(c); }
+  if (!caja.dataset.ultimoPintado) { caja.dataset.ultimoPintado = '1'; segPintarUltimo(c); esPintarRecordatorios(c); if (typeof tcPintar === 'function') tcPintar(c); if (typeof paPintar === 'function') paPintar(c); }
   let S;
   try {
     const D = await esLeer(c, lunes);
@@ -1060,6 +1060,7 @@ function esArmazonHTML(c, { sinMensajes = false } = {}) {
   const sk = '<div class="es-card es-sk"></div>';
   return `
     <div class="es-sem" id="seg-semana" data-lunes="${ini}">
+      ${typeof paTarjetaHTML === 'function' ? paTarjetaHTML() : ''}
       <div class="es-semh">
         <b data-es-titulo>${ini === actual ? 'Esta semana' : 'La semana pasada'} · ${esFechaCorta(ini)} al ${esFechaCorta(evtSumarDias(ini, 6))}</b>
         <div class="es-tog">
