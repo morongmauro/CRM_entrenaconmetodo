@@ -651,3 +651,16 @@ body.modo-movil [data-seg-mesa-btn] { display: none !important; }
 .dlg-q { font-size: 12.5px; color: #6B6B70; font-weight: 700; margin: 8px 0 4px; }
 .dlg-pie { font-size: 12px; color: #9A9AA0; margin-top: 16px; line-height: 1.45; }
 @media (max-width: 560px) { .dlg-bur { flex-direction: column; } .dlg-cp { align-self: flex-end; } .dlg-si { margin-left: 4px; } }
+
+/* Mis tareas por cliente (tareas-coach.js) */
+.tc-fila { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #F1EFEA; cursor: pointer; margin: 0; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.tc-fila input[type=checkbox] { width: 18px; height: 18px; flex: none; accent-color: #46965A; }
+.tc-txt { flex: 1; min-width: 0; font-size: 14px; color: #1F1F1F; line-height: 1.35; }
+.tc-cuando { flex: none; font-size: 12px; font-weight: 650; color: #6B6B70; background: #F4F3EF; border-radius: 99px; padding: 3px 9px; white-space: nowrap; }
+.tc-cuando.tc-hoy { color: #8A5A00; background: #FDF1D6; }
+.tc-cuando.tc-vencida { color: #A3301B; background: #FDECE8; }
+.tc-hecha .tc-txt { color: #9A9AA0; text-decoration: line-through; }
+.tc-nueva { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.tc-nueva #tc-texto { flex: 1 1 220px; min-width: 0; }
+.tc-nueva #tc-fecha { flex: 0 0 150px; }
+.seg-li-txt .seg-li-tarea { font-size: 12px; font-weight: 700; color: #A3301B; }

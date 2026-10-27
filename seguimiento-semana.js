@@ -961,7 +961,7 @@ window.esPintar = async (c, lunes = null) => {
   // En la mesa de trabajo los mensajes van en su propia columna.
   const msjs = caja.querySelector('[data-es-mensajes]') || document.querySelector('[data-es-mensajes]');
   if (cuerpo) cuerpo.classList.add('es-cargando');
-  if (!caja.dataset.ultimoPintado) { caja.dataset.ultimoPintado = '1'; segPintarUltimo(c); esPintarRecordatorios(c); }
+  if (!caja.dataset.ultimoPintado) { caja.dataset.ultimoPintado = '1'; segPintarUltimo(c); esPintarRecordatorios(c); if (typeof tcPintar === 'function') tcPintar(c); }
   let S;
   try {
     const D = await esLeer(c, lunes);
@@ -1068,6 +1068,7 @@ function esArmazonHTML(c, { sinMensajes = false } = {}) {
         </div>
       </div>
       <div class="es-ultimo" data-es-ultimo></div>
+      ${typeof tcTarjetaHTML === 'function' ? tcTarjetaHTML(c) : ''}
       <div class="es-grid" data-es-cuerpo>${sk}${sk}</div>
       ${typeof vtPanel === 'function' ? `<details class="es-card es-vt" open data-seg-videos>
         <summary class="es-k">Videos de técnica · pedidos, por revisar y a mejorar</summary>
@@ -1310,15 +1311,16 @@ async function segUltimos() {
   if (_seg.ult && Date.now() - _seg.ult.en < 60000) return _seg.ult;
   try {
     const desde = evtSumarDias(fmt.hoy(), -180);
-    const [m, n] = await Promise.all([
+    const [m, n, tareas] = await Promise.all([
       sb.from('seguimiento_mensajes').select('cliente_id, fecha, titulo, created_at').gte('fecha', desde).order('created_at', { ascending: false }).limit(5000),
       sb.from('notas_entreno').select('cliente_id').is('leida_en', null).limit(2000),
+      typeof tcResumen === 'function' ? tcResumen().catch(() => ({})) : {},
     ]);
     if (m.error) throw m.error;
     const ultimo = {}, notas = {};
     (m.data || []).forEach(f => { if (!ultimo[f.cliente_id]) ultimo[f.cliente_id] = f; });
     ((n && n.data) || []).forEach(x => { notas[x.cliente_id] = (notas[x.cliente_id] || 0) + 1; });
-    _seg.ult = { ultimo, notas, en: Date.now() };
+    _seg.ult = { ultimo, notas, tareas: tareas || {}, en: Date.now() };
     return _seg.ult;
   } catch (e) { return null; }
 }
@@ -1326,17 +1328,23 @@ async function segUltimos() {
 function segListaHTML(clientes, U, sel) {
   const filas = clientes.map(c => {
     const u = U.ultimo[c.id] || null;
-    return { c, u, d: u ? segHace(u.fecha).d : null, notas: U.notas[c.id] || 0 };
+    return { c, u, d: u ? segHace(u.fecha).d : null, notas: U.notas[c.id] || 0, tareas: (U.tareas || {})[c.id] || null };
   });
-  const tarde = (x) => x.d === null || x.d >= SEG_DIAS_AVISO;
+  // Te toca: hace días sin seguimiento, o tienes una tarea suya vencida o para hoy.
+  const tarde = (x) => x.d === null || x.d >= SEG_DIAS_AVISO || !!(x.tareas && x.tareas.vencen);
   const orden = (a, b) => (b.d ?? 9999) - (a.d ?? 9999) || String(a.c.nombre).localeCompare(String(b.c.nombre));
   const item = (x) => {
     const cuando = x.u ? segHace(x.u.fecha).txt.replace(/^./, m => m.toUpperCase()) : 'Sin seguimiento';
     const notas = x.notas ? ` · ${x.notas === 1 ? '1 nota' : x.notas + ' notas'} sin responder` : '';
+    const t = x.tareas;
+    // La tarea vencida o para hoy va en su propia línea, en rojo: la lista
+    // es angosta y al final de la línea se cortaba con «…».
+    const tareaHoy = t && t.vencen ? `<span class="seg-li-tarea" data-seg-li-tarea>${t.vencen === 1 ? '1 tarea' : t.vencen + ' tareas'} hoy</span>` : '';
+    const tareas = t && !t.vencen && t.abiertas ? ` · ${t.abiertas === 1 ? '1 tarea' : t.abiertas + ' tareas'}` : '';
     return `
     <div class="seg-li${x.c.id === sel ? ' activo' : ''}" role="button" tabindex="0" data-nombre="${escapeHtml(String(x.c.nombre || '').toLowerCase())}" data-seg-li="${x.c.id}" data-seg-dias="${x.d ?? ''}" onclick="seleccionarCliente('${x.c.id}')">
       ${helpers.avatar(x.c.nombre, 10)}
-      <div class="seg-li-txt"><b>${escapeHtml(x.c.nombre)}</b><span class="${x.c.estado === 'activo' && tarde(x) ? 'seg-li-tarde' : ''}">${cuando}${notas}</span></div>
+      <div class="seg-li-txt"><b>${escapeHtml(x.c.nombre)}</b><span class="${x.c.estado === 'activo' && tarde(x) ? 'seg-li-tarde' : ''}">${cuando}${notas}${tareas}</span>${tareaHoy}</div>
       ${x.d === 0
         ? `<span class="seg-check seg-check-ok seg-li-ck" title="Seguimiento hecho hoy">${SEG_ICO_CHECK}Hoy</span>`
         : `<button type="button" class="seg-check seg-li-ck" data-seg-li-marcar="${x.c.id}" onclick="event.stopPropagation(); segMarcar('${x.c.id}', true)" title="Marcar que hoy le hiciste seguimiento">${SEG_ICO_CHECK}Marcar</button>`}
