@@ -2,9 +2,12 @@
 // MIS TAREAS POR CLIENTE · lo que el coach se anota para cada uno
 // =====================================================
 // «Revisarle la técnica de la sentadilla el jueves», «preguntarle cómo le
-// fue con el viaje». Va arriba en su Seguimiento (tarjeta «Mis tareas con…»)
-// y en la lista de Seguimiento: quien tiene una tarea vencida o para hoy
-// sale en «Te toca» con el aviso, para que no se olvide.
+// fue con el viaje». Se ven en Seguimiento de tres formas:
+//   · arriba de todo, «Mis tareas»: la lista de todas, de todos los
+//     clientes, como recordatorios («Pedirle las fotos · Ana · Hoy»);
+//   · en el Seguimiento de cada cliente, «Mis tareas con…», donde se agregan;
+//   · en la lista de clientes: quien tiene una vencida o para hoy sale en
+//     «Te toca» con el aviso.
 //
 // Usa la tabla de siempre, `pendientes`, con para = 'coach': son las mismas
 // que se ven en la ficha (Pendientes, con la gorra) y en Actividades. La
@@ -75,7 +78,8 @@ window.tcPintar = async (c) => {
 async function tcRefrescar() {
   if (typeof invalidarCache === 'function') invalidarCache('pendientes');
   if (typeof _seg !== 'undefined') _seg.ult = null;
-  if (_tc.cliente) await tcPintar(_tc.cliente);
+  if (_tc.cliente && document.getElementById('seg-tareas')) await tcPintar(_tc.cliente);
+  tcPintarGlobal();
   if (typeof segPintarLista === 'function') segPintarLista();
 }
 
@@ -111,4 +115,44 @@ window.tcResumen = async () => {
     if (t.fecha_limite && t.fecha_limite <= hoy) x.vencen++;
   });
   return out;
+};
+
+// ── «Mis tareas»: todas, de todos los clientes, arriba en Seguimiento ──
+// Como una lista de recordatorios: qué hacer, con quién y para cuándo. Las
+// vencidas y las de hoy primero. Tocar el nombre abre su Seguimiento.
+const _tcG = { todas: false };
+window.tcPintarGlobal = async () => {
+  const caja = document.getElementById('seg-mis-tareas');
+  if (!caja) return;
+  const [{ data, error }, clientes] = await Promise.all([
+    sb.from('pendientes').select('*').eq('para', 'coach').eq('estado', 'abierto').order('created_at', { ascending: true }),
+    db.clientes.list().catch(() => []),
+  ]);
+  if (!caja.isConnected) return;
+  const nombreDe = Object.fromEntries((clientes || []).map(c => [c.id, c.nombre]));
+  if (error) { caja.innerHTML = ''; return; }
+  const filas = (data || []).sort((a, b) => String(a.fecha_limite || '9999').localeCompare(String(b.fecha_limite || '9999')) || String(a.created_at || '').localeCompare(String(b.created_at || '')));
+  if (!filas.length) { caja.innerHTML = ''; return; }
+  const hoy = tcHoy();
+  const urgentes = filas.filter(t => t.fecha_limite && t.fecha_limite <= hoy).length;
+  const MAX = 6;
+  const ver = _tcG.todas ? filas : filas.slice(0, MAX);
+  caja.innerHTML = `
+    <details class="es-card tc-global" open data-tc-global>
+      <summary class="es-k" style="margin-bottom:0">Mis tareas · ${filas.length}${urgentes ? ` · <span class="tc-urg">${urgentes} para hoy</span>` : ''}</summary>
+      <div class="tc-global-lista">
+        ${ver.map(t => {
+          const q = tcCuando(t.fecha_limite);
+          const nombre = t.cliente_id ? (nombreDe[t.cliente_id] || 'Cliente') : 'General';
+          return `
+          <div class="tc-fila" data-tc-global-tarea="${t.id}">
+            <input type="checkbox" onchange="tcMarcar('${t.id}', true)" title="Marcar como hecha">
+            <span class="tc-txt">${escapeHtml(t.descripcion)}
+              ${t.cliente_id ? `<button type="button" class="tc-quien" onclick="seleccionarCliente('${t.cliente_id}')">${escapeHtml(nombre)}</button>` : `<span class="tc-quien">${nombre}</span>`}</span>
+            <span class="tc-cuando ${q.cls}">${q.txt}</span>
+          </div>`;
+        }).join('')}
+      </div>
+      ${filas.length > MAX ? `<button type="button" class="btn btn-ghost btn-sm mt-1" data-tc-ver-todas onclick="_tcG.todas = !_tcG.todas; tcPintarGlobal()">${_tcG.todas ? 'Ver menos' : `Ver todas (${filas.length})`}</button>` : ''}
+    </details>`;
 };

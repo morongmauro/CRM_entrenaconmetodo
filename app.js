@@ -3968,8 +3968,11 @@ routes.seguimiento = async () => {
         <button class="btn btn-primary" onclick="abrirNuevoSeguimiento(_selectedClienteId)">+ Nueva semana</button>
       </div>
     </div>
+    <div id="seg-mis-tareas" data-seg-mis-tareas></div>
     <div id="seg-content"></div>
   `;
+  // Tus tareas de todos los clientes, como recordatorios (tareas-coach.js).
+  if (typeof tcPintarGlobal === 'function') tcPintarGlobal();
 
   if (_segView === 'focus' || enMovil()) renderSegFocus(clientes, allSegs, ultPorCliente);
   else renderSegBoard(clientes, allSegs);
