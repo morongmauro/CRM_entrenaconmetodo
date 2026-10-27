@@ -19,8 +19,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Entrena con Método" />
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Versión fija: «@2» obligaba a preguntar cada vez cuál era la última. -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preload" href="/fonts/figtree.woff2" as="font" type="font/woff2" crossorigin>
@@ -37,9 +37,11 @@
   <link rel="stylesheet" href="/marca-app.css" />
   <!-- Diseño: jerarquía, menú en grupos y botones como la app. AL FINAL. -->
   <link rel="stylesheet" href="/diseno.css" />
-  <script>
-    tailwind.config = { theme: { extend: { fontFamily: { sans: ['Figtree','system-ui','sans-serif'] } } } }
-  </script>
+  <!-- Tailwind ya compilado (tailwind.config.cjs). Antes lo armaba el CDN en
+       el navegador, en cada carga y de nuevo con cada cambio de pantalla: era
+       lo que más frenaba el CRM. Va AL FINAL del <head>, que es donde el CDN
+       ponía sus estilos, para que todo se vea exactamente igual. -->
+  <link rel="stylesheet" href="/tailwind.css" />
 </head>
 <body class="bg-slate-100 text-slate-800 min-h-screen">
 
