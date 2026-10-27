@@ -32,7 +32,10 @@ const falso = fs.readFileSync(path.join(import.meta.dirname, 'arnes', 'supabase-
 
 // ── Una semana de ejemplo, relativa a hoy ──
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-const HOY = iso(new Date());
+// «Hoy» es siempre un sábado (el último que pasó): la semana de ejemplo
+// tiene entrenos hasta el viernes, y un martes todavía no existen. La prueba
+// fija el reloj del navegador en ese día (abrir).
+const HOY = (() => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 1) % 7)); return iso(d); })();
 const mas = (f, n) => { const [y, m, d] = f.split('-').map(Number); const x = new Date(y, m - 1, d); x.setDate(x.getDate() + n); return iso(x); };
 const offset = (f) => { const [y, m, d] = f.split('-').map(Number); return (new Date(y, m - 1, d).getDay() + 6) % 7; };
 const LUNES = mas(HOY, -offset(HOY));
@@ -92,6 +95,7 @@ const ok = (nombre, c, extra = '') => { if (!c) mal++; console.log(`  ${c ? 'ok 
 
 async function abrir(ancho, alto, conComida = true) {
   const ctx = await b.newContext({ viewport: { width: ancho, height: alto }, deviceScaleFactor: 1 });
+  await ctx.clock.install({ time: new Date(`${HOY}T12:00:00`) }); await ctx.clock.resume();
   await ctx.grantPermissions(['clipboard-read', 'clipboard-write']);
   const p = await ctx.newPage();
   const errores = [];
