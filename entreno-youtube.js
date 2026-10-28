@@ -81,6 +81,9 @@ window.entYtEstadoRef = (ref) => (_yt.estado && _yt.estado[ref]) || null;
 
 function entYtMotivo(codigo) {
   if (codigo === 100) return 'el video ya no existe o es privado';
+  // Los de la revisión automática semanal (api/_videos.js de la app).
+  if (codigo === 400 || codigo === 404) return 'el video ya no existe';
+  if (codigo === 401 || codigo === 403) return 'el video es privado o el dueño no deja verlo fuera de YouTube';
   if (codigo === 101 || codigo === 150) return 'YouTube no deja verlo fuera de YouTube (derechos de autor, país o el dueño no lo permite)';
   if (codigo === 152 || codigo === 153) return 'YouTube no deja verlo dentro de otra página';
   return 'YouTube no lo reproduce';

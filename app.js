@@ -3969,8 +3969,10 @@ routes.seguimiento = async () => {
         <button class="btn btn-primary" onclick="abrirNuevoSeguimiento(_selectedClienteId)">+ Nueva semana</button>
       </div>
     </div>
+    ${typeof vrCajaHTML === 'function' ? vrCajaHTML() : ''}
     <div id="seg-content"></div>
   `;
+  if (typeof vrPintar === 'function') vrPintar();
 
   if (_segView === 'focus' || enMovil()) renderSegFocus(clientes, allSegs, ultPorCliente);
   else renderSegBoard(clientes, allSegs);
