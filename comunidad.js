@@ -115,6 +115,7 @@ routes.comunidad = async () => {
             ${d.bienvenida ? `<span class="text-xs text-slate-500">Última edición: ${comFecha(d.bienvenida.editado_en)}</span>` : ''}
           </div>`}
         </div>
+        ${typeof ccalCajaHTML === 'function' ? ccalCajaHTML() : ''}
         <div class="card" id="com-nuevo">
           <h3 class="font-bold text-slate-900 mb-3">Nueva publicación</h3>
           <textarea id="com-texto" rows="6" class="w-full border border-slate-200 rounded-xl p-3 text-sm" placeholder="Ej.: Esta semana el reto es dormir 7 horas. Lo demás se acomoda."></textarea>
@@ -181,6 +182,7 @@ routes.comunidad = async () => {
     </div>`}
   `;
   if (!d.error) comMarcarVisto();
+  if (!d.error && typeof ccalPintar === 'function') ccalPintar();
 };
 
 window.comPublicar = async () => {
