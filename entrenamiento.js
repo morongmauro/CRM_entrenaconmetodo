@@ -668,6 +668,10 @@ function entFiltrarSinOrden(lista) {
     //   «duplicados» → fichas marcadas como copia de otra (nombres-en-analisis.sql),
     //   para decidir una a una. Las que usan hoy nunca salen aquí.
     if (f.uso === 'duplicados' && !entEsDuplicado(e)) return false;
+    //   «ingles» → el nombre grande sale en español o con un apodo;
+    //   «repetidos» → fichas que son el mismo ejercicio (galeria-revision.js).
+    if (f.uso === 'ingles' && !(window.grNecesitaIngles && grNecesitaIngles(e))) return false;
+    if (f.uso === 'repetidos' && !(_ent.grRep && _ent.grRep.has(e.id))) return false;
     if (musculos.length) {
       const ms = [...(e.musculos_primarios || []), ...(e.musculos_secundarios || [])];
       if (!ms.some(m => musculos.includes(m))) return false;
@@ -752,6 +756,7 @@ function entTarjetaEjercicio(e, opts = {}) {
         </div>
       </div>
       ${opts.agregar ? '' : entHtmlDuplicado(e)}
+      ${!opts.agregar && _ent.filtros.uso === 'ingles' && window.grHtmlSugerencia ? grHtmlSugerencia(e) : ''}
       <div class="flex items-center justify-between mt-2 pt-2 border-t border-slate-100">
         <div>${entIconoVideo(e)}</div>
         <div class="flex gap-1">
@@ -806,7 +811,11 @@ function entNivelesCuenta() {
   const antes = _ent.enUso && _ent.usados ? todos.filter(e => _ent.usados.has(e.id) && !_ent.enUso.has(e.id)) : null;
   const analisis = _ent.enUso ? todos.filter(e => !_ent.enUso.has(e.id)) : null;
   const duplicados = todos.filter(entEsDuplicado);
-  return { clientes: ahora && de(ahora), antes: antes && de(antes), analisis: analisis && de(analisis), duplicados: duplicados.length ? { n: duplicados.length, sin: 0 } : null, '': de(todos) };
+  const ingles = window.grNecesitaIngles ? todos.filter(grNecesitaIngles).length : 0;
+  const grupos = window.grGrupos ? grGrupos(todos) : [];
+  _ent.grRep = new Set(grupos.flat().map(e => e.id));
+  return { clientes: ahora && de(ahora), antes: antes && de(antes), analisis: analisis && de(analisis), duplicados: duplicados.length ? { n: duplicados.length, sin: 0 } : null,
+    ingles: ingles ? { n: ingles, sin: 0 } : null, repetidos: grupos.length ? { n: grupos.length, sin: 0 } : null, '': de(todos) };
 }
 
 // ---------- Duplicados ----------
@@ -857,6 +866,8 @@ function entNivelesOpciones() {
     ['antes', entNivelEtiqueta('antes', '🕘 2 · Los usaron antes (hoy no)')],
     ['analisis', entNivelEtiqueta('analisis', '🔬 En análisis (todo menos lo de hoy)')],
     ...(entNivelesCuenta().duplicados ? [['duplicados', entNivelEtiqueta('duplicados', '🔁 Duplicados (para decidir)')]] : []),
+    ...(entNivelesCuenta().ingles ? [['ingles', entNivelEtiqueta('ingles', 'Sin nombre en inglés')]] : []),
+    ...(entNivelesCuenta().repetidos ? [['repetidos', `Repetidos (${entNivelesCuenta().repetidos.n} grupos)`]] : []),
   ];
 }
 
@@ -886,6 +897,16 @@ function entNivelesResumen(compacto = false) {
         <div class="text-sm"><b class="text-slate-900">${x.n}</b> ejercicios · <b class="${x.sin ? 'text-red-600' : 'text-green-600'}">${x.sin ? `${x.sin} sin video` : 'todos con video'}</b></div>
       </button>`;
   };
+  // Revisión de nombres y repetidos (galeria-revision.js).
+  const cajaRev = (nivel, titulo, texto) => {
+    const marcado = (f.uso || '') === nivel;
+    return `
+      <button type="button" data-nivel="${nivel}" onclick="entIrNivel('${nivel}')"
+              class="text-left rounded-lg border ${compacto ? 'px-2 py-1.5 min-w-0' : 'px-3 py-2'} ${marcado ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'}">
+        <div class="${compacto ? 'text-[10.5px] truncate' : 'text-[11px]'} text-slate-500">${titulo}</div>
+        <div class="${compacto ? 'text-xs leading-tight' : 'text-sm'}">${texto}</div>
+      </button>`;
+  };
   // Duplicados: no cuenta videos, cuenta los que faltan por decidir.
   const cajaDup = (x) => {
     const marcado = (f.uso || '') === 'duplicados';
@@ -904,7 +925,11 @@ function entNivelesResumen(compacto = false) {
       ${c.analisis ? caja('analisis', '🔬', 'En análisis', c.analisis) : ''}
       ${c.duplicados ? cajaDup(c.duplicados) : ''}
       ${caja('', '📚', '3 · Toda la galería', c[''])}
-    </div>`;
+    </div>
+    ${c.ingles || c.repetidos ? `<div class="mt-2 grid ${compacto ? 'grid-cols-2' : 'grid-cols-1 md:grid-cols-2'} gap-2" data-niveles-revision>
+      ${c.ingles ? cajaRev('ingles', 'Sin nombre en inglés', `<b class="text-slate-900">${c.ingles.n}</b> ejercicios · <b class="text-blue-700">ponles el inglés</b>`) : ''}
+      ${c.repetidos ? cajaRev('repetidos', 'Repetidos', `<b class="text-slate-900">${c.repetidos.n}</b> grupos · <b class="text-amber-700">elige cuál dejar</b>`) : ''}
+    </div>` : ''}`;
 }
 
 // ---------- Reporte: ejercicios sin video, por cliente ----------
@@ -1097,7 +1122,7 @@ window.entReporteSinHistorial = async () => {
 window.entIrNivel = (nivel) => {
   _ent.filtros.uso = nivel;
   // En duplicados se ven todos, tengan o no video: lo que falta es decidir.
-  _ent.filtros.video = nivel === 'duplicados' ? '' : 'sin';
+  _ent.filtros.video = ['duplicados', 'ingles', 'repetidos'].includes(nivel) ? '' : 'sin';
   document.querySelectorAll('select[data-sel="uso"]').forEach(s => { s.value = nivel; });
   document.querySelectorAll('select[data-sel="video"]').forEach(s => { s.value = _ent.filtros.video; });
   entRepintarGaleria();
@@ -1189,6 +1214,8 @@ async function entVistaEjercicios() {
   if (window.entYtCargar) await entYtCargar().catch(() => {});
   // Los niveles de uso siempre: sus contadores dicen cuántos videos faltan.
   await entDb.niveles();
+  // Nombres en inglés y repetidos: el diccionario llega aparte y repinta.
+  if (window.grCargarDiccionario && !_gr.listo) grCargarDiccionario().then(ok => { if (ok && document.getElementById('flt-lista')) entVistaEjercicios(); });
 
   body.innerHTML = `
     <div class="flex flex-wrap justify-between items-center gap-2 mb-3">
@@ -1223,7 +1250,12 @@ async function entPintarListaGaleria() {
           ? 'La galería está vacía. Crea tu primer ejercicio para empezar a armar rutinas.'
           : 'Ningún ejercicio coincide con esos filtros.'}
       </div>
-    ` : `
+    ` : _ent.filtros.uso === 'repetidos' && window.grHtmlRepetidos ? grHtmlRepetidos(lista)
+    : `
+      ${_ent.filtros.uso === 'ingles' ? `<div class="flex flex-wrap items-center justify-between gap-2 mb-3" data-gr-cabecera>
+        <div class="text-sm text-slate-600">El nombre grande sale en español o con un apodo. Revisa la sugerencia de cada uno y toca «Poner», o ponlas todas.</div>
+        <button class="btn btn-primary btn-sm" data-gr-todas onclick="grPonerTodas()">Poner las sugeridas</button>
+      </div>` : ''}
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         ${lista.map(e => entTarjetaEjercicio(e)).join('')}
       </div>
