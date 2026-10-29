@@ -18,32 +18,32 @@
 const CCAL_SUGERIDOS = [
   ['2026-10-30', `El orden en que comes importa casi tanto como lo que comes.
 
-Este fin de semana van a aparecer dulces, antojos y alguna salida. No te voy a pedir que los evites: te voy a pedir que los acomodes. Cuando comes primero la proteína y la verdura, y lo dulce o la harina al final, el azúcar te sube en la sangre mucho menos que si empiezas por ahí. Misma comida, mismas calorías, otra respuesta en tu cuerpo.
+Este fin de semana van a aparecer dulces, antojos y alguna salida. No te voy a pedir que los evites: te voy a pedir que los acomodes. En un estudio, cuando las personas comieron primero la proteína y la verdura, y la harina al final, el azúcar en la sangre les subió menos que comiendo lo mismo en el orden contrario. Misma comida, mismas calorías, otra respuesta en el cuerpo.
 
 Tres cosas para estos días:
 • Lo dulce, después de comer, nunca con el estómago vacío.
-• Elige el que de verdad te gusta y cómelo sentado y sin pantalla. Lo que más suma es el picoteo sin darte cuenta.
+• Elige el que de verdad te gusta y cómelo sentado y sin pantalla. Lo que más se acumula suele ser el picoteo sin darte cuenta.
 • Sírvete una porción y guarda el paquete. De la bolsa siempre se come más.
 
 Y regístralo igual en la app: no es para juzgarte, es para que yo vea el panorama completo. El lunes no compenses nada. Sigues normal.
 
 Fuente: Shukla y colaboradores, Diabetes Care (2015).`],
-  ['2026-11-02', `Si tuviera que escoger un solo hábito para tu salud, sería este: caminar unos minutos después de comer.
+  ['2026-11-02', `Un hábito pequeño que rinde mucho: caminar unos minutos después de comer.
 
-Cuando comes, el azúcar de la comida llega a la sangre. Si te quedas sentado, se queda ahí más tiempo. Si te mueves, tus músculos lo usan como gasolina en ese mismo momento. Se ha visto que con apenas 2 a 5 minutos de caminata suave después de comer el pico de azúcar ya baja, comparado con quedarse sentado.
+Cada vez que comes, el azúcar de la comida pasa a la sangre. Cuando te mueves justo después, tus músculos usan parte de ese azúcar como combustible, y el pico baja. No hace falta mucho: en los estudios, incluso caminatas suaves de 2 a 5 minutos después de comer ya muestran un efecto, comparado con quedarse sentado.
 
-Cómo sacarle el jugo:
-• El mejor momento es justo después de la comida más grande del día, en la primera media hora.
-• No tiene que ser fuerte: paso de conversación.
+Para aprovecharlo:
+• Hazlo en la primera media hora después de comer. Si solo puedes una vez, que sea después de la comida más grande del día.
+• No tiene que ser intenso: a un paso en el que puedas conversar.
 • Si no puedes salir, sirve subir y bajar escaleras o caminar mientras hablas por teléfono.
-• Tres caminatas cortas al día le ganan a una larga.
+• Es un complemento: no reemplaza tu entreno ni tu alimentación, los acompaña.
 
-Hoy: 10 minutos después del almuerzo. Regístralos en Entreno → Hoy → «Registrar cardio o deporte» y cuéntame cómo te sentiste.
+El reto de hoy: 10 minutos después del almuerzo. Regístralos en Entreno → Hoy → «Registrar cardio o deporte» y cuéntame cómo te sentiste.
 
 Fuente: Buffey y colaboradores, Sports Medicine (2022).`],
   ['2026-11-09', `No necesitas terminar cada serie arrastrándote para ganar músculo.
 
-Mucha gente cree que si no llega al fallo, la serie no sirvió. Lo que muestran los estudios es otra cosa: quedarte a una o dos repeticiones del fallo te da prácticamente el mismo crecimiento, y te deja con energía para hacer bien las series que siguen y llegar fresco al próximo entreno.
+Mucha gente cree que si no llega al fallo, la serie no sirvió. Al revisar los estudios, quedarse a una o dos repeticiones del fallo dio un crecimiento muscular parecido al de llegar al fallo, y deja más energía para hacer bien las series que siguen y llegar fresco al próximo entreno.
 
 La regla que quiero que uses: las repeticiones en reserva.
 • En la mayoría de tus series, para cuando sientas que te quedaban 1 o 2 repeticiones con buena técnica.
@@ -55,7 +55,7 @@ Por eso al terminar te pregunto qué tan intenso fue: del 6 al 9 es la zona dond
 Fuente: Refalo y colaboradores, Sports Medicine (2023).`],
   ['2026-11-16', `Hay comidas que te hacen comer más sin que te des cuenta.
 
-En un experimento muy famoso, las mismas personas vivieron dos semanas con comida ultraprocesada y dos semanas con comida casera. Podían comer todo lo que quisieran. Con los ultraprocesados comieron unas 500 calorías más al día y subieron de peso, sin sentir que tenían más hambre. No era falta de voluntad: era la comida.
+En un experimento muy famoso, las mismas personas vivieron dos semanas con comida ultraprocesada y dos semanas con comida casera. Podían comer todo lo que quisieran. Con los ultraprocesados comieron unas 500 calorías más al día y subieron de peso, sin sentir que tenían más hambre. No fue falta de voluntad: el tipo de comida hizo la diferencia.
 
 La buena noticia es que se reconocen fácil. En tu próxima compra, voltea el paquete:
 • Mira los tres primeros ingredientes: son la mayor parte del producto. Si el primero es azúcar, harina refinada o aceite, ya sabes lo que llevas.
@@ -68,10 +68,10 @@ En Aprendizaje → Videos tienes «Leer etiquetas sin que te engañen», partes 
 Fuente: Hall y colaboradores, Cell Metabolism (2019).`],
   ['2026-11-23', `Dormir poco puede hacer que pierdas músculo en vez de grasa.
 
-En un estudio, dos grupos siguieron exactamente la misma dieta. Unos dormían ocho horas y media y otros cinco y media. Bajaron un peso parecido, pero los que dormían poco perdieron mucha menos grasa y más músculo, y además pasaron más hambre. Es decir: el mismo esfuerzo, con peor resultado.
+En un estudio pequeño, las mismas personas hicieron la misma dieta dos veces: una durmiendo ocho horas y media y otra durmiendo cinco y media. Bajaron un peso parecido, pero durmiendo poco perdieron menos grasa y más músculo, y pasaron más hambre. El mismo esfuerzo, con peor resultado.
 
 Tres ajustes que se notan en una semana:
-• El último café, unas 8 horas antes de acostarte. La cafeína sigue trabajando horas después aunque no la sientas: tomada 6 horas antes de dormir ya puede quitarte más de una hora de sueño.
+• El último café, varias horas antes de acostarte. La cafeína sigue trabajando aunque no la sientas: en un estudio, una dosis alta tomada 6 horas antes de dormir quitó más de una hora de sueño. Si eres sensible, prueba dejarla después del mediodía.
 • Diez minutos de luz natural en la mañana, apenas te levantes. Así tu cuerpo sabe a qué hora darte sueño en la noche.
 • Cuarto oscuro y fresco, y el celular lejos de la mano media hora antes de dormir.
 
@@ -80,7 +80,7 @@ Si te levantas cansado aunque duermas tus horas, en Aprendizaje → Videos tiene
 Fuentes: Nedeltcheva y colaboradores, Annals of Internal Medicine (2010). Drake y colaboradores, Journal of Clinical Sleep Medicine (2013).`],
   ['2026-11-30', `Si sientes que nunca te llenas, casi siempre la respuesta está en la proteína.
 
-Es lo que más sacia de todo lo que comes, y es lo que tu cuerpo usa para construir y mantener músculo. Al juntar decenas de estudios, el beneficio para el músculo sigue creciendo hasta unos 1,6 gramos por kilo de peso al día. Para alguien de 70 kilos, son unos 110 gramos repartidos en el día.
+De los nutrientes, es el que más sacia, y es lo que tu cuerpo usa para construir y mantener músculo. Al juntar decenas de estudios en personas que entrenan, el beneficio para el músculo se ve hasta alrededor de 1,6 gramos por kilo de peso al día. Para alguien de 70 kilos, unos 110 gramos repartidos en el día. Tu meta puede ser distinta según tu caso: la que vale es la que te puse en la app.
 
 Suena a mucho, pero se logra así:
 • Reparte en 3 o 4 comidas, de 25 a 40 gramos cada una.
@@ -88,12 +88,12 @@ Suena a mucho, pero se logra así:
 • Sírvela primero y cómela primero.
 • Come despacio, unos 20 minutos por comida: la señal de que ya estás lleno tarda en llegar.
 
-Tu meta exacta ya está en la app, en Alimentación. Y si quieres entender por qué a veces no paras de comer, en Aprendizaje → Videos tienes «La hormona del hambre».
+Tu meta está en la app, en Alimentación. Y si quieres entender por qué a veces no paras de comer, en Aprendizaje → Videos tienes «La hormona del hambre».
 
 Fuente: Morton y colaboradores, British Journal of Sports Medicine (2018).`],
   ['2026-12-07', `Llegó diciembre, y con él las reuniones. Hablemos del trago sin rodeos.
 
-El alcohol no solo suma calorías: también frena la recuperación de tus músculos. En un estudio, tomar después de entrenar bajó la construcción de músculo cerca de un 24 %, aunque las personas comieran proteína. Y un gramo de alcohol tiene 7 calorías, casi como la grasa, sin aportarte nada a cambio.
+El alcohol no solo suma calorías: en cantidad también frena la recuperación de tus músculos. En un estudio, tomar bastante después de entrenar, lo de una noche de fiesta, bajó la construcción de músculo cerca de un 24 %, aunque las personas comieran proteína. Y un gramo de alcohol tiene 7 calorías, casi como la grasa, sin aportarte nada a cambio.
 
 No te pido que no tomes. Te pido que lo hagas con estrategia:
 • Nunca llegues con hambre a una reunión: come algo con proteína antes de salir.
@@ -106,10 +106,10 @@ Diciembre no se gana aguantando. Se gana decidiendo.
 Fuente: Parr y colaboradores, PLOS ONE (2014).`],
   ['2026-12-14', `Si estas semanas andas sin tiempo, te tengo una buena noticia: mantener cuesta mucho menos que ganar.
 
-En un estudio, personas que entrenaban tres veces por semana bajaron a una sola sesión semanal, con un tercio del trabajo. Mantuvieron su músculo y su fuerza durante 32 semanas. Lo que construiste no se va en un par de semanas difíciles.
+En un estudio, adultos jóvenes que entrenaban tres veces por semana bajaron a una sola sesión semanal, con un tercio del trabajo, y mantuvieron su músculo y su fuerza durante meses. En personas mayores hizo falta un poco más. La idea es la misma: lo que construiste no se va en un par de semanas difíciles.
 
 Para estos días de afán:
-• Con 2 entrenos a la semana conservas casi todo, siempre que mantengas el peso.
+• Con 2 entrenos a la semana sostienes muy bien lo ganado, si mantienes el peso que mueves.
 • Si solo tienes 30 o 40 minutos, haz los primeros ejercicios de fuerza de tu rutina. Son los que más trabajo te dan.
 • Si hay que recortar, recorta series, no peso.
 • Lo accesorio se puede saltar sin culpa.
@@ -117,7 +117,7 @@ Para estos días de afán:
 Un entreno corto que sí pasó vale más que el largo que nunca hiciste.
 
 Fuente: Bickel y colaboradores, Medicine & Science in Sports & Exercise (2011).`],
-  ['2026-12-21', `Un dato que cambia cómo ves las fiestas: lo que se sube en esta época suele ser poco. El problema es que casi nunca se baja.
+  ['2026-12-21', `Un dato que cambia cómo ves las fiestas: lo que se sube en esta época suele ser poco. El problema es que muchas veces no se baja.
 
 Cuando se siguió a un grupo de personas durante la temporada de fiestas, en promedio subieron menos de medio kilo. Pero la mayoría no lo bajó en todo el año siguiente. Y año tras año, eso se va sumando sin hacer ruido.
 
@@ -132,7 +132,7 @@ Un día no cambia tus resultados: lo que pesa es la semana. Disfruta con los tuy
 Fuente: Yanovski y colaboradores, New England Journal of Medicine (2000).`],
   ['2026-12-28', `Antes de escribir tus propósitos, tengo que contarte algo: un hábito no se forma en 21 días.
 
-Cuando se siguió a personas que querían crear un hábito nuevo, tardaron en promedio 66 días en hacerlo sin pensar, y a algunos les tomó mucho más. Lo mejor del estudio: fallar un día no cambió nada. Lo que cuenta es volver al siguiente.
+Cuando se siguió a personas que querían crear un hábito nuevo, tardaron en promedio 66 días en hacerlo sin pensar, y a algunos les tomó bastante más. Y algo que me encanta del estudio: fallar un día suelto casi no afectó el resultado. Lo que cuenta es volver al siguiente.
 
 La técnica con más respaldo para que un propósito sí se cumpla es decidir antes el cuándo y el dónde, con la fórmula «si pasa esto, entonces hago aquello»:
 • «Si son las 6 p. m. del lunes, miércoles y viernes, me voy al gimnasio.»
@@ -145,13 +145,13 @@ Para los días en que no quieras, en Aprendizaje → Videos tienes «De dónde s
 Fuentes: Lally y colaboradores, European Journal of Social Psychology (2010). Gollwitzer y Sheeran, Advances in Experimental Social Psychology (2006).`],
   ['2027-01-04', `Volvemos. Y te tengo una buena noticia: tu cuerpo recuerda.
 
-El músculo guarda memoria de lo que ya entrenaste. Cuando vuelves después de una pausa, recupera más rápido de lo que le costó ganarlo la primera vez. Diciembre no te devolvió a cero: te dejó a pocas semanas de donde estabas.
+El músculo guarda memoria de lo que ya entrenaste. Cuando vuelves después de una pausa, recuperar suele ser más rápido que ganarlo la primera vez. Diciembre no te devolvió a cero.
 
 Cómo volver bien:
 • La primera semana, al 80 %: el mismo plan, un poco menos de peso y técnica impecable.
 • Si te duelen los músculos los primeros días, es normal: dura de uno a tres días y se va solo. No significa que lo estés haciendo mal.
 • Retoma el registro de comida desde el desayuno de mañana, sin compensar nada de diciembre.
-• En dos semanas vas a estar donde estabas.
+• Ve subiendo poco a poco: en unas semanas vuelves a tu nivel.
 
 Si quieres que ajustemos algo para este año, escríbeme. Vamos con todo, con método.
 
