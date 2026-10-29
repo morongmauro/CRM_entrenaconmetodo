@@ -941,11 +941,15 @@ window.entReporteSinVideo = async () => {
   openModal(modalShell('Ejercicios sin video, por cliente', '<div class="text-sm text-slate-500" data-reporte-cargando>Revisando el ciclo de cada cliente…</div>'), { wide: true });
   await entDb.ejerciciosEnUso(true);
   const ejercicios = _ent.ejercicios || await entDb.ejercicios();
+  // Un video de YouTube que no se reproduce también lo ve el cliente sin
+  // video: entra en el reporte, marcado aparte.
+  if (window.entYtCargar) await entYtCargar().catch(() => {});
+  const roto = (e) => !!(window.entYtProblema && entYtProblema(e));
   const { data: clis } = await sb.from('clientes').select('id, nombre, estado');
   const nombreCli = Object.fromEntries((clis || []).map(c => [c.id, c.nombre || 'Sin nombre']));
   const activos = (clis || []).filter(c => String(c.estado || 'activo').toLowerCase() === 'activo');
   const porId = Object.fromEntries((ejercicios || []).map(e => [e.id, e]));
-  const sinVideo = (e) => !!e && (e.video_fuente || 'ninguno') === 'ninguno';
+  const sinVideo = (e) => !!e && ((e.video_fuente || 'ninguno') === 'ninguno' || roto(e));
   const porCliente = new Map();
   const faltan = [];
   (_ent.quienUsa || new Map()).forEach((clientes, ejId) => {
@@ -956,13 +960,14 @@ window.entReporteSinVideo = async () => {
   });
   faltan.sort((a, b) => b.clientes.length - a.clientes.length || entNombres(a.e).grande.localeCompare(entNombres(b.e).grande));
   const filasCli = [...porCliente.entries()].sort((a, b) => b[1].length - a[1].length || String(nombreCli[a[0]]).localeCompare(String(nombreCli[b[0]])));
-  const chip = (e) => `<button type="button" class="tag tag-gray" style="cursor:pointer" data-ej-sin-video="${e.id}" onclick="closeModal(); entEditarEjercicio('${e.id}')" title="Abrir la ficha para ponerle el video">${escapeHtml(entNombres(e).grande)}</button>`;
+  const chip = (e) => `<button type="button" class="tag ${roto(e) ? 'tag-yellow' : 'tag-gray'}" style="cursor:pointer" data-ej-sin-video="${e.id}"${roto(e) ? ' data-video-roto' : ''} onclick="closeModal(); entEditarEjercicio('${e.id}')" title="${roto(e) ? 'Tiene video, pero YouTube no lo deja ver en la app: cámbialo' : 'Abrir la ficha para ponerle el video'}">${escapeHtml(entNombres(e).grande)}${roto(e) ? ' · video no se ve' : ''}</button>`;
+  const nRotos = faltan.filter(x => roto(x.e)).length;
   const cuerpo = !faltan.length
     ? `<div class="rounded-xl bg-green-50 text-green-800 p-4 text-sm" data-reporte-ok>Todos los ejercicios que tus clientes tienen hoy tienen video.</div>`
     : `
     <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5" data-reporte-resumen>
       <div class="rounded-xl bg-slate-50 p-4"><div class="text-xs text-slate-500">Clientes con algún ejercicio sin video</div><div class="text-2xl font-bold text-slate-900"><span data-reporte-clientes>${porCliente.size}</span> <span class="text-base text-slate-500 font-semibold">de ${activos.length} activos</span></div></div>
-      <div class="rounded-xl bg-slate-50 p-4"><div class="text-xs text-slate-500">Ejercicios distintos sin video</div><div class="text-2xl font-bold text-red-600" data-reporte-ejercicios>${faltan.length}</div></div>
+      <div class="rounded-xl bg-slate-50 p-4"><div class="text-xs text-slate-500">Ejercicios distintos sin video</div><div class="text-2xl font-bold text-red-600" data-reporte-ejercicios>${faltan.length}</div>${nRotos ? `<div class="text-xs text-amber-700 mt-0.5" data-reporte-rotos>${nRotos} tienen video pero no se ve en la app</div>` : ''}</div>
       <div class="rounded-xl bg-slate-50 p-4"><div class="text-xs text-slate-500">Empieza por</div><div class="text-sm font-semibold text-slate-900 mt-1">${escapeHtml(entNombres(faltan[0].e).grande)}</div><div class="text-xs text-slate-500">lo tienen ${faltan[0].clientes.length} ${faltan[0].clientes.length === 1 ? 'cliente' : 'clientes'}</div></div>
     </div>
     <h4 class="font-bold text-slate-900 mb-2">Por ejercicio · primero los que más clientes tienen</h4>
@@ -985,7 +990,7 @@ window.entReporteSinVideo = async () => {
         </div>`).join('')}
     </div>`;
   openModal(modalShell('Ejercicios sin video, por cliente', `
-    <p class="text-sm text-slate-600 mb-4">Lo que cada cliente activo tiene en su ciclo de hoy y todavía no tiene video. Toca un ejercicio para abrir su ficha y ponerle el video.</p>
+    <p class="text-sm text-slate-600 mb-4">Lo que cada cliente activo tiene en su ciclo de hoy (con calentamiento, enfriamiento y bloques) y no tiene video, o tiene uno que YouTube no deja ver en la app. Toca un ejercicio para abrir su ficha y ponerle el video.</p>
     ${cuerpo}`), { wide: true });
 };
 

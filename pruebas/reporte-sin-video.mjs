@@ -99,6 +99,17 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   const p = a.p;
   await p.evaluate(() => navigate('entrenamiento')); await p.waitForTimeout(500); await p.evaluate(() => entTab('ejercicios'));
   await p.waitForSelector('[data-reporte-sin-video]', { timeout: 15000 });
+  // Uno que usan hoy tiene video, pero YouTube no lo deja ver en la app.
+  const rotoId = await p.evaluate(async () => {
+    const ej = Object.fromEntries(TABLAS_FALSAS.ejercicios.map(e => [e.id, e]));
+    const id = [...(_ent.quienUsa || new Map()).keys()].find(x => ej[x] && ej[x].video_fuente === 'youtube');
+    if (!id) return null;
+    ej[id].video_ref = 'rotoRef1234';
+    (_ent.ejercicios || []).forEach(e => { if (e.id === id) e.video_ref = 'rotoRef1234'; });
+    TABLAS_FALSAS.ejercicio_video_estado = [{ id: 'v1', user_id: 'coach-1', video_ref: 'rotoRef1234', ejercicio_id: id, estado: 'problema', codigo: 401, revisado_en: '2026-10-27T10:00:00Z' }];
+    if (window.entYtCargar) await entYtCargar(true);
+    return id;
+  });
   await p.locator('[data-reporte-sin-video]').click();
   await p.waitForSelector('[data-reporte-resumen], [data-reporte-ok]', { timeout: 10000 });
   const r = await p.evaluate(() => {
@@ -107,12 +118,15 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
     return {
       clientes: Number(document.querySelector('[data-reporte-clientes]')?.textContent || 0),
       ejercicios: Number(document.querySelector('[data-reporte-ejercicios]')?.textContent || 0),
-      ids, todosSinVideo: ids.every(id => (ej[id].video_fuente || 'ninguno') === 'ninguno'),
+      ids, todosSinVideo: ids.every(id => (ej[id].video_fuente || 'ninguno') === 'ninguno' || ej[id].video_ref === 'rotoRef1234'),
       enUsoConVideo: [...(_ent.quienUsa || new Map()).keys()].filter(id => ej[id] && ej[id].video_fuente === 'youtube').length,
-      sinVideoEnUso: [...(_ent.quienUsa || new Map()).keys()].filter(id => ej[id] && (ej[id].video_fuente || 'ninguno') === 'ninguno').length,
+      sinVideoEnUso: [...(_ent.quienUsa || new Map()).keys()].filter(id => ej[id] && ((ej[id].video_fuente || 'ninguno') === 'ninguno' || ej[id].video_ref === 'rotoRef1234')).length,
     };
   });
   ok(`${tag} · dice cuántos clientes tienen ejercicios sin video (${r.clientes})`, r.clientes >= 1, JSON.stringify(r));
+  ok(`${tag} · también el que tiene video pero no se ve en la app, marcado aparte`, !!rotoId && r.ids.includes(rotoId)
+    && (await p.locator(`[data-reporte-por-ejercicio] [data-ej-sin-video="${rotoId}"][data-video-roto]`).count()) === 1
+    && /no se ve en la app/.test(await p.locator('[data-reporte-rotos]').innerText().catch(() => '')), JSON.stringify({ rotoId, ids: r.ids }));
   ok(`${tag} · lista justo los que usan hoy y no tienen video (${r.ejercicios})`, r.ejercicios === r.sinVideoEnUso && r.ids.length === r.ejercicios && r.todosSinVideo, JSON.stringify(r));
   ok(`${tag} · los que ya tienen video no salen`, r.enUsoConVideo > 0 && r.todosSinVideo, JSON.stringify(r));
   ok(`${tag} · y por cliente, con sus ejercicios`, await p.locator('[data-reporte-por-cliente] [data-ej-sin-video]').count() >= r.ejercicios);
