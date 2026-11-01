@@ -175,6 +175,9 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
     ok(`${tag} · Seguimiento de Carlos: «Por qué está en tu cola» con la molestia`, /Por qué está en tu cola/.test(mot) && /molestia/.test(mot), mot);
     ok(`${tag} · sin el selector Semana/Diálogo`, await p.locator('[data-seg-modo]:visible').count() === 0);
     await p.screenshot({ path: path.join(CAPTURAS, 'crm-prueba-seguimiento.png') });
+    await p.mouse.move(800, 5);
+    await p.evaluate(() => navigate('dashboard')); await p.waitForTimeout(2500);
+    await p.screenshot({ path: path.join(CAPTURAS, 'crm-prueba-inicio.png') });
   }
   // Cartera.
   await p.evaluate(() => navigate('cartera'));

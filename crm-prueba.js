@@ -91,6 +91,45 @@ window.cpCambiar = (on) => {
   .cp-senal .cp-acc{flex-wrap:nowrap}
   .cp-rec{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px}
   .cp-rec .cp-mot{flex:1 1 220px;margin-top:0}
+  /* ── Look nuevo (solo en prueba): fondo blanco con degradados de marca, menú en contraste ── */
+  html:has(body.crm-prueba), body.crm-prueba {
+    background:
+      radial-gradient(55% 520px at 0% 0%, rgba(60,123,214,.26), rgba(60,123,214,0) 100%),
+      radial-gradient(45% 460px at 100% 0%, rgba(70,150,90,.20), rgba(70,150,90,0) 100%),
+      radial-gradient(45% 520px at 100% 85%, rgba(238,132,52,.17), rgba(238,132,52,0) 100%),
+      radial-gradient(45% 480px at 0% 75%, rgba(242,201,76,.22), rgba(242,201,76,0) 100%),
+      #FCFCFD !important;
+    background-attachment: fixed !important;
+  }
+  body.crm-prueba #app-screen > header, body.crm-prueba header.glass { background: rgba(252,252,253,.6) !important; -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4); border-bottom: 1px solid rgba(255,255,255,.7) !important; }
+  body.crm-prueba .card, body.crm-prueba .cp-card, body.crm-prueba .es-card, body.crm-prueba #view .bg-white.rounded-2xl, body.crm-prueba #view .bg-white.rounded-xl {
+    background: #FFFFFF !important;
+    box-shadow: 0 1px 2px rgba(30,40,60,.05), 0 10px 28px rgba(30,40,60,.08) !important;
+  }
+  @media (min-width:1024px) {
+    body.crm-prueba .em-side { background: #1F2328 !important; border-radius: 22px !important; box-shadow: 0 14px 34px rgba(20,25,35,.22) !important; padding: 10px 8px !important; max-height: calc(100vh - 6.2rem); overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.2) transparent; }
+    body.crm-prueba .em-nav .nav-item { color: rgba(255,255,255,.78) !important; }
+    body.crm-prueba .em-nav .nav-item .em-ico { opacity: .85; }
+    body.crm-prueba .em-nav .nav-item:hover { background: rgba(255,255,255,.08) !important; color: #fff !important; }
+    body.crm-prueba .em-nav .nav-item.active { background: #fff !important; color: #1F2328 !important; box-shadow: none !important; }
+    body.crm-prueba .em-nav .em-nav-grupo { color: rgba(255,255,255,.45) !important; }
+    body.crm-prueba .em-nav .em-nav-fin { border-color: rgba(255,255,255,.12) !important; }
+    /* La lista de clientes de Seguimiento, dentro del menú oscuro */
+    body.crm-prueba .em-side [data-nav-sub] { color: rgba(255,255,255,.85); }
+    body.crm-prueba .em-side [data-nav-sub] input { background: rgba(255,255,255,.08) !important; color: #fff !important; border-color: transparent !important; }
+    body.crm-prueba .em-side [data-nav-sub] input::placeholder { color: rgba(255,255,255,.45) !important; }
+    body.crm-prueba .em-side [data-nav-sub] .text-slate-900, body.crm-prueba .em-side [data-nav-sub] .text-slate-800, body.crm-prueba .em-side [data-nav-sub] b, body.crm-prueba .em-side [data-nav-sub] strong { color: #fff !important; }
+    body.crm-prueba .em-side [data-nav-sub] .text-slate-500, body.crm-prueba .em-side [data-nav-sub] .text-slate-400, body.crm-prueba .em-side [data-nav-sub] .text-slate-600 { color: rgba(255,255,255,.55) !important; }
+    body.crm-prueba .em-side .seg-li { background: transparent !important; box-shadow: none !important; }
+    body.crm-prueba .em-side .seg-li:hover { background: rgba(255,255,255,.07) !important; }
+    body.crm-prueba .em-side .seg-li.activo { background: rgba(255,255,255,.14) !important; }
+    body.crm-prueba .em-side .seg-li-txt b { color: #fff !important; }
+    body.crm-prueba .em-side .seg-li-txt span { color: rgba(255,255,255,.6) !important; }
+    body.crm-prueba .em-side .seg-li-txt .seg-li-tarde { color: #F5A66B !important; }
+    body.crm-prueba .em-side .seg-li-grp { color: rgba(255,255,255,.45) !important; }
+    body.crm-prueba .em-side .seg-li-ck { background: rgba(255,255,255,.1) !important; color: rgba(255,255,255,.8) !important; border-color: transparent !important; }
+    body.crm-prueba #menu-toggle, body.crm-prueba .em-menu-toggle { background: #1F2328 !important; color: #fff !important; border-radius: 12px !important; }
+  }
   @media (max-width:700px){
     body.crm-prueba .cp-boton{display:none}
     .cp-boton{font-size:12px;padding:6px 10px;margin-right:6px}
