@@ -39,9 +39,11 @@ const engNorm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').
 const engLetra = (iso) => ENG_LETRAS[(new Date(iso + 'T12:00:00').getDay() + 6) % 7];
 
 // Los entrenos que tocaban entre dos fechas: los días de la fase de cada fecha.
-function engPlaneados(fases, desde, hasta) {
+// `fuera`: días que estuvo fuera (viaje, enfermedad…): no se planean.
+function engPlaneados(fases, desde, hasta, fuera = null) {
   let n = 0;
   for (let f = desde; f <= hasta; f = engSumar(f, 1)) {
+    if (fuera && fuera.has(f)) continue;
     const fa = fases.find(x => x.fecha_inicio && x.fecha_inicio <= f && engSumar(x.fecha_inicio, (Number(x.semanas) || 0) * 7 - 1) >= f);
     if (fa && (fa.dias_semana || []).map(String).includes(engLetra(f))) n++;
   }
@@ -52,7 +54,7 @@ function engPlaneados(fases, desde, hasta) {
 //   uso: [{ fecha, secciones: {…}, recetas: […] }] · mt: el resumen de la app
 //   (day_scores, recetas_registradas, menus_creados, favoritos) · sesiones y
 //   fases del CRM.
-function engCliente({ c, hoy, uso = [], mt = null, sesiones = [], fases = [] }) {
+function engCliente({ c, hoy, uso = [], mt = null, sesiones = [], fases = [], fuera = null }) {
   const d28 = engSumar(hoy, -27), d56 = engSumar(hoy, -55), d14 = engSumar(hoy, -13), d7 = engSumar(hoy, -6);
   const dias = {};   // sección → Set de fechas
   ENG_SECC.forEach(([k]) => { dias[k] = new Set(); });
@@ -73,7 +75,7 @@ function engCliente({ c, hoy, uso = [], mt = null, sesiones = [], fases = [] }) 
   const enRango = (set, a, b) => [...set].filter(f => f >= a && f <= b).length;
   const puntaje = (a, b) => {
     const activos = enRango(app, a, b);
-    const plan = engPlaneados(fases, a, b);
+    const plan = engPlaneados(fases, a, b, fuera);
     const hechosV = hechas.filter(s => s.fecha >= a && s.fecha <= b).length;
     const comida = enRango(comidaDias, a, b);
     const partes = [[0.4, Math.min(1, activos / 20)], [0.3, plan > 0 ? Math.min(1, hechosV / plan) : null], [0.3, Math.min(1, comida / 21)]].filter(p => p[1] != null);
@@ -140,6 +142,8 @@ const ENG_FILTROS = [
 
 async function engDatos() {
   const hoy = fmt.hoy();
+  // Las ausencias (ausencias-crm.js): esos días no se planean.
+  try { if (typeof ausCargar === 'function') await ausCargar(); } catch (e) { /* sin tabla */ }
   const todos = await db.clientes.list();
   const activos = todos.filter(c => String(c.estado || 'activo').toLowerCase() === 'activo');
   const d56 = engSumar(hoy, -55);
@@ -155,7 +159,7 @@ async function engDatos() {
   const mtDe = (c) => mts.find(m => c.mealtracker_id && m.user_id === c.mealtracker_id) || mts.find(m => engNorm(m.name) === engNorm(c.nombre)) || null;
   const usoDe = (c, mt) => filasUso.filter(u => (mt && (u.user_id === mt.user_id || u.clave === mt.user_id)) || (c.mealtracker_id && u.user_id === c.mealtracker_id) || engNorm(u.name) === engNorm(c.nombre));
   const fasesDe = (id) => fases.filter(f => f.cliente_id === id && f.estado !== 'archivada' && f.visible_cliente !== false);
-  const calc = (c) => { const mt = mtDe(c); return engCliente({ c, hoy, uso: usoDe(c, mt), mt, sesiones: sesiones.filter(s => s.cliente_id === c.id), fases: fasesDe(c.id) }); };
+  const calc = (c) => { const mt = mtDe(c); return engCliente({ c, hoy, uso: usoDe(c, mt), mt, sesiones: sesiones.filter(s => s.cliente_id === c.id), fases: fasesDe(c.id), fuera: typeof ausFueraDe === 'function' ? ausFueraDe(c.id) : null }); };
   const filas = activos.map(calc);
   // Retención: de todos los que empezaron hace 1+ mes (2+ meses), cuántos
   // siguen activos (estado activo y con actividad en los últimos 14 días).

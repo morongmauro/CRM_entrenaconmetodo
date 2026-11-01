@@ -177,9 +177,36 @@ function bdjArmar(d) {
     });
   });
 
+  // ── Avisó que va a estar fuera (lo marcó en su app): para que le escribas tú ──
+  const activos = new Set(clientes.map(c => c.id));
+  (d.ausencias || []).filter(a => a.origen === 'cliente' && !a.vista_en && !a.anulada_en && activos.has(a.cliente_id)).forEach(a => {
+    const cuando = String(a.updated_at || a.created_at || hoy).slice(0, 10);
+    const motivo = typeof ausMotivo === 'function' ? ausMotivo(a.motivo) : a.motivo;
+    const rango = typeof ausRango === 'function' ? ausRango(a) : `${a.desde} al ${a.hasta}`;
+    add(atencion, {
+      id: `aus:${a.id}:${cuando}`, tipo: 'nota', cliente_id: a.cliente_id, fecha: cuando,
+      icono: typeof AUS_ICONO === 'string' ? AUS_ICONO : '', aus_id: a.id, escribir: true,
+      titulo: `Avisó que va a estar fuera · ${motivo}`,
+      detalle: `${rango}${a.nota ? ` · «${a.nota}»` : ''}. Esos días no cuentan en su adherencia ni en las alertas.`,
+    });
+  });
+
   // ── Por cliente: lo que no es un evento suelto sino un patrón ──
   const semana = hoy.slice(0, 4) + '-' + bdjSemanaNum(hoy);
   clientes.forEach(c => {
+    // Estuvo o está fuera (viaje, enfermedad…) en la última semana: sin
+    // alertas de «no entrena» ni «no registra comida».
+    const fuera = (d.ausencias || []).some(a => a.cliente_id === c.id && !a.anulada_en && a.hasta >= bdjSumarDias(hoy, -7) && a.desde <= hoy);
+    // Bienestar: una de las tres bajó dos veces seguidas.
+    const caida = typeof bienCaida === 'function' ? bienCaida((d.bienestar || []).filter(b => b.cliente_id === c.id).sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)))) : null;
+    if (caida) {
+      add(atencion, {
+        id: `bien:${c.id}:${caida.fecha}:${caida.k}`, tipo: 'bienestar', cliente_id: c.id, fecha: caida.fecha,
+        icono: typeof BIEN_ICONO === 'string' ? BIEN_ICONO : '', escribir: true,
+        titulo: `${caida.frase}: ${caida.t.toLowerCase()} ${caida.vals.join(' → ')} de 5`,
+        detalle: 'En sus últimos 3 check-ins de bienestar. Vale preguntarle cómo viene.',
+      });
+    }
     const suyas = deCliente(sesiones, c.id);
     const completadas = suyas.filter(s => s.estado === 'completada').sort((a, b) => b.fecha.localeCompare(a.fecha));
     const fase = (d.fases || []).find(f => f.cliente_id === c.id);
@@ -197,7 +224,7 @@ function bdjArmar(d) {
     if (fase) {
       const ultima = completadas[0] ? completadas[0].fecha : null;
       const dias = ultima ? bdjDiasEntre(ultima, hoy) : null;
-      if (dias == null ? (fase.fecha_inicio && bdjDiasEntre(fase.fecha_inicio, hoy) >= 7) : dias >= 7) {
+      if (!fuera && (dias == null ? (fase.fecha_inicio && bdjDiasEntre(fase.fecha_inicio, hoy) >= 7) : dias >= 7)) {
         add(atencion, {
           id: `sinentreno:${c.id}:${semana}`, tipo: 'entreno', cliente_id: c.id, fecha: hoy, icono: '⏸',
           titulo: dias == null ? 'Aún no completa ningún entreno en la app' : `Lleva ${dias} días sin registrar un entreno`,
@@ -239,7 +266,7 @@ function bdjArmar(d) {
     if (com) {
       if (com.last_active) {
         const sin = bdjDiasEntre(com.last_active, hoy);
-        if (sin >= 3) {
+        if (sin >= 3 && !fuera) {
           add(atencion, {
             id: `sincomida:${c.id}:${com.last_active}`, tipo: 'comida', cliente_id: c.id, fecha: hoy, icono: '🍽',
             titulo: `Lleva ${sin} días sin registrar comida`, detalle: `Último registro: ${bdjFecha(com.last_active)}.`,
@@ -454,8 +481,11 @@ async function bdjCargar(forzar = false) {
       }
     } catch (e) { avisos.push('comida'); }
 
+    // Ausencias y bienestar (ausencias-crm.js): sin la tabla, nada.
+    let aus = { lista: [], bien: [] };
+    try { if (typeof ausCargar === 'function') aus = await ausCargar(forzar); } catch (e) { /* sin tabla */ }
     _bdj.datos = bdjArmar({
-      hoy, clientes, fases, rutinas, sesiones, series,
+      hoy, clientes, fases, rutinas, sesiones, series, ausencias: aus.lista || [], bienestar: aus.bien || [],
       notas: notas.map(n => ({ ...n, ejercicio_nombre: n.ejercicios ? entNombres(n.ejercicios).grande : null })),
       mediciones, actividades, comida, registros, fotos,
       lecturas: typeof entLecturasDatos === 'function' ? entLecturasDatos : null,
@@ -508,6 +538,8 @@ routes.bandeja = async () => {
         ${a.detalle ? `<div class="text-xs text-slate-500 mt-0.5 leading-relaxed">${escapeHtml(a.detalle)}${a.ejercicio ? ` — <em>${escapeHtml(a.ejercicio)}</em>` : ''}</div>` : ''}
         <div class="text-[11px] text-slate-400 mt-0.5">${a.fecha === fmt.hoy() ? 'hoy' : fmt.fechaCorta(a.fecha)}${deshacer && a.listo_en ? ` · listo el ${fmt.fechaCorta(String(a.listo_en).slice(0, 10))}` : ''}</div>
       </div>
+      ${a.escribir && typeof segIr === 'function'
+        ? `<button class="btn btn-primary btn-sm flex-shrink-0" data-bdj-escribir onclick="segIr('${a.cliente_id}')">Escribirle</button>` : ''}
       ${a.responder && typeof ccAbrirDesdeNota === 'function'
         ? `<button class="btn btn-primary btn-sm flex-shrink-0" data-nota-responder onclick='ccAbrirDesdeNota(${escapeHtml(JSON.stringify(a.responder))})'>Responder</button>` : ''}
       ${deshacer
@@ -603,6 +635,9 @@ window.bdjFiltro = (f) => { _bdj.filtro = f; routes.bandeja(); };
 window.bdjRecargar = async () => { await bdjCargar(true); routes.bandeja(); };
 window.bdjListo = async (id, notaId) => {
   bdjMarcarVisto(id);
+  // Un aviso de ausencia: queda visto en la base (si lo cambia, vuelve a llegar).
+  const aus = /^aus:([^:]+):/.exec(String(id));
+  if (aus && typeof ausVista === 'function') await ausVista(aus[1]);
   if (notaId) {
     // La nota se marca en la base: así queda leída también en el teléfono.
     try { await sb.from('notas_entreno').update({ leida_en: new Date().toISOString() }).eq('id', notaId); } catch (e) {}

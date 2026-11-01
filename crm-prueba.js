@@ -30,7 +30,7 @@ const _cpr = { datos: null, leido: 0, filtro: 'todos', cargando: null, porId: {}
 const cpActivo = () => { try { return localStorage.getItem(CP_CLAVE) === '1'; } catch (e) { return false; } };
 const cpNorm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 const CP_DOLOR = /(dol|duele|molest|lesi|pincha|tiron|tirón|hinch|me lastim|esguin|contractur)/i;
-const CP_TONO = { intervenir: ['#FBE3DE', '#B2402B', 'Intervenir'], observar: ['#FDEFD9', '#9A5B12', 'Observar'], normal: ['#E4F1E7', '#2F7F45', 'Normal'] };
+const CP_TONO = { intervenir: ['#FBE3DE', '#B2402B', 'Intervenir'], observar: ['#FDEFD9', '#9A5B12', 'Observar'], pausa: ['#E3EDFA', '#2F6CC4', 'En pausa'], normal: ['#E4F1E7', '#2F7F45', 'Normal'] };
 
 // ── Encender / apagar ────────────────────────────────────────────────────
 function cpAplicar() {
@@ -155,6 +155,8 @@ async function cpDatos(forzar = false) {
       leer(sb.from('fases').select('id, cliente_id, nombre, fecha_inicio, semanas, dias_semana, estado, visible_cliente')),
     ]);
     const clientes = (await db.clientes.list()).filter(c => String(c.estado || 'activo').toLowerCase() === 'activo');
+    // Ausencias y bienestar (ausencias-crm.js).
+    try { if (typeof ausCargar === 'function') await ausCargar(forzar); } catch (e) { /* sin tabla */ }
     let meds = [];
     try { meds = (await sb.from('mediciones_corporales').select('*').order('fecha', { ascending: true })).data || []; } catch (e) { meds = []; }
     let pagos = null;
@@ -180,8 +182,10 @@ async function cpDatos(forzar = false) {
       pedidos: pedidos.filter(p => p.cliente_id === c.id),
       ultimoMsj: mensajes.filter(m => m.cliente_id === c.id).map(m => m.fecha).sort().pop() || null,
       pago: pagos ? pagos[c.nombre] : undefined,
+      pausa: typeof ausHoy === 'function' ? ausHoy(c.id, hoy) : null,
+      fuera: typeof ausFueraDe === 'function' ? ausFueraDe(c.id) : new Set(),
     }));
-    const orden = { intervenir: 0, observar: 1, normal: 2 };
+    const orden = { intervenir: 0, observar: 1, pausa: 2, normal: 3 };
     filas.sort((a, b) => orden[a.estado] - orden[b.estado] || b.senales.length - a.senales.length || String(a.c.nombre).localeCompare(String(b.c.nombre)));
     _cpr.datos = { hoy, filas, conApp: !!(eng && eng.conApp) };
     _cpr.leido = Date.now();
@@ -199,12 +203,13 @@ function cpGuardarDescarte(clave) {
 window.cpDescartar = (clave) => { cpGuardarDescarte(clave); _cpr.datos = null; rerenderView(); };
 
 // El entreno semana a semana: hechos contra lo de su ciclo.
-function cpSemanas(fases, sesiones, hoy, n = 6) {
+// Los días que estuvo fuera (viaje, enfermedad…) no se planean.
+function cpSemanas(fases, sesiones, hoy, n = 6, fuera = new Set()) {
   const lunes = evtSumarDias(hoy, -((new Date(hoy + 'T12:00:00').getDay() + 6) % 7));
   const out = [];
   for (let k = n; k >= 1; k--) {
     const a = evtSumarDias(lunes, -7 * k), b = evtSumarDias(a, 6);
-    const plan = typeof engPlaneados === 'function' ? engPlaneados(fases, a, b) : 0;
+    const plan = typeof engPlaneados === 'function' ? engPlaneados(fases, a, b, fuera) : 0;
     const hechos = sesiones.filter(s => s.estado === 'completada' && s.fecha >= a && s.fecha <= b).length;
     out.push({ desde: a, plan, hechos, pct: plan ? Math.min(100, Math.round((hechos / plan) * 100)) : null });
   }
@@ -212,18 +217,20 @@ function cpSemanas(fases, sesiones, hoy, n = 6) {
 }
 
 // ── El estado de un cliente: señal → interpretación → acción ─────────────
-function cpEstado({ c, hoy, vistos, descartes, bdj, eng, fases, sesiones, metas, meds, pedidos, ultimoMsj, pago }) {
+function cpEstado({ c, hoy, vistos, descartes, bdj, eng, fases, sesiones, metas, meds, pedidos, ultimoMsj, pago, pausa = null, fuera = new Set() }) {
   const S = [];   // { nivel, clave, texto, accion: { t, fn } }
   const add = (nivel, clave, texto, accion = null) => { clave = String(clave).replace(/[^\w:.-]/g, '_').slice(0, 80); if (descartes[`${c.id}:${clave}`] && descartes[`${c.id}:${clave}`] >= hoy) return; S.push({ nivel, clave, texto, accion }); };
   const id = c.id;
+  // 0. Te avisó que va a estar fuera (desde su app): va aparte, en «Te avisaron».
+  const avisos = bdj.filter(a => /^aus:/.test(a.id) && !vistos.has(a.id));
   // 1. Notas sin responder (una molestia es lo primero).
-  bdj.filter(a => a.tipo === 'nota' && !vistos.has(a.id)).forEach(a => {
+  bdj.filter(a => a.tipo === 'nota' && !/^aus:/.test(a.id) && !vistos.has(a.id)).forEach(a => {
     const dolor = CP_DOLOR.test(a.detalle || '');
     add(dolor ? 'intervenir' : 'observar', a.id, `${dolor ? '<b>Reportó una molestia</b>' : '<b>Te dejó una nota</b>'}: «${escapeHtml(String(a.detalle || '').slice(0, 120))}»`,
       { t: 'Responder', fn: `cpResponder('${id}','${a.id}')` });
   });
   // 2. Adherencia contra su propia línea: las 2 últimas semanas contra las 4 anteriores.
-  const sem = cpSemanas(fases, sesiones, hoy, 6).filter(w => w.plan > 0);
+  const sem = cpSemanas(fases, sesiones, hoy, 6, fuera).filter(w => w.plan > 0);
   if (sem.length >= 3) {
     const ult = sem.slice(-2), base = sem.slice(0, -2);
     const prom = Math.round(base.reduce((s, w) => s + w.pct, 0) / base.length);
@@ -264,14 +271,19 @@ function cpEstado({ c, hoy, vistos, descartes, bdj, eng, fases, sesiones, metas,
   if (c.fecha_inicio) { const d = Math.round((new Date(hoy + 'T12:00:00') - new Date(c.fecha_inicio + 'T12:00:00')) / 86400000); if (d >= 0 && d < 14) add('observar', 'inicio', `Semana ${Math.floor(d / 7) + 1} en el programa: un check-in corto ahora vale más que después`, { t: 'Escribirle', fn: `cpSeguimiento('${id}')` }); }
   // 9. Pago vencido.
   if (pago && pago.due) add('observar', 'pago', `Pago vencido${pago.meses_deuda > 1 ? ` (${pago.meses_deuda} meses)` : ''}`, { t: 'Ir a Pagos', fn: `navigate('pagos')` });
+  // 10. Bienestar: una de las tres bajó dos veces seguidas.
+  bdj.filter(a => a.tipo === 'bienestar' && !vistos.has(a.id)).forEach(a => add('observar', a.id, `<b>${escapeHtml(a.titulo.split(':')[0])}</b>:${escapeHtml(a.titulo.split(':').slice(1).join(':'))} en sus últimos check-ins de bienestar`, { t: 'Ver bienestar', fn: `cpSeguimiento('${id}','bienestar')` }));
+  // En pausa (está fuera hoy): solo cuenta lo que te escribió (una molestia sigue siendo urgente).
+  if (pausa) for (let i = S.length - 1; i >= 0; i--) if (!/^(nota|cierre):/.test(S[i].clave)) S.splice(i, 1);
   // Para reconocer (no es alerta): récords y semana cumplida.
   const reconocer = bdj.filter(a => (a.tipo === 'record' || /^semana:/.test(a.id)) && noVisto(a)).map(a => ({ id: a.id, texto: `${escapeHtml(a.titulo)}${a.detalle ? ` · ${escapeHtml(a.detalle)}` : ''}` }));
-  const estado = S.some(s => s.nivel === 'intervenir') ? 'intervenir' : S.some(s => s.nivel === 'observar') ? 'observar' : 'normal';
+  const estado = S.some(s => s.nivel === 'intervenir') ? 'intervenir' : pausa ? 'pausa' : S.some(s => s.nivel === 'observar') ? 'observar' : 'normal';
   S.sort((a, b) => (a.nivel === 'intervenir' ? 0 : 1) - (b.nivel === 'intervenir' ? 0 : 1));
   const pend = pedidos.filter(p => p.estado === 'pendiente').sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
   const proxima = S.find(s => s.accion) ? `${S.find(s => s.accion).accion.t}` : pend ? `Revisar: ${pend.texto}` : 'Nada hoy';
   return {
-    c, estado, senales: S, reconocer, proxima, semanas: cpSemanas(fases, sesiones, hoy, 6),
+    c, estado, senales: S, reconocer, proxima: pausa && !S.length ? `En pausa hasta el ${typeof ausCorta === 'function' ? ausCorta(pausa.hasta) : pausa.hasta}` : proxima, semanas: cpSemanas(fases, sesiones, hoy, 6, fuera),
+    pausa, avisos,
     eng, ultimoMsj, diasMed, ciclo: vig ? { nombre: vig.nombre || 'Ciclo', queda } : null, pago,
     bdjIds: bdj.filter(noVisto).map(a => a.id),
   };
@@ -321,8 +333,8 @@ window.cpResponder = (id, notaClave) => {
   const a = bd.find(x => x.id === notaClave);
   if (!f || !a) return;
   if (a.responder && typeof ccAbrirDesdeNota === 'function') return ccAbrirDesdeNota(a.responder);   // nota de un ejercicio: en ese ejercicio
-  openModal(modalShell(`Responderle a ${escapeHtml(f.c.nombre.split(' ')[0])}`, `
-    <div class="text-sm text-slate-600 mb-2">${escapeHtml(a.titulo)}: <em>«${escapeHtml(a.detalle || '')}»</em></div>
+  openModal(modalShell(`${a.aus_id ? 'Escribirle' : 'Responderle'} a ${escapeHtml(f.c.nombre.split(' ')[0])}`, `
+    <div class="text-sm text-slate-600 mb-2">${a.aus_id ? `${escapeHtml(a.titulo)} · ${escapeHtml(a.detalle || '')}` : `${escapeHtml(a.titulo)}: <em>«${escapeHtml(a.detalle || '')}»</em>`}</div>
     <textarea id="cp-resp" rows="4" placeholder="Tu respuesta" style="width:100%"></textarea>
     <p class="text-xs text-slate-500 mt-2">«A su app» le sale como mensaje de su coach en el inicio de la app. WhatsApp, para lo que necesita conversación.</p>`,
     `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
@@ -351,11 +363,22 @@ window.cpEnviarRespuesta = async (id, notaClave, wa) => {
   }
   if (typeof segRegistrar === 'function') await segRegistrar(id, { origen: 'nota', titulo: wa ? 'Respuesta por WhatsApp' : 'Respuesta en su app', texto });
   bdjMarcarVisto(notaClave);
+  if (a.aus_id && typeof ausVista === 'function') await ausVista(a.aus_id);
   if (a.nota_id) { try { await sb.from('notas_entreno').update({ leida_en: new Date().toISOString() }).eq('id', a.nota_id); } catch (e) { /* queda en este navegador */ } }
   closeModal();
   toast(wa ? 'Abierto en WhatsApp y guardado' : 'Le llegó a su app y quedó guardado');
   _cpr.datos = null; rerenderView();
 };
+
+// Un aviso de ausencia: visto (sin escribirle).
+window.cpAvisoVisto = async (clave, ausId) => {
+  bdjMarcarVisto(clave);
+  if (ausId && typeof ausVista === 'function') await ausVista(ausId);
+  if (typeof bdjPintarContador === 'function') bdjPintarContador();
+  _cpr.datos = null; rerenderView();
+};
+// Editar una ausencia desde Hoy: el mismo formulario de Seguimiento.
+window.cpAusEditar = (clienteId, ausId) => { if (typeof ausMarcar === 'function') ausMarcar(clienteId, ausId); };
 
 // ── Hoy ─────────────────────────────────────────────────────────────────
 function cpTarjeta(f, conAcciones = true) {
@@ -384,14 +407,26 @@ routes.hoy = async () => {
   try { D = await cpDatos(); } catch (e) { D = { filas: [] }; console.warn('hoy', e); }
   finCargando();
   const I = D.filas.filter(f => f.estado === 'intervenir'), O = D.filas.filter(f => f.estado === 'observar'), N = D.filas.filter(f => f.estado === 'normal');
+  const PA = D.filas.filter(f => f.estado === 'pausa');
+  const AV = D.filas.flatMap(f => (f.avisos || []).map(a => ({ f, a })));
   const rec = D.filas.filter(f => f.reconocer.length);
   const med = D.filas.filter(f => f.senales.some(s => s.clave === 'medicion')).length;
   view.innerHTML = `${cpBanda()}
     <div class="mb-3"><h2 class="text-2xl font-bold text-slate-900">Hoy</h2>
-      <p class="text-sm text-slate-500" data-cp-resumen><b>${I.length}</b> para intervenir · <b>${O.length}</b> para observar · <b>${N.length}</b> van bien (no hace falta nada hoy)</p></div>
+      <p class="text-sm text-slate-500" data-cp-resumen><b>${I.length}</b> para intervenir · <b>${O.length}</b> para observar · <b>${N.length}</b> van bien${PA.length ? ` · <b>${PA.length}</b> en pausa` : ''} (no hace falta nada hoy)</p></div>
+    ${AV.length ? `<div class="cp-h">Te avisaron · ${AV.length}</div><div data-cp-avisos>${AV.map(({ f, a }) => `<div class="cp-card cp-rec" data-cp-aviso="${f.c.id}">
+      <span style="flex:none;width:38px;height:38px;border-radius:12px;background:rgba(60,123,214,.12);display:grid;place-items:center">${typeof AUS_ICONO === 'string' ? AUS_ICONO : ''}</span>
+      <span style="flex:1 1 240px"><b style="font-size:15.5px">${escapeHtml(f.c.nombre)}</b> <span class="cp-mot" style="display:inline">${escapeHtml(a.titulo)}</span><div class="cp-mot">${escapeHtml(a.detalle || '')}</div></span>
+      <span class="cp-acc"><button type="button" class="cp-btn" onclick="cpResponder('${f.c.id}','${a.id}')">Escribirle</button><button type="button" class="cp-btn s" onclick="cpAvisoVisto('${a.id}','${a.aus_id || ''}')">Visto</button></span></div>`).join('')}</div>` : ''}
     <div class="cp-h">Intervenir · ${I.length}</div>
     <div data-cp-intervenir>${I.length ? I.map(f => cpTarjeta(f)).join('') : '<div class="cp-card text-sm text-slate-500">Nadie necesita que intervengas hoy.</div>'}</div>
     ${rec.length ? `<div class="cp-h">Para reconocer · ${rec.length}</div><div data-cp-reconocer>${rec.map(f => `<div class="cp-card cp-rec"><b style="min-width:140px">${escapeHtml(f.c.nombre)}</b><span class="cp-mot">${f.reconocer.map(r => r.texto).join(' · ')}</span><button type="button" class="cp-btn" onclick="cpSeguimiento('${f.c.id}')">Escribirle</button></div>`).join('')}</div>` : ''}
+    ${PA.length ? `<div class="cp-h">En pausa · ${PA.length}</div><div data-cp-pausa>${PA.map(f => `<div class="cp-card cp-rec" data-cp-cliente="${f.c.id}" data-cp-estado="pausa">
+      <span style="flex:none;width:38px;height:38px;border-radius:12px;background:rgba(60,123,214,.12);display:grid;place-items:center">${typeof AUS_ICONO === 'string' ? AUS_ICONO : ''}</span>
+      <span style="flex:1 1 240px"><b style="font-size:15.5px;cursor:pointer" onclick="cpSeguimiento('${f.c.id}')">${escapeHtml(f.c.nombre)}</b> <span class="cp-pill" style="background:#E3EDFA;color:#2F6CC4">${typeof ausMotivo === 'function' ? ausMotivo(f.pausa.motivo) : 'Fuera'}</span>
+        <div class="cp-mot">${typeof ausRango === 'function' ? ausRango(f.pausa) : ''} · ${f.pausa.origen === 'cliente' ? 'la marcó en su app' : 'la marcaste tú'}. Esos días no cuentan en su adherencia, puntajes ni alertas.${f.pausa.nota ? ` «${escapeHtml(f.pausa.nota)}»` : ''}</div>
+        ${f.senales.map(s2 => `<div class="cp-mot" style="margin-top:4px"><span style="color:#C98A1B;font-weight:800">●</span> ${s2.texto}</div>`).join('')}</span>
+      <span class="cp-acc"><button type="button" class="cp-btn s" onclick="cpAusEditar('${f.c.id}','${f.pausa.id}')">Editar</button></span></div>`).join('')}</div>` : ''}
     <details class="cp-card" style="margin-top:14px" data-cp-observar ${I.length ? '' : 'open'}><summary style="cursor:pointer;font-weight:800">Observar · ${O.length} <span class="text-sm text-slate-500" style="font-weight:500">· señales tempranas; casi siempre basta con mirar</span></summary>
       <div style="margin-top:10px">${O.map(f => cpTarjeta(f)).join('') || '<div class="text-sm text-slate-500">Nadie.</div>'}</div>
       ${med > 1 ? `<button type="button" class="cp-btn" style="margin-top:6px" onclick="cpPedirMedicionTodos()">Pedir la medición del mes a los ${med} que les toca</button>` : ''}</details>
@@ -403,7 +438,7 @@ routes.hoy = async () => {
 // ── Cartera ──────────────────────────────────────────────────────────────
 const CP_FILTROS = [
   ['todos', 'Todos', () => true], ['intervenir', 'Intervenir', f => f.estado === 'intervenir'], ['observar', 'Observar', f => f.estado === 'observar'],
-  ['normal', 'Van bien', f => f.estado === 'normal'], ['ciclo', 'Termina ciclo', f => f.ciclo && f.ciclo.queda <= 7], ['medicion', 'Toca medición', f => f.diasMed == null || f.diasMed > 30],
+  ['normal', 'Van bien', f => f.estado === 'normal'], ['pausa', 'En pausa', f => f.estado === 'pausa'], ['ciclo', 'Termina ciclo', f => f.ciclo && f.ciclo.queda <= 7], ['medicion', 'Toca medición', f => f.diasMed == null || f.diasMed > 30],
 ];
 function cpBarras(sem) {
   return `<div class="cp-sem" title="Entreno, últimas 6 semanas">${sem.map(w => w.pct == null ? '<span style="height:4px;background:#E4E0D8"></span>' : `<span title="${w.hechos} de ${w.plan}" style="height:${6 + (w.pct / 100) * 20}px;background:${w.pct >= 75 ? '#3C7BD6' : w.pct >= 50 ? '#C9A227' : '#C2412D'}"></span>`).join('')}</div>`;
@@ -423,7 +458,7 @@ routes.cartera = async () => {
       <table class="lis-tabla"><thead><tr><th class="lis-nom">Cliente</th><th>Estado y por qué</th><th>Entreno (6 sem)</th><th>Comida (28 días)</th><th>Sin actividad</th><th>Último contacto</th><th>Próxima acción</th><th>Ciclo</th><th>Pago</th></tr></thead>
       <tbody>${filas.map(f => { const [bg, col, t] = CP_TONO[f.estado]; return `<tr data-cp-fila="${f.c.id}" onclick="cpSeguimiento('${f.c.id}')" style="cursor:pointer">
         <td class="lis-nom">${typeof entAvatar === 'function' ? entAvatar(f.c.nombre) : ''}<b>${escapeHtml(f.c.nombre)}</b></td>
-        <td style="min-width:240px;max-width:320px"><span class="cp-pill" style="background:${bg};color:${col}">${t}</span><div style="font-size:12.5px;color:#55565B;margin-top:4px;line-height:1.35">${f.senales.slice(0, 2).map(s => s.texto.replace(/<[^>]+>/g, '')).join(' · ') || 'Todo en orden'}</div></td>
+        <td style="min-width:240px;max-width:320px"><span class="cp-pill" style="background:${bg};color:${col}">${t}</span><div style="font-size:12.5px;color:#55565B;margin-top:4px;line-height:1.35">${f.pausa && typeof ausRango === 'function' ? `${ausMotivo(f.pausa.motivo)} · ${ausRango(f.pausa)}${f.senales.length ? ' · ' : ''}` : ''}${f.senales.slice(0, 2).map(s => s.texto.replace(/<[^>]+>/g, '')).join(' · ') || (f.pausa ? '' : 'Todo en orden')}</div></td>
         <td>${cpBarras(f.semanas)}</td>
         <td>${f.eng ? `${f.eng.comida28} días` : '—'}</td>
         <td>${f.eng ? (f.eng.sinActividad == null ? 'nunca' : f.eng.sinActividad === 0 ? 'hoy' : `${f.eng.sinActividad} días`) : '—'}</td>
@@ -450,7 +485,7 @@ async function cpMotivoSeguimiento() {
   div.className = 'cp-card'; div.dataset.cpMotivo = '1';
   div.innerHTML = `<b>Por qué está en tu cola</b> <span class="cp-pill" style="background:${bg};color:${col}">${t}</span>
     <div class="cp-mot">${f.senales.length ? f.senales.map(s => s.texto).join('<br>') : 'Va bien: no hace falta nada extra hoy.'}</div>`;
-  caja.insertBefore(div, caja.querySelector('[data-sa-barra]') || caja.firstChild);
+  caja.insertBefore(div, caja.querySelector('[data-aus-seg]') || caja.querySelector('[data-sa-barra]') || caja.firstChild);
 }
 if (typeof window.saPintar === 'function') {
   const base = window.saPintar;
