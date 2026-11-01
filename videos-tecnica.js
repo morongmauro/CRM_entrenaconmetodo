@@ -101,7 +101,7 @@ function vtPintar() {
         <div class="text-xs text-slate-500">Pedido el ${vtCorta(f.pedido_en)} (${vtHace(f.pedido_en)})${f.revisado_en ? ` · revisado el ${vtCorta(f.revisado_en)}` : ''}${veces(f) > 1 ? ` · ${veces(f)}ª vez` : ''}</div>
         ${f.nota ? `<div class="text-xs mt-0.5" style="color:${VT_ESTADO[f.estado].color}">📝 ${escapeHtml(f.nota)}</div>` : ''}
       </div>
-      <div class="flex gap-1 flex-wrap justify-end flex-shrink-0">${botones}</div>
+      <div class="flex gap-1 flex-wrap justify-end flex-shrink-0" style="max-width:58%">${botones}</div>
     </div>`;
   const btnBien = (f) => `<button class="btn btn-ghost btn-sm" data-vt-bien onclick="vtMarcar('${f.id}', 'bien')" title="Lo revisaste y lo hizo bien">✓ Bien</button>`;
   const btnMejorar = (f) => `<button class="btn btn-ghost btn-sm" data-vt-mejorar onclick="vtMejorar('${f.id}')" title="Hay que corregir algo: anota qué y vuelve a pedirlo">↻ A mejorar</button>`

@@ -156,6 +156,11 @@ export default async function handler(req, res) {
   // son caras, así que el límite es más bajo que el del chat.
   if (!guard(req, res, { key: 'coach-insight', limit: 12 })) return;
 
+  // Modo «pedidos»: del mensaje que el coach escribe en Seguimiento, lo que le
+  // pide al cliente, en una lista corta para confirmar (no hay streaming: es
+  // una extracción breve y se contesta en JSON).
+  if (req.body && req.body.modo === 'pedidos') return extraerPedidos(req, res);
+
   try {
     const { analisis, extra, guia, nivel } = req.body || {};
     const N = resolverNivel(nivel, process.env.CRM_INSIGHT_NIVEL);
@@ -241,5 +246,52 @@ ${guia.trim().slice(0, 4000)}`,
     console.error('coach-insight error:', error);
     if (res.headersSent) return res.end();
     return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+const SYSTEM_PEDIDOS = `Recibes el mensaje que un coach de entrenamiento y nutrición le va a mandar a su cliente por WhatsApp.
+Saca SOLO lo que le PIDE hacer al cliente (acciones concretas que se puedan revisar después). No incluyas
+saludos, felicitaciones, explicaciones ni preguntas abiertas.
+
+Devuelve SOLO un JSON: {"pedidos":[{"tipo":"entreno|video|comida|medicion|otro","texto":"…","ejercicio":null,"peso_kg":null,"foco":null}]}
+- tipo: entreno (cargas, reps, rutinas, cardio), video (que mande un video de técnica), comida (lo que come o registra),
+  medicion (peso, % de grasa, medidas, fotos de progreso), otro (cualquier otra acción).
+- texto: la acción en 3 a 8 palabras, en infinitivo y en español («Subir elevación lateral a 15 kg»).
+- ejercicio: el nombre del ejercicio si lo hay (usa el de la lista si coincide), si no null.
+- peso_kg: el número en kg si pide un peso concreto (convierte libras a kg), si no null.
+- foco: en comida, "proteina" si es sobre proteína, "registro" si es sobre registrar, si no "otro"; en lo demás null.
+Si no pide nada concreto, devuelve {"pedidos":[]}. Máximo 6.`;
+
+async function extraerPedidos(req, res) {
+  const texto = String((req.body && req.body.texto) || '').slice(0, 3000).trim();
+  const ejercicios = Array.isArray(req.body && req.body.ejercicios) ? req.body.ejercicios.slice(0, 60).map(x => String(x).slice(0, 80)) : [];
+  if (texto.length < 10) return res.status(200).json({ pedidos: [] });
+  const N = resolverNivel('rapido');
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: N.modelo,
+        max_tokens: 600,
+        system: SYSTEM_PEDIDOS,
+        messages: [{ role: 'user', content: `Ejercicios de su rutina: ${ejercicios.join(', ') || '(no hay)'}\n\nMensaje del coach:\n${texto}` }],
+      }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) return res.status(r.status).json({ error: data.error?.message || 'Anthropic API error' });
+    const out = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+    const m = out.match(/\{[\s\S]*\}/);
+    const j = m ? JSON.parse(m[0]) : { pedidos: [] };
+    const pedidos = (Array.isArray(j.pedidos) ? j.pedidos : []).slice(0, 6).map(p => ({
+      tipo: ['entreno', 'video', 'comida', 'medicion', 'otro'].includes(p.tipo) ? p.tipo : 'otro',
+      texto: String(p.texto || '').slice(0, 160),
+      ejercicio: p.ejercicio ? String(p.ejercicio).slice(0, 80) : null,
+      peso_kg: Number(p.peso_kg) > 0 ? Number(p.peso_kg) : null,
+      foco: ['proteina', 'registro', 'otro'].includes(p.foco) ? p.foco : null,
+    })).filter(p => p.texto);
+    return res.status(200).json({ pedidos, modelo: N.modelo, uso: data.usage || null });
+  } catch (e) {
+    return res.status(500).json({ error: 'No pude leer el mensaje' });
   }
 }

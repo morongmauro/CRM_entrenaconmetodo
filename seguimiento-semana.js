@@ -253,7 +253,10 @@ function esCalcular(D, lunes, hoy) {
       } : null,
       enMeta: conMetaK.filter(v => Math.abs(v.kcal - v.goal_kcal) <= v.goal_kcal * 0.1).length,
       conMeta: conMetaK.length,
+      // Los 14 días que trae la app, para el área de Meta y los pedidos de comida.
+      diasLista: Object.entries(rd).filter(([, v]) => v && Number(v.kcal) > 0).map(([fecha, v]) => ({ fecha, ...v })).sort((a, b) => a.fecha.localeCompare(b.fecha)),
     };
+    K.kcalProm = K.diasLista.length ? Math.round(K.diasLista.reduce((a, v) => a + Number(v.kcal), 0) / K.diasLista.length) : null;
     if (K.prot) K.prot.pct = K.prot.meta ? K.prot.prom / K.prot.meta : null;
   } else {
     dias.forEach(d => { d.comida = 'nodata'; });
@@ -962,9 +965,9 @@ window.esPintar = async (c, lunes = null) => {
   const msjs = caja.querySelector('[data-es-mensajes]') || document.querySelector('[data-es-mensajes]');
   if (cuerpo) cuerpo.classList.add('es-cargando');
   if (!caja.dataset.ultimoPintado) { caja.dataset.ultimoPintado = '1'; segPintarUltimo(c); esPintarRecordatorios(c); if (typeof tcPintar === 'function') tcPintar(c); if (typeof paPintar === 'function') paPintar(c); }
-  let S;
+  let S, D;
   try {
-    const D = await esLeer(c, lunes);
+    D = await esLeer(c, lunes);
     if (!document.getElementById('seg-semana') || document.getElementById('seg-semana').dataset.lunes !== lunes || _es.cliente !== c) return;
     S = esCalcular(D, lunes, hoy);
     _esCache[`${c.id}|${lunes}`] = { p: Promise.resolve(S), en: Date.now() };
@@ -975,11 +978,15 @@ window.esPintar = async (c, lunes = null) => {
   _es.semana = S;
   _es.mensajes = esMensajes(c, S);
   cuerpo.classList.remove('es-cargando');
+  // Con las 6 áreas (seguimiento-areas.js), «Pesos y repeticiones» va en Fuerza.
+  const enFuerza = caja.querySelector('[data-sa-fuerza-sob]');
   cuerpo.innerHTML = `
     <div class="es-card" data-es-cumplimiento>${esCumplimientoHTML(S)}</div>
     <div class="es-card es-txt" data-es-resumen><div class="es-k">En pocas palabras</div>${esResumenHTML(c, S)}</div>
-    <div class="es-card" data-es-sobrecarga>${esSobrecargaHTML(S)}</div>
+    ${enFuerza ? '' : `<div class="es-card" data-es-sobrecarga>${esSobrecargaHTML(S)}</div>`}
     <div class="es-card" data-es-comentarios>${esComentariosHTML(c, S)}</div>`;
+  if (enFuerza) enFuerza.innerHTML = `<div class="es-card" data-es-sobrecarga>${esSobrecargaHTML(S)}</div>`;
+  if (typeof saPintar === 'function' && caja.querySelector('[data-sa-barra]')) saPintar(c, S, D);
   if (msjs) msjs.innerHTML = `<div class="es-k">Mensajes para ${S.cierre ? 'su semana' : 'esta semana'}</div>${esMensajesHTML(_es.mensajes)}`;
   const ciclo = document.querySelector('[data-seg-ciclo]');
   if (ciclo && S.fase) {
@@ -1069,18 +1076,35 @@ function esArmazonHTML(c, { sinMensajes = false } = {}) {
         </div>
       </div>
       <div class="es-ultimo" data-es-ultimo></div>
+      ${typeof saBarraHTML === 'function' ? esAreasHTML(c, sk, sinMensajes) : `
       ${typeof tcTarjetaHTML === 'function' ? tcTarjetaHTML(c) : ''}
       <div class="es-grid" data-es-cuerpo>${sk}${sk}</div>
-      ${typeof vtPanel === 'function' ? `<details class="es-card es-vt" open data-seg-videos>
+      ${esVideosHTML()}
+      ${esRecHTML()}
+      ${sinMensajes ? '' : `<div class="es-card" data-es-mensajes><div class="es-k">Mensajes</div>${sk}</div>`}`}
+    </div>`;
+}
+
+const esVideosHTML = () => (typeof vtPanel === 'function' ? `<details class="es-card es-vt" open data-seg-videos>
         <summary class="es-k">Videos de técnica · pedidos, por revisar y a mejorar</summary>
         <div id="seg-vt"></div>
-      </details>` : ''}
-      <details class="es-card es-vt" open data-seg-recordatorios>
+      </details>` : '');
+const esRecHTML = () => `<details class="es-card es-vt" data-seg-recordatorios>
         <summary class="es-k">Lo que le sale en su app · recordatorios</summary>
         <div id="seg-rec"><div class="es-vacio">Leyendo su app…</div></div>
-      </details>
-      ${sinMensajes ? '' : `<div class="es-card" data-es-mensajes><div class="es-k">Mensajes</div>${sk}</div>`}
-    </div>`;
+      </details>`;
+// Las 6 áreas en el orden en que se revisa (seguimiento-areas.js).
+function esAreasHTML(c, sk, sinMensajes) {
+  return `${saBarraHTML()}
+    ${saAreaHTML('hoy', 1, `${typeof tcTarjetaHTML === 'function' ? tcTarjetaHTML(c) : ''}<div class="es-grid" data-es-cuerpo>${sk}${sk}</div>`)}
+    ${saAreaHTML('pedi', 2, `<div data-sa-vez><div class="es-card es-sk"></div></div>${esVideosHTML()}<div data-sa-sinvideo></div>${esRecHTML()}`)}
+    ${saAreaHTML('comida', 3, `<div data-sa-comida><div class="es-card es-sk"></div></div>`)}
+    ${saAreaHTML('fuerza', 4, `<div class="sa-card" data-sa-fuerza></div><div data-sa-fuerza-sob style="margin-top:12px"></div>`)}
+    ${saAreaHTML('composicion', 5, `<div data-sa-composicion><div class="es-card es-sk"></div></div>`)}
+    ${saAreaHTML('meta', 6, `<div data-sa-meta><div class="es-card es-sk"></div></div>`)}
+    ${saCajaHTML(c)}
+    ${sinMensajes ? '' : `<div class="es-card" data-es-mensajes style="margin-top:14px"><div class="es-k">Mensajes</div>${sk}</div>`}
+    ${saCerrarHTML()}`;
 }
 
 // ── La franja corta: ficha, Entrenamiento y Alimentación ───────────────

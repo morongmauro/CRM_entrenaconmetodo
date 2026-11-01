@@ -142,7 +142,7 @@ const r = await p.evaluate(() => {
     sobre: [...s.querySelectorAll('[data-es-sobre]')].map(f => ({ t: f.dataset.esSobre, x: f.innerText.replace(/\s+/g, ' ') })),
     coment: s.querySelector('[data-es-comentarios]').innerText,
     videos: !!s.querySelector('[data-seg-videos] #seg-vt'),
-    ordenMsjDespuesVideos: !!s.querySelector('[data-seg-videos] ~ [data-es-mensajes]'),
+    ordenMsjDespuesVideos: !!(s.querySelector('[data-seg-videos]') && s.querySelector('[data-es-mensajes]') && (s.querySelector('[data-seg-videos]').compareDocumentPosition(s.querySelector('[data-es-mensajes]')) & Node.DOCUMENT_POSITION_FOLLOWING)),
   };
 });
 ok('la semana completa está en Seguimiento, con el cliente elegido', r.enSeguimiento);
