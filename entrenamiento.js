@@ -1825,6 +1825,7 @@ window.entCerrarConstructor = () => {
   document.body.classList.remove('ent-mesa-on');
   _ent.rutinaId = null;
   _ent.rutina = null;
+  _ent.histCiclos = null;
   _ent.bloqueDestino = '';
   if (_ent.volver) { _ent.tab = _ent.volver.tab; if (_ent.volver.subtab) _ent.subtab = _ent.volver.subtab; _ent.volver = null; }
   routes.entrenamiento();
@@ -1848,6 +1849,9 @@ async function entPintarConstructor() {
   const r = await entDb.rutina(_ent.rutinaId);
   if (!r) { toast('No encontré esa rutina'); return entCerrarConstructor(); }
   _ent.rutina = r;
+  // En qué ciclos anteriores del cliente estuvo cada ejercicio (la etiqueta
+  // de cada fila). Si falla, la rutina se abre igual, sin etiqueta.
+  _ent.histCiclos = r.fase_id && r.cliente_id ? await entHistorialCiclos(r).catch(() => null) : null;
   await entDb.ejercicios();
   await entCargarCambios(r.id);
 
@@ -2307,6 +2311,62 @@ function entEnvolverBloque(b, dentro, cuantos) {
   `;
 }
 
+// ---------- En qué ciclos anteriores lo tuvo el cliente ----------
+// Para decidir si vale la pena repetirlo: «Lo usó en el ciclo anterior»,
+// «Lo usó hace 3 ciclos», «Lo usó en los últimos 2 ciclos»… Cuenta las
+// rutinas de sus ciclos anteriores (por fecha de inicio) y reconoce el mismo
+// ejercicio aunque esté en otra ficha con el mismo nombre (repetidos).
+async function entHistorialCiclos(r) {
+  const { data: fases } = await sb.from('fases').select('id, nombre, orden, fecha_inicio, estado').eq('cliente_id', r.cliente_id);
+  const lista = (fases || []).filter(f => f.estado !== 'archivada')
+    .sort((a, b) => String(a.fecha_inicio || '').localeCompare(String(b.fecha_inicio || '')) || (a.orden ?? 0) - (b.orden ?? 0));
+  const i = lista.findIndex(f => f.id === r.fase_id);
+  if (i <= 0) return { porId: new Map(), porNombre: new Map(), nombres: {} };
+  const antes = lista.slice(0, i);
+  const atrasDe = Object.fromEntries(antes.map((f, j) => [f.id, i - j]));   // 1 = el ciclo anterior
+  const nombres = Object.fromEntries(antes.map((f, j) => [i - j, f.nombre || `Ciclo ${j + 1}`]));
+  const { data: rutinas } = await sb.from('rutinas').select('id, fase_id').in('fase_id', antes.map(f => f.id));
+  const faseDe = Object.fromEntries((rutinas || []).map(x => [x.id, x.fase_id]));
+  const ids = Object.keys(faseDe);
+  const filas = [];
+  for (let k = 0; k < ids.length; k += 150) {
+    const { data } = await sb.from('rutina_ejercicios').select('rutina_id, ejercicio_id, ejercicios(nombre, alias)').in('rutina_id', ids.slice(k, k + 150));
+    filas.push(...(data || []));
+  }
+  const porId = new Map(), porNombre = new Map();
+  const sumar = (m, k, a) => { if (!k) return; if (!m.has(k)) m.set(k, new Set()); m.get(k).add(a); };
+  filas.forEach(x => {
+    const a = atrasDe[faseDe[x.rutina_id]];
+    if (!a) return;
+    sumar(porId, x.ejercicio_id, a);
+    if (x.ejercicios) { sumar(porNombre, normalizeName(entNombres(x.ejercicios).grande), a); sumar(porNombre, normalizeName(x.ejercicios.nombre), a); }
+  });
+  return { porId, porNombre, nombres };
+}
+// Los ciclos atrás (1, 2, 3…) en los que estuvo, de menor a mayor.
+function entCiclosDeEjercicio(e) {
+  const h = _ent.histCiclos;
+  if (!h || !e) return [];
+  const todos = new Set([...(h.porId.get(e.id) || []), ...(h.porNombre.get(normalizeName(entNombres(e).grande)) || []), ...(h.porNombre.get(normalizeName(e.nombre)) || [])]);
+  return [...todos].sort((a, b) => a - b);
+}
+function entTextoCiclos(atras) {
+  if (!atras.length) return '';
+  const n = atras.length;
+  if (atras[n - 1] === n) return n === 1 ? 'Lo usó en el ciclo anterior' : `Lo usó en los últimos ${n} ciclos`;
+  const y = (xs) => xs.length === 1 ? String(xs[0]) : `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}`;
+  if (atras[0] === 1) return `Lo usó en el ciclo anterior y hace ${y(atras.slice(1))} ciclos`;
+  return `Lo usó hace ${y(atras)} ciclos`;
+}
+function entTagCiclosHTML(e) {
+  const atras = entCiclosDeEjercicio(e);
+  if (!atras.length) return '';
+  const h = _ent.histCiclos;
+  const cuales = atras.map(a => h.nombres[a]).filter(Boolean).join(' · ');
+  // Amarillo si estuvo en el ciclo anterior (sería repetirlo seguido); gris si fue antes.
+  return `<div class="mt-0.5"><span class="tag ${atras[0] === 1 ? 'tag-yellow' : 'tag-gray'}" data-tag-ciclos="${atras.join(',')}" title="${escapeHtml(cuales)}">${escapeHtml(entTextoCiclos(atras))}</span></div>`;
+}
+
 function entFilaRutina(re, i, total, bloques) {
   const e = re.ejercicios || {};
   // Un ejercicio sin descripción llega al cliente sin ninguna instrucción de
@@ -2337,6 +2397,7 @@ function entFilaRutina(re, i, total, bloques) {
           <div class="min-w-0">
             <div class="font-bold text-sm text-slate-900">${i + 1}. ${escapeHtml(entNombres(e).grande)}</div>
             ${entNombreChico(e)}
+            ${entTagCiclosHTML(e)}
             <div class="text-xs text-slate-500">${entLabel(ENT_TIPOS, e.tipo)} · ${entChipMusculos(e)}
               <span class="ent-tiempo-re" data-tiempo-re="${re.id}" title="Lo que pesa en el reloj (series, descansos y el cambio al siguiente)">${_ent.rutina ? (s2 => s2 ? `≈ ${entMin(s2)}` : '')(entEstimarTiempo(_ent.rutina).porRE[re.id]) : ''}</span></div>
             ${window.ccSiempreHTML ? ccSiempreHTML(re) : ''}
