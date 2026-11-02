@@ -66,6 +66,8 @@ routes.comunidad = async () => {
   cargando('Leyendo tu comunidad…');
   const d = await comCargar();
   const activos = d.clientes ? d.clientes.filter(c => c.estado === 'activo') : [];
+  _com.activos = activos.map(c => c.nombre).filter(Boolean);
+  const avisoDias = comDiasDesdeAviso();
   const nombre = (id) => (d.clientes.find(c => c.id === id) || {}).nombre || 'Alguien';
   // Durante la misma visita (borrar, responder, editar), «lo nuevo» se
   // mantiene: se mide desde la entrada, no desde el último refresco.
@@ -124,6 +126,10 @@ routes.comunidad = async () => {
             <input id="com-enlace" class="border border-slate-200 rounded-xl px-3 py-2 text-sm" placeholder="Enlace para abrir (opcional)">
           </div>
           <label class="flex items-center gap-2 mt-3 text-sm"><input type="checkbox" id="com-fijar"> Fijar arriba</label>
+          <label class="flex items-start gap-2 mt-2 text-sm" data-com-avisar-caja><input type="checkbox" id="com-avisar" class="mt-0.5" ${avisoDias != null && avisoDias < 7 ? 'disabled' : ''}>
+            <span>Avisar por notificación<span class="block text-xs text-slate-500">${avisoDias != null && avisoDias < 7
+              ? `Ya avisaste hace ${avisoDias === 0 ? 'menos de un día' : avisoDias === 1 ? '1 día' : `${avisoDias} días`}. Para que no se cansen, máximo una vez por semana: de nuevo en ${7 - avisoDias} ${7 - avisoDias === 1 ? 'día' : 'días'}.`
+              : 'Solo para lo importante, máximo una vez por semana. Les llega «Nuevo en la comunidad» al teléfono a quien tenga los avisos activos.'}</span></span></label>
           <div class="flex items-center gap-3 mt-4">
             <button class="btn btn-primary" id="com-publicar" onclick="comPublicar()">Publicar</button>
             <span class="text-xs text-slate-500">Le llega a tus ${activos.length} clientes activos.</span>
@@ -199,9 +205,23 @@ window.comPublicar = async () => {
   const { error } = await sb.from('comunidad_posts').insert(fila);
   _com.publicando = false;
   if (error) { toastError('No se pudo publicar: ' + (error.message || 'error')); return; }
-  toast('Publicado. Ya le sale a tu equipo.');
+  // «Avisar por notificación» (desmarcado por defecto, máximo 1 por semana).
+  const avisar = document.getElementById('com-avisar');
+  if (avisar && avisar.checked && !avisar.disabled && (_com.activos || []).length && typeof mtApiPost === 'function') {
+    const resumen = texto.replace(/\s+/g, ' ').slice(0, 120) + (texto.length > 120 ? '…' : '');
+    const r = await mtApiPost('/api/push-send', { mode: 'comunidad', title: 'Nuevo en la comunidad', body: resumen, names: _com.activos }).catch(() => null);
+    if (r && r.ok) {
+      try { localStorage.setItem(COM_CLAVE_AVISO, new Date().toISOString()); } catch (e) {}
+      toast(`Publicado. El aviso le llegó a ${r.enviados} de ${r.total} (${r.con_push} tienen los avisos activos).`);
+    } else toastError('Publicado, pero el aviso no salió' + (r && r.causa ? `: ${r.causa}` : '.'));
+  } else toast('Publicado. Ya le sale a tu equipo.');
   routes.comunidad();
 };
+// El último aviso por notificación (en este navegador): para no pasar de uno por semana.
+const COM_CLAVE_AVISO = 'crm:comunidadAvisoEn';
+function comDiasDesdeAviso() {
+  try { const t = Date.parse(localStorage.getItem(COM_CLAVE_AVISO) || ''); return Number.isFinite(t) ? Math.floor((Date.now() - t) / 86400000) : null; } catch (e) { return null; }
+}
 window.comEditar = (id) => { _com.editando = id; routes.comunidad(); };
 // La bienvenida: una por coach (se crea la primera vez y después se edita).
 window.comGuardarBienvenida = async () => {
