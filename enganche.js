@@ -29,8 +29,8 @@
 // =====================================================
 
 const _eng = { filtro: 'todos', datos: null, abierto: null };
-const ENG_SECC = [['entreno', 'Entreno'], ['comida', 'Comida'], ['recetas', 'Recetas'], ['aprende', 'Aprende'], ['comunidad', 'Comunidad'], ['chat', 'Chat']];
-const ENG_TONO = { entreno: ['#E8EEF8', '#2F6CC4'], comida: ['#E4F1E7', '#2F7F45'], recetas: ['#FDEFD9', '#B4541D'], aprende: ['#FCE9DB', '#C95F17'], comunidad: ['#EDE7F8', '#6A4FB0'], chat: ['#EFEFF1', '#3A3A3C'] };
+const ENG_SECC = [['entreno', 'Entreno'], ['comida', 'Comida'], ['recetas', 'Recetas'], ['aprende', 'Aprende'], ['comunidad', 'Comunidad'], ['chat', 'Chat'], ['fichas', 'Ficha']];
+const ENG_TONO = { entreno: ['#E8EEF8', '#2F6CC4'], comida: ['#E4F1E7', '#2F7F45'], recetas: ['#FDEFD9', '#B4541D'], aprende: ['#FCE9DB', '#C95F17'], comunidad: ['#EDE7F8', '#6A4FB0'], chat: ['#EFEFF1', '#3A3A3C'], fichas: ['#EEF0F2', '#454B54'] };
 const ENG_LETRAS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 
 const engSumar = (iso, n) => { const [y, m, d] = iso.split('-').map(Number); const x = new Date(y, m - 1, d + n); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
@@ -71,6 +71,12 @@ function engCliente({ c, hoy, uso = [], mt = null, sesiones = [], fases = [], fu
   uso.forEach(u => { const r = u && u.secciones && u.secciones.respira; if (Array.isArray(r)) r.forEach(x => respira.push({ fecha: u.fecha, ...x })); });
   respira.sort((a, b) => `${b.fecha} ${b.h}`.localeCompare(`${a.fecha} ${a.h}`));
   const resp28 = respira.filter(x => x.fecha >= d28);
+  // Ficha del ejercicio: cada vez que la abrió (fecha, hora, ejercicio).
+  const fichas = [];
+  uso.forEach(u => { const r = u && u.secciones && u.secciones.fichas; if (Array.isArray(r)) r.forEach(x => fichas.push({ fecha: u.fecha, ...x })); });
+  fichas.sort((a, b) => `${b.fecha} ${b.h}`.localeCompare(`${a.fecha} ${a.h}`));
+  const fich28 = fichas.filter(x => x.fecha >= d28);
+  const porEj = {}; fich28.forEach(x => { const k = x.n || x.e || 'Ejercicio'; porEj[k] = (porEj[k] || 0) + 1; });
   const hechas = sesiones.filter(s => s.estado === 'completada' && !s.bloque);
   hechas.forEach(s => { dias.entreno.add(s.fecha); app.add(s.fecha); });
   const comidaDias = new Set(Object.keys((mt && mt.day_scores) || {}));
@@ -124,6 +130,10 @@ function engCliente({ c, hoy, uso = [], mt = null, sesiones = [], fases = [], fu
       ultima: respira[0] || null, lista: respira.slice(0, 12),
       origenes: resp28.reduce((o, x) => { const k = x.o || 'otro'; o[k] = (o[k] || 0) + 1; return o; }, {}),
     },
+    fichas: {
+      veces: fich28.length, dias: new Set(fich28.map(x => x.fecha)).size, ejercicios: Object.keys(porEj).length,
+      ultima: fichas[0] || null, top: Object.entries(porEj).sort((a, b) => b[1] - a[1]).slice(0, 3),
+    },
     centro,
   };
 }
@@ -151,6 +161,7 @@ const ENG_FILTROS = [
   ['comida', 'No registran comida', (f) => f.comida28 < 4],
   ['top', 'Más enganchados', (f) => f.score >= 75],
   ['respira', 'Usan Respira', (f) => f.respira && f.respira.veces > 0],
+  ['fichas', 'Abren la ficha', (f) => f.fichas && f.fichas.veces > 0],
 ];
 
 async function engDatos() {
@@ -231,6 +242,7 @@ function engKpis(D) {
     ${caja(conRecetas, `de ${n}`, `abrieron o cocinaron recetas (28 días) · ${conMenus} crearon menús`, recTop ? `Receta top: ${escapeHtml(recTop[0])}` : '')}
     ${caja(emp ? `${Math.round((terminados / emp) * 100)} %` : '—', '', 'de los entrenos empezados se terminan (28 días)', 'Fluidez del entreno')}
     ${(() => { const con = F.filter(f => f.respira && f.respira.veces); const veces = con.reduce((a, f) => a + f.respira.veces, 0); return caja(con.length, `de ${n}`, `usaron Respira (28 días) · ${veces} ${veces === 1 ? 'vez' : 'veces'}`, con.length ? `Más: ${escapeHtml(con.sort((a, b) => b.respira.veces - a.respira.veces)[0].c.nombre.split(' ')[0])}` : 'Nadie por ahora', '#6B6B6B'); })()}
+    ${(() => { const con = F.filter(f => f.fichas && f.fichas.veces); const veces = con.reduce((a, f) => a + f.fichas.veces, 0); return caja(con.length, `de ${n}`, `abrieron la ficha de un ejercicio (28 días) · ${veces} ${veces === 1 ? 'vez' : 'veces'}`, con.length ? `Más: ${escapeHtml(con.sort((a, b) => b.fichas.veces - a.fichas.veces)[0].c.nombre.split(' ')[0])}` : 'Nadie por ahora', '#6B6B6B'); })()}
     ${(() => { const cuenta = {}; F.forEach(f => { if (!f.centro) return; [...f.centro.capsulas.map(x => ['Cápsula', x]), ...f.centro.videos.map(x => ['Video', x])].forEach(([t, x]) => { const k = `${t}: ${x.titulo}`; cuenta[k] = (cuenta[k] || 0) + 1; }); }); const top = Object.entries(cuenta).sort((a, b) => b[1] - a[1]); const vieron = F.filter(f => f.centro && (f.centro.capsulas.length || f.centro.videos.length)).length; return caja(vieron, `de ${n}`, 'han visto cápsulas o videos del centro', top.length ? `Lo más visto: ${escapeHtml(top[0][0])} (${top[0][1]})` : (D.centroListo ? 'Nadie todavía' : 'No pude leer el centro'), '#6B6B6B'); })()}
     ${caja(D.retencion.mes1.de ? `${D.retencion.mes1.siguen}` : '—', D.retencion.mes1.de ? `de ${D.retencion.mes1.de}` : '', `siguen activos tras el mes 1${D.retencion.mes2.de ? ` · ${D.retencion.mes2.siguen} de ${D.retencion.mes2.de} tras el mes 2` : ''}`, 'Retención')}
   </div>`;
@@ -294,6 +306,10 @@ function engDetalle(id) {
   ind.push(['Respira', r.veces
     ? `${r.veces} ${r.veces === 1 ? 'vez' : 'veces'} en 28 días (${r.dias} día${r.dias === 1 ? '' : 's'}) · ${r.minutos} min en total · la última ${fmt.fechaCorta(r.ultima.fecha)} a las ${escapeHtml(r.ultima.h)}. ${Object.entries(r.origenes).map(([k, v]) => `${v} ${ORIGEN_RESP[k] || k}`).join(', ')}`
     : (r.ultima ? `No la usó en 28 días (la última, ${fmt.fechaCorta(r.ultima.fecha)})` : 'Nunca la ha usado')]);
+  const fi = f.fichas || { veces: 0 };
+  ind.push(['Ficha de ejercicios', fi.veces
+    ? `${fi.veces} ${fi.veces === 1 ? 'vez' : 'veces'} en 28 días (${fi.dias} día${fi.dias === 1 ? '' : 's'}) · ${fi.ejercicios} ejercicio${fi.ejercicios === 1 ? '' : 's'} distinto${fi.ejercicios === 1 ? '' : 's'} · la última ${fmt.fechaCorta(fi.ultima.fecha)} a las ${escapeHtml(fi.ultima.h)}${fi.top.length ? `. Más vista: ${fi.top.map(([k, v]) => `${escapeHtml(k)} (${v})`).join(', ')}` : ''}`
+    : (fi.ultima ? `No la abrió en 28 días (la última, ${fmt.fechaCorta(fi.ultima.fecha)})` : 'Todavía no la abre (se cuenta desde hoy)')]);
   const piezas = (l) => l.slice(0, 6).map(x => `${escapeHtml(x.titulo)}${x.fecha ? ` <span style="color:#8A8A8E">· ${fmt.fechaCorta(x.fecha)}</span>` : ''}`).join('<br>');
   if (f.centro) {
     ind.push(['Cápsulas vistas', f.centro.capsulas.length ? `${f.centro.capsulas.length}:<br>${piezas(f.centro.capsulas)}${f.centro.capsulas.length > 6 ? '<br>…' : ''}` : 'Ninguna todavía']);

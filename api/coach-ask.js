@@ -679,7 +679,30 @@ profesionales de ejercicios (Trainerize, ExRx, NASM):
 Responde SOLO con un objeto JSON, sin texto antes ni después:
 {"<id>": "English Name", ...}`;
 
+// Ficha del ejercicio (CRM → editar ejercicio → «Sugerir con IA»): las claves
+// de técnica y los errores comunes que verá el cliente. Sin herramientas.
+const SYSTEM_TECNICA = `Eres un preparador físico certificado que escribe la ficha de un ejercicio
+para la app de sus clientes (latinoamericanos, en español neutro, de tú).
+
+Recibes un JSON con "nombre", a veces "nombre_en", "patron", "equipo" y las
+"claves" que el coach ya escribió.
+
+Devuelve:
+- "claves": 3 indicaciones cortas de cómo hacerlo bien (si el coach ya escribió
+  claves, devuélvelas tal cual y completa solo hasta 3).
+- "errores": los 3 errores más comunes y concretos de ESE ejercicio, que el
+  cliente pueda reconocer en sí mismo. Ej. para press banca: «Rebotar la barra
+  en el pecho», «Despegar la cadera del banco», «Abrir los codos a 90°».
+
+Reglas: frases de 3 a 8 palabras, en imperativo o como acción, sin punto final,
+primera letra en mayúscula y el resto en minúscula, sin emojis, sin tecnicismos
+innecesarios, sin diagnósticos ni dolor.
+
+Responde SOLO con un objeto JSON, sin texto antes ni después:
+{"claves": ["…", "…", "…"], "errores": ["…", "…", "…"]}`;
+
 const PERFILES = {
+  tecnica: { tools: null, system: SYSTEM_TECNICA },
   general: { tools: HERRAMIENTAS_GENERAL, system: SYSTEM_GENERAL },
   rutinas: { tools: HERRAMIENTAS_RUTINAS, system: SYSTEM_RUTINAS },
   nombres: { tools: null, system: SYSTEM_NOMBRES },

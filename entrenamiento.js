@@ -723,6 +723,33 @@ function entNombres(e) {
 }
 // ¿La tabla ya tiene la columna `busqueda`? (carga/nombres-ingles-espanol.sql)
 // Sin ella, el formulario no la muestra ni la manda: guardar no falla.
+// La columna errores_tecnicos existe (migraciones/ejercicios-errores.sql corrido).
+function entTieneErrores() {
+  const una = (_ent.ejercicios || [])[0];
+  return !!una && Object.prototype.hasOwnProperty.call(una, 'errores_tecnicos');
+}
+// «Sugerir con IA»: completa «Cómo hacerlo bien» (hasta 3) y los errores
+// comunes. Llena solo lo vacío: lo que el coach ya escribió no se pisa.
+window.entSugerirTecnica = async () => {
+  const b = document.querySelector('[data-ej-sugerir]');
+  const nombre = val('#ej-nombre');
+  if (!nombre) return toast('Primero el nombre del ejercicio');
+  const claves = val('#ej-claves').split('\n').map(x => x.trim()).filter(Boolean);
+  if (b) { b.disabled = true; b.textContent = 'Pensando…'; }
+  try {
+    const r = await fetch('/api/coach-ask', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ perfil: 'tecnica', nivel: 'rapido', messages: [{ role: 'user', content: JSON.stringify({ nombre, nombre_en: val('#ej-alias') || undefined, patron: val('#ej-patron') || undefined, claves }) }] }) });
+    const d = await r.json().catch(() => ({}));
+    const texto = (d.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
+    const j = JSON.parse((texto.match(/\{[\s\S]*\}/) || ['{}'])[0]);
+    const limpia = (l) => (Array.isArray(l) ? l : []).map(x => String(x).trim().replace(/\.$/, '')).filter(Boolean).slice(0, 3);
+    const ta = $('#ej-claves'), te = $('#ej-errores');
+    if (ta && !claves.length && limpia(j.claves).length) ta.value = limpia(j.claves).join('\n');
+    if (te && !te.value.trim() && limpia(j.errores).length) te.value = limpia(j.errores).join('\n');
+    toast(limpia(j.errores).length || limpia(j.claves).length ? 'Sugerencia lista: revísala antes de guardar' : 'No llegó sugerencia, inténtalo de nuevo');
+  } catch (e) { toast('No pude pedir la sugerencia'); }
+  if (b) { b.disabled = false; b.textContent = 'Sugerir con IA'; }
+};
 function entTieneBusqueda() {
   const una = (_ent.ejercicios || [])[0];
   return !!una && Object.prototype.hasOwnProperty.call(una, 'busqueda');
@@ -1422,8 +1449,13 @@ window.entEditarEjercicio = async (id) => {
     <div class="sec-title">Lo que ve el cliente</div>
     <div class="mb-2"><label>Descripción / cómo se hace</label>
       <textarea id="ej-descripcion" rows="3" placeholder="Acuéstate en el banco, pies firmes…">${escapeHtml(e.descripcion || '')}</textarea></div>
-    <div class="mb-4"><label>Claves técnicas (una por línea)</label>
-      <textarea id="ej-claves" rows="3" placeholder="Escápulas retraídas&#10;Codos a 45°">${escapeHtml((e.claves_tecnicas || []).join('\n'))}</textarea></div>
+    <div class="mb-2"><div class="flex items-center justify-between gap-2"><label>Cómo hacerlo bien (una por línea)</label>
+      <button type="button" class="btn btn-secondary btn-sm" data-ej-sugerir onclick="entSugerirTecnica()">Sugerir con IA</button></div>
+      <textarea id="ej-claves" rows="3" placeholder="Escápulas juntas y pecho arriba&#10;Pies firmes en el piso">${escapeHtml((e.claves_tecnicas || []).join('\n'))}</textarea></div>
+    ${entTieneErrores() ? `<div class="mb-4"><label>Errores comunes (uno por línea)</label>
+      <textarea id="ej-errores" rows="3" placeholder="Rebotar la barra en el pecho&#10;Despegar la cadera del banco">${escapeHtml((e.errores_tecnicos || []).join('\n'))}</textarea>
+      <p class="text-xs text-slate-400 mt-1">En la app salen debajo de «Cómo hacerlo bien», en la ficha del ejercicio.</p></div>`
+      : `<p class="text-xs text-amber-700 mb-4">Para escribir los errores comunes, corre primero el SQL <code>migraciones/ejercicios-errores.sql</code> en Supabase.</p>`}
 
     <div class="sec-title">Solo para ti</div>
     <div><label>Notas de coach</label>
@@ -1650,6 +1682,7 @@ window.entGuardarEjercicio = async (id) => {
     ...(entTieneBusqueda() ? { busqueda: val('#ej-busqueda') || null } : {}),
     descripcion: val('#ej-descripcion') || null,
     claves_tecnicas: val('#ej-claves').split('\n').map(s => s.trim()).filter(Boolean),
+    ...(entTieneErrores() && $('#ej-errores') ? { errores_tecnicos: val('#ej-errores').split('\n').map(s => s.trim()).filter(Boolean) } : {}),
     notas_coach: val('#ej-notas') || null,
     tipo: val('#ej-tipo') || null,
     segmento: val('#ej-segmento') || null,
