@@ -45,7 +45,7 @@ Cualquier duda me escribes por aquí.` },
   { id: 'sal-semana', cat: 'saludos', titulo: 'Arranque de semana', texto:
 `Hola {nombre}! Arrancamos semana.
 
-Tienes [N] entrenos en el plan. Si ya sabes qué día se te complica, muévelo desde hoy en el calendario de la app y así no se te acumula.
+Tienes {entrenos_semana} entrenos en el plan. Si ya sabes qué día se te complica, muévelo desde hoy en el calendario de la app y así no se te acumula.
 
 Vamos con toda 💪` },
   { id: 'sal-ciclo', cat: 'saludos', titulo: 'Ciclo nuevo', texto:
@@ -59,7 +59,7 @@ No pasa nada. La idea es retomar sin querer recuperar todo de golpe. Esta semana
 
 ¿Qué día te queda bien empezar?` },
   { id: 'sal-gracias', cat: 'saludos', titulo: 'Gracias por la constancia', texto:
-`{nombre}, te quería decir algo: llevas [N] semanas sin soltar el proceso, y eso se nota en tus datos.
+`{nombre}, te quería decir algo: llevas {semanas_proceso} semanas sin soltar el proceso, y eso se nota en tus datos.
 
 La constancia es lo que menos se ve y lo que más resultado da. Gracias por tomártelo en serio. Seguimos.` },
 
@@ -83,10 +83,10 @@ Estoy por acá para acompañarte en cada paso. ¡A darle con toda! 🔥` },
   { id: 'ini-metas', cat: 'inicio', titulo: 'Tus metas de alimentación', texto:
 `Hola {nombre}! Tus metas son completamente individuales porque contemplan tu nivel de actividad, edad, peso actual y sexo. Así quedan tus números objetivo:
 
-* Meta: [1800] kcal ([déficit del 15 %, para pérdida de grasa y aumento de masa muscular])
-* Proteína: [165] g
-* Carbohidratos: [185] g
-* Grasas: [45] g
+* Meta: {meta_kcal} kcal ({meta_objetivo})
+* Proteína: {meta_proteina} g
+* Carbohidratos: {meta_carbos} g
+* Grasas: {meta_grasas} g
 
 [Nota personal, si aplica. Ej.: por los motivos de salud y tu % de grasa actual, tu meta es un poco más restrictiva. Sin embargo, si llegas a sentir hambre o algo de ansiedad me avisas para que lo revisemos; la idea es tomar el camino donde te sientas bien y no haya sufrimiento.]
 
@@ -97,11 +97,11 @@ La idea es mantenernos lo más cerca posible a la meta diaria. La distribución 
   { id: 'ini-partida-musculo', cat: 'inicio', titulo: 'Punto de partida · ganar músculo', texto:
 `Te comparto también una pequeña retroalimentación sobre tu estado actual y punto de partida:
 
-Te encuentras con un peso de [57,8] kg y un porcentaje de grasa corporal del [18,8] %, el cual se encuentra dentro de un rango [Athletic (13–20 %)]. Cuentas con [46,9] kg de masa libre de grasa, por lo que tienes una buena base muscular para tu peso. Vamos a enfocarnos en seguir desarrollando masa muscular, manteniendo y evitando una reducción adicional de grasa. La prioridad será generar las condiciones necesarias para aumentar masa magra y músculo, manteniendo niveles de grasa adecuados y cuidando tu rendimiento, energía y recuperación.` },
+Te encuentras con un peso de {peso} kg y un porcentaje de grasa corporal del {grasa} %, el cual se encuentra dentro de un rango {rango_grasa}. Cuentas con {masa_magra} kg de masa libre de grasa, por lo que tienes una buena base muscular para tu peso. Vamos a enfocarnos en seguir desarrollando masa muscular, manteniendo y evitando una reducción adicional de grasa. La prioridad será generar las condiciones necesarias para aumentar masa magra y músculo, manteniendo niveles de grasa adecuados y cuidando tu rendimiento, energía y recuperación.` },
   { id: 'ini-partida-grasa', cat: 'inicio', titulo: 'Punto de partida · bajar grasa (recomposición)', texto:
 `Te comparto también una pequeña retroalimentación sobre tu estado actual y punto de partida:
 
-Te encuentras con un peso de [80,5] kg y un porcentaje de grasa corporal del [30,8] % ([High / Overweight: 26 % o más]). Cuentas con [55,7] kg de masa libre de grasa, por lo que tienes también una base muscular de soporte con la que vamos a trabajar. Vamos a enfocarnos en optimizar la recomposición corporal mediante un déficit calórico eficiente, priorizando la reducción de grasa mientras mantenemos tu masa magra. La prioridad será generar un entorno favorable para perder tejido graso de forma sostenible, cuidando tu rendimiento en los entrenamientos, tu energía diaria y tu recuperación.` },
+Te encuentras con un peso de {peso} kg y un porcentaje de grasa corporal del {grasa} % ({rango_grasa}). Cuentas con {masa_magra} kg de masa libre de grasa, por lo que tienes también una base muscular de soporte con la que vamos a trabajar. Vamos a enfocarnos en optimizar la recomposición corporal mediante un déficit calórico eficiente, priorizando la reducción de grasa mientras mantenemos tu masa magra. La prioridad será generar un entorno favorable para perder tejido graso de forma sostenible, cuidando tu rendimiento en los entrenamientos, tu energía diaria y tu recuperación.` },
 
   // ── SEGUIMIENTO SEMANAL ──
   { id: 'sem-pregunta', cat: 'semana', titulo: 'Pedir el reporte de la semana', texto:
@@ -113,13 +113,13 @@ Te encuentras con un peso de [80,5] kg y un porcentaje de grasa corporal del [30
 
 Con eso y tus datos de la app ajusto lo que haga falta.` },
   { id: 'sem-buena', cat: 'semana', titulo: 'Semana muy buena', texto:
-`Hola {nombre}! Revisé tu semana: [x] de [x] entrenos y [x] días registrando comida.
+`Hola {nombre}! Revisé tu semana: {hechos_semana} de {plan_semana} entrenos y {dias_comida} días registrando comida.
 
 Así se construye. Lo que más me gustó: [detalle concreto].
 
 Esta semana mantenemos la misma estructura y vamos por [objetivo concreto].` },
   { id: 'sem-mixta', cat: 'semana', titulo: 'Semana a medias', texto:
-`Hola {nombre}! Revisé tu semana. Entrenaste [x] de [x] y la alimentación estuvo [más irregular / bien encaminada].
+`Hola {nombre}! Revisé tu semana. Entrenaste {hechos_semana} de {plan_semana} y la alimentación estuvo [más irregular / bien encaminada].
 
 No hace falta hacerlo perfecto, hace falta hacerlo seguido. Para esta semana te propongo una sola cosa: [ajuste concreto].
 
@@ -135,11 +135,21 @@ Si necesitas que ajuste la rutina a menos tiempo, me dices y lo hago.` },
   { id: 'exp-ciclo', cat: 'explicar', titulo: 'Por qué cambia el ciclo', texto:
 `Hola {nombre}. Ya tienes el ciclo nuevo en la app.
 
-Te explico el porqué. En estas [N] semanas tu cuerpo ya se adaptó a lo que veníamos haciendo: [lo que logró, ej. pasaste de 50 a 60 kg en press banca]. Si seguimos igual, el progreso se frena. Por eso cambio el estímulo.
+Te explico el porqué. En estas {semanas_ciclo_anterior} semanas tu cuerpo ya se adaptó a lo que veníamos haciendo: {progreso_ciclo}. Si seguimos igual, el progreso se frena. Por eso cambio el estímulo.
 
 Qué cambia: [qué cambia, ej. bajamos un poco las repeticiones y subimos la carga en los básicos]. [Ejercicio nuevo] entra en lugar de [el que sale] porque [razón concreta, ej. te deja cargar más sin molestar el hombro].
 
 Las dos primeras sesiones son de reconocimiento: técnica limpia, peso cómodo y anota todo. Con esos datos ajusto la carga la semana siguiente.` },
+  { id: 'exp-cambio-ciclo', cat: 'explicar', titulo: 'Cambio de ciclo: qué cambia y por qué', texto:
+`Hola {nombre}! Ya tienes tu {ciclo_nuevo} en la app. Te cuento qué cambia respecto al {ciclo_anterior} y por qué.
+
+Entrenamiento: son {dias_ciclo} días por semana durante {ciclo_semanas} semanas. Entran {ejercicios_nuevos} y salen {ejercicios_salen}. Este ciclo pone el foco en {enfoque_ciclo}, porque [razón, ej. ya tienes buena base en los básicos y ahora buscamos más volumen en piernas].
+
+Peso: en el ciclo anterior {progreso_ciclo}. [Cómo seguimos, ej. arrancas con el peso donde quedaste y subimos cuando completes las repeticiones con buena técnica].
+
+Alimentación: tu meta diaria queda en {meta_kcal} kcal, {meta_proteina} g de proteína, {meta_carbos} g de carbohidratos y {meta_grasas} g de grasa ({meta_cambio}). [Por qué, ej. con la fuerza subiendo necesitas un poco más de energía para recuperarte].
+
+Las dos primeras sesiones son de reconocimiento: técnica limpia, peso cómodo y anota todo. Cualquier duda me escribes.` },
   { id: 'exp-primeros', cat: 'explicar', titulo: 'Por qué estos primeros ejercicios', texto:
 `Hola {nombre}. Ya está tu primera rutina en la app.
 
@@ -299,7 +309,7 @@ Hazlo en la app, en ayunas y en las mismas condiciones de siempre, así la compa
   { id: 'rec-app', cat: 'recordatorio', titulo: 'Usar la app', texto:
 `{nombre}, te recuerdo que todo lo de tu proceso está en la app: tu rutina de hoy, tu meta de comida y tu avance. Marca las series y registra lo que comes, así cada semana te ajusto con datos y no a ojo.` },
   { id: 'rec-pago', cat: 'recordatorio', titulo: 'Mensualidad', texto:
-`Hola {nombre}! Te recuerdo la mensualidad de [mes]. Cuando la hagas me avisas.
+`Hola {nombre}! Te recuerdo la mensualidad de {mes}. Cuando la hagas me avisas.
 
 ¡Seguimos con toda! 💪` },
 
@@ -366,11 +376,166 @@ function dlgHtml(texto) {
   return escapeHtml(texto).replace(/\[([^\]]+)\]/g, '<mark class="dlg-hueco">[$1]</mark>');
 }
 
+// ---------- Datos reales del cliente en las plantillas ----------
+// {dato} se llena solo con lo que hay del cliente. Tres colores:
+//   verde   · ya se llenó con su dato;
+//   naranja · el dato existe pero le falta (no hay medición, meta, ciclo
+//             anterior…): actualízalo en su ficha y se llena solo;
+//   azul    · [corchetes]: lo escribes tú, no sale de ningún dato.
+const DLG_DATOS = {
+  entrenos_semana: 'entrenos por semana', hechos_semana: 'entrenos hechos', plan_semana: 'entrenos planeados',
+  dias_comida: 'días registrando comida', semanas_proceso: 'semanas en el proceso', mes: 'mes',
+  peso: 'peso', grasa: '% de grasa', masa_magra: 'masa libre de grasa', rango_grasa: 'rango de grasa',
+  meta_kcal: 'kcal de la meta', meta_proteina: 'proteína de la meta', meta_carbos: 'carbos de la meta', meta_grasas: 'grasas de la meta',
+  meta_objetivo: 'objetivo de la meta', meta_cambio: 'cambio de la meta',
+  ciclo_nuevo: 'ciclo nuevo', ciclo_anterior: 'ciclo anterior', ciclo_semanas: 'semanas del ciclo', semanas_ciclo_anterior: 'semanas del ciclo anterior',
+  dias_ciclo: 'días por semana del ciclo', ejercicios_nuevos: 'ejercicios que entran', ejercicios_salen: 'ejercicios que salen',
+  enfoque_ciclo: 'enfoque del ciclo', progreso_ciclo: 'progreso del ciclo anterior',
+};
+const DLG_MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const dlgNum = (v, d = 1) => (v == null || v === '' || Number.isNaN(Number(v)) ? null : String(Math.round(Number(v) * 10 ** d) / 10 ** d).replace('.', ','));
+const dlgLista = (xs) => xs.length <= 1 ? (xs[0] || '') : `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}`;
+const dlgLeer = async (q) => { try { const { data, error } = await q; return error ? null : data; } catch (e) { return null; } };
+// Rango de grasa (tabla ISSA, la misma del Listado y la app).
+const DLG_ISSA = { F: [['Low / Essential', 10], ['Athletic', 13], ['Fit', 21], ['Average', 25], ['High / Overweight', 32]], M: [['Low / Essential', 4], ['Athletic', 7], ['Fit', 11], ['Average', 17], ['High / Overweight', 26]] };
+function dlgRango(sexo, g) {
+  const t = DLG_ISSA[sexo];
+  if (!t || g == null) return null;
+  let i = 0; t.forEach(([, d], k) => { if (g >= d) i = k; });
+  const sig = t[i + 1];
+  return sig ? `${t[i][0]} (${t[i][1]}–${sig[1] - 1} %)` : `${t[i][0]}: ${t[i][1]} % o más`;
+}
+
+// Lee todo lo del cliente que usan las plantillas. Lo que no hay queda null.
+async function dlgDatos(c) {
+  const d = {};
+  const hoy = fmt.hoy();
+  d.mes = DLG_MESES[Number(hoy.slice(5, 7)) - 1];
+  if (c.fecha_inicio) { const s = Math.floor((Date.parse(hoy) - Date.parse(String(c.fecha_inicio).slice(0, 10))) / 604800000); d.semanas_proceso = s >= 1 ? String(s) : null; }
+  const [meds, metas, fases] = await Promise.all([
+    dlgLeer(sb.from('mediciones_corporales').select('fecha, peso, grasa_pct').eq('cliente_id', c.id).order('fecha', { ascending: false }).limit(20)),
+    dlgLeer(sb.from('metas_historial').select('*').eq('cliente_id', c.id).order('fecha', { ascending: false }).order('created_at', { ascending: false }).limit(10)),
+    dlgLeer(sb.from('fases').select('*').eq('cliente_id', c.id)),
+  ]);
+  // Composición: su último peso y su último % de grasa.
+  const conPeso = (meds || []).find(m => m.peso != null), conGrasa = (meds || []).find(m => m.grasa_pct != null);
+  if (conPeso) d.peso = dlgNum(conPeso.peso);
+  if (conGrasa) { d.grasa = dlgNum(conGrasa.grasa_pct); d.rango_grasa = dlgRango(c.sexo, Number(conGrasa.grasa_pct)); }
+  if (conPeso && conGrasa) d.masa_magra = dlgNum(Number(conPeso.peso) * (1 - Number(conGrasa.grasa_pct) / 100));
+  // Meta nutricional vigente (y la anterior, para decir cuánto cambió).
+  const m0 = (metas || [])[0], m1 = (metas || []).find(x => x !== m0 && (x.kcal !== m0.kcal || x.proteina_g !== m0.proteina_g));
+  if (m0) {
+    d.meta_kcal = m0.kcal != null ? String(m0.kcal) : null; d.meta_proteina = m0.proteina_g != null ? String(m0.proteina_g) : null;
+    d.meta_carbos = m0.carbos_g != null ? String(m0.carbos_g) : null; d.meta_grasas = m0.grasas_g != null ? String(m0.grasas_g) : null;
+    d.meta_objetivo = m0.objetivo ? String(m0.objetivo).toLowerCase() : null;
+    if (m1 && m1.kcal && m0.kcal) { const dif = m0.kcal - m1.kcal; d.meta_cambio = dif === 0 ? `igual que antes en calorías; antes la proteína era ${m1.proteina_g} g` : `${dif > 0 ? 'subimos' : 'bajamos'} ${Math.abs(dif)} kcal; antes eran ${m1.kcal}`; }
+    else if (m0.kcal) d.meta_cambio = 'la misma que venías usando';
+  }
+  // Ciclos: el vigente y el anterior (por fecha de inicio).
+  const dia = (f) => String(f.fecha_inicio || '').slice(0, 10);
+  const lista = (fases || []).filter(f => f.estado !== 'archivada' && dia(f)).sort((a, b) => dia(a).localeCompare(dia(b)));
+  const vig = typeof entCicloVigente === 'function' ? entCicloVigente(fases || [], hoy) : lista.filter(f => dia(f) <= hoy).pop();
+  const iv = vig ? lista.findIndex(f => f.id === vig.id) : -1;
+  // Si ya hay uno armado que arranca después (el que viene), ese es el «nuevo».
+  const sig = iv >= 0 ? lista[iv + 1] : null;
+  const nuevo = sig || vig, ant = sig ? vig : (iv > 0 ? lista[iv - 1] : null);
+  if (nuevo) {
+    d.ciclo_nuevo = nuevo.nombre || 'ciclo nuevo';
+    d.ciclo_semanas = nuevo.semanas ? String(nuevo.semanas) : null;
+    d.dias_ciclo = Array.isArray(nuevo.dias_semana) && nuevo.dias_semana.length ? String(nuevo.dias_semana.length) : (c.dias_entreno_cantidad ? String(c.dias_entreno_cantidad) : null);
+  }
+  if (vig) d.entrenos_semana = Array.isArray(vig.dias_semana) && vig.dias_semana.length ? String(vig.dias_semana.length) : (c.dias_entreno_cantidad ? String(c.dias_entreno_cantidad) : null);
+  else if (c.dias_entreno_cantidad) d.entrenos_semana = String(c.dias_entreno_cantidad);
+  if (ant) {
+    d.ciclo_anterior = ant.nombre || 'ciclo anterior';
+    d.semanas_ciclo_anterior = ant.semanas ? String(ant.semanas) : null;
+  }
+  if (nuevo && ant) {
+    const rut = (await dlgLeer(sb.from('rutinas').select('id, fase_id').in('fase_id', [nuevo.id, ant.id]))) || [];
+    const ids = rut.map(r => r.id);
+    const re = ids.length ? ((await dlgLeer(sb.from('rutina_ejercicios').select('rutina_id, ejercicio_id, ejercicios(id, nombre, alias, segmento)').in('rutina_id', ids))) || []) : [];
+    const faseDe = Object.fromEntries(rut.map(r => [r.id, r.fase_id]));
+    const nom = (e) => (typeof entNombres === 'function' ? entNombres(e).grande : (e.nombre || ''));
+    const de = (fid) => { const m = new Map(); re.filter(x => faseDe[x.rutina_id] === fid && x.ejercicios).forEach(x => m.set(normalizeName(nom(x.ejercicios)), x.ejercicios)); return m; };
+    const N = de(nuevo.id), A = de(ant.id);
+    if (N.size && A.size) {
+      const entran = [...N.entries()].filter(([k]) => !A.has(k)).map(([, e]) => e);
+      const salen = [...A.entries()].filter(([k]) => !N.has(k)).map(([, e]) => e);
+      const corta = (xs) => xs.length > 4 ? `${xs.slice(0, 4).join(', ')} y ${xs.length - 4} más` : dlgLista(xs);
+      d.ejercicios_nuevos = entran.length ? corta(entran.map(nom)) : null;
+      d.ejercicios_salen = salen.length ? corta(salen.map(nom)) : null;
+      const SEG = { tren_superior: 'tren superior', tren_inferior: 'tren inferior', core: 'core', full_body: 'cuerpo completo' };
+      const cuenta = {}; entran.forEach(e => { const k = SEG[e.segmento]; if (k) cuenta[k] = (cuenta[k] || 0) + 1; });
+      const top = Object.entries(cuenta).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k]) => k);
+      d.enfoque_ciclo = top.length ? dlgLista(top) : null;
+    }
+    // Lo que más subió de peso en el ciclo anterior (primera sesión contra la última).
+    const ses = (await dlgLeer(sb.from('sesiones').select('id, fecha').eq('cliente_id', c.id).eq('fase_id', ant.id))) || [];
+    if (ses.length >= 2) {
+      const fecha = Object.fromEntries(ses.map(x => [x.id, String(x.fecha).slice(0, 10)]));
+      const sl = (await dlgLeer(sb.from('series_log').select('sesion_id, ejercicio_id, peso, unidad, reps, completada, ejercicios(nombre, alias)').in('sesion_id', ses.map(x => x.id)))) || [];
+      const kg = (x) => (x.unidad === 'lb' ? Number(x.peso) * 0.4536 : Number(x.peso));
+      const por = {};
+      sl.filter(x => x.completada !== false && Number(x.peso) > 0 && Number(x.reps) > 0).forEach(x => {
+        const f = fecha[x.sesion_id]; if (!f) return;
+        const p = (por[x.ejercicio_id] ||= { e: x.ejercicios, dias: {} });
+        p.dias[f] = Math.max(p.dias[f] || 0, kg(x));
+      });
+      let mejor = null;
+      Object.values(por).forEach(p => {
+        const fs = Object.keys(p.dias).sort(); if (fs.length < 2) return;
+        const a = p.dias[fs[0]], b = p.dias[fs[fs.length - 1]];
+        if (b > a && (!mejor || b - a > mejor.b - mejor.a)) mejor = { e: p.e, a, b };
+      });
+      if (mejor) d.progreso_ciclo = `en ${nom(mejor.e || {})} pasaste de ${dlgNum(mejor.a)} a ${dlgNum(mejor.b)} kg`;
+    }
+  }
+  // La semana que se revisa (la misma de Seguimiento).
+  if (typeof esSemanaDe === 'function' && typeof esLunesDe === 'function') {
+    try {
+      const S = await esSemanaDe(c, esLunesDe(c, hoy));
+      if (S && S.F) { d.hechos_semana = String(S.F.hechas); d.plan_semana = String(S.F.plan); }
+      if (S && S.K) d.dias_comida = String(S.K.dias);
+    } catch (e) { /* sin su semana: quedan por llenar */ }
+  }
+  return d;
+}
+
+// Arma el texto con sus datos: { plano, html }. `datos` null = sin cliente.
+function dlgArmar(texto, c, datos) {
+  let plano = '', html = '';
+  const re = /\{(\w+)\}|\[([^\]]+)\]/g;
+  let i = 0, m;
+  const t = String(texto || '');
+  while ((m = re.exec(t))) {
+    plano += t.slice(i, m.index); html += escapeHtml(t.slice(i, m.index));
+    if (m[2] != null) { plano += m[0]; html += `<mark class="dlg-hueco">${escapeHtml(m[0])}</mark>`; }
+    else if (m[1] === 'nombre' || m[1] === 'coach') {
+      const v = m[1] === 'nombre' ? (c ? dlgTrato(c) : '') : ((typeof _settings !== 'undefined' && _settings.nombre_coach) || '');
+      if (v) { plano += v; html += m[1] === 'nombre' ? `<mark class="dlg-lleno">${escapeHtml(v)}</mark>` : escapeHtml(v); }
+      else { plano += `[${m[1]}]`; html += `<mark class="dlg-falta">[${m[1]}]</mark>`; }
+    } else if (m[1] in DLG_DATOS) {
+      const v = datos ? datos[m[1]] : null;
+      if (v != null && v !== '') { plano += v; html += `<mark class="dlg-lleno" title="Sale de sus datos">${escapeHtml(v)}</mark>`; }
+      else { plano += `[${DLG_DATOS[m[1]]}]`; html += `<mark class="dlg-falta" title="${datos ? 'Falta este dato: actualízalo en su ficha y se llena solo' : 'Se llena con sus datos al elegir un cliente'}">[${escapeHtml(DLG_DATOS[m[1]])}]</mark>`; }
+    } else { plano += m[0]; html += escapeHtml(m[0]); }
+    i = re.lastIndex;
+  }
+  plano += t.slice(i); html += escapeHtml(t.slice(i));
+  return { plano, html };
+}
+const DLG_LEYENDA = `<div class="flex gap-3 flex-wrap text-xs text-slate-600" data-dlg-leyenda>
+  <span><mark class="dlg-lleno">verde</mark> sale de sus datos</span>
+  <span><mark class="dlg-falta">naranja</mark> falta el dato: actualízalo en su ficha</span>
+  <span><mark class="dlg-hueco">azul</mark> lo escribes tú</span></div>`;
+
 const dlgHuecos = (texto) => (String(texto).match(/\[[^\]]+\]/g) || []);
 
 const DLG_ESTILOS = `
     <style>
-      .dlg-hueco { background: #FEF3C7; color: #92400E; border-radius: 4px; padding: 0 2px; }
+      .dlg-hueco { background: #DBEAFE; color: #1E40AF; border-radius: 4px; padding: 0 2px; }
+      .dlg-lleno { background: #DCFCE7; color: #166534; border-radius: 4px; padding: 0 2px; font-weight: 600; }
+      .dlg-falta { background: #FFEDD5; color: #9A3412; border-radius: 4px; padding: 0 2px; font-weight: 600; }
       .dlg-chip { border: 1px solid #e2e8f0; border-radius: 999px; padding: .3rem .7rem; font-size: .8rem; font-weight: 600; background: #fff; color: #334155; white-space: nowrap; }
       .dlg-chip.on { background: #1D1D1F; border-color: #1D1D1F; color: #fff; }
       .dlg-card { border: 1px solid #e2e8f0; border-radius: 14px; padding: .8rem .9rem; background: #fff; }
@@ -390,15 +555,23 @@ window.abrirDialogos = async (clienteId) => {
           <input id="dlg-trato" value="${escapeHtml(c.trato || '')}" placeholder="${escapeHtml(dlgTrato({ nombre: c.nombre }))} (su primer nombre)" oninput="dlgCambioTrato(this.value)">
         </div>
         <button class="btn btn-secondary btn-sm" data-dlg-guardar-trato onclick="dlgGuardarTrato()">Guardar</button>
-        <div class="text-xs text-slate-500 w-full">Así sale su nombre en cada diálogo. Lo que va entre <mark class="dlg-hueco">[corchetes]</mark> lo rellenas tú antes de mandarlo.</div>
+        <div class="text-xs text-slate-500 w-full">Así sale su nombre en cada diálogo.</div>
       </div>
+      ${DLG_LEYENDA}
       <input id="dlg-q" placeholder="Buscar un diálogo…" oninput="_dlg.q = this.value; dlgPintar()">
       <div class="flex gap-1.5 overflow-x-auto pb-1" id="dlg-cats"></div>
       <div id="dlg-lista" class="space-y-2"></div>
     </div>
   `), { wide: true });
   dlgPintar();
+  dlgCargarDatos(c);
 };
+// Sus datos para llenar las plantillas: se pinta ya y se repinta al llegar.
+async function dlgCargarDatos(c) {
+  _dlg.datos = null;
+  const d = await dlgDatos(c).catch(() => ({}));
+  if (_dlg.cliente && _dlg.cliente.id === c.id) { _dlg.datos = d; if (document.getElementById('dlg-lista')) dlgPintar(true); }
+}
 
 window.dlgCambioTrato = (v) => { if (_dlg.cliente) { _dlg.cliente = { ..._dlg.cliente, trato: v }; dlgPintar(true); } };
 
@@ -429,7 +602,8 @@ function dlgPintar(soloLista = false) {
     : todos.filter(d => d.cat === _dlg.cat);
   const c = _dlg.cliente;
   $('#dlg-lista').innerHTML = lista.length ? lista.map(d => {
-    const texto = dlgRellenar(d.texto, c);
+    const armado = dlgArmar(d.texto, c, c ? (_dlg.datos || {}) : null);
+    const texto = armado.plano;
     if (_dlg.editando === d.id) return dlgFormHtml(d);
     return `
       <div class="dlg-card" data-dlg="${d.id}">
@@ -439,7 +613,7 @@ function dlgPintar(soloLista = false) {
             <button class="btn btn-ghost btn-sm" onclick="dlgEditar('${d.id}')" title="Cambiar la plantilla para todos los clientes">✎</button>
           </div>
         </div>
-        <div class="dlg-texto">${dlgHtml(texto)}</div>
+        <div class="dlg-texto">${armado.html}</div>
         <div class="mt-2">
           <textarea class="hidden w-full text-sm" rows="8" data-dlg-txt="${d.id}">${escapeHtml(texto)}</textarea>
           <div class="flex gap-1.5 flex-wrap mt-1.5">
@@ -509,7 +683,8 @@ function dlgFormHtml(d) {
         <div><label>Título</label><input id="dlg-f-titulo" value="${escapeHtml(d?.titulo || '')}" placeholder="Ej.: Felicitar por el récord"></div>
         <div><label>Categoría</label><select id="dlg-f-cat" ${d && !d.propio && !nuevo ? 'disabled' : ''}>${cats}</select></div>
       </div>
-      <label class="mt-2 block">Texto · usa {nombre} para su nombre y [corchetes] para lo que rellenas</label>
+      <label class="mt-2 block">Texto · {nombre} y los {datos} se llenan solos; [corchetes] para lo que rellenas tú</label>
+      <div class="text-[11px] text-slate-500 leading-snug">Datos: ${Object.keys(DLG_DATOS).map(k => `{${k}}`).join(' ')}</div>
       <textarea id="dlg-f-texto" rows="9" class="w-full text-sm">${escapeHtml(d?.texto || 'Hola {nombre}! ')}</textarea>
       <div class="flex gap-1.5 flex-wrap mt-2">
         <button class="btn btn-primary btn-sm" data-dlg-f-guardar onclick="dlgGuardarForm('${nuevo ? '' : d.id}')">Guardar</button>
@@ -606,12 +781,13 @@ routes.dialogos = async () => {
     ${_dlgV.modo === 'semana' && c
       ? '<div class="card" id="seg-dialogo"><div class="es-vacio">Armando su diálogo…</div></div>'
       : `<div class="card space-y-3">
+          ${DLG_LEYENDA}
           <input id="dlg-q" placeholder="Buscar un diálogo…" oninput="_dlg.q = this.value; dlgPintar()">
           <div class="flex gap-1.5 overflow-x-auto pb-1" id="dlg-cats"></div>
           <div id="dlg-lista" class="space-y-2"></div>
         </div>`}`;
   if (_dlgV.modo === 'semana' && c) { if (typeof dtPintar === 'function') dtPintar(c); }
-  else dlgPintar();
+  else { dlgPintar(); if (c) dlgCargarDatos(c); else _dlg.datos = null; }
 };
 
 window.dlgVista = (cambio) => {

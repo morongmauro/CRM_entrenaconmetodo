@@ -39,7 +39,7 @@ const L = (k) => mas(LUNES, k);            // esta semana: L(0)=lunes … L(6)=d
 const P = (k) => mas(LUNES, k - 7);        // semana pasada
 
 function tablas() {
-  const cliente = { id: 'c0', user_id: 'coach-1', nombre: 'Ana Pérez', estado: 'activo', objetivo: 'Ganar músculo', monto: 280000, moneda: 'COP', dia_pago: 5, fecha_inicio: '2026-01-05', created_at: '2026-01-01T00:00:00Z' };
+  const cliente = { id: 'c0', user_id: 'coach-1', nombre: 'Ana Pérez', estado: 'activo', sexo: 'F', objetivo: 'Ganar músculo', monto: 280000, moneda: 'COP', dia_pago: 5, fecha_inicio: '2026-01-05', created_at: '2026-01-01T00:00:00Z' };
   const fase = { id: 'f1', user_id: 'coach-1', cliente_id: 'c0', nombre: 'Ciclo 19', semanas: 5, fecha_inicio: mas(LUNES, -14), dias_semana: ['L', 'X', 'V', 'S'], orden: 1, estado: 'activa', visible_cliente: true };
   const rut = (id, nombre, d, o) => ({ id, user_id: 'coach-1', cliente_id: 'c0', fase_id: 'f1', nombre, dia_orden: o, dias_semana: [d], archivada: false, tipo_sesion: 'fuerza' });
   const rutinas = [rut('r1', 'Push', 'L', 1), rut('r2', 'Lower', 'X', 2), rut('r3', 'Pull', 'V', 3), rut('r4', 'Legs', 'S', 4)];
@@ -62,14 +62,32 @@ function tablas() {
   const actividades = [{ id: 'a1', cliente_id: 'c0', fecha: P(6), tipo: 'deporte', titulo: 'Fútbol', duracion_min: 60 }];
   const notas_entreno = [{ id: 'n1', user_id: 'coach-1', cliente_id: 'c0', fecha: L(0), rutina_id: 'r1', ejercicio_id: 'e2', texto: 'No tengo esta máquina en mi gym', leida_en: null, created_at: L(0) + 'T10:00:00Z', ejercicios: { nombre: 'Press banca', alias: 'Bench Press' } }];
   return {
-    clientes: [cliente], seguimientos: [], pagos: [], pendientes: [], mediciones_corporales: [], fotos_progreso: [],
+    clientes: [cliente], seguimientos: [], pagos: [], pendientes: [], fotos_progreso: [],
+    // Para llenar las plantillas con sus datos: medición, dos metas y el ciclo anterior.
+    mediciones_corporales: [{ id: 'md1', cliente_id: 'c0', fecha: mas(LUNES, -10), peso: 62.4, grasa_pct: 23.1 }],
     settings: [{ user_id: 'coach-1', usd_cop_rate: 4000, nombre_coach: 'Mauro', mealtracker_app_url: 'https://mt.prueba', mealtracker_coach_password: 'x' }],
-    metas_historial: [], nutricion_insights: [], ia_uso: [], push_pago_log: [],
-    fases: [fase], rutinas, rutina_ejercicios: [], rutina_bloques: [], sesiones, series_log, ejercicios,
+    metas_historial: [
+      { id: 'mt1', cliente_id: 'c0', fecha: mas(LUNES, -14), kcal: 2100, proteina_g: 140, carbos_g: 230, grasas_g: 60, objetivo: 'Superávit +5% (leve)', created_at: '2026-01-02T00:00:00Z' },
+      { id: 'mt0', cliente_id: 'c0', fecha: mas(LUNES, -60), kcal: 1950, proteina_g: 130, carbos_g: 210, grasas_g: 60, objetivo: 'Mantenimiento', created_at: '2026-01-01T00:00:00Z' },
+    ], nutricion_insights: [], ia_uso: [], push_pago_log: [],
+    fases: [{ ...fase, id: 'f0', nombre: 'Ciclo 18', fecha_inicio: mas(LUNES, -49), estado: 'finalizada' }, fase],
+    rutinas: [...rutinas, { ...rutinas[0], id: 'r0', fase_id: 'f0', nombre: 'Full body' }],
+    rutina_ejercicios: [
+      { id: 'x1', rutina_id: 'r0', ejercicio_id: 'e2', orden: 1, ejercicios: { id: 'e2', nombre: 'Press banca', alias: 'Bench Press', segmento: 'tren_superior' } },
+      { id: 'x2', rutina_id: 'r0', ejercicio_id: 'e3', orden: 2, ejercicios: { id: 'e3', nombre: 'Sentadilla goblet', alias: 'Goblet Squat', segmento: 'tren_inferior' } },
+      { id: 'x3', rutina_id: 'r1', ejercicio_id: 'e2', orden: 1, ejercicios: { id: 'e2', nombre: 'Press banca', alias: 'Bench Press', segmento: 'tren_superior' } },
+      { id: 'x4', rutina_id: 'r2', ejercicio_id: 'e4', orden: 1, ejercicios: { id: 'e4', nombre: 'Empuje de cadera', alias: 'Hip Thrust', segmento: 'tren_inferior' } },
+      { id: 'x5', rutina_id: 'r2', ejercicio_id: 'e5', orden: 2, ejercicios: { id: 'e5', nombre: 'Plancha', alias: 'Plank', segmento: 'core' } },
+      { id: 're1', rutina_id: 'r3', ejercicio_id: 'e1', reps: '6-8', orden: 1, ejercicios: { id: 'e1', nombre: 'Remo con barra', alias: 'Barbell Row', segmento: 'tren_superior' } },
+    ],
+    rutina_bloques: [],
+    sesiones: [...sesiones, { id: 'q1', cliente_id: 'c0', fase_id: 'f0', fecha: mas(LUNES, -45), rutina_id: 'r0', estado: 'completada' }, { id: 'q2', cliente_id: 'c0', fase_id: 'f0', fecha: mas(LUNES, -20), rutina_id: 'r0', estado: 'completada' }],
+    series_log: [...series_log, { id: 'q1a', sesion_id: 'q1', ejercicio_id: 'e2', serie_num: 1, reps: 8, peso: 50, unidad: 'kg', completada: true, ejercicios: { nombre: 'Press banca', alias: 'Bench Press' } },
+      { id: 'q2a', sesion_id: 'q2', ejercicio_id: 'e2', serie_num: 1, reps: 8, peso: 57.5, unidad: 'kg', completada: true, ejercicios: { nombre: 'Press banca', alias: 'Bench Press' } }],
+    ejercicios,
     eventos, evento_registros, actividades, notas_entreno,
     // Lo que se habló y se cambió esta semana
     comentarios_coach: [{ id: 'k1', user_id: 'coach-1', cliente_id: 'c0', ejercicio_id: 'e1', tipo: 'puntual', texto: 'Baja la barra más lento', creado_en: L(0) + 'T15:00:00Z', leido_en: null, quitado_en: null }],
-    rutina_ejercicios: [{ id: 're1', rutina_id: 'r3', ejercicio_id: 'e1', reps: '6-8', orden: 1 }],
     videos_tecnica: [{ id: 'v1', cliente_id: 'c0', ejercicio_id: 'e2', ejercicio_nombre: 'Bench Press', estado: 'mejorar', pedido_en: P(0), revisado_en: L(0), nota: 'Baja la barra hasta tocar el pecho.', created_at: P(0) }],
     cambios_ejercicio: [{ id: 'x1', user_id: 'coach-1', cliente_id: 'c0', rutina_id: 'r1', rutina_nombre: 'Push', nombre_antes: 'Chest Press Machine', nombre_despues: 'Bench Press', origen: 'alternativas', creado_at: L(0) + 'T16:00:00Z' }],
     rutina_movimientos: [], rutina_extras: [], rutina_dias_quitados: [],
@@ -134,6 +152,29 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   await p.locator('[data-dlgv-modo="semana"]').waitFor({ timeout: 10000 });
   const con = await p.locator('[data-dlg]').first().innerText();
   ok(`${tag} · con cliente: sus diálogos con su nombre`, /Ana/.test(con) && !/\[nombre\]/.test(con), con.slice(0, 200));
+  // Sus datos en las plantillas: verde lo que se llenó, naranja lo que falta, azul lo manual.
+  await p.locator('[data-dlg-cat="explicar"]').click();
+  await p.waitForFunction(() => document.querySelectorAll('[data-dlg="exp-cambio-ciclo"] .dlg-lleno').length > 8, null, { timeout: 15000 }).catch(() => {});
+  const cc = await p.locator('[data-dlg="exp-cambio-ciclo"] .dlg-texto').innerText();
+  ok(`${tag} · cambio de ciclo con sus datos: ciclos, ejercicios que entran y salen, enfoque, progreso y meta`, /Ciclo 19/.test(cc) && /Ciclo 18/.test(cc) && /Hip Thrust, Plank y Barbell Row/.test(cc) && /Goblet Squat/.test(cc)
+    && /tren inferior y core/.test(cc) && /Bench Press pasaste de 50 a 57,5 kg/.test(cc) && /2100 kcal, 140 g/.test(cc) && /subimos 150 kcal; antes eran 1950/.test(cc), cc);
+  ok(`${tag} · los tres colores y la leyenda`, await p.locator('[data-dlg="exp-cambio-ciclo"] .dlg-lleno').count() > 8 && await p.locator('[data-dlg="exp-cambio-ciclo"] .dlg-hueco').count() >= 3 && await p.locator('[data-dlg-leyenda]').count() === 1);
+  if (tag === 'ancho' && process.env.FOTO) await p.locator('[data-dlg="exp-cambio-ciclo"]').screenshot({ path: path.join(CAPTURAS, `dialogos-cambio-ciclo-${process.env.FOTO}.png`) });
+  await p.locator('[data-dlg-cat="inicio"]').click(); await p.waitForTimeout(300);
+  const pm = await p.locator('[data-dlg="ini-partida-musculo"] .dlg-texto').innerText();
+  ok(`${tag} · punto de partida con su medición y su rango ISSA`, /62,4 kg/.test(pm) && /23,1 %/.test(pm) && /Fit \(21–24 %\)/.test(pm) && /48 kg|48 kg/.test(pm.replace('48 kg', '48 kg')), pm);
+  if (tag === 'ancho' && process.env.FOTO) await p.locator('[data-dlg="ini-partida-musculo"]').screenshot({ path: path.join(CAPTURAS, `dialogos-partida-${process.env.FOTO}.png`) });
+  await p.locator('[data-dlg-cat="semana"]').click(); await p.waitForTimeout(300);
+  const sb_ = await p.locator('[data-dlg="sem-buena"] .dlg-texto').innerText();
+  ok(`${tag} · un dato que falta (sin comidas registradas) queda en naranja para completarlo`, await p.locator('[data-dlg="sem-buena"] .dlg-falta').count() >= 1 || /\d+ días registrando/.test(sb_), sb_);
+  if (tag === 'ancho' && process.env.FOTO) await p.locator('[data-dlg="sem-buena"]').screenshot({ path: path.join(CAPTURAS, `dialogos-semana-${process.env.FOTO}.png`) });
+  if (tag === 'ancho' && process.env.FOTO) {
+    // Un cliente sin medición: el punto de partida queda en naranja.
+    await p.evaluate(() => { _dlg.datos = { ..._dlg.datos, peso: null, grasa: null, masa_magra: null, rango_grasa: null }; _dlg.cat = 'inicio'; dlgPintar(); });
+    await p.waitForTimeout(300);
+    await p.locator('[data-dlg="ini-partida-musculo"]').screenshot({ path: path.join(CAPTURAS, `dialogos-falta-${process.env.FOTO}.png`) });
+    await p.evaluate(() => { _dlg.cat = 'semana'; dlgCargarDatos(_dlg.cliente); });
+  }
   await p.locator('[data-dlgv-modo="semana"]').click();
   await p.locator('[data-dlg-paso="cierre"]').waitFor({ timeout: 15000 }).catch(() => {});
   ok(`${tag} · «Diálogo de su semana» trae los 6 pasos del check-in`, await p.locator('[data-dlg-paso="apertura"]').count() === 1 && await p.locator('[data-dlg-paso="cierre"]').count() === 1);
