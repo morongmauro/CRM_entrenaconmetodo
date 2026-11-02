@@ -109,8 +109,14 @@ for (const [ancho, alto] of [[1440, 900], [390, 844]]) {
   ok('repetidos agrupados: elevación lateral (e2, e3) y en máquina (e5, e6)', grupos.length === 2 && grupos.some(g => g.join() === 'e2,e3') && grupos.some(g => g.join() === 'e5,e6'), JSON.stringify(grupos));
   ok('el que usan los clientes va primero y dice «Sugerido dejar»', /Sugerido dejar/.test(await p.locator('[data-gr-ficha="e2"]').innerText()) && /1 cliente ahora/.test(await p.locator('[data-gr-ficha="e2"]').innerText()));
   if (FOTO) await p.screenshot({ path: path.join(CAPTURAS, `galeria-repetidos-${ancho}-${FOTO}.png`), fullPage: true });
-  await p.locator('[data-gr-ficha="e3"] [data-gr-archivar]').click(); await p.waitForTimeout(900);
-  ok('archivar: sale del grupo (no se borra)', (await p.evaluate(() => window.TABLAS_FALSAS.ejercicios.find(e => e.id === 'e3').archivado)) === true && (await p.locator('[data-gr-grupo]').count()) === 1);
+  // e3 tiene el video bueno; e2 es la que usan los clientes: se le pasa el
+  // video (intercambio: el de e2 queda guardado en e3) y se deja e2.
+  const vAntes = await p.evaluate(() => Object.fromEntries(['e2', 'e3'].map(id => [id, window.TABLAS_FALSAS.ejercicios.find(e => e.id === id).video_ref])));
+  await p.locator('[data-gr-ficha="e3"] [data-gr-pasar-video]').click(); await p.waitForTimeout(900);
+  const vDespues = await p.evaluate(() => Object.fromEntries(['e2', 'e3'].map(id => [id, window.TABLAS_FALSAS.ejercicios.find(e => e.id === id).video_ref])));
+  ok('«Pasar este video a la otra»: la que usan los clientes queda con el video, y el suyo queda guardado en la otra', vDespues.e2 === vAntes.e3 && vDespues.e3 === vAntes.e2, JSON.stringify([vAntes, vDespues]));
+  await p.locator('[data-gr-ficha="e2"] [data-gr-dejar]').click(); await p.waitForTimeout(900);
+  ok('«Dejar este»: la otra se archiva (no se borra) y el grupo sale', (await p.evaluate(() => window.TABLAS_FALSAS.ejercicios.find(e => e.id === 'e3').archivado)) === true && !(await p.evaluate(() => window.TABLAS_FALSAS.ejercicios.find(e => e.id === 'e2').archivado)) && (await p.locator('[data-gr-grupo]').count()) === 1);
   ok('sin errores de JavaScript', !errores.length, errores.join(' | '));
   ok('sin barra horizontal', await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   await ctx.close();

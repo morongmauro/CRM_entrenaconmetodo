@@ -143,9 +143,13 @@ function grHtmlRepetidos(lista) {
           ${g.map((e, i) => `
             <div data-gr-ficha="${e.id}">
               ${entTarjetaEjercicio(e)}
-              <div class="flex items-center justify-between gap-2 px-1 pt-2">
+              <div class="flex items-center justify-between gap-2 px-1 pt-2 flex-wrap">
                 <div>${grEtiquetaUso(e)}${i === 0 && ((_ent.enUso && _ent.enUso.get(e.id)) || (_ent.usados && _ent.usados.has(e.id))) ? ' <span class="tag tag-green">Sugerido dejar</span>' : ''}</div>
-                <button class="btn btn-secondary btn-sm" data-gr-archivar onclick="grArchivar('${e.id}')" title="Sale de la galería; las rutinas que lo usan no se tocan">Archivar este</button>
+                <div class="flex gap-1 flex-wrap justify-end">
+                  ${grDestinoVideo(e, g) ? `<button class="btn btn-ghost btn-sm" data-gr-pasar-video onclick="grPasarVideo('${e.id}', '${escapeHtml(clave)}')" title="La otra ficha se queda con este video; el suyo queda guardado en esta">Pasar este video ${g.length === 2 ? 'a la otra' : 'a la sugerida'}</button>` : ''}
+                  ${g.length > 2 ? `<button class="btn btn-ghost btn-sm" data-gr-archivar onclick="grArchivar('${e.id}')" title="Sale de la galería; las rutinas que lo usan no se tocan">Archivar este</button>` : ''}
+                  <button class="btn btn-primary btn-sm" data-gr-dejar onclick="grDejar('${e.id}', '${escapeHtml(clave)}')" title="Deja esta ficha y archiva las demás del grupo">Dejar este</button>
+                </div>
               </div>
             </div>`).join('')}
         </div>
@@ -251,6 +255,54 @@ window.grPonerTodas = async () => {
   estado('Poner las sugeridas');
   if (fallos) toastError(`Listo: ${ok} con su nombre en inglés. ${fallos} no se pudieron guardar.`);
   else toast(`Listo: ${ok} con su nombre en inglés.${faltan ? ` ${faltan} quedan para escribirlos a mano.` : ''}`);
+  entRepintarGaleria();
+};
+
+// ---------- Dejar una ficha del grupo / pasarle el video a otra ----------
+// «Dejar este» archiva las demás fichas del grupo (archivar no borra ni toca
+// rutinas: quien la tiene en su ciclo la sigue viendo con su video).
+// «Pasar este video…» INTERCAMBIA los videos con la otra ficha (la que usan
+// los clientes, si es la sugerida): la otra queda con este video y su video
+// anterior queda guardado en esta. Así nada se pierde.
+const GR_CAMPOS_VIDEO = ['video_fuente', 'video_url', 'video_ref', 'video_path', 'poster_path', 'poster_url', 'video_inicio_seg'];
+const grFichasDe = (clave) => String(clave).split('|').map(id => (_ent.ejercicios || []).find(x => x.id === id)).filter(Boolean);
+const grUsoN = (e) => (_ent.enUso && _ent.enUso.get(e.id)) || 0;
+const grMismoVideo = (a, b) => GR_CAMPOS_VIDEO.slice(0, 4).every(k => (a[k] ?? null) === (b[k] ?? null));
+// A qué ficha se le pasa el video: la otra (o, en grupos de 3+, la sugerida).
+function grDestinoVideo(e, g) {
+  const otras = g.filter(x => x.id !== e.id);
+  const destino = otras[0];
+  if (!destino || (e.video_fuente || 'ninguno') === 'ninguno' || grMismoVideo(e, destino)) return null;
+  return destino;
+}
+window.grPasarVideo = async (id, clave) => {
+  const g = grFichasDe(clave);
+  const e = g.find(x => x.id === id);
+  const d = e && grDestinoVideo(e, g);
+  if (!d) return;
+  const n = grUsoN(d);
+  if (!confirm(`«${entNombres(d).grande}»${n ? ` (la usan ${n} ${n === 1 ? 'cliente' : 'clientes'})` : ''} queda con el video de esta ficha.\n\nSus rutinas no cambian: solo el video. El video que tenía queda guardado en esta otra ficha, no se pierde.`)) return;
+  const de = (x) => Object.fromEntries(GR_CAMPOS_VIDEO.map(k => [k, x[k] ?? null]));
+  const ahora = new Date().toISOString();
+  const aD = { ...de(e), video_elegido_at: ahora, updated_at: ahora }, aE = { ...de(d), video_elegido_at: ahora, updated_at: ahora };
+  const r1 = await sb.from('ejercicios').update(aD).eq('id', d.id);
+  if (r1.error) { toastError('No se pudo cambiar el video: ' + r1.error.message); return; }
+  const r2 = await sb.from('ejercicios').update(aE).eq('id', e.id);
+  if (r2.error) toastError('El video quedó puesto, pero no se guardó el anterior: ' + r2.error.message);
+  Object.assign(d, aD); if (!r2.error) Object.assign(e, aE);
+  toast(`Listo: «${entNombres(d).grande}» tiene el video nuevo.`);
+  entRepintarGaleria();
+};
+window.grDejar = async (id, clave) => {
+  const g = grFichasDe(clave);
+  const e = g.find(x => x.id === id);
+  const otras = g.filter(x => x.id !== id);
+  if (!e || !otras.length) return;
+  const usadas = otras.filter(x => grUsoN(x));
+  const aviso = usadas.length ? `\n\nOjo: ${usadas.map(x => `«${entNombres(x).grande}» la usan ${grUsoN(x)} ${grUsoN(x) === 1 ? 'cliente' : 'clientes'}`).join('; ')}. Sus rutinas no cambian y la siguen viendo con su video. Si quieres que vean el de esta, cancela y toca primero «Pasar este video».` : '';
+  if (!confirm(`Dejar «${entNombres(e).grande}» y archivar ${otras.length === 1 ? 'la otra ficha' : `las otras ${otras.length}`}.\n\nArchivar no borra nada ni toca rutinas: solo deja de salir en la galería.${aviso}`)) return;
+  for (const x of otras) await entDb.archivarEjercicio(x.id);
+  toast(otras.length === 1 ? 'Listo: la otra quedó archivada.' : `Listo: ${otras.length} archivadas.`);
   entRepintarGaleria();
 };
 
