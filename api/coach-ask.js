@@ -657,9 +657,32 @@ REGLAS DURAS
 - Si el coach te pide algo destructivo (quitar varios ejercicios, vaciar una rutina), propónlo
   igual pero dile en una línea qué se pierde.`;
 
+// Nombres en inglés de la galería (galeria-revision.js, «Poner las
+// sugeridas»): los que no están en el diccionario de Trainerize. Sin
+// herramientas: recibe la lista y devuelve solo un JSON { id: "English Name" }.
+const SYSTEM_NOMBRES = `Eres un preparador físico bilingüe. Recibes una lista JSON de ejercicios de
+gimnasio: cada uno con "id", "nombre" (en español) y, a veces, "alias" (un apodo,
+a veces en inglés en minúsculas o abreviado).
+
+Para cada uno devuelve su nombre en inglés estándar, el que usan las librerías
+profesionales de ejercicios (Trainerize, ExRx, NASM):
+- Title Case. Si el nombre dice el implemento, va primero: Dumbbell, Barbell,
+  Kettlebell, Cable, Band, Machine, Smith Machine, Bodyweight.
+- El nombre conocido, no la traducción literal: «peso muerto rumano» →
+  "Romanian Deadlift"; «sentadilla búlgara con mancuernas» → "Dumbbell Bulgarian
+  Split Squat"; «bicho muerto» → "Dead Bug"; «flexión con palmada» → "Clap
+  Push-Up"; «cobra» → "Cobra Stretch".
+- Usa solo lo que dicen el nombre y el alias: no agregues implementos, ángulos ni
+  variantes que no estén.
+- Si el alias ya es el nombre en inglés, devuélvelo bien escrito.
+
+Responde SOLO con un objeto JSON, sin texto antes ni después:
+{"<id>": "English Name", ...}`;
+
 const PERFILES = {
   general: { tools: HERRAMIENTAS_GENERAL, system: SYSTEM_GENERAL },
   rutinas: { tools: HERRAMIENTAS_RUTINAS, system: SYSTEM_RUTINAS },
+  nombres: { tools: null, system: SYSTEM_NOMBRES },
 };
 
 function textoPlano(v, max) {
@@ -785,7 +808,7 @@ ${guia.trim().slice(0, 4000)}`,
         // caché en el system cubre todo el prefijo estable (herramientas +
         // instrucciones): a partir de la segunda pregunta ese tramo cuesta una
         // décima parte.
-        tools: cfg.tools,
+        ...(cfg.tools ? { tools: cfg.tools } : {}),
         system: [{ type: 'text', text: cfg.system, cache_control: { type: 'ephemeral' } }, ...guiaTxt],
         messages: conPreludio,
       }),

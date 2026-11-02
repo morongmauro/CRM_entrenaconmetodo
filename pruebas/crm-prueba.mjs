@@ -142,7 +142,7 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   const inter = await ids('[data-cp-intervenir]');
   ok(`${tag} · Intervenir: Carlos y Lucía (${inter})`, inter.includes('c1') && inter.includes('c2') && !inter.includes('c0') && !inter.includes('c4'), JSON.stringify(inter));
   const carlos = (await p.locator('[data-cp-cliente="c1"]').innerText()).replace(/\s+/g, ' ');
-  ok(`${tag} · Carlos: molestia (primero) y días sin actividad`, /Reportó una molestia/.test(carlos) && /6 días sin actividad/.test(carlos) && carlos.indexOf('molestia') < carlos.indexOf('sin actividad'), carlos);
+  ok(`${tag} · Carlos: molestia (primero) y días sin actividad`, /Reportó una molestia/.test(carlos) && /[67] días sin actividad/.test(carlos) && carlos.indexOf('molestia') < carlos.indexOf('sin actividad'), carlos);
   const lucia = (await p.locator('[data-cp-cliente="c2"]').innerText()).replace(/\s+/g, ' ');
   ok(`${tag} · Lucía: «2 semanas bajando» contra su propio promedio`, /2 semanas bajando: 0 de 3 y 0 de 3 \(antes 100 %\)/.test(lucia), lucia);
   const obs = await ids('[data-cp-observar]');

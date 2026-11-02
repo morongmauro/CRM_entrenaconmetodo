@@ -177,27 +177,80 @@ window.grPonerIngles = async (id) => {
   entRepintarGaleria();
 };
 
+// Los que el diccionario no conoce: se los pide al asistente del CRM (en
+// tandas de 40), que devuelve { id: "English Name" }. Si el asistente no
+// responde, un apodo que ya está en inglés (en minúsculas) se pone con
+// mayúsculas; el resto queda para escribirlo a mano.
+async function grTraducir(lista) {
+  const out = {};
+  for (let i = 0; i < lista.length; i += 40) {
+    const tanda = lista.slice(i, i + 40).map(e => ({ id: e.id, nombre: e.nombre || '', ...(String(e.alias || '').trim() ? { alias: String(e.alias).trim() } : {}) }));
+    try {
+      const r = await fetch('/api/coach-ask', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ perfil: 'nombres', nivel: 'rapido', messages: [{ role: 'user', content: JSON.stringify(tanda) }] }) });
+      const d = await r.json().catch(() => ({}));
+      const texto = (d.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+      const json = JSON.parse((texto.match(/\{[\s\S]*\}/) || ['{}'])[0]);
+      tanda.forEach(t => { const en = String(json[t.id] || '').trim(); if (en && !grEsApodo(en)) out[t.id] = en; });
+    } catch (err) { /* sin asistente: quedan para el respaldo de abajo */ }
+  }
+  return out;
+}
+// «bulgarian split squat» → «Bulgarian Split Squat» (solo si ya es inglés).
+function grConMayusculas(a) {
+  const t = String(a || '').trim();
+  if (!t || /[,;áéíóúñ]/i.test(t) || GR_PALABRAS_ES.test(grNorm(t)) || !/^[a-z0-9 \-'()/]+$/i.test(t)) return '';
+  return t.replace(/\b([a-z])([a-z]*)/g, (m, a, b) => a.toUpperCase() + b);
+}
+
 window.grPonerTodas = async () => {
+  const boton = document.querySelector('[data-gr-todas]');
+  const estado = (t) => { if (boton) { boton.textContent = t; boton.disabled = !!t && t !== 'Poner las sugeridas'; } };
+  await grCargarDiccionario();
   const lista = (_ent.ejercicios || []).filter(grNecesitaIngles);
-  const con = lista.map(e => ({ e, s: grSugerencia(e) })).filter(x => x.s && !x.s.otras.length);
-  if (!con.length) { toast('No hay sugerencias para poner'); return; }
-  const trad = con.filter(x => x.s.de === 'traduccion').length;
-  if (!confirm(`Poner el nombre en inglés a ${con.length} ejercicios.\n\n${con.length - trad} salen de la librería de Trainerize y ${trad} son traducción.\nEl español se queda debajo y los apodos pasan a las palabras de búsqueda. No se borra nada.\n\nLos que no tienen sugerencia, o tienen varias, quedan para que los revises.`)) return;
-  let ok = 0;
-  for (const { e, s } of con) {
-    const input = document.getElementById(`gr-en-${e.id}`);
-    if (input) input.value = s.en;
-    const cambios = { alias: s.en, updated_at: new Date().toISOString() };
+  if (!lista.length) { toast('Ya todos tienen su nombre en inglés'); return; }
+  // 1) Diccionario de Trainerize (con varias opciones, la primera).
+  const plan = [];
+  const sinDic = [];
+  lista.forEach(e => { const s = grSugerencia(e); if (s) plan.push({ e, en: s.en, de: s.de }); else sinDic.push(e); });
+  // 2) El resto, con el asistente.
+  if (sinDic.length) {
+    estado(`Buscando ${sinDic.length} nombres…`);
+    const ia = await grTraducir(sinDic);
+    sinDic.forEach(e => {
+      if (ia[e.id]) plan.push({ e, en: ia[e.id], de: 'asistente' });
+      else { const m = grConMayusculas(e.alias); if (m) plan.push({ e, en: m, de: 'mayusculas' }); }
+    });
+  }
+  estado('Poner las sugeridas');
+  if (!plan.length) { toast('No encontré nombres para poner. Escríbelos a mano.'); return; }
+  const cuenta = (de) => plan.filter(x => x.de === de).length;
+  const ejemplos = plan.slice(0, 6).map(x => `· ${x.e.nombre} → ${x.en}`).join('\n');
+  const faltan = lista.length - plan.length;
+  if (!confirm(`Poner el nombre en inglés a ${plan.length} ejercicios:\n`
+    + `· ${cuenta('trainerize')} de la librería de Trainerize\n· ${cuenta('traduccion') + cuenta('asistente')} traducidos\n`
+    + (cuenta('mayusculas') ? `· ${cuenta('mayusculas')} que ya estaban en inglés (solo mayúsculas)\n` : '')
+    + `\nEjemplos:\n${ejemplos}\n\nEl español se queda debajo y los apodos pasan a las palabras de búsqueda. No se borra nada.`
+    + (faltan ? `\n\n${faltan} quedan para escribirlos a mano.` : ''))) return;
+  // 3) Guardar, de a 6 a la vez, con el avance en el botón.
+  let ok = 0, fallos = 0, hechos = 0;
+  const guardar = async ({ e, en }) => {
+    const cambios = { alias: en, updated_at: new Date().toISOString() };
     const viejo = String(e.alias || '').trim();
-    if (viejo && viejo !== s.en && Object.prototype.hasOwnProperty.call(e, 'busqueda')) {
+    if (viejo && viejo !== en && Object.prototype.hasOwnProperty.call(e, 'busqueda')) {
       const b = String(e.busqueda || '');
       if (!grNorm(b).includes(grNorm(viejo))) cambios.busqueda = (b ? b + ', ' : '') + viejo;
     }
-    try { await sb.from('ejercicios_nombre_respaldo').insert({ ejercicio_id: e.id, alias: e.alias || null, nombre: e.nombre, busqueda: e.busqueda || null, motivo: 'crm-nombre-ingles', puesto_alias: s.en, puesto_nombre: e.nombre }); } catch (err) { /* nada */ }
-    const { error } = await sb.from('ejercicios').update(cambios).eq('id', e.id);
-    if (!error) { Object.assign(e, cambios); ok++; }
-  }
-  toast(`Listo: ${ok} con su nombre en inglés.`);
+    try { await sb.from('ejercicios_nombre_respaldo').insert({ ejercicio_id: e.id, alias: e.alias || null, nombre: e.nombre, busqueda: e.busqueda || null, motivo: 'crm-nombre-ingles', puesto_alias: en, puesto_nombre: e.nombre }); } catch (err) { /* nada */ }
+    // Con .select() se sabe si de verdad se guardó (sin permiso no vuelve nada).
+    const { data, error } = await sb.from('ejercicios').update(cambios).eq('id', e.id).select('id');
+    if (!error && (!Array.isArray(data) || data.length)) { Object.assign(e, cambios); ok++; } else fallos++;
+    hechos++; estado(`Poniendo… ${hechos} de ${plan.length}`);
+  };
+  for (let i = 0; i < plan.length; i += 6) await Promise.all(plan.slice(i, i + 6).map(guardar));
+  estado('Poner las sugeridas');
+  if (fallos) toastError(`Listo: ${ok} con su nombre en inglés. ${fallos} no se pudieron guardar.`);
+  else toast(`Listo: ${ok} con su nombre en inglés.${faltan ? ` ${faltan} quedan para escribirlos a mano.` : ''}`);
   entRepintarGaleria();
 };
 
