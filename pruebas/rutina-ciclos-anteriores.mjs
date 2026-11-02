@@ -139,7 +139,8 @@ for (const [tag, ancho, alto] of [['ancho', 1600, 900], ['telefono', 390, 844]])
   if (C.otro) {
     await p.evaluate((id) => entAgregarARutina(id), C.otro); await p.waitForTimeout(700);
     const nuevo = await p.evaluate((id) => { const re = _ent.rutina.ejercicios.find(x => x.ejercicio_id === id); const f = re && document.querySelector(`[data-re="${re.id}"]`); return f ? !!f.querySelector('[data-tag-ciclos]') : null; }, C.otro);
-    ok(`${tag} · uno que nunca tuvo, al añadirlo, sale sin etiqueta`, nuevo === false, String(nuevo));
+    const txt = await p.evaluate((id) => { const re = _ent.rutina.ejercicios.find(x => x.ejercicio_id === id); return document.querySelector(`[data-re="${re.id}"] [data-tag-ciclos]`)?.textContent.trim() || ''; }, C.otro);
+    ok(`${tag} · uno que nunca tuvo, al añadirlo, dice «Nuevo para este cliente»`, nuevo === true && txt === 'Nuevo para este cliente', txt);
   }
   if (process.env.FOTO) {
     await p.locator('#cons-col-rutina').scrollIntoViewIfNeeded();

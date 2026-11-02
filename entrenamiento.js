@@ -2360,7 +2360,9 @@ function entTextoCiclos(atras) {
 }
 function entTagCiclosHTML(e) {
   const atras = entCiclosDeEjercicio(e);
-  if (!atras.length) return '';
+  // Nunca lo tuvo en un ciclo anterior (y el cliente sí tiene ciclos antes).
+  if (!atras.length) return _ent.histCiclos && Object.keys(_ent.histCiclos.nombres).length
+    ? '<div class="mt-0.5"><span class="tag tag-green" data-tag-ciclos="nuevo">Nuevo para este cliente</span></div>' : '';
   const h = _ent.histCiclos;
   const cuales = atras.map(a => h.nombres[a]).filter(Boolean).join(' · ');
   // Amarillo si estuvo en el ciclo anterior (sería repetirlo seguido); gris si fue antes.
