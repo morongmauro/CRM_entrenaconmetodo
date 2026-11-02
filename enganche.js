@@ -54,7 +54,7 @@ function engPlaneados(fases, desde, hasta, fuera = null) {
 //   uso: [{ fecha, secciones: {…}, recetas: […] }] · mt: el resumen de la app
 //   (day_scores, recetas_registradas, menus_creados, favoritos) · sesiones y
 //   fases del CRM.
-function engCliente({ c, hoy, uso = [], mt = null, sesiones = [], fases = [], fuera = null }) {
+function engCliente({ c, hoy, uso = [], mt = null, sesiones = [], fases = [], fuera = null, centro = null }) {
   const d28 = engSumar(hoy, -27), d56 = engSumar(hoy, -55), d14 = engSumar(hoy, -13), d7 = engSumar(hoy, -6);
   const dias = {};   // sección → Set de fechas
   ENG_SECC.forEach(([k]) => { dias[k] = new Set(); });
@@ -66,6 +66,11 @@ function engCliente({ c, hoy, uso = [], mt = null, sesiones = [], fases = [], fu
     Object.keys(u.secciones || {}).forEach(k => { if (dias[k]) dias[k].add(u.fecha); });
     (u.recetas || []).forEach(r => { if (u.fecha >= d28) abiertas[r] = (abiertas[r] || 0) + 1; if (dias.recetas) dias.recetas.add(u.fecha); });
   });
+  // Respira: cada vez que la terminó (fecha, hora, segundos, desde dónde).
+  const respira = [];
+  uso.forEach(u => { const r = u && u.secciones && u.secciones.respira; if (Array.isArray(r)) r.forEach(x => respira.push({ fecha: u.fecha, ...x })); });
+  respira.sort((a, b) => `${b.fecha} ${b.h}`.localeCompare(`${a.fecha} ${a.h}`));
+  const resp28 = respira.filter(x => x.fecha >= d28);
   const hechas = sesiones.filter(s => s.estado === 'completada' && !s.bloque);
   hechas.forEach(s => { dias.entreno.add(s.fecha); app.add(s.fecha); });
   const comidaDias = new Set(Object.keys((mt && mt.day_scores) || {}));
@@ -113,6 +118,13 @@ function engCliente({ c, hoy, uso = [], mt = null, sesiones = [], fases = [], fu
     cocinadas,
     menus: (mt && mt.menus_creados) || 0, favoritos: (mt && mt.favoritos) || 0,
     conApp: !!mt,
+    respira: {
+      veces: resp28.length, dias: new Set(resp28.map(x => x.fecha)).size,
+      minutos: Math.round(resp28.reduce((a, x) => a + (Number(x.s) || 0), 0) / 60),
+      ultima: respira[0] || null, lista: respira.slice(0, 12),
+      origenes: resp28.reduce((o, x) => { const k = x.o || 'otro'; o[k] = (o[k] || 0) + 1; return o; }, {}),
+    },
+    centro,
   };
 }
 
@@ -138,6 +150,7 @@ const ENG_FILTROS = [
   ['recetas', 'Nunca usan recetas', (f) => !f.abiertas.length && !f.cocinadas.length],
   ['comida', 'No registran comida', (f) => f.comida28 < 4],
   ['top', 'Más enganchados', (f) => f.score >= 75],
+  ['respira', 'Usan Respira', (f) => f.respira && f.respira.veces > 0],
 ];
 
 async function engDatos() {
@@ -154,19 +167,35 @@ async function engDatos() {
     typeof mtApiGet === 'function' ? mtApiGet('/api/coach-data?action=list').catch(() => null) : null,
     typeof mtApiGet === 'function' ? mtApiGet('/api/coach-data?action=uso').catch(() => null) : null,
   ]);
+  // Lo que vio en el centro de aprendizaje (cápsulas y videos), con la fecha.
+  const filasCentro = typeof cargarLecturasCentro === 'function' ? await cargarLecturasCentro().catch(() => null) : null;
+  const centroDe = (c) => {
+    if (!filasCentro) return null;
+    const nombres = [c.nombre, ...(c.nombres_alternos || [])].map(engNorm);
+    const suyas = filasCentro.filter(f => nombres.includes(engNorm(f.client_name)));
+    const pieza = (fuente, prefijo, catalogo) => suyas.filter(f => fuente.includes(f.source)).map(f => {
+      const id = String(f.section_key || '').replace(prefijo, '');
+      const cat = (catalogo || []).find(x => x.id === id);
+      return { id, titulo: (cat && cat.title) || f.section_label || id, fecha: typeof centroFechaFila === 'function' ? centroFechaFila(f) : null };
+    }).filter(x => x.id).sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
+    return {
+      capsulas: pieza(['capsula'], /^cap:/, typeof CENTRO_CAPSULAS !== 'undefined' ? CENTRO_CAPSULAS : []),
+      videos: pieza(['podcast'], /^pod:/, typeof CENTRO_PODCASTS !== 'undefined' ? CENTRO_PODCASTS : []),
+    };
+  };
   const mts = (lista && lista.clients) || [];
   const filasUso = (uso && uso.uso) || [];
   const mtDe = (c) => mts.find(m => c.mealtracker_id && m.user_id === c.mealtracker_id) || mts.find(m => engNorm(m.name) === engNorm(c.nombre)) || null;
   const usoDe = (c, mt) => filasUso.filter(u => (mt && (u.user_id === mt.user_id || u.clave === mt.user_id)) || (c.mealtracker_id && u.user_id === c.mealtracker_id) || engNorm(u.name) === engNorm(c.nombre));
   const fasesDe = (id) => fases.filter(f => f.cliente_id === id && f.estado !== 'archivada' && f.visible_cliente !== false);
-  const calc = (c) => { const mt = mtDe(c); return engCliente({ c, hoy, uso: usoDe(c, mt), mt, sesiones: sesiones.filter(s => s.cliente_id === c.id), fases: fasesDe(c.id), fuera: typeof ausFueraDe === 'function' ? ausFueraDe(c.id) : null }); };
+  const calc = (c) => { const mt = mtDe(c); return engCliente({ c, hoy, uso: usoDe(c, mt), mt, sesiones: sesiones.filter(s => s.cliente_id === c.id), fases: fasesDe(c.id), fuera: typeof ausFueraDe === 'function' ? ausFueraDe(c.id) : null, centro: centroDe(c) }); };
   const filas = activos.map(calc);
   // Retención: de todos los que empezaron hace 1+ mes (2+ meses), cuántos
   // siguen activos (estado activo y con actividad en los últimos 14 días).
   const vivo = (c) => { if (String(c.estado || 'activo').toLowerCase() !== 'activo') return false; const f = filas.find(x => x.c.id === c.id); return !!(f && f.sinActividad != null && f.sinActividad <= 13); };
   const tras = (dias) => { const base = todos.filter(c => c.fecha_inicio && engEntre(c.fecha_inicio, hoy) >= dias); return { de: base.length, siguen: base.filter(vivo).length }; };
   return {
-    hoy, filas,
+    hoy, filas, centroListo: !!filasCentro,
     usoListo: !!(uso && uso.ok), sinTabla: !!(uso && uso.sinTabla), conApp: !!lista,
     usoDesde: filasUso.length ? filasUso.map(u => u.fecha).sort()[0] : null,
     retencion: { mes1: tras(30), mes2: tras(60) },
@@ -201,6 +230,8 @@ function engKpis(D) {
     ${caja(frios, '', 'se están enfriando: 5 o más días sin actividad', frios ? 'Escríbeles hoy' : 'Nadie por ahora', frios ? '#B4541D' : '#2F7F45')}
     ${caja(conRecetas, `de ${n}`, `abrieron o cocinaron recetas (28 días) · ${conMenus} crearon menús`, recTop ? `Receta top: ${escapeHtml(recTop[0])}` : '')}
     ${caja(emp ? `${Math.round((terminados / emp) * 100)} %` : '—', '', 'de los entrenos empezados se terminan (28 días)', 'Fluidez del entreno')}
+    ${(() => { const con = F.filter(f => f.respira && f.respira.veces); const veces = con.reduce((a, f) => a + f.respira.veces, 0); return caja(con.length, `de ${n}`, `usaron Respira (28 días) · ${veces} ${veces === 1 ? 'vez' : 'veces'}`, con.length ? `Más: ${escapeHtml(con.sort((a, b) => b.respira.veces - a.respira.veces)[0].c.nombre.split(' ')[0])}` : 'Nadie por ahora', '#6B6B6B'); })()}
+    ${(() => { const cuenta = {}; F.forEach(f => { if (!f.centro) return; [...f.centro.capsulas.map(x => ['Cápsula', x]), ...f.centro.videos.map(x => ['Video', x])].forEach(([t, x]) => { const k = `${t}: ${x.titulo}`; cuenta[k] = (cuenta[k] || 0) + 1; }); }); const top = Object.entries(cuenta).sort((a, b) => b[1] - a[1]); const vieron = F.filter(f => f.centro && (f.centro.capsulas.length || f.centro.videos.length)).length; return caja(vieron, `de ${n}`, 'han visto cápsulas o videos del centro', top.length ? `Lo más visto: ${escapeHtml(top[0][0])} (${top[0][1]})` : (D.centroListo ? 'Nadie todavía' : 'No pude leer el centro'), '#6B6B6B'); })()}
     ${caja(D.retencion.mes1.de ? `${D.retencion.mes1.siguen}` : '—', D.retencion.mes1.de ? `de ${D.retencion.mes1.de}` : '', `siguen activos tras el mes 1${D.retencion.mes2.de ? ` · ${D.retencion.mes2.siguen} de ${D.retencion.mes2.de} tras el mes 2` : ''}`, 'Retención')}
   </div>`;
 }
@@ -258,6 +289,16 @@ function engDetalle(id) {
     ['Fluidez', f.fluidez != null ? `${f.fluidez} % de entrenos terminados${f.sinTerminar ? ` · ${f.sinTerminar} sin terminar` : ''}` : 'Sin entrenos en 28 días'],
     ['Recetas', `${f.abiertas.length} abierta${f.abiertas.length === 1 ? '' : 's'}${f.abiertas.length ? ` (${f.abiertas.slice(0, 3).map(([r]) => escapeHtml(r)).join(', ')})` : ''} · ${f.cocinadas.length} cocinada${f.cocinadas.length === 1 ? '' : 's'} · ${f.menus} menú${f.menus === 1 ? '' : 's'} creado${f.menus === 1 ? '' : 's'} · ${f.favoritos} favorita${f.favoritos === 1 ? '' : 's'}`],
   ];
+  const ORIGEN_RESP = { 'fin-entreno': 'al terminar el entreno', descanso: 'en un día de descanso', dash: 'desde la app', otro: 'otro' };
+  const r = f.respira || { veces: 0 };
+  ind.push(['Respira', r.veces
+    ? `${r.veces} ${r.veces === 1 ? 'vez' : 'veces'} en 28 días (${r.dias} día${r.dias === 1 ? '' : 's'}) · ${r.minutos} min en total · la última ${fmt.fechaCorta(r.ultima.fecha)} a las ${escapeHtml(r.ultima.h)}. ${Object.entries(r.origenes).map(([k, v]) => `${v} ${ORIGEN_RESP[k] || k}`).join(', ')}`
+    : (r.ultima ? `No la usó en 28 días (la última, ${fmt.fechaCorta(r.ultima.fecha)})` : 'Nunca la ha usado')]);
+  const piezas = (l) => l.slice(0, 6).map(x => `${escapeHtml(x.titulo)}${x.fecha ? ` <span style="color:#8A8A8E">· ${fmt.fechaCorta(x.fecha)}</span>` : ''}`).join('<br>');
+  if (f.centro) {
+    ind.push(['Cápsulas vistas', f.centro.capsulas.length ? `${f.centro.capsulas.length}:<br>${piezas(f.centro.capsulas)}${f.centro.capsulas.length > 6 ? '<br>…' : ''}` : 'Ninguna todavía']);
+    ind.push(['Videos vistos', f.centro.videos.length ? `${f.centro.videos.length}:<br>${piezas(f.centro.videos)}${f.centro.videos.length > 6 ? '<br>…' : ''}` : 'Ninguno todavía']);
+  }
   const tel = String(f.c.telefono || '').replace(/[^\d]/g, '');
   view.innerHTML = `
     <button type="button" class="btn btn-ghost btn-sm" data-eng-volver onclick="engVolver()" style="margin-bottom:8px">‹ Enganche</button>

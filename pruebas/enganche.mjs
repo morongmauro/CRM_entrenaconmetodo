@@ -47,9 +47,10 @@ function tablas() {
     const f = mas(HOY, -k);
     if (!['L', 'X', 'V'].includes(LETRA(f))) continue;
     sesiones.push({ id: `a${k}`, cliente_id: 'c0', fecha: f, estado: 'completada' });
-    // Carlos: entrenaba, pero hace 6 días que nada; dejó 2 sin terminar.
-    if (k >= 6) sesiones.push({ id: `b${k}`, cliente_id: 'c1', fecha: f, estado: k === 9 || k === 13 ? 'en_curso' : 'completada' });
   }
+  // Carlos: entrenaba día de por medio, pero hace 6 días que nada; dejó 2
+  // sin terminar. Sin depender del día de la semana en que corre la prueba.
+  for (let k = 6; k < 56; k += 2) sesiones.push({ id: `b${k}`, cliente_id: 'c1', fecha: mas(HOY, -k), estado: k === 10 || k === 14 ? 'en_curso' : 'completada' });
   return {
     clientes, fases: [fase('f0', 'c0'), fase('f1', 'c1'), fase('f2', 'c2')], sesiones,
     settings: [{ user_id: 'coach-1', usd_cop_rate: 4000, nombre_coach: 'Mauro', mealtracker_app_url: 'https://mt.prueba', mealtracker_coach_password: 'x' }],
@@ -67,7 +68,7 @@ function app(accion) {
     { user_id: '33333333-3333-3333-3333-333333333333', name: 'Carlos Ruiz', day_scores: {}, recetas_registradas: [], menus_creados: 0, favoritos: 0 },
   ] };
   return { ok: true, uso: [
-    ...Array.from({ length: 25 }, (_, k) => ({ clave: '11111111-1111-1111-1111-111111111111', user_id: '11111111-1111-1111-1111-111111111111', name: 'Ana Pérez', fecha: mas(HOY, -k), secciones: { dash: 1, comida: 1, ...(k % 3 ? {} : { aprende: 1 }) }, recetas: k === 4 ? ['Huevos con atún'] : [] })),
+    ...Array.from({ length: 25 }, (_, k) => ({ clave: '11111111-1111-1111-1111-111111111111', user_id: '11111111-1111-1111-1111-111111111111', name: 'Ana Pérez', fecha: mas(HOY, -k), secciones: { dash: 1, comida: 1, ...(k % 3 ? {} : { aprende: 1 }), ...(k === 1 ? { respira: [{ h: '07:10', s: 180, m: 3, o: 'fin-entreno' }, { h: '21:30', s: 60, m: 1, o: 'dash' }] } : {}) }, recetas: k === 4 ? ['Huevos con atún'] : [] })),
     ...Array.from({ length: 14 }, (_, k) => ({ clave: 'n:Lucía Gómez', user_id: null, name: 'Lucía Gómez', fecha: mas(HOY, -2 * k), secciones: { comida: 1, recetas: 1, comunidad: 1 }, recetas: ['Wrap de carne y batata'] })),
   ] };
 }
@@ -89,6 +90,11 @@ async function abrir(ancho, alto) {
     if (u.includes('supabase-js')) return ruta.fulfill({ contentType: 'text/javascript', body: falso });
     if (u.startsWith('https://mt.prueba/api/coach-auth')) return ruta.fulfill({ contentType: 'application/json', body: JSON.stringify({ token: 't', expiresAt: Date.now() + 3600e3 }) });
     if (u.startsWith('https://mt.prueba/api/coach-data')) return ruta.fulfill({ contentType: 'application/json', body: JSON.stringify(app(new URL(u).searchParams.get('action'))) });
+    if (u.includes('/rest/v1/reading_state')) return ruta.fulfill({ contentType: 'application/json', body: JSON.stringify([
+      { client_name: 'Ana Pérez', source: 'capsula', section_key: 'cap:ent-01-capacidades', last_at: `${mas(HOY, -3)}T10:00:00Z` },
+      { client_name: 'Ana Pérez', source: 'podcast', section_key: 'pod:compra-cafe', last_at: `${mas(HOY, -1)}T10:00:00Z` },
+      { client_name: 'Lucía Gómez', source: 'podcast', section_key: 'pod:compra-cafe', last_at: `${mas(HOY, -2)}T10:00:00Z` },
+    ]) });
     if (u.includes('fonts.googleapis.com') || u.includes('fonts.gstatic.com')) return ruta.continue().catch(() => ruta.abort());
     return ruta.fulfill({ status: 200, contentType: 'application/json', body: u.includes('/rest/v1/') ? '[]' : '{}' });
   });
@@ -120,6 +126,10 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   ok(`${tag} · filtro «Se están enfriando»: solo Carlos`, JSON.stringify(await p.locator('[data-eng-fila]').evaluateAll(els => els.map(e => e.dataset.engFila))) === '["c1"]');
   await p.locator('[data-eng-filtro="recetas"]').click();
   ok(`${tag} · filtro «Nunca usan recetas»: solo Carlos`, JSON.stringify(await p.locator('[data-eng-fila]').evaluateAll(els => els.map(e => e.dataset.engFila))) === '["c1"]');
+  const k2 = (await p.locator('[data-eng-kpis]').innerText()).replace(/\s+/g, ' ');
+  ok(`${tag} · cifras: Respira (1 de 3, 2 veces) y lo más visto del centro`, /1 de 3 usaron Respira \(28 días\) · 2 veces/.test(k2) && /Lo más visto: Video: Qué café comprar y cuál no \(2\)/.test(k2), k2);
+  await p.locator('[data-eng-filtro="respira"]').click();
+  ok(`${tag} · filtro «Usan Respira»: solo Ana`, JSON.stringify(await p.locator('[data-eng-fila]').evaluateAll(els => els.map(e => e.dataset.engFila))) === '["c0"]');
   await p.locator('[data-eng-filtro="todos"]').click();
   await p.screenshot({ path: path.join(CAPTURAS, `enganche-${tag}.png`), fullPage: true });
   await p.locator('[data-eng-fila="c2"]').click();
@@ -128,6 +138,7 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   ok(`${tag} · 1 a 1 de Lucía: 28 días por sección (comida, recetas y comunidad cada 2 días; sin entreno)`, mapa.entreno === 0 && mapa.comunidad === 14 && mapa.recetas === 14 && mapa.comida >= 20, JSON.stringify(mapa));
   const ind = (await p.locator('[data-eng-indicadores]').innerText()).replace(/\s+/g, ' ');
   ok(`${tag} · indicadores: retención, enganche, intereses, fluidez y recetas`, /Retención/.test(ind) && /Enganche/.test(ind) && /Intereses/.test(ind) && /Nunca abrió: entreno/.test(ind) && /Wrap de carne y batata/.test(ind) && /5 menús creados/.test(ind), ind);
+  ok(`${tag} · Lucía: el video que vio, con su fecha`, /Videos vistos/.test(ind) && /Qué café comprar y cuál no/.test(ind), ind);
   ok(`${tag} · botón de WhatsApp con su número`, (await p.locator('[data-eng-siguiente] a[href^="https://wa.me/573000000000"]').count()) === 1);
   await p.evaluate(() => rerenderView()); await p.waitForTimeout(300);
   ok(`${tag} · si el CRM repinta, el 1 a 1 sigue abierto`, await p.locator('[data-eng-mapas]').count() === 1);
