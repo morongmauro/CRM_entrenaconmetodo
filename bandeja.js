@@ -491,6 +491,7 @@ async function bdjCargar(forzar = false) {
       lecturas: typeof entLecturasDatos === 'function' ? entLecturasDatos : null,
     });
     _bdj.datos.avisos = avisos;
+    _bdj.clientes = clientes;
     _bdj.cargadoEn = Date.now();
     bdjPintarContador();
     return _bdj.datos;
@@ -541,7 +542,8 @@ routes.bandeja = async () => {
       ${a.escribir && typeof segIr === 'function'
         ? `<button class="btn btn-primary btn-sm flex-shrink-0" data-bdj-escribir onclick="segIr('${a.cliente_id}')">Escribirle</button>` : ''}
       ${a.responder && typeof ccAbrirDesdeNota === 'function'
-        ? `<button class="btn btn-primary btn-sm flex-shrink-0" data-nota-responder onclick='ccAbrirDesdeNota(${escapeHtml(JSON.stringify(a.responder))})'>Responder</button>` : ''}
+        ? `<button class="btn btn-primary btn-sm flex-shrink-0" data-nota-responder onclick='ccAbrirDesdeNota(${escapeHtml(JSON.stringify(a.responder))})'>Responder</button>`
+        : (a.tipo === 'nota' && !deshacer && !/^aus:/.test(a.id) ? `<button class="btn btn-primary btn-sm flex-shrink-0" data-nota-responder-sesion onclick="bdjResponder('${a.id}')">Responder</button>` : '')}
       ${deshacer
         ? `<button class="btn btn-ghost btn-sm flex-shrink-0" data-nota-deshacer onclick="bdjDeshacer('${a.id}'${a.nota_id ? `, '${a.nota_id}'` : ''})" title="Volver a pendientes">Deshacer</button>`
         : `<button class="btn btn-secondary btn-sm flex-shrink-0" onclick="bdjListo('${a.id}'${a.nota_id ? `, '${a.nota_id}'` : ''})">${accion}</button>`}
@@ -693,3 +695,69 @@ setTimeout(function bdjSondeo() {
   } catch (e) {}
   setTimeout(bdjSondeo, 10 * 60 * 1000);
 }, 4000);
+
+
+// ═════════════════════════════════════════════════════════════════════
+// RESPONDER UNA NOTA DE SESIÓN («Al terminar … te dijo», o una nota sin
+// ejercicio). «A su app»: queda en respuestas_coach (migraciones/
+// respuestas-notas.sql), le llega el aviso al teléfono y en su inicio sale
+// «Te respondió» con su nota y la respuesta. «Por WhatsApp»: abre el chat.
+// Las dos quedan en su Seguimiento y la nota pasa a «Listo».
+// ═════════════════════════════════════════════════════════════════════
+function bdjNotaDe(clave) {
+  return ((_bdj.datos && _bdj.datos.atencion) || []).find(x => x.id === clave) || null;
+}
+// «Al terminar Upper Body Training te dijo» → «Al terminar Upper Body Training».
+const bdjContexto = (a) => String(a.titulo || '').replace(/\s+te dijo$/, '').replace(/^Te escribió\s*/, '').trim() || null;
+window.bdjResponder = (clave, alTerminar = null) => {
+  const a = bdjNotaDe(clave);
+  const c = a && (_bdj.clientes || []).find(x => x.id === a.cliente_id);
+  if (!a || !c) return toast('No encuentro esa nota');
+  _bdj.alResponder = alTerminar;
+  const primer = escapeHtml(String(c.nombre || '').split(' ')[0]);
+  openModal(modalShell(`Responderle a ${primer}`, `
+    <div class="text-sm text-slate-600 mb-2" data-bdj-resp-cita>${escapeHtml(bdjContexto(a) || 'Su nota')}: <em>«${escapeHtml(a.detalle || '')}»</em></div>
+    <textarea id="bdj-resp" rows="4" maxlength="1000" placeholder="Tu respuesta" style="width:100%"></textarea>
+    <p class="text-xs text-slate-500 mt-2">«A su app»: le llega un aviso al teléfono y le sale en el inicio de su app, debajo de su nota. Queda guardado en su Seguimiento.<br>«Por WhatsApp»: para lo que necesita conversación.</p>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-secondary" data-bdj-resp-wa onclick="bdjEnviarRespuesta('${clave}', true)">Por WhatsApp</button>
+     <button class="btn btn-primary" data-bdj-resp-app onclick="bdjEnviarRespuesta('${clave}', false)">A su app</button>`));
+  setTimeout(() => document.getElementById('bdj-resp')?.focus(), 50);
+};
+window.bdjEnviarRespuesta = async (clave, wa) => {
+  const a = bdjNotaDe(clave);
+  const c = a && (_bdj.clientes || []).find(x => x.id === a.cliente_id);
+  const txt = (document.getElementById('bdj-resp')?.value || '').trim();
+  if (!a || !c) return toast('No encuentro esa nota');
+  if (!txt) return toast('Escribe la respuesta');
+  const contexto = bdjContexto(a);
+  const rutina = /^Al terminar\s+/.test(contexto || '') ? contexto.replace(/^Al terminar\s+/, '') : null;
+  const conTema = rutina ? `Sobre tu ${rutina}: ${txt}` : txt;
+  let aviso = '';
+  if (wa) {
+    const tel = String(c.telefono || '').replace(/[^\d]/g, '');
+    if (!tel) return toast('No tiene teléfono en su ficha');
+    window.open(`https://wa.me/${tel}?text=${encodeURIComponent(conTema)}`, '_blank', 'noopener');
+  } else {
+    const { error } = await sb.from('respuestas_coach').insert({ cliente_id: c.id, nota_clave: clave, contexto, nota: String(a.detalle || '').slice(0, 1000), texto: txt });
+    if (error) {
+      return toastError(/respuestas_coach|relation|schema cache/i.test(error.message || '')
+        ? 'Falta correr migraciones/respuestas-notas.sql en Supabase. Mientras, respóndele por WhatsApp.'
+        : 'No se pudo guardar: ' + (error.message || 'error'));
+    }
+    // El aviso al teléfono (si tiene los avisos del coach activos).
+    if (typeof mtApiPost === 'function') {
+      const mtId = typeof resolverMealtrackerId === 'function' ? await resolverMealtrackerId(c).catch(() => null) : null;
+      const r = await mtApiPost('/api/push-send', { user_id: mtId || undefined, name: c.nombre, tipo: 'coach', title: 'Tu coach te respondió', body: conTema.slice(0, 180), url: '/?ir=dash' }).catch(() => null);
+      aviso = r && r.ok ? ' y le llegó el aviso' : ' (el aviso al teléfono no salió: lo verá al abrir la app)';
+    }
+  }
+  if (typeof segRegistrar === 'function') await segRegistrar(c.id, { origen: 'nota', titulo: wa ? 'Respuesta por WhatsApp' : 'Respuesta en su app', texto: conTema }).catch(() => {});
+  bdjMarcarVisto(clave);
+  if (a.nota_id) { try { await sb.from('notas_entreno').update({ leida_en: new Date().toISOString() }).eq('id', a.nota_id); } catch (e) { /* queda en este navegador */ } }
+  closeModal();
+  toast(wa ? 'Abierto en WhatsApp y guardado' : `Le llegó a su app${aviso}`);
+  bdjPintarContador();
+  const fn = _bdj.alResponder; _bdj.alResponder = null;
+  if (typeof fn === 'function') fn(); else routes.bandeja();
+};

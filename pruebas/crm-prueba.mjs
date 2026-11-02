@@ -153,12 +153,12 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   // Responder la nota de Ana a su app.
   await p.locator('[data-cp-observar] summary').click().catch(() => {});
   await p.locator('[data-cp-cliente="c0"] button', { hasText: 'Responder' }).click();
-  await p.locator('#cp-resp').fill('¡Qué bien! Esa energía se nota en tus cargas.');
+  await p.locator('#bdj-resp').fill('¡Qué bien! Esa energía se nota en tus cargas.');
   if (tag === 'ancho') await p.screenshot({ path: path.join(CAPTURAS, 'crm-prueba-responder.png') });
-  await p.locator('[data-cp-resp-app]').click();
+  await p.locator('[data-bdj-resp-app]').click();
   await p.waitForTimeout(800);
-  const env = enviados.at(-1);
-  ok(`${tag} · la respuesta le llega a su app como mensaje del coach: «Sobre tu Tren superior: …»`, env && env.reminders.some(r => r.text === 'Sobre tu Tren superior: ¡Qué bien! Esa energía se nota en tus cargas.'), JSON.stringify(env));
+  const resp = await p.evaluate(() => (window.TABLAS_FALSAS.respuestas_coach || []).slice(-1)[0] || null);
+  ok(`${tag} · la respuesta queda para su app («Te respondió»), pegada a su nota`, resp && resp.cliente_id === 'c0' && resp.texto === '¡Qué bien! Esa energía se nota en tus cargas.' && resp.contexto === 'Al terminar Tren superior' && !!resp.nota, JSON.stringify(resp));
   const guardado = await p.evaluate(() => (window.TABLAS_FALSAS.seguimiento_mensajes || []).length);
   ok(`${tag} · queda en su historial de seguimiento`, guardado >= 1, String(guardado));
   await p.locator('[data-cp-resumen]').waitFor({ timeout: 10000 });

@@ -333,6 +333,8 @@ window.cpResponder = (id, notaClave) => {
   const a = bd.find(x => x.id === notaClave);
   if (!f || !a) return;
   if (a.responder && typeof ccAbrirDesdeNota === 'function') return ccAbrirDesdeNota(a.responder);   // nota de un ejercicio: en ese ejercicio
+  // Nota de sesión: la misma respuesta de la Bandeja (tarjeta en su app + aviso).
+  if (!a.aus_id && typeof bdjResponder === 'function') return bdjResponder(notaClave, () => { _cpr.datos = null; rerenderView(); });
   openModal(modalShell(`${a.aus_id ? 'Escribirle' : 'Responderle'} a ${escapeHtml(f.c.nombre.split(' ')[0])}`, `
     <div class="text-sm text-slate-600 mb-2">${a.aus_id ? `${escapeHtml(a.titulo)} · ${escapeHtml(a.detalle || '')}` : `${escapeHtml(a.titulo)}: <em>«${escapeHtml(a.detalle || '')}»</em>`}</div>
     <textarea id="cp-resp" rows="4" placeholder="Tu respuesta" style="width:100%"></textarea>
