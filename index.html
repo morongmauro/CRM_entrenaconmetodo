@@ -132,112 +132,112 @@
   </div>
   <div id="toast" class="hidden fixed bottom-6 right-6 bg-slate-900 text-white px-4 py-2 rounded-xl shadow-lg z-50 text-sm"></div>
 
-  <script src="/config.js"></script>
-  <script src="/app.js"></script>
+  <script src="/config.js?v=20261104"></script>
+  <script src="/app.js?v=20261104"></script>
   <!-- Figura muscular: dibuja qué trabaja cada ejercicio. ANTES de
        entrenamiento.js, que la usa en la ficha y en el editor. No depende
        de nada: solo expone window.figuraMusculos. -->
-  <script src="/musculos-figura.js"></script>
+  <script src="/musculos-figura.js?v=20261104"></script>
   <!-- Sección Entrenamiento. DESPUÉS de app.js: usa sus funciones y se
        registra sola en el router y en la barra de navegación. -->
-  <script src="/entrenamiento.js"></script>
+  <script src="/entrenamiento.js?v=20261104"></script>
   <!-- Galería: nombres en inglés y repetidos (usa entrenamiento.js; el
        diccionario nombres-ingles.js se carga solo al abrir la galería). -->
-  <script src="/galeria-revision.js"></script>
+  <script src="/galeria-revision.js?v=20261104"></script>
   <!-- Videos de la galería: 3 propuestas por ejercicio y pegar tu link.
        DESPUÉS de entrenamiento.js (usa su estado y sus funciones). -->
-  <script src="/entreno-videos.js"></script>
-  <script src="/entreno-youtube.js"></script>
-  <script src="/videos-rotos.js"></script>
-  <script src="/comentarios-coach.js"></script>
-  <script src="/no-sirve.js"></script>
+  <script src="/entreno-videos.js?v=20261104"></script>
+  <script src="/entreno-youtube.js?v=20261104"></script>
+  <script src="/videos-rotos.js?v=20261104"></script>
+  <script src="/comentarios-coach.js?v=20261104"></script>
+  <script src="/no-sirve.js?v=20261104"></script>
   <!-- Tiempos reales del entreno (por ejercicio, descansos, total). DESPUÉS
        de entrenamiento.js (usa entSegTrabajo y entNombres). -->
-  <script src="/entreno-tiempos.js"></script>
+  <script src="/entreno-tiempos.js?v=20261104"></script>
   <!-- Alternativas de cada ejercicio del constructor (sin IA) y Sustituir en
        su mismo renglón. DESPUÉS de entrenamiento.js (usa _ent y entDb). -->
-  <script src="/entreno-alternativas.js"></script>
+  <script src="/entreno-alternativas.js?v=20261104"></script>
   <!-- Bandeja del coach: todo lo que hicieron los clientes, ordenado. DESPUÉS
        de entrenamiento.js (usa sus lecturas de estancamiento y su lector de
        series). Se registra sola en el router y en la barra. -->
-  <script src="/bandeja.js"></script>
-  <script src="/comunidad.js"></script>
-  <script src="/comunidad-calendario.js"></script>
+  <script src="/bandeja.js?v=20261104"></script>
+  <script src="/comunidad.js?v=20261104"></script>
+  <script src="/comunidad-calendario.js?v=20261104"></script>
   <!-- Nutrición del cliente, centralizada. DESPUÉS de app.js: reemplaza
        routes.nutricion y engancha el análisis enriquecido. -->
-  <script src="/nutricion-plus.js"></script>
+  <script src="/nutricion-plus.js?v=20261104"></script>
   <!-- Composición del cliente (peso, medidas, metas, actividad y la
        calculadora). Se auto-registra en el router y en la barra. -->
-  <script src="/composicion.js"></script>
+  <script src="/composicion.js?v=20261104"></script>
   <!-- Centro de aprendizaje: qué contenido del Centro de Recursos ha visto
        cada cliente. DESPUÉS de app.js: usa sus catálogos y su lectura del
        centro, y se registra solo en el router y en la barra. -->
-  <script src="/centro-aprendizaje.js"></script>
+  <script src="/centro-aprendizaje.js?v=20261104"></script>
   <!-- Eventos del calendario: natación, mediciones, citas. DESPUÉS de
        entrenamiento.js (usa su catálogo de días) y ANTES del agente de
        rutinas, que los crea por voz. -->
-  <script src="/eventos.js"></script>
-  <script src="/cardio-opciones.js"></script>
+  <script src="/eventos.js?v=20261104"></script>
+  <script src="/cardio-opciones.js?v=20261104"></script>
   <!-- Duplicar un ciclo: tus días + lo que movió el cliente como pregunta.
        DESPUÉS de entrenamiento.js y eventos.js (usa evtSumarDias). -->
-  <script src="/entreno-ciclos.js"></script>
+  <script src="/entreno-ciclos.js?v=20261104"></script>
   <!-- La fuerza de UN solo día (mover, poner, quitar) y el lote de fuerza.
        DESPUÉS de entrenamiento.js y eventos.js. -->
-  <script src="/entreno-dias.js"></script>
-  <script src="/entreno-bloques.js"></script>
+  <script src="/entreno-dias.js?v=20261104"></script>
+  <script src="/entreno-bloques.js?v=20261104"></script>
   <!-- Unir y separar rutinas (Push + Pull → Upper, Full Body → Upper / Lower…).
        DESPUÉS de entrenamiento.js. -->
-  <script src="/entreno-mezcla.js"></script>
+  <script src="/entreno-mezcla.js?v=20261104"></script>
   <!-- Videos de técnica: qué le pediste a cada cliente y cómo le fue.
        DESPUÉS de entrenamiento.js. Sale en Entrenamiento y en Seguimiento. -->
-  <script src="/videos-tecnica.js"></script>
+  <script src="/videos-tecnica.js?v=20261104"></script>
   <!-- Diálogos: mensajes listos para WhatsApp con el nombre del cliente -->
-  <script src="/dialogos.js"></script>
+  <script src="/dialogos.js?v=20261104"></script>
   <!-- «Esta semana» arriba de la ficha del cliente: cumplimiento, resumen
        escrito y mensajes con sus números. DESPUÉS de entreno-dias.js,
        eventos.js y dialogos.js. -->
-  <script src="/seguimiento-semana.js"></script>
-  <script src="/seguimiento-areas.js"></script>
+  <script src="/seguimiento-semana.js?v=20261104"></script>
+  <script src="/seguimiento-areas.js?v=20261104"></script>
   <!-- Ausencias (viaje, enfermedad…) y bienestar cada 15 días: en Seguimiento,
        la Bandeja y «Hoy». DESPUÉS de seguimiento-areas.js. -->
-  <script src="/ausencias-crm.js"></script>
+  <script src="/ausencias-crm.js?v=20261104"></script>
   <!-- Mis tareas por cliente: en su Seguimiento y en la lista (usa la tabla pendientes) -->
-  <script src="/puntos-app.js"></script>
-  <script src="/tareas-coach.js"></script>
+  <script src="/puntos-app.js?v=20261104"></script>
+  <script src="/tareas-coach.js?v=20261104"></script>
   <!-- Listado: todos los clientes desde varios ángulos (solo lee) -->
-  <script src="/listado.js"></script>
-  <script src="/enganche.js"></script>
+  <script src="/listado.js?v=20261104"></script>
+  <script src="/enganche.js?v=20261104"></script>
   <!-- CRM en prueba: «Hoy» y «Cartera» (gestión por excepción). Solo se
        ve si prendes «Probar el CRM nuevo» arriba. DESPUÉS de bandeja.js,
        composicion.js, seguimiento-areas.js y enganche.js. -->
-  <script src="/crm-prueba.js"></script>
+  <script src="/crm-prueba.js?v=20261104"></script>
   <!-- Encuesta de la app: NPS y respuestas por cliente, en Inicio -->
-  <script src="/encuesta.js"></script>
+  <script src="/encuesta.js?v=20261104"></script>
   <!-- Diálogo tipo del check-in, por cliente y semana (Seguimiento → Diálogo) -->
-  <script src="/dialogo-tipo.js"></script>
+  <script src="/dialogo-tipo.js?v=20261104"></script>
   <!-- Asistencia al armar rutinas + Trainerize al lado de lo tuyo. DESPUÉS
        de entrenamiento.js (usa su capa de datos y sus lecturas). -->
-  <script src="/entreno-asistencia.js"></script>
+  <script src="/entreno-asistencia.js?v=20261104"></script>
   <!-- Progreso de fuerza (sobrecarga por ejercicio y por patrón): en
        Seguimiento y en la ficha. DESPUÉS de entrenamiento.js. -->
-  <script src="/progreso-fuerza.js"></script>
+  <script src="/progreso-fuerza.js?v=20261104"></script>
   <!-- Ciclos: cuándo empieza y termina el de cada cliente, y aviso cuando
        vence. DESPUÉS de entrenamiento.js (pestaña «Ciclos» y aviso en Inicio). -->
-  <script src="/ciclos-vencen.js"></script>
+  <script src="/ciclos-vencen.js?v=20261104"></script>
   <!-- Asistente: responde preguntas leyendo tus propios datos. Va al final
        porque usa la capa db de app.js y los lectores del Mealtracker y del
        Centro de Recursos. -->
-  <script src="/asistente.js"></script>
+  <script src="/asistente.js?v=20261104"></script>
   <!-- Agente de rutinas. DESPUÉS de entrenamiento.js (usa su capa de datos y
        su calendario) y de asistente.js (usa su motor de conversación). -->
-  <script src="/asistente-rutinas.js"></script>
+  <script src="/asistente-rutinas.js?v=20261104"></script>
   <!-- Íconos de línea en el menú y en el inicio (en vez de emojis). -->
-  <script src="/marca-app.js"></script>
+  <script src="/marca-app.js?v=20261104"></script>
   <!-- Íconos de línea en todo el CRM (en vez de emojis). -->
-  <script src="/iconos-linea.js"></script>
+  <script src="/iconos-linea.js?v=20261104"></script>
   <!-- Más espacio: ocultar el menú y ajustar el ancho de las columnas. -->
-  <script src="/columnas.js"></script>
+  <script src="/columnas.js?v=20261104"></script>
   <!-- El mismo CRM en el teléfono: versión móvil o escritorio (al final). -->
-  <script src="/movil.js"></script>
+  <script src="/movil.js?v=20261104"></script>
 </body>
 </html>
