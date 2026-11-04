@@ -39,7 +39,7 @@ function cpAplicar() {
   document.body.classList.toggle('crm-prueba', on);
   const nav = document.getElementById('main-nav');
   if (nav) {
-    [['hoy', 'Hoy'], ['cartera', 'Cartera']].forEach(([v, t]) => {
+    [['toques', 'Toques'], ['hoy', 'Hoy'], ['cartera', 'Cartera']].forEach(([v, t]) => {
       let b = nav.querySelector(`.nav-item[data-view="${v}"]`);
       if (on && !b) {
         b = document.createElement('button');
