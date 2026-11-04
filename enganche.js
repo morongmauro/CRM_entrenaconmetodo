@@ -164,7 +164,15 @@ const ENG_FILTROS = [
   ['fichas', 'Abren la ficha', (f) => f.fichas && f.fichas.veces > 0],
 ];
 
-async function engDatos() {
+// Se comparte un minuto entre secciones (Hoy, Toques, Enganche).
+const _engCache = { t: 0, p: null };
+async function engDatos(forzar = false) {
+  if (!forzar && _engCache.p && Date.now() - _engCache.t < 60000) return _engCache.p;
+  _engCache.t = Date.now();
+  _engCache.p = engDatosSin().catch(e => { _engCache.p = null; throw e; });
+  return _engCache.p;
+}
+async function engDatosSin() {
   const hoy = fmt.hoy();
   // Las ausencias (ausencias-crm.js): esos días no se planean.
   try { if (typeof ausCargar === 'function') await ausCargar(); } catch (e) { /* sin tabla */ }

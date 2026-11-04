@@ -107,7 +107,28 @@ async function mtApiToken(force = false) {
   } catch (e) { return null; }
 }
 
+// Las lecturas pesadas de la app (los datos de TODOS los clientes) se
+// comparten 3 minutos entre secciones: Hoy, Toques, Enganche, Seguimiento y
+// Bandeja pedían lo mismo cada una por su lado, y cada vez que entrabas.
+// Si dos piden a la vez, esperan la misma respuesta. Cualquier escritura a la
+// app (POST/PATCH) la deja vieja.
+const _mtCache = new Map();
+const MT_CACHE_MS = 180000;
+const MT_CACHEABLE = /[?&]action=(list|uso)(&|$)/;
+const mtCacheLimpiar = () => _mtCache.clear();
 async function mtApiGet(path) {
+  if (MT_CACHEABLE.test(path)) {
+    const hit = _mtCache.get(path);
+    if (hit && (hit.pendiente || Date.now() - hit.t < MT_CACHE_MS)) return hit.p;
+    const e = { t: Date.now(), pendiente: true, p: null };
+    e.p = mtApiGetSin(path).then(d => { e.pendiente = false; e.t = Date.now(); if (d == null) _mtCache.delete(path); return d; },
+      err => { _mtCache.delete(path); throw err; });
+    _mtCache.set(path, e);
+    return e.p;
+  }
+  return mtApiGetSin(path);
+}
+async function mtApiGetSin(path) {
   const cfg = mtApiBase();
   if (!cfg) return null;
   let token = await mtApiToken();
@@ -124,6 +145,7 @@ async function mtApiGet(path) {
 }
 
 async function mtApiPost(path, body) {
+  mtCacheLimpiar();
   const cfg = mtApiBase();
   if (!cfg) return null;
   let token = await mtApiToken();
@@ -144,6 +166,7 @@ async function mtApiPost(path, body) {
 }
 
 async function mtApiPatch(path, body) {
+  mtCacheLimpiar();
   const cfg = mtApiBase();
   if (!cfg) return null;
   let token = await mtApiToken();
@@ -3224,7 +3247,8 @@ function pintarErrorVista(e) {
     </div>`;
 }
 
-async function correrVista() {
+let _renderGen = 0, _renderHecho = 0;
+async function correrVista(gen = _renderGen) {
   // Red de seguridad de la doble pantalla: cada repintado arranca escribiendo
   // en el contenedor principal. Si algo dejó `view` apuntando a una columna
   // que ya no existe, aquí se endereza solo en vez de pintar en el vacío.
@@ -3236,10 +3260,14 @@ async function correrVista() {
       Promise.resolve((routes[_currentView] || routes.dashboard)()),
       25000, 'Esta sección');
   } catch (e) {
-    pintarErrorVista(e);
+    if (gen === _renderGen) pintarErrorVista(e);
   } finally {
-    finCargando();
+    if (gen === _renderGen) finCargando();
   }
+  // Una sección vieja que terminó DESPUÉS de la nueva pintó encima: se
+  // repinta la actual (sale de la caché, es inmediato).
+  if (gen !== _renderGen && _renderHecho >= _renderGen) { _renderPendiente = true; }
+  if (gen === _renderGen) _renderHecho = gen;
 }
 
 async function navigate(name) {
@@ -3257,7 +3285,7 @@ async function navigate(name) {
     try { activo.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' }); } catch (e) {}
   }
   window.scrollTo({ top: 0, behavior: 'instant' });
-  await rerenderView();
+  await rerenderView({ nueva: true });
 }
 
 // Re-renderiza la vista actual sin saltar el scroll (para toggles de checkboxes)
@@ -3271,13 +3299,20 @@ async function navigate(name) {
 // final (que es el que tiene los datos buenos).
 let _renderEnCurso = null;
 let _renderPendiente = false;
-async function rerenderView() {
-  if (_renderEnCurso) { _renderPendiente = true; return _renderEnCurso; }
-  _renderEnCurso = (async () => {
-    try { await correrVista(); } finally { _renderEnCurso = null; }
-    if (_renderPendiente) { _renderPendiente = false; await rerenderView(); }
+// Cambiar de sección ({ nueva: true }) NO hace fila: la sección nueva arranca
+// ya, sin esperar a que termine de cargar la que dejaste (antes, si «Hoy»
+// tardaba 5 s, entrar a Clientes también tardaba 5 s). Si la vieja termina
+// después y pinta encima, se repinta la actual.
+async function rerenderView(op = {}) {
+  if (_renderEnCurso && !op.nueva) { _renderPendiente = true; return _renderEnCurso; }
+  if (op.nueva) _renderPendiente = false;
+  const gen = ++_renderGen;
+  const p = (async () => {
+    try { await correrVista(gen); } finally { if (_renderEnCurso === p) _renderEnCurso = null; }
+    if (_renderPendiente && !_renderEnCurso) { _renderPendiente = false; await rerenderView(); }
   })();
-  return _renderEnCurso;
+  _renderEnCurso = p;
+  return p;
 }
 
 // ── Volver de un guardado SIN cambiar de pantalla ───────────────────────
