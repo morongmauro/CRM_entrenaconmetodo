@@ -672,6 +672,8 @@ function entFiltrarSinOrden(lista) {
     //   «repetidos» → fichas que son el mismo ejercicio (galeria-revision.js).
     if (f.uso === 'ingles' && !(window.grNecesitaIngles && grNecesitaIngles(e))) return false;
     if (f.uso === 'repetidos' && !(_ent.grRep && _ent.grRep.has(e.id))) return false;
+    //   «fichas» → les falta patrón, músculos, cómo hacerlo bien o errores (fichas-ia.js).
+    if (f.uso === 'fichas' && !(window.fiIncompleta && fiIncompleta(e))) return false;
     if (musculos.length) {
       const ms = [...(e.musculos_primarios || []), ...(e.musculos_secundarios || [])];
       if (!ms.some(m => musculos.includes(m))) return false;
@@ -841,7 +843,9 @@ function entNivelesCuenta() {
   const ingles = window.grNecesitaIngles ? todos.filter(grNecesitaIngles).length : 0;
   const grupos = window.grGrupos ? grGrupos(todos) : [];
   _ent.grRep = new Set(grupos.flat().map(e => e.id));
+  const fichas = window.fiIncompleta ? todos.filter(fiIncompleta).length : 0;
   return { clientes: ahora && de(ahora), antes: antes && de(antes), analisis: analisis && de(analisis), duplicados: duplicados.length ? { n: duplicados.length, sin: 0 } : null,
+    fichas: fichas ? { n: fichas, sin: 0 } : null,
     ingles: ingles ? { n: ingles, sin: 0 } : null, repetidos: grupos.length ? { n: grupos.length, sin: 0 } : null, '': de(todos) };
 }
 
@@ -893,6 +897,7 @@ function entNivelesOpciones() {
     ['antes', entNivelEtiqueta('antes', '🕘 2 · Los usaron antes (hoy no)')],
     ['analisis', entNivelEtiqueta('analisis', '🔬 En análisis (todo menos lo de hoy)')],
     ...(entNivelesCuenta().duplicados ? [['duplicados', entNivelEtiqueta('duplicados', '🔁 Duplicados (para decidir)')]] : []),
+    ...(entNivelesCuenta().fichas ? [['fichas', entNivelEtiqueta('fichas', 'Ficha incompleta')]] : []),
     ...(entNivelesCuenta().ingles ? [['ingles', entNivelEtiqueta('ingles', 'Sin nombre en inglés')]] : []),
     ...(entNivelesCuenta().repetidos ? [['repetidos', `Repetidos (${entNivelesCuenta().repetidos.n} grupos)`]] : []),
   ];
@@ -953,7 +958,8 @@ function entNivelesResumen(compacto = false) {
       ${c.duplicados ? cajaDup(c.duplicados) : ''}
       ${caja('', '📚', '3 · Toda la galería', c[''])}
     </div>
-    ${c.ingles || c.repetidos ? `<div class="mt-2 grid ${compacto ? 'grid-cols-2' : 'grid-cols-1 md:grid-cols-2'} gap-2" data-niveles-revision>
+    ${c.ingles || c.repetidos || c.fichas ? `<div class="mt-2 grid ${compacto ? 'grid-cols-2' : 'grid-cols-1 md:grid-cols-3'} gap-2" data-niveles-revision>
+      ${c.fichas ? cajaRev('fichas', 'Ficha incompleta', `<b class="text-slate-900">${c.fichas.n}</b> ejercicios · <b class="text-green-700">complétalas con IA</b>`) : ''}
       ${c.ingles ? cajaRev('ingles', 'Sin nombre en inglés', `<b class="text-slate-900">${c.ingles.n}</b> ejercicios · <b class="text-blue-700">ponles el inglés</b>`) : ''}
       ${c.repetidos ? cajaRev('repetidos', 'Repetidos', `<b class="text-slate-900">${c.repetidos.n}</b> grupos · <b class="text-amber-700">elige cuál dejar</b>`) : ''}
     </div>` : ''}`;
@@ -1154,7 +1160,7 @@ window.entReporteSinHistorial = async () => {
 window.entIrNivel = (nivel) => {
   _ent.filtros.uso = nivel;
   // En duplicados se ven todos, tengan o no video: lo que falta es decidir.
-  _ent.filtros.video = ['duplicados', 'ingles', 'repetidos'].includes(nivel) ? '' : 'sin';
+  _ent.filtros.video = ['duplicados', 'ingles', 'repetidos', 'fichas'].includes(nivel) ? '' : 'sin';
   document.querySelectorAll('select[data-sel="uso"]').forEach(s => { s.value = nivel; });
   document.querySelectorAll('select[data-sel="video"]').forEach(s => { s.value = _ent.filtros.video; });
   entRepintarGaleria();
@@ -1284,6 +1290,7 @@ async function entPintarListaGaleria() {
       </div>
     ` : _ent.filtros.uso === 'repetidos' && window.grHtmlRepetidos ? grHtmlRepetidos(lista)
     : `
+      ${_ent.filtros.uso === 'fichas' && window.fiHtmlCabecera ? fiHtmlCabecera(todos) : ''}
       ${_ent.filtros.uso === 'ingles' ? `<div class="flex flex-wrap items-center justify-between gap-2 mb-3" data-gr-cabecera>
         <div class="text-sm text-slate-600">El nombre grande sale en español o con un apodo. Revisa la sugerencia de cada uno y toca «Poner», o ponlas todas.</div>
         <button class="btn btn-primary btn-sm" data-gr-todas onclick="grPonerTodas()">Poner las sugeridas</button>
