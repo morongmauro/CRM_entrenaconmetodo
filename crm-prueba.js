@@ -1,7 +1,8 @@
 // =====================================================
-// CRM EN PRUEBA · la gestión por excepción de la auditoría, sin tocar lo de siempre
+// CRM NUEVO · la gestión por excepción (antes «en prueba»)
 // =====================================================
-// Un botón en la cabecera («Probar el CRM nuevo») lo prende y lo apaga. Prendido:
+// Desde el 4 de noviembre es el CRM de siempre: está prendido para todos, sin
+// botón para volver al anterior, y el CRM abre en «Hoy». Lo que trae:
 //   · «Hoy»: una sola cola. Arriba quién hay que INTERVENIR, con el motivo en
 //     una línea y la acción a un toque; plegado, a quién OBSERVAR; y cuántos
 //     van NORMAL (no hace falta nada hoy). Aparte, lo que vale la pena
@@ -14,7 +15,6 @@
 //     sugeridos; arriba, por qué ese cliente está en la cola.
 //   · Las notas al terminar una rutina se responden: a su app (le sale como
 //     mensaje de su coach) o por WhatsApp; queda en su historial.
-// Apagado, el CRM queda exactamente como siempre.
 //
 // Los estados se miden contra la propia línea de cada cliente (su promedio
 // de semanas anteriores), no contra un número fijo igual para todos. Solo lee
@@ -27,7 +27,8 @@
 
 const CP_CLAVE = 'crm:prueba';
 const _cpr = { datos: null, leido: 0, filtro: 'todos', cargando: null, porId: {} };
-const cpActivo = () => { try { return localStorage.getItem(CP_CLAVE) === '1'; } catch (e) { return false; } };
+// Siempre prendido (el coach lo eligió como su CRM).
+const cpActivo = () => true;
 const cpNorm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 const CP_DOLOR = /(dol|duele|molest|lesi|pincha|tiron|tirón|hinch|me lastim|esguin|contractur)/i;
 const CP_TONO = { intervenir: ['#FBE3DE', '#B2402B', 'Intervenir'], observar: ['#FDEFD9', '#9A5B12', 'Observar'], pausa: ['#E3EDFA', '#2F6CC4', 'En pausa'], normal: ['#E4F1E7', '#2F7F45', 'Normal'] };
@@ -48,15 +49,8 @@ function cpAplicar() {
       } else if (!on && b) b.remove();
     });
   }
-  const top = document.querySelector('.em-topbar');
-  if (top && !document.getElementById('cp-boton')) {
-    const btn = document.createElement('button');
-    btn.id = 'cp-boton'; btn.type = 'button'; btn.className = 'cp-boton';
-    btn.addEventListener('click', () => cpCambiar(!cpActivo()));
-    top.insertBefore(btn, document.getElementById('logout-btn'));
-  }
-  const btn = document.getElementById('cp-boton');
-  if (btn) { btn.textContent = on ? 'Volver al CRM de siempre' : 'Probar el CRM nuevo'; btn.dataset.on = on ? '1' : ''; }
+  // (Ya no hay botón para volver al CRM anterior.)
+  const btn = document.getElementById('cp-boton'); if (btn) btn.remove();
 }
 window.cpCambiar = (on) => {
   try { localStorage.setItem(CP_CLAVE, on ? '1' : '0'); } catch (e) { /* sin almacenamiento */ }
@@ -400,9 +394,8 @@ function cpTarjeta(f, conAcciones = true) {
     </div>`).join('')}
   </div>`;
 }
-function cpBanda() {
-  return `<div class="cp-banda" data-cp-banda>Estás probando el CRM nuevo: gestión por excepción. Lo de siempre sigue igual.<button type="button" onclick="cpCambiar(false)">Volver al de siempre</button></div>`;
-}
+// (La franja «Estás probando el CRM nuevo… Volver al de siempre» ya no va.)
+function cpBanda() { return ''; }
 routes.hoy = async () => {
   cargando('Revisando a todos tus clientes…');
   let D;

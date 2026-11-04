@@ -1,4 +1,4 @@
-// CRM en prueba (crm-prueba.js): botón, «Hoy» por excepción, responder notas y «Cartera».
+// CRM nuevo (crm-prueba.js): siempre prendido, «Hoy» por excepción, responder notas y «Cartera».
 //
 //   TAILWIND_CSS=/ruta/tailwind.css node pruebas/crm-prueba.mjs
 import { createRequire } from 'module';
@@ -116,19 +116,16 @@ async function abrir(ancho, alto, prueba = true) {
 }
 
 
-// Apagado: el CRM de siempre, con el botón para probar.
+// El CRM nuevo es el CRM: sin botón ni franja para volver al anterior, y
+// abre en «Hoy» (aunque nunca se haya prendido nada).
 {
   const { ctx, p, errores } = await abrir(1440, 1000, false);
-  ok('apagado · botón «Probar el CRM nuevo» arriba', (await p.locator('#cp-boton').innerText()).includes('Probar el CRM nuevo'));
-  ok('apagado · sin «Hoy» ni «Cartera» en el menú', await p.locator('.nav-item[data-view="hoy"], .nav-item[data-view="cartera"]').count() === 0);
-  await p.screenshot({ path: path.join(CAPTURAS, 'crm-prueba-apagado.png') });
-  await p.locator('#cp-boton').click();
   await p.locator('[data-cp-resumen]').waitFor({ timeout: 15000 });
-  ok('apagado → prendido · abre «Hoy» y aparecen Hoy y Cartera arriba del menú', await p.locator('.nav-item[data-view="hoy"]').count() === 1 && await p.locator('.nav-item[data-view="cartera"]').count() === 1);
-  await p.locator('[data-cp-banda] button').click();
-  await p.waitForTimeout(500);
-  ok('«Volver al de siempre» · quita Hoy y Cartera', await p.locator('.nav-item[data-view="hoy"]').count() === 0 && await p.evaluate(() => localStorage.getItem('crm:prueba')) === '0');
-  ok('apagado · sin errores', errores.length === 0, errores.join(' | '));
+  ok('abre en «Hoy», con Hoy y Cartera arriba del menú', await p.locator('.nav-item[data-view="hoy"]').count() === 1 && await p.locator('.nav-item[data-view="cartera"]').count() === 1);
+  ok('sin botón «Volver al CRM de siempre» ni «Probar el CRM nuevo»', await p.locator('#cp-boton').count() === 0);
+  ok('sin la franja «Estás probando el CRM nuevo»', await p.locator('[data-cp-banda]').count() === 0);
+  await p.screenshot({ path: path.join(CAPTURAS, 'crm-nuevo-fijo.png') });
+  ok('sin errores', errores.length === 0, errores.join(' | '));
   await ctx.close();
 }
 

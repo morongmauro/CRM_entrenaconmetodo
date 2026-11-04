@@ -2809,7 +2809,8 @@ async function volverDondeEstaba() {
   // Las secciones (entrenamiento.js y las demás) cargan después de este
   // archivo: con la sesión guardada, esto puede llegar antes de que existan.
   if (document.readyState === 'loading') await new Promise(r => document.addEventListener('DOMContentLoaded', r, { once: true }));
-  const vista = g && routes[g.vista] ? g.vista : (enMovil() ? 'seguimiento' : 'dashboard');
+  // El CRM abre en «Hoy» (la cola del día, crm-prueba.js).
+  const vista = g && routes[g.vista] ? g.vista : (routes.hoy ? 'hoy' : (enMovil() ? 'seguimiento' : 'dashboard'));
   await navigate(vista);
   // La página se pinta en dos pasadas (lo que tarda llega después): se
   // vuelve a la misma altura cuando ya hay dónde.
