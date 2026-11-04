@@ -174,12 +174,44 @@ window.vtBorrar = async (id) => {
 };
 
 // ── Pedir: de su rutina, con lo que ya sabes de cada ejercicio ──────────
+// En cada ejercicio, para decidir qué pedir: su video (se ve ahí mismo),
+// cuántos ciclos lleva haciéndolo (o si es nuevo) y si ya le pediste video
+// antes, con el último estado (por llegar, por revisar, bien, a mejorar…).
 window.vtPedir = async () => {
   const clienteId = _vt.clienteId;
   const fases = await entDb.fases(clienteId);
   const fase = fases.find(f => f.estado === 'activa' && f.visible_cliente) || fases.find(f => f.estado === 'activa') || fases[fases.length - 1] || null;
-  const rutinas = fase ? await entDb.rutinasDeFase(fase.id) : [];
-  const porRutina = await entDb.ejerciciosDeRutinas(rutinas.map(r => r.id));
+  // Los ciclos anteriores a este, del más reciente al más viejo.
+  const cuando = (f) => `${String(f.fecha_inicio || '').slice(0, 10)}|${String(Number(f.orden) || 0).padStart(6, '0')}`;
+  const antes = fase ? fases.filter(f => f.id !== fase.id && cuando(f) < cuando(fase) && (f.estado !== 'borrador' || f.visible_cliente)).sort((x, y) => cuando(y).localeCompare(cuando(x))) : [];
+  const [rutinas, rutAntes] = await Promise.all([
+    fase ? entDb.rutinasDeFase(fase.id) : [],
+    Promise.all(antes.map(f => entDb.rutinasDeFase(f.id).catch(() => []))),
+    entDb.ejercicios().catch(() => []),
+  ]);
+  const idsAntes = rutAntes.flat().map(r => r.id);
+  const [porRutina, porRutAntes] = await Promise.all([
+    entDb.ejerciciosDeRutinas(rutinas.map(r => r.id)),
+    idsAntes.length ? entDb.ejerciciosDeRutinas(idsAntes) : {},
+  ]);
+  // En qué ciclos anteriores estuvo cada ejercicio (índice 0 = el ciclo pasado).
+  const enCiclo = antes.map((f, k) => new Set(rutAntes[k].flatMap(r => (porRutAntes[r.id] || []).map(re => re.ejercicio_id))));
+  const historia = (id) => {
+    let seguidos = 0; while (seguidos < enCiclo.length && enCiclo[seguidos].has(id)) seguidos++;
+    const ultimo = enCiclo.findIndex(s => s.has(id));
+    if (ultimo < 0) return `<span class="vt-h vt-nuevo" data-vt-ciclos="nuevo">Nuevo en este ciclo</span>`;
+    if (seguidos > 0) return `<span class="vt-h" data-vt-ciclos="${seguidos + 1}">Lleva ${seguidos + 1} ciclos seguidos</span>`;
+    return `<span class="vt-h" data-vt-ciclos="vuelve">Vuelve: lo hizo en ${escapeHtml(antes[ultimo].nombre)}</span>`;
+  };
+  // Lo que ya le pediste de ese ejercicio.
+  const pedidosDe = (k) => _vt.filas.filter(f => vtClave(f) === k).sort((x, y) => String(y.pedido_en).localeCompare(String(x.pedido_en)) || String(y.created_at).localeCompare(String(x.created_at)));
+  const videos = (k) => {
+    const l = pedidosDe(k);
+    if (!l.length) return '<span class="vt-h vt-gris" data-vt-pedidos="0">Nunca le pediste video</span>';
+    const u = l[0], e = VT_ESTADO[u.estado] || VT_ESTADO.pedido;
+    const cuando = u.estado === 'pedido' ? `se lo pediste ${vtHace(u.pedido_en)}` : `${l.length === 1 ? 'pedido 1 vez' : `pedido ${l.length} veces`} · el último ${vtCorta(u.pedido_en)}`;
+    return `<span class="vt-est" style="background:${e.fondo};color:${e.color}" data-vt-ultimo="${u.estado}">${e.txt}</span><span class="vt-h vt-gris" data-vt-pedidos="${l.length}">${cuando}</span>${u.nota && ['mejorar', 'mal'].includes(u.estado) ? `<span class="vt-h vt-nota">Qué corregir: ${escapeHtml(u.nota)}</span>` : ''}`;
+  };
   const ult = vtUltimos(_vt.filas);
   const vistos = new Set();
   const grupos = rutinas.map(r => {
@@ -187,24 +219,49 @@ window.vtPedir = async () => {
       .filter(re => !['calentamiento', 'estiramiento_pasivo', 'cardio'].includes(re.ejercicios.tipo));
     return { r, ejs };
   }).filter(g => g.ejs.length);
-  const insignia = (k) => { const f = ult[k]; return f ? `<span class="text-[10px] font-bold rounded-full px-1.5 py-0.5" style="background:${VT_ESTADO[f.estado].fondo};color:${VT_ESTADO[f.estado].color}">${VT_ESTADO[f.estado].txt}</span>` : ''; };
+  const prev = (e) => (typeof entMiniPreviewHTML === 'function' ? entMiniPreviewHTML(e) : '') || '<span class="ent-mini-prev vt-sin-video">Sin video</span>';
   openModal(modalShell('Pedir videos de técnica', `
-    <p class="text-sm text-slate-600 mb-3">Marca los ejercicios${fase ? ` de «${escapeHtml(fase.nombre)}»` : ''}. Al lado ves cómo le fue la última vez.</p>
-    <div class="max-h-[55vh] overflow-y-auto pr-1">
+    <p class="text-sm text-slate-600 mb-3">Marca los ejercicios${fase ? ` de «${escapeHtml(fase.nombre)}»` : ''}. En cada uno ves su video, cuántos ciclos lleva haciéndolo y si ya le pediste video antes.</p>
+    <div class="max-h-[58vh] overflow-y-auto pr-1">
       ${grupos.length ? grupos.map(g => `
-        <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wide mt-2 mb-1">${escapeHtml(g.r.nombre)}</div>
-        ${g.ejs.map(re => `
-          <label class="flex items-center gap-2 py-1.5 border-b border-slate-100 cursor-pointer" style="margin:0;text-transform:none;letter-spacing:0;font-weight:400">
-            <input type="checkbox" class="vt-ej" style="width:auto" value="${re.ejercicio_id}" data-nombre="${escapeHtml(entNombres(re.ejercicios).grande)}" ${ult[re.ejercicio_id]?.estado === 'pedido' ? 'disabled' : ''}>
-            <span class="flex-1 min-w-0 text-sm">${escapeHtml(entNombres(re.ejercicios).grande)}</span>${insignia(re.ejercicio_id)}
-          </label>`).join('')}`).join('') : '<p class="text-sm text-slate-500">Su ciclo no tiene ejercicios de fuerza todavía.</p>'}
+        <div class="vt-grupo">${escapeHtml(g.r.nombre)}</div>
+        ${g.ejs.map(re => { const n = entNombres(re.ejercicios).grande, porLlegar = ult[re.ejercicio_id]?.estado === 'pedido'; return `
+          <div class="vt-fila-pedir${porLlegar ? ' vt-por-llegar' : ''}" data-vt-ej-fila="${re.ejercicio_id}">
+            ${prev(re.ejercicios)}
+            <label class="vt-fila-txt" style="margin:0;text-transform:none;letter-spacing:0;font-weight:400">
+              <span class="flex items-start gap-2"><input type="checkbox" class="vt-ej" style="width:auto;margin-top:3px" value="${re.ejercicio_id}" data-nombre="${escapeHtml(n)}" ${porLlegar ? 'disabled' : ''}>
+              <span class="min-w-0"><span class="block text-sm font-semibold text-slate-900">${escapeHtml(n)}</span>
+              <span class="vt-lineas">${historia(re.ejercicio_id)}</span>
+              <span class="vt-lineas">${videos(re.ejercicio_id)}</span></span></span>
+            </label>
+          </div>`; }).join('')}`).join('') : '<p class="text-sm text-slate-500">Su ciclo no tiene ejercicios de fuerza todavía.</p>'}
     </div>
-    <div class="mt-3"><label>Otro (escribe el nombre)</label><input id="vt-otro" placeholder="Hip thrust con barra"></div>
+    <div class="mt-3"><label style="text-transform:none;letter-spacing:0">Otro (escribe el nombre)</label><input id="vt-otro" placeholder="Hip thrust con barra"></div>
     <label class="flex items-center gap-2 mt-3 cursor-pointer" style="text-transform:none;letter-spacing:0;font-weight:400">
       <input type="checkbox" id="vt-copiar" checked style="width:auto"> <span class="text-sm">Copiar el mensaje para mandárselo por WhatsApp</span></label>
   `, `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-primary" data-vt-confirmar onclick="vtConfirmarPedido()">Pedir</button>`), { wide: true });
 };
+
+(function () {
+  const s = document.createElement('style');
+  s.textContent = `
+  .vt-grupo{font-size:13px;font-weight:700;color:#55565B;margin:12px 0 4px}
+  .vt-fila-pedir{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid #F1EEE8}
+  .vt-fila-pedir .ent-mini-prev{width:112px}
+  .vt-fila-pedir .ent-mini-prev.reproduciendo{width:220px}
+  .vt-sin-video{display:grid;place-items:center;font-size:11px;color:#9A9AA0}
+  .vt-fila-txt{flex:1;min-width:0;cursor:pointer}
+  .vt-por-llegar .vt-fila-txt{cursor:default}
+  .vt-lineas{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:3px}
+  .vt-h{font-size:12px;color:#1F1F1F}
+  .vt-h.vt-gris{color:#7A7A7A}
+  .vt-h.vt-nota{color:#A3301B;flex-basis:100%}
+  .vt-h.vt-nuevo{background:#EAF1FB;color:#2F6CC4;font-weight:700;border-radius:999px;padding:1px 8px}
+  .vt-est{font-size:11px;font-weight:700;border-radius:999px;padding:1px 8px}
+  @media (max-width: 640px){ .vt-fila-pedir{align-items:flex-start} .vt-fila-pedir .ent-mini-prev{width:84px} }`;
+  document.head.appendChild(s);
+})();
 
 window.vtConfirmarPedido = async () => {
   const marcados = $$('.vt-ej:checked').map(i => ({ ejercicio_id: i.value, ejercicio_nombre: i.dataset.nombre }));
