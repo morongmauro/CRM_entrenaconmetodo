@@ -133,15 +133,11 @@ const D = '/tmp/claude-0/-home-user/72c7c01f-58d6-5368-9640-a3136112d4a6/scratch
   await p.waitForFunction(() => /Mensajes por responder/.test(document.getElementById('view').innerText), null, { timeout: 20000 });
   await p.waitForTimeout(500);
   const txt = (await p.locator('#view').innerText()).replace(/\s+/g, ' ');
-  ok('aviso: «Pablo Ríos · Avisó que va a estar fuera · Viaje» con fechas y su nota', /Pablo Ríos · Avisó que va a estar fuera · Viaje/.test(txt) && /Cartagena/.test(txt), txt.slice(0, 600));
-  ok('bienestar: «Duerme peor: sueño 5 → 3 → 2 de 5» de Ana', /Ana Pérez · Duerme peor: sueño 5 → 3 → 2 de 5/.test(txt), txt.slice(0, 800));
-  ok('a Pablo no le sale «Lleva N días sin registrar un entreno» (está de viaje)', !/Pablo Ríos · Lleva \d+ días sin registrar un entreno/.test(txt));
-  ok('botón «Escribirle» en los avisos', await p.locator('[data-bdj-escribir]').count() >= 2);
-  await p.screenshot({ path: `${D}/C-bandeja.png` });
-  const fila = p.locator('#view .flex.items-start', { hasText: 'Avisó que va a estar fuera' });
-  await fila.locator('button', { hasText: 'Listo' }).click();
-  await p.waitForTimeout(800);
-  ok('«Listo» lo deja visto en la base', !!(await p.evaluate(() => window.TABLAS_FALSAS.ausencias[0].vista_en)));
+  // Desde el 5 de nov la Bandeja es solo de mensajes: los avisos (ausencias,
+  // bienestar) están en «Hoy» (se revisa más abajo).
+  ok('la Bandeja ya no muestra los avisos (están en «Hoy»)', !/Avisó que va a estar fuera/.test(txt) && !/Duerme peor/.test(txt), txt.slice(0, 600));
+  ok('y dice dónde están', /están en «Hoy»/.test(txt));
+  await p.screenshot({ path: `${D}/C-bandeja.png` }).catch(() => {});
   ok('sin errores', errores.length === 0, errores.join(' | '));
   await ctx.close();
 }

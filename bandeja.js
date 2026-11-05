@@ -527,7 +527,6 @@ routes.bandeja = async () => {
   const pasa = (tipo) => _bdj.filtro === 'todo' || tipo === _bdj.filtro;
   const pendientes = d.atencion.filter(a => !vistos.has(a.id) && pasa(a.tipo));
   const mensajes = pendientes.filter(bdjEsMensaje);
-  const avisos = pendientes.filter(a => !bdjEsMensaje(a));
   const felicitar = d.felicitar.filter(a => !vistos.has(a.id) && pasa(a.tipo));
   // Notas: pendientes y las que ya marcaste «Listo» (en la base o en este navegador).
   const notasPend = d.atencion.filter(a => a.tipo === 'nota' && !vistos.has(a.id));
@@ -604,28 +603,15 @@ routes.bandeja = async () => {
         <h3 class="font-bold text-slate-900">Mensajes por responder</h3>
         <span class="text-xs text-slate-400">${mensajes.length}</span>
       </div>
-      <p class="text-xs text-slate-500 mb-1">Lo que tus clientes te escribieron en la app. Es lo único que cuenta en el número de la Bandeja.</p>
+      <p class="text-xs text-slate-500 mb-1">Lo que tus clientes te escribieron en la app. Los avisos (medidas, entrenos saltados, comida, estancados) y lo que hay para felicitar están en «Hoy».</p>
       ${mensajes.length ? mensajes.map(a => tarjeta(a, 'Listo')).join('')
         : '<div class="text-sm text-slate-500 py-3">Ningún mensaje por responder.</div>'}
     </div>
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-      <div class="card" data-bdj-avisos>
-        <h3 class="font-bold text-slate-900 mb-1">Avisos para revisar</h3>
-        <p class="text-xs text-slate-500 mb-1">Lo que pasó en su app: medidas, entrenos saltados, comida, estancados. No son mensajes; «Listo» los quita.</p>
-        ${avisos.length ? avisos.map(a => tarjeta(a, 'Listo')).join('')
-          : '<div class="text-sm text-slate-500 py-3">Nada para revisar.</div>'}
-      </div>
-      <div class="card" data-bdj-felicitar>
-        <h3 class="font-bold text-slate-900 mb-1">Para felicitar</h3>
-        <p class="text-xs text-slate-500 mb-1">Récords y semanas cumplidas.</p>
-        ${felicitar.length ? felicitar.map(a => tarjeta(a, 'Hecho')).join('')
-          : '<div class="text-sm text-slate-500 py-3">Esta semana todavía nada que celebrar.</div>'}
-      </div>
     </div>`}
 
-    <div class="card">
-      <h3 class="font-bold text-slate-900 mb-1">Día a día</h3>
-      <p class="text-xs text-slate-500 mb-3">Los últimos ${BDJ_DIAS_VISTA} días, cliente por cliente.</p>
+    <details class="card" data-bdj-dia-a-dia>
+      <summary class="font-bold text-slate-900 mb-1" style="cursor:pointer">Lo que hicieron en su app · últimos ${BDJ_DIAS_VISTA} días</summary>
+      <p class="text-xs text-slate-500 mb-3">Cliente por cliente, día por día. Es para consultar: no son pendientes.</p>
       ${d.dias.map(dia => {
         const filas = dia.filas.map(f => ({ ...f, chips: f.chips.filter(ch => pasa(ch.tipo)) })).filter(f => f.chips.length);
         if (!filas.length) return '';
@@ -641,7 +627,7 @@ routes.bandeja = async () => {
               </div>`).join('')}
           </div>`;
       }).join('') || '<div class="text-sm text-slate-500 py-3">Sin actividad en estos días.</div>'}
-    </div>
+    </details>
   `;
 };
 

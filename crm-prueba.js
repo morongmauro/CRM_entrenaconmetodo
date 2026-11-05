@@ -406,9 +406,13 @@ routes.hoy = async () => {
   const AV = D.filas.flatMap(f => (f.avisos || []).map(a => ({ f, a })));
   const rec = D.filas.filter(f => f.reconocer.length);
   const med = D.filas.filter(f => f.senales.some(s => s.clave === 'medicion')).length;
+  // Lo que antes estaba en Inicio: tus tareas, cumpleaños y ciclos por vencer.
+  const extras = typeof hoyExtrasHTML === 'function' ? await hoyExtrasHTML().catch(() => '') : '';
+  if (_currentView !== 'hoy') return;
   view.innerHTML = `${cpBanda()}
     <div class="mb-3"><h2 class="text-2xl font-bold text-slate-900">Hoy</h2>
       <p class="text-sm text-slate-500" data-cp-resumen><b>${I.length}</b> para intervenir · <b>${O.length}</b> para observar · <b>${N.length}</b> van bien${PA.length ? ` · <b>${PA.length}</b> en pausa` : ''} (no hace falta nada hoy)</p></div>
+    <div id="cic-aviso-inicio" data-hoy-ciclos></div>
     ${AV.length ? `<div class="cp-h">Te avisaron · ${AV.length}</div><div data-cp-avisos>${AV.map(({ f, a }) => `<div class="cp-card cp-rec" data-cp-aviso="${f.c.id}">
       <span style="flex:none;width:38px;height:38px;border-radius:12px;background:rgba(60,123,214,.12);display:grid;place-items:center">${typeof AUS_ICONO === 'string' ? AUS_ICONO : ''}</span>
       <span style="flex:1 1 240px"><b style="font-size:15.5px">${escapeHtml(f.c.nombre)}</b> <span class="cp-mot" style="display:inline">${escapeHtml(a.titulo)}</span><div class="cp-mot">${escapeHtml(a.detalle || '')}</div></span>
@@ -416,6 +420,7 @@ routes.hoy = async () => {
     <div class="cp-h">Intervenir · ${I.length}</div>
     <div data-cp-intervenir>${I.length ? I.map(f => cpTarjeta(f)).join('') : '<div class="cp-card text-sm text-slate-500">Nadie necesita que intervengas hoy.</div>'}</div>
     ${rec.length ? `<div class="cp-h">Para reconocer · ${rec.length}</div><div data-cp-reconocer>${rec.map(f => `<div class="cp-card cp-rec"><b style="min-width:140px">${escapeHtml(f.c.nombre)}</b><span class="cp-mot">${f.reconocer.map(r => r.texto).join(' · ')}</span><button type="button" class="cp-btn" onclick="cpSeguimiento('${f.c.id}')">Escribirle</button></div>`).join('')}</div>` : ''}
+    ${extras}
     ${PA.length ? `<div class="cp-h">En pausa · ${PA.length}</div><div data-cp-pausa>${PA.map(f => `<div class="cp-card cp-rec" data-cp-cliente="${f.c.id}" data-cp-estado="pausa">
       <span style="flex:none;width:38px;height:38px;border-radius:12px;background:rgba(60,123,214,.12);display:grid;place-items:center">${typeof AUS_ICONO === 'string' ? AUS_ICONO : ''}</span>
       <span style="flex:1 1 240px"><b style="font-size:15.5px;cursor:pointer" onclick="cpSeguimiento('${f.c.id}')">${escapeHtml(f.c.nombre)}</b> <span class="cp-pill" style="background:#E3EDFA;color:#2F6CC4">${typeof ausMotivo === 'function' ? ausMotivo(f.pausa.motivo) : 'Fuera'}</span>
@@ -428,6 +433,7 @@ routes.hoy = async () => {
     <div class="cp-h">Van bien · ${N.length}</div>
     <div class="cp-normal" data-cp-normal>${N.map(f => `<span onclick="cpSeguimiento('${f.c.id}')">${escapeHtml(f.c.nombre)}</span>`).join('') || '<span style="cursor:default">Nadie en este grupo todavía</span>'}</div>
     <p class="text-xs text-slate-500" style="margin-top:14px">Cada estado se mide contra la propia línea del cliente (sus semanas anteriores). «No hace falta» esconde esa señal 7 días. «Atendido» marca de una vez lo suyo en la Bandeja.</p>`;
+  if (typeof cicAviso === 'function') cicAviso('cic-aviso-inicio');
 };
 
 // ── Cartera ──────────────────────────────────────────────────────────────

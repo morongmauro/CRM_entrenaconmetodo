@@ -57,7 +57,7 @@
   // Ajustes al final. Los módulos añaden sus botones cuando cargan; aquí solo
   // se ordenan y se les pone el título del grupo (no cambia lo que hacen).
   const GRUPOS = [
-    ['Hoy', ['hoy', 'cartera', 'toques', 'dashboard', 'bandeja', 'asistente']],
+    ['Hoy', ['hoy', 'cartera', 'toques', 'bandeja', 'asistente', 'dashboard']],
     ['Clientes', ['clientes', 'listado', 'enganche', 'seguimiento', 'dialogos', 'entrenamiento', 'nutricion', 'composicion', 'aprendizaje']],
     ['Negocio', ['pagos', 'pendientes', 'negocio', 'comunidad']],
     ['', ['ajustes', 'ia']],
@@ -66,6 +66,11 @@
   function agruparMenu() {
     const nav = document.getElementById('main-nav');
     if (!nav || ordenando) return;
+    // Inicio ya no va en el menú (5 nov): «Hoy» es la lista de pendientes; los
+    // cobros están en Pagos y el equipo y la encuesta en Mi negocio. El botón
+    // sigue en el HTML (los módulos lo clonan para crear los suyos), oculto.
+    const ini = nav.querySelector(':scope > .nav-item[data-view="dashboard"]');
+    if (ini && ini.style.display !== 'none') ini.style.setProperty('display', 'none', 'important');
     const botones = [...nav.querySelectorAll(':scope > .nav-item[data-view]')];
     const conocidos = new Set(GRUPOS.flatMap(g => g[1]));
     const orden = [];

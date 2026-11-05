@@ -1675,10 +1675,13 @@ const helpers = {
   diasHastaCumple: (fechaNac) => {
     if (!fechaNac) return null;
     const n = new Date(fechaNac + 'T00:00:00');
-    const hoy = new Date();
+    // Hoy a las 00:00: así el cumpleaños de HOY da 0 (antes, pasada la
+    // medianoche, se iba al año siguiente y nunca salía «Hoy»).
+    const ahora = new Date();
+    const hoy = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
     let prox = new Date(hoy.getFullYear(), n.getMonth(), n.getDate());
     if (prox < hoy) prox = new Date(hoy.getFullYear() + 1, n.getMonth(), n.getDate());
-    return Math.floor((prox - hoy) / 86400000);
+    return Math.round((prox - hoy) / 86400000);
   },
   diaPagoEnMes: (cliente, mes) => {
     if (!cliente.dia_pago) return null;
@@ -3271,7 +3274,7 @@ async function correrVista(gen = _renderGen) {
 }
 
 async function navigate(name) {
-  _currentView = routes[name] ? name : 'dashboard';
+  _currentView = routes[name] ? name : (routes.hoy ? 'hoy' : 'dashboard');
   if (_currentView !== 'seguimiento') document.body.classList.remove('seg-mesa-on');
   try { sessionStorage.setItem(VISTA_KEY, JSON.stringify({ vista: _currentView, y: 0 })); } catch (e) {}
   // La doble pantalla ensancha el marco: fuera de Seguimiento se quita.
@@ -5919,8 +5922,10 @@ routes.pagos = async () => {
       <div class="text-xs text-slate-300 mt-4">Todo en pesos: lo que está en USD se convierte a ${(_settings.usd_cop_rate || 0).toLocaleString('es-CO')} COP por dólar.</div>
     </div>
 
+    <div id="pagos-cobrar"></div>
     <div id="pagos-content"></div>
   `;
+  pagPintarCobrar();
 
   // En el teléfono la tabla anual no cabe: van las tarjetas del mes.
   const vistaPag = enMovil() ? 'cards' : _pagosView;
@@ -5938,6 +5943,53 @@ routes.pagos = async () => {
       renderPagosTabla(clientes, map, meses, totalesMes, totalAnio, mesActualNum, pagadoMesT, faltaMesT);
     }
   }
+};
+
+// «Para cobrar hoy» (antes en el «Para hoy» de Inicio): los vencidos,
+// contando sus días de gracia, y los que vencen hoy, con «Recordar» (copia el
+// mensaje para WhatsApp) y «Marcar pagado».
+async function pagPintarCobrar() {
+  const caja = document.getElementById('pagos-cobrar');
+  if (!caja) return;
+  let clientes = [], pagosMes = [];
+  try { [clientes, pagosMes] = await Promise.all([db.clientes.list(), db.pagos.listMes(fmt.mesActual())]); } catch (e) { return; }
+  if (!caja.isConnected) return;
+  const diaHoy = new Date().getDate();
+  const pagado = (c) => { const p = pagosMes.find(pp => pp.cliente_id === c.id); return !!(p && (p.pagado || Number(p.monto) === 0)); };
+  const activos = clientes.filter(c => c.estado === 'activo' && c.dia_pago && !pagado(c));
+  const vencidos = activos.filter(c => c.dia_pago < diaHoy && (diaHoy - c.dia_pago) > (c.dias_gracia || 0));
+  const hoy = activos.filter(c => c.dia_pago === diaHoy);
+  if (!vencidos.length && !hoy.length) { caja.innerHTML = ''; return; }
+  const fila = (c, txt, rojo) => `<div class="flex items-center gap-3" style="border-top:1px solid #F1EFEA;padding:10px 0" data-pagos-cobrar-item="${rojo ? 'vencido' : 'hoy'}">
+      <div class="flex-1 min-w-0"><div class="font-bold text-slate-900 truncate" style="font-size:15px">${escapeHtml(c.nombre)}</div>
+        <div class="text-[13px] truncate" style="color:${rojo ? '#B2402B' : '#9A5B12'}">${txt} · ${fmt.money(c.monto, c.moneda)}</div></div>
+      <button class="btn btn-ghost btn-sm" title="Copiar recordatorio de pago para WhatsApp" onclick="copiarRecordatorioPago('${c.id}')">Recordar</button>
+      <button class="btn btn-secondary btn-sm" onclick="marcarPagoRapido('${c.id}')">Marcar pagado</button>
+    </div>`;
+  caja.innerHTML = `<div class="card mb-5" data-pagos-cobrar>
+      <div class="flex items-center justify-between mb-1"><h3 class="em-h3">Para cobrar hoy</h3><span class="text-sm font-semibold text-slate-500">${vencidos.length + hoy.length}</span></div>
+      ${vencidos.map(c => fila(c, `Vencido · día ${c.dia_pago}`, true)).join('')}
+      ${hoy.map(c => fila(c, 'Vence hoy', false)).join('')}
+    </div>`;
+}
+
+// Tus tareas y los cumpleaños de la semana (antes en Inicio), para «Hoy».
+window.hoyExtrasHTML = async () => {
+  let pend = [], clientes = [];
+  try { [pend, clientes] = await Promise.all([db.pendientes.listAbiertos(), db.clientes.list()]); } catch (e) { /* sin datos */ }
+  const cumples = (clientes || []).filter(c => c.estado !== 'finalizado' && c.fecha_nacimiento && helpers.diasHastaCumple(c.fecha_nacimiento) !== null && helpers.diasHastaCumple(c.fecha_nacimiento) <= 7)
+    .sort((a, b) => helpers.diasHastaCumple(a.fecha_nacimiento) - helpers.diasHastaCumple(b.fecha_nacimiento));
+  const tareas = (pend || []).slice(0, 8);
+  return `${tareas.length ? `<div class="cp-h">Tus tareas · ${pend.length}</div><div class="cp-card" data-hoy-tareas style="display:block">
+      ${tareas.map(p => `<div class="flex items-start gap-3" style="padding:8px 0;border-bottom:1px solid #F1EFEA">
+        <input type="checkbox" class="mt-1 rounded" onchange="togglePendienteDash('${p.id}', '${p.estado}')">
+        <div class="flex-1 min-w-0"><div class="font-medium text-sm">${escapeHtml(p.descripcion || '')}</div>
+          <div class="text-xs text-slate-500">${p.para === 'coach' ? 'Tuyo' : escapeHtml(p.clientes?.nombre || '')}${p.fecha_limite ? ' · vence ' + fmt.fechaCorta(p.fecha_limite) : ''}</div></div>
+        <span class="tag ${p.prioridad === 'alta' ? 'tag-red' : p.prioridad === 'baja' ? 'tag-gray' : 'tag-yellow'}">${p.prioridad || ''}</span>
+      </div>`).join('')}
+      ${pend.length > tareas.length ? `<button type="button" class="cp-btn s" style="margin-top:8px" onclick="navigate('pendientes')">Ver las ${pend.length}</button>` : ''}
+    </div>` : ''}
+    ${cumples.length ? `<div class="cp-h">Cumpleaños esta semana · ${cumples.length}</div><div data-hoy-cumples>${cumples.map(c => { const d = helpers.diasHastaCumple(c.fecha_nacimiento); return `<div class="cp-card cp-rec"><b style="min-width:140px">${escapeHtml(c.nombre)}</b><span class="cp-mot">${d === 0 ? 'Hoy' : d === 1 ? 'Mañana' : `En ${d} días`}</span></div>`; }).join('')}</div>` : ''}`;
 };
 
 // Al marcar un pago, lo que ve el cliente cambia: se tira la caché para que la
@@ -8683,10 +8735,26 @@ routes.negocio = async () => {
   // Nuevos este mes
   const nuevosMes = clientes.filter(c => c.fecha_inicio && c.fecha_inicio.slice(0, 7) === mesActual).length;
 
+  // «Cómo va tu equipo» y la encuesta de la app (antes en Inicio): se pintan
+  // al terminar de armar la pantalla.
+  setTimeout(() => {
+    if (typeof inicioEquipo === 'function') inicioEquipo('inicio-equipo');
+    if (typeof encPintarInicio === 'function') encPintarInicio(activos, clientes);
+  }, 0);
   view.innerHTML = `
     <div class="mb-5">
       <h2 class="text-2xl font-bold text-slate-900">Mi negocio</h2>
       <p class="text-sm text-slate-500">Indicadores del coaching · ${_pagosYear}</p>
+    </div>
+    <div class="em-inicio-fila mb-4" data-negocio-equipo>
+      <div class="card" data-equipo>
+        <h3 class="em-h3" style="margin-bottom:12px">Cómo va tu equipo</h3>
+        <div id="inicio-equipo" class="text-sm text-slate-500">Calculando…</div>
+      </div>
+      <div class="card" data-inicio-encuesta>
+        <h3 class="em-h3" style="margin-bottom:4px">Encuesta de la app</h3>
+        <div id="inicio-encuesta" class="text-sm text-slate-500">Calculando…</div>
+      </div>
     </div>
 
     <div class="em-par-kpis">
