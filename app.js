@@ -3768,6 +3768,11 @@ window.togglePendienteDash = async (id, estado) => {
   rerenderView();
 };
 
+// El pago se gestiona en Pagos. En las demás pantallas (Equipo) queda solo un
+// punto de color (verde al día, rojo debe) que lleva a Pagos.
+window.pagoPunto = (debe, detalle = '') => debe == null ? '<span style="color:#C2BFB8">—</span>'
+  : `<a href="#" data-pago-punto="${debe ? 'debe' : 'ok'}" title="${debe ? 'Debe' : 'Al día'}${detalle ? ' · ' + escapeHtml(detalle) : ''} · ver en Pagos" onclick="event.preventDefault();event.stopPropagation();navigate('pagos')" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:inherit"><i style="display:inline-block;width:11px;height:11px;border-radius:50%;background:${debe ? '#D9483B' : '#46965A'}"></i></a>`;
+
 // Genera y copia un recordatorio de pago amable para pegar en WhatsApp
 window.copiarRecordatorioPago = async (clienteId) => {
   const c = await db.clientes.get(clienteId);

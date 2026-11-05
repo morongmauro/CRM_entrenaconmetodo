@@ -470,7 +470,7 @@ routes.cartera = async () => {
         <td>${typeof tqUltimoHTML === 'function' ? tqUltimoHTML(ultToque(f), { prefijo: '' }) : hace(ultToque(f))}</td>
         <td><span style="font-weight:600;font-size:13px">${escapeHtml(f.proxima)}</span></td>
         <td>${f.ciclo ? `${escapeHtml(f.ciclo.nombre)}<div style="font-size:12px;color:#737373">${f.ciclo.queda} días</div>` : '—'}</td>
-        <td>${f.pago === undefined ? '—' : f.pago && f.pago.due ? '<span style="color:#B2402B;font-weight:700">Vencido</span>' : 'Al día'}</td></tr>`; }).join('')}</tbody></table>
+        <td>${f.pago === undefined ? '—' : typeof pagoPunto === 'function' ? pagoPunto(!!(f.pago && f.pago.due), f.pago && f.pago.due ? 'vencido' : '') : (f.pago && f.pago.due ? 'Vencido' : 'Al día')}</td></tr>`; }).join('')}</tbody></table>
       ${filas.length ? '' : '<p class="text-sm text-slate-500" style="padding:0 16px 16px">Nadie en este filtro.</p>'}
     </div>`;
 };

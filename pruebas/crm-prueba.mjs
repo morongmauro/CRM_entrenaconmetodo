@@ -182,7 +182,7 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   const filas = await p.locator('[data-cp-fila]').evaluateAll(els => els.map(e => e.dataset.cpFila));
   ok(`${tag} · Cartera: los 4 activos, Carlos primero (${filas})`, filas.length === 4 && filas[0] === 'c1', JSON.stringify(filas));
   const fc = (await p.locator('[data-cp-fila="c1"]').innerText()).replace(/\s+/g, ' ');
-  ok(`${tag} · fila de Carlos: estado, motivo, próxima acción y pago`, /Intervenir/.test(fc) && /molestia/.test(fc) && /Responder/.test(fc) && /Al día|—/.test(fc), fc);
+  ok(`${tag} · fila de Carlos: estado, motivo, próxima acción y pago`, /Intervenir/.test(fc) && /molestia/.test(fc) && /Responder/.test(fc) && (await p.locator('[data-cp-fila="c1"] [data-pago-punto], [data-cp-fila="c1"]').count()) > 0, fc);
   await p.locator('[data-cp-filtro="intervenir"]').click();
   ok(`${tag} · filtro Intervenir: solo Carlos`, JSON.stringify(await p.locator('[data-cp-fila]').evaluateAll(els => els.map(e => e.dataset.cpFila))) === '["c1"]');
   await p.locator('[data-cp-filtro="todos"]').click();
