@@ -60,7 +60,7 @@ function tablas() {
     rutinas: [{ id: 'r1', nombre: 'Tren superior' }], fases: [],
     notas_entreno: [{ id: 'n1', cliente_id: 'c1', fecha: mas(HOY, -1), created_at: mas(HOY, -1) + 'T10:00:00Z', texto: 'Me duele la rodilla', leida_en: null }],
     respuestas_coach: [{ id: 'r0', cliente_id: 'c0', created_at: HOY + 'T12:00:00Z', texto: 'Bien' }],
-    comentarios_coach: [], videos_tecnica: [], toques_cliente: [],
+    comentarios_coach: [], videos_tecnica: [], toques_cliente: [], toques_semana: [],
     seguimiento_mensajes: [msj('m1', 'c2', mas(HOY, -20)), msj('m2', 'c4', mas(HOY, -10)), msj('m3', 'c0', HOY), ...[0, 1, 2, 3].map(k => msj('ms' + k, 'c5', mas(HOY, -k)))],
     settings: [{ user_id: 'coach-1', usd_cop_rate: 4000, nombre_coach: 'Mauro', mealtracker_app_url: 'https://mt.prueba', mealtracker_coach_password: 'x' }],
     seguimientos: [], seguimiento_pedidos: [], pagos: [], pendientes: [], mediciones_corporales: [],
@@ -142,6 +142,11 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   ok(`${tag} · «Seguimiento» abre en otra pestaña (?seg=)`, await p.locator('tr[data-tq-cliente="c4"] [data-tq-seg-pestana]').evaluate(a => a.target === '_blank' && /\?seg=c4$/.test(a.getAttribute('href'))));
   await p.locator('tr[data-tq-cliente="c4"] [data-tq-seg-hecho]').click(); await p.waitForTimeout(1500);
   ok(`${tag} · «Marcar hecho»: Marta pasa a «Hecho» y queda guardado`, /^Hecho/.test(await celda('c4', 'seguimiento')) && (await p.evaluate(() => window.TABLAS_FALSAS.seguimiento_mensajes.filter(m => m.cliente_id === 'c4' && m.origen === 'manual').length)) === 1, await celda('c4', 'seguimiento'));
+  await p.locator('tr[data-tq-cliente="c2"] [data-tq-nhf]').click(); await p.waitForTimeout(1500);
+  ok(`${tag} · «No hace falta»: Lucía sale como «No hace falta» y ya no cuenta en «sin seguimiento»`, /^No hace falta/.test(await celda('c2', 'seguimiento')) && /1 sin seguimiento/.test((await p.locator('[data-tq-faltas]').innerText()).replace(/\s+/g, ' ')) && (await p.evaluate(() => window.TABLAS_FALSAS.toques_semana.filter(x => x.cliente_id === 'c2').length)) === 1, (await p.locator('[data-tq-faltas]').innerText()).replace(/\s+/g, ' ') + ' · ' + JSON.stringify(await p.evaluate(() => window.TABLAS_FALSAS.toques_semana)));
+  if (tag === 'ancho') await p.locator('[data-tq-tabla]').screenshot({ path: path.join(CAPTURAS, 'toques-no-hace-falta.png') }).catch(() => {});
+  await p.locator('tr[data-tq-cliente="c2"] [data-tq-nhf-deshacer]').click(); await p.waitForTimeout(1500);
+  ok(`${tag} · «deshacer» la vuelve a «Falta»`, /^Falta/.test(await celda('c2', 'seguimiento')));
   if (tag === 'ancho') { await p.locator('[data-tq-filtro="todos"]').first().click(); await p.waitForTimeout(600); await p.screenshot({ path: path.join(CAPTURAS, 'toques-semana.png'), fullPage: true }); }
   await p.locator('[data-tq-filtro="todos"]').first().click(); await p.waitForTimeout(600);
   const frio = (await p.locator('tr[data-tq-cliente="c2"]').innerText()).replace(/\s+/g, ' ');

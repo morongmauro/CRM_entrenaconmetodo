@@ -88,7 +88,7 @@ async function tqDatos(forzar = false) {
   if (!forzar && _tq.datos && Date.now() - (_tq.leido || 0) < 120000) return _tq.datos;
   const hoy = fmt.hoy(), lunes = tqLunes(hoy), desde = evtSumarDias(hoy, -30), hace7 = evtSumarDias(hoy, -6);
   const leer = async (q) => { try { const { data, error } = await q; return error ? null : (data || []); } catch (e) { return null; } };
-  const [msj, vids, notas, ses, resp, com, toq] = await Promise.all([
+  const [msj, vids, notas, ses, resp, com, toq, nhf] = await Promise.all([
     leer(sb.from('seguimiento_mensajes').select('cliente_id, fecha, origen, created_at').gte('fecha', desde)),
     leer(sb.from('videos_tecnica').select('cliente_id, ejercicio_id, ejercicio_nombre, pedido_en, estado, revisado_en, created_at').gte('pedido_en', evtSumarDias(hoy, -120))),
     leer(sb.from('notas_entreno').select('cliente_id, fecha, created_at').gte('fecha', desde)),
@@ -96,8 +96,11 @@ async function tqDatos(forzar = false) {
     leer(sb.from('respuestas_coach').select('cliente_id, created_at').gte('created_at', desde)),
     leer(sb.from('comentarios_coach').select('cliente_id, creado_en').gte('creado_en', desde)),
     leer(sb.from('toques_cliente').select('cliente_id, fecha, tipo, created_at').gte('fecha', desde)),
+    leer(sb.from('toques_semana').select('cliente_id, lunes, motivo').eq('lunes', lunes)),
   ]);
   _tq.sinTabla = toq === null;
+  _tq.sinTablaSemana = nhf === null;
+  const noHaceFalta = new Set((nhf || []).map(x => String(x.cliente_id)));
   let eng = null;
   try { eng = typeof engDatos === 'function' ? await engDatos() : null; } catch (e) { eng = null; }
   try { if (typeof ausCargar === 'function') await ausCargar(); } catch (e) { /* sin tabla */ }
@@ -159,6 +162,7 @@ async function tqDatos(forzar = false) {
       semana: diasSemana.map(d => ({ d, tuyo: diasTuyos.has(d), suyo: diasSuyos.has(d), futuro: d > hoy, hoy: d === hoy })),
       diasToque: diasTuyos.size, contacto: diasTuyos.size + diasSuyos.size > 0,
       seguimiento: segSemana[0] || null, suyoPor: suyoUlt ? suyoUlt[0] : null,
+      noHaceFalta: noHaceFalta.has(String(c.id)),
       entrenos: s.filter(x => x.estado === 'completada' && semana(x.fecha)).length,
       app: e ? e.sinActividad : undefined,
     };
@@ -193,6 +197,23 @@ window.tqResponder = (id) => {
 };
 // «Marcar hecho»: el seguimiento de esta semana, hecho a mano (le escribiste
 // directo o lo viste en persona). Es la misma marca de su Seguimiento.
+// «No hace falta»: ya lo tocaste y no está frío, esta semana no le hace falta
+// el seguimiento. No cuenta en «sin seguimiento»; la semana siguiente vuelve.
+window.tqNoHaceFalta = async (id, si = true) => {
+  const lunes = tqLunes(fmt.hoy());
+  try {
+    const { error } = si
+      ? await sb.from('toques_semana').insert({ cliente_id: id, lunes, motivo: 'no_hace_falta' })
+      : await sb.from('toques_semana').delete().eq('cliente_id', id).eq('lunes', lunes);
+    if (error && !/duplicate|unique/i.test(error.message || '')) throw error;
+  } catch (e) {
+    toast(/toques_semana|relation|schema cache/i.test((e && e.message) || '') ? 'Falta correr migraciones/toques-semana.sql en Supabase' : 'No pude guardarlo');
+    return;
+  }
+  toast(si ? 'Listo: esta semana no le hace falta seguimiento' : 'Vuelve a «Falta»');
+  _tq.datos = null;
+  if (_currentView === 'toques') rerenderView();
+};
 window.tqSegHecho = async (id) => {
   if (typeof segMarcar !== 'function') return;
   await segMarcar(id, true);
@@ -215,7 +236,7 @@ function tqCuando(f, hoy) { if (!f) return 'nunca'; const d = tqEntre(f, hoy); r
 const TQ_FILTROS = [['todos', 'Todos'], ['rojo', 'Rojo'], ['amarillo', 'Amarillo'], ['verde', 'Verde'], ['gris', 'En pausa']];
 // Lo que falta en la semana (también son filtros).
 const TQ_FALTA = {
-  sinSeg: (f) => f.estado !== 'pausa' && !f.seguimiento,
+  sinSeg: (f) => f.estado !== 'pausa' && !f.seguimiento && !f.noHaceFalta,
   sinContacto: (f) => f.estado !== 'pausa' && !f.contacto,
   revisar: (f) => f.videos.porRevisar > 0,
 };
@@ -240,7 +261,8 @@ routes.toques = async () => {
   const dia = (f) => TQ_DIAS[(new Date(f + 'T12:00:00Z').getUTCDay() + 6) % 7];
   const celdaSeg = (f) => f.estado === 'pausa' ? '<span class="tq-cero">—</span>'
     : f.seguimiento ? `<span class="tq-ok">Hecho</span><div class="tq-sub">${['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'][TQ_DIAS.indexOf(dia(f.seguimiento))]}</div>`
-    : `<span class="tq-falta">Falta</span><div><button type="button" class="tq-hecho" data-tq-seg-hecho onclick="tqSegHecho('${f.c.id}')">Marcar hecho</button></div>`;
+    : f.noHaceFalta ? `<span class="tq-nhf">No hace falta</span><div class="tq-sub">esta semana · <a href="#" class="tq-ult-link" data-tq-nhf-deshacer onclick="event.preventDefault();tqNoHaceFalta('${f.c.id}', false)">deshacer</a></div>`
+    : `<span class="tq-falta">Falta</span><div class="tq-seg-btns"><button type="button" class="tq-hecho" data-tq-seg-hecho onclick="tqSegHecho('${f.c.id}')">Marcar hecho</button><button type="button" class="tq-hecho tq-hecho-s" data-tq-nhf onclick="tqNoHaceFalta('${f.c.id}', true)" title="Ya lo tocaste y no está frío: esta semana no le hace falta seguimiento. La próxima vuelve.">No hace falta</button></div>`;
   const celdaVid = (f) => {
     const l = [f.videos.porRevisar ? `<b>${f.videos.porRevisar} por revisar</b>` : '', f.videos.porLlegar ? `${f.videos.porLlegar} por llegar` : '', f.videos.pedidosSemana ? `<span class="tq-sub">${f.videos.pedidosSemana} pedido${f.videos.pedidosSemana === 1 ? '' : 's'} esta semana</span>` : ''].filter(Boolean);
     return l.length ? l.join('<br>') : '<span class="tq-cero">—</span>';
@@ -269,7 +291,7 @@ routes.toques = async () => {
       <p class="text-sm text-slate-500">Semana del ${fmt.fechaCorta(D.lunes)} al ${fmt.fechaCorta(evtSumarDias(D.lunes, 6))}. Qué hiciste con cada cliente y qué te falta.</p></div>
     ${_tq.sinTabla ? `<div class="card mb-3 text-xs text-amber-900 bg-amber-50 border border-amber-200" data-tq-sin-tabla>Para registrar «Me escribió» y los WhatsApp que abres desde el CRM, corre <code>migraciones/toques-cliente.sql</code> en Supabase. Lo demás ya se ve.</div>` : ''}
     <div class="tq-faltas" data-tq-faltas>
-      ${tarjeta('sinSeg', activos.length - conSeg, 'sin seguimiento esta semana', `${conSeg} de ${activos.length} hechos`)}
+      ${tarjeta('sinSeg', activos.filter(TQ_FALTA.sinSeg).length, 'sin seguimiento esta semana', `${conSeg} de ${activos.length} hechos${activos.some(f => f.noHaceFalta && !f.seguimiento) ? ` · ${activos.filter(f => f.noHaceFalta && !f.seguimiento).length} no hace falta` : ''}`)}
       ${tarjeta('sinContacto', activos.filter(TQ_FALTA.sinContacto).length, 'sin contacto esta semana', 'ni tú ni él escribieron')}
       ${tarjeta('revisar', D.filas.filter(TQ_FALTA.revisar).length, 'con videos por revisar', 'te llegaron y falta revisarlos')}
     </div>
@@ -282,7 +304,7 @@ routes.toques = async () => {
     <details class="tq-que mt-3" data-tq-leyenda open><summary>Qué cuenta en cada columna</summary>
       <div class="tq-que-g">
         <div><b>Tus toques</b>Un toque es un día en que le escribiste algo: seguimiento, pedirle video, responder su nota (o marcarla «Listo» en la Bandeja) o abrir su WhatsApp desde el CRM. Si el mismo día haces dos cosas, cuenta 1. En la semana: <span class="tq-dia t">L</span> lo tocaste ese día, <span class="tq-dia s">L</span> te escribió.</div>
-        <div><b>Seguimiento semanal</b>Hecho si esta semana le mandaste el seguimiento (lo copiaste desde el CRM) o tocaste «Marcar hecho». El botón «Seguimiento» lo abre en otra pestaña.</div>
+        <div><b>Seguimiento semanal</b>Hecho si esta semana le mandaste el seguimiento (lo copiaste desde el CRM) o tocaste «Marcar hecho». «No hace falta»: ya lo tocaste y no está frío; esta semana no cuenta como pendiente y la próxima vuelve. El botón «Seguimiento» lo abre en otra pestaña.</div>
         <div><b>Te escribió</b>Una nota suya en la app, o tocaste «Me escribió» porque te escribió por WhatsApp. En rojo si todavía no le respondes; abrir su WhatsApp o responderle en la app cuenta como respuesta.</div>
         <div><b>Semáforo</b><b class="tq-r">Rojo</b>: le debes respuesta, o 15 días o más sin un toque tuyo. <b class="tq-a">Amarillo</b>: 8 a 14 días sin toque, o 4 días o más con toque en los últimos 7 (mejor esperar). <b class="tq-v">Verde</b>: bien.</div>
       </div>
@@ -303,7 +325,10 @@ routes.toques = async () => {
   .es-ult-t .tq-ult-link{color:#1F1F1F;font-weight:750}
   .es-ult-tarde .tq-ult-link{color:#B5611A}
   .tq-ok{font-weight:700;color:#2F7F45}
-  .tq-hecho{margin-top:4px;border:0;border-radius:999px;padding:4px 10px;font:inherit;font-size:11.5px;font-weight:700;cursor:pointer;background:#F1EFE9;color:#1F1F1F;white-space:nowrap}
+  .tq-seg-btns{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+  .tq-nhf{font-weight:700;color:#737373}
+  .tq-hecho-s{background:transparent!important;box-shadow:inset 0 0 0 1.5px #E4E0D8}
+  .tq-hecho{margin-top:0;border:0;border-radius:999px;padding:4px 10px;font:inherit;font-size:11.5px;font-weight:700;cursor:pointer;background:#F1EFE9;color:#1F1F1F;white-space:nowrap}
   .tq-acc a.cp-btn{text-decoration:none;display:inline-block}
   .tq-falta{font-weight:700;color:#8A6410}
   .tq-rojo{font-weight:700;color:#B2402B}
