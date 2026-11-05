@@ -169,6 +169,22 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
   ok(`${tag} · composición: último peso hace 40 días, «Toca medición» y gráfica`, /84 kg/.test(comp) && /hace 40 días/.test(comp) && /Toca medición/.test(comp) && await p.locator('[data-sa-comp-card] polyline').count() === 2, comp);
   const meta = (await p.locator('[data-sa-meta-card]').innerText()).replace(/\s+/g, ' ');
   ok(`${tag} · meta: desactualizada (88 → 84 kg) con «Recalcular aquí»`, /Meta desactualizada/.test(meta) && /88/.test(meta) && await p.locator('[data-sa-recalcular]').count() === 1, meta);
+  // Oportunidades de mejora: 4 categorías en orden y, dentro, Actuar primero.
+  await p.locator('[data-op-item]').first().waitFor({ timeout: 10000 }).catch(() => {});
+  const cats = await p.locator('[data-op-cat]').evaluateAll(els => els.map(e => e.dataset.opCat));
+  ok(`${tag} · oportunidades: 4 categorías en orden (${cats})`, JSON.stringify(cats) === '["entreno","actividad","comida","cuerpo"]');
+  const opE = (await p.locator('[data-op-cat="entreno"]').innerText()).replace(/\s+/g, ' ');
+  ok(`${tag} · oportunidades · entreno: faltó al entreno y estancado en elevación lateral con el peso siguiente`, /Faltó a 1 entreno/.test(opE) && /Estancado en/.test(opE) && /13,5 kg/.test(opE), opE);
+  const opC = (await p.locator('[data-op-cat="comida"]').innerText()).replace(/\s+/g, ' ');
+  ok(`${tag} · oportunidades · comida: le faltan 40 g de proteína, con equivalencia en comida real`, /No llega a su meta/.test(opC) && /−40 g/.test(opC) && /pechuga de pollo/.test(opC), opC);
+  const opP = (await p.locator('[data-op-cat="cuerpo"]').innerText()).replace(/\s+/g, ' ');
+  ok(`${tag} · oportunidades · composición: falta pesarse (hace 40 días), en Actuar`, /Falta registrar el peso/.test(opP) && /hace 40 días/.test(opP) && await p.locator('[data-op-cat="cuerpo"] [data-op-nivel="actuar"]').count() >= 1, opP);
+  const niveles = await p.locator('[data-op-cat="comida"] [data-op-nivel]').evaluateAll(els => els.map(e => e.dataset.opNivel));
+  ok(`${tag} · oportunidades: dentro de cada categoría, Actuar antes que Revisar`, niveles.join() === niveles.slice().sort().join(), niveles.join());
+  if (tag === 'ancho') await p.locator('[data-op-mejora]').screenshot({ path: path.join(CAPTURAS, 'oportunidades.png') }).catch(() => {});
+  await p.locator('[data-op-cat="comida"] [data-op-usar]').first().click(); await p.waitForTimeout(400);
+  ok(`${tag} · «Usar en mi mensaje» pasa la recomendación a la caja`, /te faltan 40 g de proteína/.test(await p.locator('#sa-texto').inputValue()), await p.locator('#sa-texto').inputValue());
+  await p.evaluate(() => { const t = document.getElementById('sa-texto'); t.value = ''; _sa.detectado = []; _sa.textoDetectado = ''; saPintarPedidos(); });
   // Pedir 1 video de lo que no tiene: queda pedido y el mensaje va a la caja.
   await p.locator('.sa-vid').first().check();
   await p.locator('[data-sa-pedir-videos]').click();

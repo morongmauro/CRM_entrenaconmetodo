@@ -1096,6 +1096,7 @@ const esRecHTML = () => `<details class="es-card es-vt" data-seg-recordatorios>
 // Las 6 áreas en el orden en que se revisa (seguimiento-areas.js).
 function esAreasHTML(c, sk, sinMensajes) {
   return `${saBarraHTML()}
+    ${typeof opHTML === 'function' ? opHTML() : ''}
     ${saAreaHTML('hoy', 1, `${typeof tcTarjetaHTML === 'function' ? tcTarjetaHTML(c) : ''}<div class="es-grid" data-es-cuerpo>${sk}${sk}</div>`)}
     ${saAreaHTML('pedi', 2, `<div data-sa-vez><div class="es-card es-sk"></div></div>${esVideosHTML()}<div data-sa-sinvideo></div>${esRecHTML()}`)}
     ${saAreaHTML('comida', 3, `<div data-sa-comida><div class="es-card es-sk"></div></div>`)}
