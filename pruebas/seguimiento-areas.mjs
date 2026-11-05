@@ -159,8 +159,9 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
   ok(`${tag} · semáforos: hoy amarillo (faltó el miércoles), composición rojo (40 días), meta amarillo (desactualizada), fuerza amarillo (1 estancado), comida amarillo`, est.hoy === 'amarillo' && est.composicion === 'rojo' && est.meta === 'amarillo' && est.fuerza === 'amarillo' && est.comida === 'amarillo', JSON.stringify(est));
   const vez = (await p.locator('[data-sa-vezpasada]').innerText().catch(() => '')).replace(/\s+/g, ' ');
   ok(`${tag} · «La vez pasada le dijiste»: su mensaje, el remo cumplido y la medición sin dato`, /cumplió 1 de 2/i.test(vez) && /sube el remo a 55 kg/.test(vez) && /Subir el remo a 55 kg.*Cumplió/.test(vez) && /Mandar la medición del mes.*Sin dato aún/.test(vez), vez);
+  if (tag === 'ancho' && process.env.FOTO_PEDI) await p.locator('#sa-pedi').screenshot({ path: process.env.FOTO_PEDI }).catch(() => {});
   const sin = (await p.locator('[data-sa-sinvideo-lista]').innerText().catch(() => '')).replace(/\s+/g, ' ');
-  ok(`${tag} · su rutina sin video pedido: sentadilla y elevación lateral (remo y banca ya tienen)`, /Barbell Back Squat/.test(sin) && /Dumbbell Lateral Raise/.test(sin) && !/Barbell Row/.test(sin), sin);
+  ok(`${tag} · sin la lista grande de ejercicios para pedir video (se pide con «+ Pedir videos»)`, sin === '' && await p.locator('#sa-pedi .sa-vid').count() === 0, sin);
   const comida = (await p.locator('[data-sa-comida-card]').innerText().catch(() => '')).replace(/\s+/g, ' ');
   ok(`${tag} · comida: días, proteína, receta cocinada, gráfica y qué recomendarle`, /días registrados/.test(comida) && /100 g/.test(comida) && /recetas que cocinó/.test(comida) && /Qué recomendarle/i.test(comida) && await p.locator('[data-sa-comida-card] svg rect').count() >= 7, comida.slice(0, 400));
   const fuerza = (await p.locator('[data-sa-fuerza]').innerText()).replace(/\s+/g, ' ');
@@ -185,18 +186,11 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
   await p.locator('[data-op-cat="comida"] [data-op-usar]').first().click(); await p.waitForTimeout(400);
   ok(`${tag} · «Usar en mi mensaje» pasa la recomendación a la caja`, /te faltan 40 g de proteína/.test(await p.locator('#sa-texto').inputValue()), await p.locator('#sa-texto').inputValue());
   await p.evaluate(() => { const t = document.getElementById('sa-texto'); t.value = ''; _sa.detectado = []; _sa.textoDetectado = ''; saPintarPedidos(); });
-  // Pedir 1 video de lo que no tiene: queda pedido y el mensaje va a la caja.
-  await p.locator('.sa-vid').first().check();
-  await p.locator('[data-sa-pedir-videos]').click();
-  await p.waitForTimeout(600);
-  const caja = await p.locator('#sa-texto').inputValue();
-  const vids = await p.evaluate(async () => (await sb.from('videos_tecnica').select('*').eq('cliente_id', 'c0')).data.length);
-  ok(`${tag} · pedir video: se guarda como pedido y el mensaje queda en la caja`, vids === 3 && /Mándame un video de/.test(caja), `${vids} · ${caja}`);
   // Escribirle: detecta lo que le pides y guarda mensaje + pedidos.
   await p.locator('#sa-texto').fill('Ana, vas muy bien con el remo. Sube la elevación lateral a 15 kg y en el desayuno súmale un huevo más.');
   await p.waitForFunction(() => [...document.querySelectorAll('[data-sa-ped] input')].some(i => i.value === 'Subir elevación lateral a 15 kg'), null, { timeout: 8000 }).catch(() => {});
   const peds = await p.locator('[data-sa-ped] input').evaluateAll(els => els.map(e => e.value));
-  ok(`${tag} · detecta lo que le pides para confirmar (y conserva el video que pediste con el botón)`, peds.includes('Subir elevación lateral a 15 kg') && peds.includes('Sumar un huevo en el desayuno') && peds.some(x => /^Video de/.test(x)), JSON.stringify(peds));
+  ok(`${tag} · detecta lo que le pides para confirmar `, peds.includes('Subir elevación lateral a 15 kg') && peds.includes('Sumar un huevo en el desayuno'), JSON.stringify(peds));
   await p.locator('[data-sa-enviar]').click();
   await p.waitForTimeout(800);
   const g = await p.evaluate(async () => ({
@@ -204,7 +198,7 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
     peds: (await sb.from('seguimiento_pedidos').select('*').eq('cliente_id', 'c0')).data.length,
     wa: (window.__abiertos || []).join(' '),
   }));
-  ok(`${tag} · «Enviar por WhatsApp y guardar»: abre WhatsApp con su número y guarda mensaje y pedidos`, g.msj === 2 && g.peds === 5 && /wa\.me\/573001112233\?text=Ana/.test(g.wa), JSON.stringify(g));
+  ok(`${tag} · «Enviar por WhatsApp y guardar»: abre WhatsApp con su número y guarda mensaje y pedidos`, g.msj === 2 && g.peds === 4 && /wa\.me\/573001112233\?text=Ana/.test(g.wa), JSON.stringify(g));
   await p.locator('[data-sa-chip="meta"]').click();
   await p.waitForTimeout(1600);
   const rev = await p.locator('[data-sa-revisado]').innerText();

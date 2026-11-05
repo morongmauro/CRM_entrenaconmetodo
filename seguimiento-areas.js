@@ -318,19 +318,10 @@ async function saPintarPedi(c, S, D) {
       </div>`;
     }
   }
-  // Su rutina sin video pedido: lo prescrito de su ciclo que nunca se le pidió.
-  if (sin) {
-    const pedidosVid = new Set((D.videos || []).flatMap(v => [String(v.ejercicio_id || ''), `n:${saNorm(v.ejercicio_nombre)}`]));
-    const ids = [...new Set((D.prescritos || []).map(p => String(p.ejercicio_id)).filter(Boolean))].filter(id => !pedidosVid.has(id));
-    let ejs = [];
-    if (ids.length) { try { const { data } = await sb.from('ejercicios').select('id, nombre, alias, tipo').in('id', ids); ejs = data || []; } catch (e) { ejs = []; } }
-    ejs = ejs.filter(e => !['calentamiento', 'estiramiento_pasivo', 'cardio'].includes(e.tipo) && !pedidosVid.has(`n:${saNorm(typeof entNombres === 'function' ? entNombres(e).grande : e.nombre)}`));
-    const nom = (e) => (typeof entNombres === 'function' ? entNombres(e).grande : (e.alias || e.nombre));
-    sin.innerHTML = ejs.length ? `<div class="sa-card" data-sa-sinvideo-lista><div class="sa-k">Su rutina sin video pedido · ${ejs.length}</div>
-        ${ejs.map(e => `<label class="sa-row" style="cursor:pointer;margin:0;text-transform:none;letter-spacing:0;font-weight:400"><input type="checkbox" class="sa-vid" style="width:auto" value="${e.id}" data-nombre="${escapeHtml(nom(e))}" onchange="saContarVid()"><span style="flex:1"><b>${escapeHtml(nom(e))}</b></span></label>`).join('')}
-        <div class="sa-btns"><button type="button" class="sa-btn" data-sa-pedir-videos onclick="saPedirVideos()" disabled>Marca los que quieres pedir</button><span class="sa-m">Quedan como «por llegar» y el mensaje va a tu caja.</span></div>
-      </div>` : '';
-  }
+  // Su rutina sin video pedido: ya no va aquí la lista. El «+ Pedir videos»
+  // de Videos de técnica (justo arriba) abre la ventana de pedir, que ya dice
+  // de cada ejercicio si nunca se le pidió video.
+  if (sin) sin.innerHTML = '';
   // Semáforo: lo de la vez pasada sin cumplir, videos a mejorar sin repedir o que no llegan.
   const vids = typeof vtUltimos === 'function' ? Object.values(vtUltimos(D.videos || [])) : [];
   const viejo = vids.filter(v => v.estado === 'pedido' && saDias(v.pedido_en, hoy) > 10).length;
