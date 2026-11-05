@@ -171,7 +171,8 @@ async function tqDatos(forzar = false) {
       app: e ? e.sinActividad : undefined,
     };
   });
-  filas.sort((a, b) => TQ_ORDEN[a.estado] - TQ_ORDEN[b.estado] || (b.sinToque ?? 99) - (a.sinToque ?? 99) || String(a.c.nombre).localeCompare(String(b.c.nombre)));
+  // Por estado (rojo, amarillo, verde, en pausa) y, dentro de cada uno, en orden alfabético.
+  filas.sort((a, b) => TQ_ORDEN[a.estado] - TQ_ORDEN[b.estado] || String(a.c.nombre).localeCompare(String(b.c.nombre), 'es', { sensitivity: 'base' }));
   _tq.datos = { hoy, lunes, filas };
   _tq.leido = Date.now();
   return _tq.datos;
