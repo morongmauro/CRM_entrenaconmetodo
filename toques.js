@@ -85,7 +85,7 @@ async function tqDesdeEnlace(url) {
 // mismo día copias el seguimiento y abres su WhatsApp, cuenta 1, no 2.
 const TQ_DIAS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 async function tqDatos(forzar = false) {
-  if (!forzar && _tq.datos) return _tq.datos;
+  if (!forzar && _tq.datos && Date.now() - (_tq.leido || 0) < 120000) return _tq.datos;
   const hoy = fmt.hoy(), lunes = tqLunes(hoy), desde = evtSumarDias(hoy, -30), hace7 = evtSumarDias(hoy, -6);
   const leer = async (q) => { try { const { data, error } = await q; return error ? null : (data || []); } catch (e) { return null; } };
   const [msj, vids, notas, ses, resp, com, toq] = await Promise.all([
@@ -165,9 +165,16 @@ async function tqDatos(forzar = false) {
   });
   filas.sort((a, b) => TQ_ORDEN[a.estado] - TQ_ORDEN[b.estado] || (b.sinToque ?? 99) - (a.sinToque ?? 99) || String(a.c.nombre).localeCompare(String(b.c.nombre)));
   _tq.datos = { hoy, lunes, filas };
+  _tq.leido = Date.now();
   return _tq.datos;
 }
 window.tqFiltro = (k) => { _tq.filtro = k; rerenderView(); };
+// El contacto se gestiona aquí. En las demás pantallas (Equipo, Seguimiento)
+// queda solo «Último toque: hace N días», que trae esto mismo y lleva a Toques.
+window.tqUltimo = async (id) => {
+  try { const D = await tqDatos(); const f = D.filas.find(x => String(x.c.id) === String(id)); return f ? f.ultTuyo : undefined; } catch (e) { return undefined; }
+};
+window.tqUltimoHTML = (fecha, { prefijo = 'Último toque: ' } = {}) => `<a class="tq-ult-link" data-tq-ultimo-link href="#" onclick="event.preventDefault();event.stopPropagation();navigate('toques')" title="Ver en Toques">${prefijo}${tqCuando(fecha, fmt.hoy())}</a>`;
 
 // ── Acciones de cada fila ────────────────────────────────────────────────
 window.tqWhatsApp = async (id) => {
@@ -202,7 +209,6 @@ window.tqPedirVideo = async (id) => {
   _vt.filas = (await vtDb.lista(id)) || [];
   vtPedir();
 };
-window.tqFiltro = (k) => { _tq.filtro = k; rerenderView(); };
 
 // ── La vista: una fila por cliente ───────────────────────────────────────
 function tqCuando(f, hoy) { if (!f) return 'nunca'; const d = tqEntre(f, hoy); return d === 0 ? 'hoy' : d === 1 ? 'ayer' : `hace ${d} días`; }
@@ -292,6 +298,10 @@ routes.toques = async () => {
   .tq-cero{color:#C2BFB8}
   .tq-sub{font-size:11.5px;color:#7A7A7A;margin-top:2px}
   .tq-nw{white-space:nowrap}
+  .tq-ult-link{color:inherit;text-decoration:underline;text-decoration-color:#C9C5BB;text-underline-offset:3px;cursor:pointer}
+  .tq-ult-link:hover{text-decoration-color:currentColor}
+  .es-ult-t .tq-ult-link{color:#1F1F1F;font-weight:750}
+  .es-ult-tarde .tq-ult-link{color:#B5611A}
   .tq-ok{font-weight:700;color:#2F7F45}
   .tq-hecho{margin-top:4px;border:0;border-radius:999px;padding:4px 10px;font:inherit;font-size:11.5px;font-weight:700;cursor:pointer;background:#F1EFE9;color:#1F1F1F;white-space:nowrap}
   .tq-acc a.cp-btn{text-decoration:none;display:inline-block}

@@ -182,6 +182,23 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   await ctx.close();
 }
 {
+  console.log('\nÚltimo toque en Equipo y Seguimiento');
+  const { ctx, p, errores } = await abrir(1440, 900);
+  await p.evaluate(() => navigate('cartera')); await p.locator('[data-cp-fila]').first().waitFor({ timeout: 20000 });
+  await p.waitForTimeout(800);
+  const th = await p.locator('[data-cp-tabla] th').allInnerTexts();
+  const ana = (await p.locator('[data-cp-fila="c0"] [data-tq-ultimo-link]').innerText().catch(() => '')).trim();
+  const lucia = (await p.locator('[data-cp-fila="c2"] [data-tq-ultimo-link]').innerText().catch(() => '')).trim();
+  ok('Equipo · Estado: columna «Último toque» con lo mismo que Toques (Ana hoy, Lucía hace 20 días)', th.includes('Último toque') && ana === 'hoy' && lucia === 'hace 20 días', `${th} · ${ana} · ${lucia}`);
+  await p.locator('[data-cp-fila="c2"] [data-tq-ultimo-link]').click(); await p.waitForTimeout(1200);
+  ok('tocarlo lleva a Toques', await p.evaluate(() => _currentView === 'toques'));
+  await p.evaluate(() => segIr('c0')); await p.locator('#seg-semana [data-es-ultimo] [data-tq-ultimo-link]').waitFor({ timeout: 15000 }).catch(() => {});
+  const seg = (await p.locator('#seg-semana [data-es-ultimo]').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  ok('Seguimiento: «Último toque: hoy» con enlace a Toques', /Último toque: hoy/.test(seg) && await p.locator('#seg-semana [data-es-ultimo] [data-tq-ultimo-link]').count() === 1, seg);
+  ok('sin errores (último toque)', errores.length === 0, errores.join(' | '));
+  await ctx.close();
+}
+{
   console.log('\nenlace ?seg=');
   const { ctx, p, errores } = await abrir(1440, 900);
   await p.goto(BASE + '/?seg=c0'); await p.locator('#app-screen').waitFor({ state: 'visible', timeout: 20000 });

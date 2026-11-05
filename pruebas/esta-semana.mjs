@@ -197,7 +197,7 @@ ok('al copiar queda guardado solo: cliente, de dónde, título y el texto', reg.
 await p.waitForFunction(() => /Hoy/.test(document.querySelector('#seg-list [data-seg-li="c0"]')?.innerText || ''), null, { timeout: 5000 });
 ok('lista: Ana pasa a «Al día» con «Hoy»', /Al día/i.test(await p.locator('#seg-list').innerText()));
 const ult = await p.locator('#seg-semana [data-es-ultimo]').innerText();
-ok('la ficha dice «Último seguimiento: hoy» con el título', /Último seguimiento: hoy/.test(ult) && /A mitad de semana/.test(ult), ult);
+ok('la ficha dice «Último toque: hoy» (lo mismo que Toques)', /Último toque: hoy/.test(ult), ult);
 await p.locator(`#seg-semana [data-es-copiar="${iCurso}"]`).click();
 await p.waitForTimeout(400);
 ok('copiar el mismo mensaje otra vez el mismo día no lo duplica', await p.evaluate(() => TABLAS_FALSAS.seguimiento_mensajes.length) === 2);
@@ -300,7 +300,7 @@ await ck.p.locator('#seg-semana [data-seg-check="marcar"]').click();
 await ck.p.locator('#seg-semana [data-seg-check="hecho"]').waitFor({ timeout: 5000 });
 const m1 = await ck.p.evaluate(() => TABLAS_FALSAS.seguimiento_mensajes.map(x => ({ o: x.origen, c: x.cliente_id })));
 ok('check en Seguimiento: marca el seguimiento de hoy (queda en el historial)', m1.length === 1 && m1[0].o === 'manual' && m1[0].c === 'c0', JSON.stringify(m1));
-ok('check en Seguimiento: dice «Último seguimiento: hoy»', /Último seguimiento: hoy/.test(await ck.p.locator('#seg-semana [data-es-ultimo]').innerText()));
+ok('check en Seguimiento: dice «Último toque: hoy»', /Último toque: hoy/.test(await ck.p.locator('#seg-semana [data-es-ultimo]').innerText()));
 await ck.p.locator('#seg-semana').screenshot({ path: path.join(CAPTURAS, 'seguimiento-check.png'), clip: undefined });
 await ck.p.locator('#seg-semana [data-seg-check="hecho"]').click();
 await ck.p.locator('#seg-semana [data-seg-check="marcar"]').waitFor({ timeout: 5000 });

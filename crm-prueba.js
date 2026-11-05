@@ -451,19 +451,23 @@ routes.cartera = async () => {
   finCargando();
   const filtro = CP_FILTROS.find(x => x[0] === _cpr.filtro) || CP_FILTROS[0];
   const filas = D.filas.filter(filtro[2]);
+  // Último toque: lo mismo que dice Toques (donde se gestiona el contacto).
+  const T = typeof tqDatos === 'function' ? await tqDatos().catch(() => null) : null;
+  if (_currentView !== 'cartera' && _currentView !== 'equipo') return;
+  const ultToque = (f) => { const t = T && T.filas.find(x => String(x.c.id) === String(f.c.id)); return t ? t.ultTuyo : f.ultimoMsj; };
   const hace = (f) => { if (!f) return 'nunca'; const d = Math.round((new Date(fmt.hoy() + 'T12:00:00') - new Date(f + 'T12:00:00')) / 86400000); return d === 0 ? 'hoy' : d === 1 ? 'ayer' : `hace ${d} días`; };
   view.innerHTML = `${cpBanda()}
     <div class="mb-3"><h2 class="text-2xl font-bold text-slate-900">Cartera</h2><p class="text-sm text-slate-500">Todos tus clientes en una tabla: su estado, por qué, y lo que toca.</p></div>
     <div class="card lis-tabla-caja" data-cp-tabla style="padding-top:14px">
       <div class="flex gap-1.5 flex-wrap" style="padding:0 16px 10px">${CP_FILTROS.map(([k, t, fn]) => `<button type="button" class="chip ${_cpr.filtro === k ? 'active' : ''}" data-cp-filtro="${k}" onclick="cpFiltro('${k}')">${t} · ${D.filas.filter(fn).length}</button>`).join('')}</div>
-      <table class="lis-tabla"><thead><tr><th class="lis-nom">Cliente</th><th>Estado y por qué</th><th>Entreno (6 sem)</th><th>Comida (28 días)</th><th>Sin actividad</th><th>Último contacto</th><th>Próxima acción</th><th>Ciclo</th><th>Pago</th></tr></thead>
+      <table class="lis-tabla"><thead><tr><th class="lis-nom">Cliente</th><th>Estado y por qué</th><th>Entreno (6 sem)</th><th>Comida (28 días)</th><th>Sin actividad</th><th>Último toque</th><th>Próxima acción</th><th>Ciclo</th><th>Pago</th></tr></thead>
       <tbody>${filas.map(f => { const [bg, col, t] = CP_TONO[f.estado]; return `<tr data-cp-fila="${f.c.id}" onclick="cpSeguimiento('${f.c.id}')" style="cursor:pointer">
         <td class="lis-nom">${typeof entAvatar === 'function' ? entAvatar(f.c.nombre) : ''}<b>${escapeHtml(f.c.nombre)}</b></td>
         <td style="min-width:240px;max-width:320px"><span class="cp-pill" style="background:${bg};color:${col}">${t}</span><div style="font-size:12.5px;color:#55565B;margin-top:4px;line-height:1.35">${f.pausa && typeof ausRango === 'function' ? `${ausMotivo(f.pausa.motivo)} · ${ausRango(f.pausa)}${f.senales.length ? ' · ' : ''}` : ''}${f.senales.slice(0, 2).map(s => s.texto.replace(/<[^>]+>/g, '')).join(' · ') || (f.pausa ? '' : 'Todo en orden')}</div></td>
         <td>${cpBarras(f.semanas)}</td>
         <td>${f.eng ? `${f.eng.comida28} días` : '—'}</td>
         <td>${f.eng ? (f.eng.sinActividad == null ? 'nunca' : f.eng.sinActividad === 0 ? 'hoy' : `${f.eng.sinActividad} días`) : '—'}</td>
-        <td>${hace(f.ultimoMsj)}</td>
+        <td>${typeof tqUltimoHTML === 'function' ? tqUltimoHTML(ultToque(f), { prefijo: '' }) : hace(ultToque(f))}</td>
         <td><span style="font-weight:600;font-size:13px">${escapeHtml(f.proxima)}</span></td>
         <td>${f.ciclo ? `${escapeHtml(f.ciclo.nombre)}<div style="font-size:12px;color:#737373">${f.ciclo.queda} días</div>` : '—'}</td>
         <td>${f.pago === undefined ? '—' : f.pago && f.pago.due ? '<span style="color:#B2402B;font-weight:700">Vencido</span>' : 'Al día'}</td></tr>`; }).join('')}</tbody></table>

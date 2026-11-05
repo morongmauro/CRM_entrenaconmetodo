@@ -1237,11 +1237,17 @@ window.segPintarUltimo = async (c) => {
     caja.innerHTML = `<div class="es-ult-fila"><span class="es-ult-t" data-es-ult-dias="">Aún no hay seguimientos guardados. Se guardan solos cuando copias un mensaje, o márcalo a mano.</span>${check}</div>`;
     return;
   }
-  const u = hist[0], h = segHace(u.fecha);
+  const u = hist[0];
+  // El contacto se gestiona en Toques: aquí, solo su último toque (lo mismo
+  // que dice Toques) con el enlace.
+  const ultT = typeof tqUltimo === 'function' ? await tqUltimo(c.id) : undefined;
+  if (!caja.isConnected) return;
+  const fT = ultT !== undefined ? ultT : u.fecha;
+  const h = fT ? segHace(fT) : { d: 999, txt: 'nunca' };
   const tono = h.d >= SEG_DIAS_AVISO ? ' es-ult-tarde' : '';
   caja.innerHTML = `
     <div class="es-ult-fila">
-      <span class="es-ult-t${tono}" data-es-ult-dias="${h.d}">Último seguimiento: <b>${h.txt}</b> (${esFechaCorta(String(u.fecha).slice(0, 10))})${u.titulo ? ` · ${escapeHtml(u.titulo)}` : ''}</span>
+      <span class="es-ult-t${tono}" data-es-ult-dias="${h.d}">${typeof tqUltimoHTML === 'function' && fT ? tqUltimoHTML(fT) : `Último toque: <b>${h.txt}</b>`}</span>
       ${check}
       <button type="button" class="es-ult-btn" data-es-ult-ver onclick="this.closest('[data-es-ultimo]').classList.toggle('abierto')">Lo que le dijiste</button>
     </div>
