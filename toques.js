@@ -184,6 +184,14 @@ window.tqResponder = (id) => {
   if (f && f.suyoPor === 'app' && routes.bandeja) return navigate('bandeja');
   return tqWhatsApp(id);
 };
+// «Marcar hecho»: el seguimiento de esta semana, hecho a mano (le escribiste
+// directo o lo viste en persona). Es la misma marca de su Seguimiento.
+window.tqSegHecho = async (id) => {
+  if (typeof segMarcar !== 'function') return;
+  await segMarcar(id, true);
+  _tq.datos = null;
+  if (_currentView === 'toques') rerenderView();
+};
 window.tqMeEscribio = async (id) => {
   if (await tqRegistrar(id, 'me_escribio')) { toast('Listo: te escribió hoy'); rerenderView(); }
   else toast(_tq.sinTabla ? 'Falta correr migraciones/toques-cliente.sql en Supabase' : 'No pude guardarlo');
@@ -226,7 +234,7 @@ routes.toques = async () => {
   const dia = (f) => TQ_DIAS[(new Date(f + 'T12:00:00Z').getUTCDay() + 6) % 7];
   const celdaSeg = (f) => f.estado === 'pausa' ? '<span class="tq-cero">—</span>'
     : f.seguimiento ? `<span class="tq-ok">Hecho</span><div class="tq-sub">${['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'][TQ_DIAS.indexOf(dia(f.seguimiento))]}</div>`
-    : '<span class="tq-falta">Falta</span>';
+    : `<span class="tq-falta">Falta</span><div><button type="button" class="tq-hecho" data-tq-seg-hecho onclick="tqSegHecho('${f.c.id}')">Marcar hecho</button></div>`;
   const celdaVid = (f) => {
     const l = [f.videos.porRevisar ? `<b>${f.videos.porRevisar} por revisar</b>` : '', f.videos.porLlegar ? `${f.videos.porLlegar} por llegar` : '', f.videos.pedidosSemana ? `<span class="tq-sub">${f.videos.pedidosSemana} pedido${f.videos.pedidosSemana === 1 ? '' : 's'} esta semana</span>` : ''].filter(Boolean);
     return l.length ? l.join('<br>') : '<span class="tq-cero">—</span>';
@@ -244,7 +252,7 @@ routes.toques = async () => {
       <td data-tq="escribio">${celdaEscribio(f)}</td>
       <td data-tq="su-semana"><span class="tq-nw">${f.entrenos} entreno${f.entrenos === 1 ? '' : 's'}</span>${app(f)}</td>
       <td><div class="tq-acc">
-        ${f.debe ? `<button type="button" class="cp-btn" data-tq-responder onclick="tqResponder('${f.c.id}')">Responder</button>` : `<button type="button" class="cp-btn" onclick="cpSeguimiento('${f.c.id}')">Seguimiento</button>`}
+        ${f.debe ? `<button type="button" class="cp-btn" data-tq-responder onclick="tqResponder('${f.c.id}')">Responder</button>` : `<a class="cp-btn" data-tq-seg-pestana href="?seg=${encodeURIComponent(f.c.id)}" target="_blank" rel="noopener" title="Abre su seguimiento en otra pestaña">Seguimiento</a>`}
         <button type="button" class="cp-btn s" onclick="tqPedirVideo('${f.c.id}')">Pedir video</button>
         <button type="button" class="cp-btn s" data-tq-wa onclick="tqWhatsApp('${f.c.id}')">WhatsApp</button>
         <button type="button" class="cp-btn s" data-tq-me-escribio onclick="tqMeEscribio('${f.c.id}')">Me escribió</button>
@@ -268,7 +276,7 @@ routes.toques = async () => {
     <details class="tq-que mt-3" data-tq-leyenda open><summary>Qué cuenta en cada columna</summary>
       <div class="tq-que-g">
         <div><b>Tus toques</b>Un toque es un día en que le escribiste algo: seguimiento, pedirle video, responder su nota o abrir su WhatsApp desde el CRM. Si el mismo día haces dos cosas, cuenta 1. En la semana: <span class="tq-dia t">L</span> lo tocaste ese día, <span class="tq-dia s">L</span> te escribió.</div>
-        <div><b>Seguimiento semanal</b>Hecho si esta semana le mandaste el seguimiento (lo copiaste desde el CRM o tocaste «Marcar seguimiento»).</div>
+        <div><b>Seguimiento semanal</b>Hecho si esta semana le mandaste el seguimiento (lo copiaste desde el CRM) o tocaste «Marcar hecho». El botón «Seguimiento» lo abre en otra pestaña.</div>
         <div><b>Te escribió</b>Una nota suya en la app, o tocaste «Me escribió» porque te escribió por WhatsApp. En rojo si todavía no le respondes; abrir su WhatsApp o responderle en la app cuenta como respuesta.</div>
         <div><b>Semáforo</b><b class="tq-r">Rojo</b>: le debes respuesta, o 15 días o más sin un toque tuyo. <b class="tq-a">Amarillo</b>: 8 a 14 días sin toque, o 4 días o más con toque en los últimos 7 (mejor esperar). <b class="tq-v">Verde</b>: bien.</div>
       </div>
@@ -285,6 +293,8 @@ routes.toques = async () => {
   .tq-sub{font-size:11.5px;color:#7A7A7A;margin-top:2px}
   .tq-nw{white-space:nowrap}
   .tq-ok{font-weight:700;color:#2F7F45}
+  .tq-hecho{margin-top:4px;border:0;border-radius:999px;padding:4px 10px;font:inherit;font-size:11.5px;font-weight:700;cursor:pointer;background:#F1EFE9;color:#1F1F1F;white-space:nowrap}
+  .tq-acc a.cp-btn{text-decoration:none;display:inline-block}
   .tq-falta{font-weight:700;color:#8A6410}
   .tq-rojo{font-weight:700;color:#B2402B}
   .tq-ch{display:inline-block;font-size:10.5px;font-weight:700;background:#F1EFE9;color:#555;border-radius:999px;padding:1px 7px;margin:3px 3px 0 0}

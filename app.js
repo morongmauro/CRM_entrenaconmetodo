@@ -2835,6 +2835,15 @@ async function volverDondeEstaba() {
   // Las secciones (entrenamiento.js y las demás) cargan después de este
   // archivo: con la sesión guardada, esto puede llegar antes de que existan.
   if (document.readyState === 'loading') await new Promise(r => document.addEventListener('DOMContentLoaded', r, { once: true }));
+  // «?seg=<cliente>»: abrir directo su Seguimiento (lo usa Toques para
+  // abrirlo en otra pestaña). La dirección se limpia para que recargar no
+  // vuelva a saltar ahí.
+  const segPedido = new URLSearchParams(location.search).get('seg');
+  if (segPedido && typeof window.segIr === 'function') {
+    try { history.replaceState(null, '', location.pathname); } catch (e) {}
+    window.segIr(segPedido);
+    return;
+  }
   // El CRM abre en «Hoy» (la cola del día, crm-prueba.js).
   const vista = g && routes[g.vista] ? g.vista : (routes.hoy ? 'hoy' : (enMovil() ? 'seguimiento' : 'dashboard'));
   await navigate(vista);

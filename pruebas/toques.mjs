@@ -126,7 +126,7 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   ok(`${tag} · sin el inactivo`, !/Pedro/.test(await p.locator('[data-tq-tabla]').innerText()));
   const celda = async (c, k) => (await p.locator(`tr[data-tq-cliente="${c}"] [data-tq="${k}"]`).innerText()).trim();
   ok(`${tag} · Sofía: seguimiento semanal hecho`, /^Hecho/.test(await celda('c5', 'seguimiento')));
-  ok(`${tag} · Marta: le falta el seguimiento semanal`, await celda('c4', 'seguimiento') === 'Falta');
+  ok(`${tag} · Marta: le falta el seguimiento semanal`, /^Falta/.test(await celda('c4', 'seguimiento')));
   ok(`${tag} · Ana: seguimiento y respuesta el mismo día = 1 toque`, (await p.locator('tr[data-tq-cliente="c0"] [data-tq-dias]').innerText()).trim() === '1 de 7 días' && /Seguimiento/.test(await celda('c0', 'semana')) && /Respuesta/.test(await celda('c0', 'semana')), await celda('c0', 'semana'));
   ok(`${tag} · Ana: el día de hoy marcado en su semana`, await p.locator('tr[data-tq-cliente="c0"] .tq-dia.t').count() === 1);
   ok(`${tag} · Ana: te escribió y le respondiste`, /respondido/.test(await celda('c0', 'escribio')) && /^1 entreno/.test(await celda('c0', 'su-semana')));
@@ -138,6 +138,10 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   await p.locator('[data-tq-filtro="sinContacto"]').click(); await p.waitForTimeout(600);
   const sc = await p.locator('tr[data-tq-cliente]').evaluateAll(els => els.map(e => e.dataset.tqCliente));
   ok(`${tag} · filtro «sin contacto»: Lucía y Marta sí, Ana no`, sc.includes('c2') && sc.includes('c4') && !sc.includes('c0'), JSON.stringify(sc));
+  await p.locator('[data-tq-filtro="todos"]').first().click(); await p.waitForTimeout(600);
+  ok(`${tag} · «Seguimiento» abre en otra pestaña (?seg=)`, await p.locator('tr[data-tq-cliente="c4"] [data-tq-seg-pestana]').evaluate(a => a.target === '_blank' && /\?seg=c4$/.test(a.getAttribute('href'))));
+  await p.locator('tr[data-tq-cliente="c4"] [data-tq-seg-hecho]').click(); await p.waitForTimeout(1500);
+  ok(`${tag} · «Marcar hecho»: Marta pasa a «Hecho» y queda guardado`, /^Hecho/.test(await celda('c4', 'seguimiento')) && (await p.evaluate(() => window.TABLAS_FALSAS.seguimiento_mensajes.filter(m => m.cliente_id === 'c4' && m.origen === 'manual').length)) === 1, await celda('c4', 'seguimiento'));
   if (tag === 'ancho') { await p.locator('[data-tq-filtro="todos"]').first().click(); await p.waitForTimeout(600); await p.screenshot({ path: path.join(CAPTURAS, 'toques-semana.png'), fullPage: true }); }
   await p.locator('[data-tq-filtro="todos"]').first().click(); await p.waitForTimeout(600);
   const frio = (await p.locator('tr[data-tq-cliente="c2"]').innerText()).replace(/\s+/g, ' ');
@@ -175,6 +179,15 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   await p.screenshot({ path: path.join(CAPTURAS, `toques-${tag}.png`), fullPage: tag === 'telefono' });
   if (tag === 'telefono') ok(`${tag} · sin scroll de lado en la página`, await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   ok(`${tag} · sin errores`, errores.length === 0, errores.join(' | '));
+  await ctx.close();
+}
+{
+  console.log('\nenlace ?seg=');
+  const { ctx, p, errores } = await abrir(1440, 900);
+  await p.goto(BASE + '/?seg=c0'); await p.locator('#app-screen').waitFor({ state: 'visible', timeout: 20000 });
+  await p.waitForTimeout(2500);
+  ok('?seg=c0 abre el Seguimiento de Ana y limpia la dirección', await p.evaluate(() => _currentView === 'seguimiento' && String(_selectedClienteId) === 'c0' && !location.search), await p.evaluate(() => `${_currentView} ${_selectedClienteId} ${location.search}`));
+  ok('sin errores (enlace)', errores.length === 0, errores.join(' | '));
   await ctx.close();
 }
 await b.close(); servidor.close();
