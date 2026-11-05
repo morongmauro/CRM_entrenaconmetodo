@@ -20,6 +20,7 @@
  "dialogos": "<svg width=\"20\" height=\"20\" fill=\"currentColor\" viewBox=\"0 0 256 256\"><path d=\"M216,80H184V48a16,16,0,0,0-16-16H40A16,16,0,0,0,24,48V176a8,8,0,0,0,13,6.22L72,154V184a16,16,0,0,0,16,16h93.59L219,230.22a8,8,0,0,0,5,1.78,8,8,0,0,0,8-8V96A16,16,0,0,0,216,80ZM66.55,137.78,40,159.25V48H168v88H71.58A8,8,0,0,0,66.55,137.78ZM216,207.25l-26.55-21.47a8,8,0,0,0-5-1.78H88V152h80a16,16,0,0,0,16-16V96h32Z\"></path></svg>",
  "enganche": "<svg width=\"20\" height=\"20\" fill=\"currentColor\" viewBox=\"0 0 256 256\"><path d=\"M240,128a8,8,0,0,1-8,8H204.94l-37.78,75.58A8,8,0,0,1,160,216h-.4a8,8,0,0,1-7.08-5.14L95.35,60.76,63.28,131.31A8,8,0,0,1,56,136H24a8,8,0,0,1,0-16H50.85L88.72,36.69a8,8,0,0,1,14.76.46l57.51,151,31.85-63.71A8,8,0,0,1,200,120h32A8,8,0,0,1,240,128Z\"></path></svg>",
  "listado": "<svg width=\"20\" height=\"20\" fill=\"currentColor\" viewBox=\"0 0 256 256\"><path d=\"M224,128a8,8,0,0,1-8,8H104a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128ZM104,72H216a8,8,0,0,0,0-16H104a8,8,0,0,0,0,16ZM216,184H104a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16ZM56,116a12,12,0,1,0,12,12A12,12,0,0,0,56,116Zm0-64A12,12,0,1,0,68,64,12,12,0,0,0,56,52Zm0,128a12,12,0,1,0,12,12A12,12,0,0,0,56,180Z\"></path></svg>",
+ "equipo": "<svg width=\"20\" height=\"20\" fill=\"currentColor\" viewBox=\"0 0 256 256\"><path d=\"M224,128a8,8,0,0,1-8,8H104a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128ZM104,72H216a8,8,0,0,0,0-16H104a8,8,0,0,0,0,16ZM216,184H104a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16ZM56,116a12,12,0,1,0,12,12A12,12,0,0,0,56,116Zm0-64A12,12,0,1,0,68,64,12,12,0,0,0,56,52Zm0,128a12,12,0,1,0,12,12A12,12,0,0,0,56,180Z\"></path></svg>",
  "pagos": "<svg width=\"20\" height=\"20\" fill=\"currentColor\" viewBox=\"0 0 256 256\"><path d=\"M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm40-68a28,28,0,0,1-28,28h-4v8a8,8,0,0,1-16,0v-8H104a8,8,0,0,1,0-16h36a12,12,0,0,0,0-24H116a28,28,0,0,1,0-56h4V72a8,8,0,0,1,16,0v8h16a8,8,0,0,1,0,16H116a12,12,0,0,0,0,24h24A28,28,0,0,1,168,148Z\"></path></svg>",
  "pendientes": "<svg width=\"20\" height=\"20\" fill=\"currentColor\" viewBox=\"0 0 256 256\"><path d=\"M224,48V208a16,16,0,0,1-16,16H136a8,8,0,0,1,0-16h72V48H48v96a8,8,0,0,1-16,0V48A16,16,0,0,1,48,32H208A16,16,0,0,1,224,48ZM125.66,154.34a8,8,0,0,0-11.32,0L64,204.69,45.66,186.34a8,8,0,0,0-11.32,11.32l24,24a8,8,0,0,0,11.32,0l56-56A8,8,0,0,0,125.66,154.34Z\"></path></svg>",
  "clientes": "<svg width=\"20\" height=\"20\" fill=\"currentColor\" viewBox=\"0 0 256 256\"><path d=\"M117.25,157.92a60,60,0,1,0-66.5,0A95.83,95.83,0,0,0,3.53,195.63a8,8,0,1,0,13.4,8.74,80,80,0,0,1,134.14,0,8,8,0,0,0,13.4-8.74A95.83,95.83,0,0,0,117.25,157.92ZM40,108a44,44,0,1,1,44,44A44.05,44.05,0,0,1,40,108Zm210.14,98.7a8,8,0,0,1-11.07-2.33A79.83,79.83,0,0,0,172,168a8,8,0,0,1,0-16,44,44,0,1,0-16.34-84.87,8,8,0,1,1-5.94-14.85,60,60,0,0,1,55.53,105.64,95.83,95.83,0,0,1,47.22,37.71A8,8,0,0,1,250.14,206.7Z\"></path></svg>",
@@ -57,8 +58,8 @@
   // Ajustes al final. Los módulos añaden sus botones cuando cargan; aquí solo
   // se ordenan y se les pone el título del grupo (no cambia lo que hacen).
   const GRUPOS = [
-    ['Hoy', ['hoy', 'cartera', 'toques', 'bandeja', 'asistente', 'dashboard']],
-    ['Clientes', ['clientes', 'listado', 'enganche', 'seguimiento', 'dialogos', 'entrenamiento', 'nutricion', 'composicion', 'aprendizaje']],
+    ['Hoy', ['hoy', 'toques', 'bandeja', 'asistente', 'dashboard', 'cartera']],
+    ['Clientes', ['equipo', 'clientes', 'seguimiento', 'listado', 'enganche', 'dialogos', 'entrenamiento', 'nutricion', 'composicion', 'aprendizaje']],
     ['Negocio', ['pagos', 'pendientes', 'negocio', 'comunidad']],
     ['', ['ajustes', 'ia']],
   ];
@@ -69,8 +70,12 @@
     // Inicio ya no va en el menú (5 nov): «Hoy» es la lista de pendientes; los
     // cobros están en Pagos y el equipo y la encuesta en Mi negocio. El botón
     // sigue en el HTML (los módulos lo clonan para crear los suyos), oculto.
-    const ini = nav.querySelector(':scope > .nav-item[data-view="dashboard"]');
-    if (ini && ini.style.display !== 'none') ini.style.setProperty('display', 'none', 'important');
+    // Cartera, Listado y Enganche quedaron dentro de «Equipo» (equipo.js),
+    // como vistas: sus botones también se ocultan.
+    ['dashboard', 'cartera', 'listado', 'enganche'].forEach(v => {
+      const b = nav.querySelector(`:scope > .nav-item[data-view="${v}"]`);
+      if (b && b.style.display !== 'none') b.style.setProperty('display', 'none', 'important');
+    });
     const botones = [...nav.querySelectorAll(':scope > .nav-item[data-view]')];
     const conocidos = new Set(GRUPOS.flatMap(g => g[1]));
     const orden = [];
