@@ -1,5 +1,7 @@
 // Videos de YouTube rotos: la app los revisa sola una vez por semana y, si
-// alguno no se ve, Seguimiento lo avisa arriba con el botón para arreglarlos.
+// alguno no se ve, Entrenamiento → Galería lo avisa arriba con el botón para
+// arreglarlos. Es de todos los clientes: en Seguimiento (que es de un
+// cliente) ya no sale.
 //
 //   NODE_PATH=/ruta/node_modules node pruebas/videos-rotos-seguimiento.mjs
 import { createRequire } from 'module';
@@ -67,7 +69,7 @@ async function abrir(ancho, alto, estados) {
   await p.goto(BASE + '/');
   await p.locator('#app-screen').waitFor({ state: 'visible', timeout: 20000 });
   await p.waitForTimeout(800);
-  await p.evaluate(() => { try { localStorage.setItem('crm:segModo', 'semana'); } catch (e) {} navigate('seguimiento'); });
+  await p.evaluate(() => { _ent.tab = 'ejercicios'; _ent.clienteId = null; navigate('entrenamiento'); });
   await p.locator('#seg-videos-rotos').waitFor({ state: 'attached', timeout: 15000 });
   await p.waitForTimeout(1500);
   return { ctx, p, errores };
@@ -78,9 +80,14 @@ const FOTO = process.env.FOTO || '';
   const { ctx, p, errores } = await abrir(1440, 900, ROTOS);
   if (FOTO) await p.screenshot({ path: path.join(CAPTURAS, `videos-rotos-${FOTO}.png`) });
   const t = await p.locator('[data-vr-aviso]').innerText().catch(() => '');
-  ok('Seguimiento avisa arriba cuántos no se ven en la app', /2 videos de YouTube no se ven en la app/.test(t), t);
+  ok('la galería avisa arriba cuántos no se ven en la app', /2 videos de YouTube no se ven en la app/.test(t), t);
   ok('…con los ejercicios (los que encontró la revisión semanal y el botón)', /Bench Press/.test(t) && /Barbell Row/.test(t) && !/Back Squat/.test(t), t);
-  ok('va antes del seguimiento del cliente', await p.evaluate(() => { const a = document.getElementById('seg-videos-rotos'), c = document.getElementById('seg-content'); return !!a && !!c && !!(a.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING); }));
+  ok('va arriba de la galería', await p.evaluate(() => { const a = document.getElementById('seg-videos-rotos'), c = document.getElementById('ent-body'); return !!a && !!c && !!(a.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING); }));
+  await p.evaluate(() => { try { localStorage.setItem('crm:segModo', 'semana'); } catch (e) {} navigate('seguimiento'); });
+  await p.locator('#seg-content').waitFor({ timeout: 15000 }); await p.waitForTimeout(1500);
+  ok('Seguimiento (de un cliente) ya no lo muestra', (await p.locator('[data-vr-aviso]').count()) === 0);
+  await p.evaluate(() => { _ent.tab = 'ejercicios'; _ent.clienteId = null; navigate('entrenamiento'); });
+  await p.locator('[data-vr-revisar]').waitFor({ timeout: 15000 });
   await p.locator('[data-vr-revisar]').click();
   await p.waitForTimeout(2000);
   ok('«Revisarlos» lleva a la galería, filtrada a los que tienen problema', await p.evaluate(() => _currentView === 'entrenamiento' && _ent.tab === 'ejercicios' && _ent.filtros.video === 'yt'));

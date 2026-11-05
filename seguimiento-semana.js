@@ -1145,7 +1145,7 @@ async function esPintarFranja(c, modo) {
     ${partes.join('')}
     ${det.length ? `<span class="es-franja-d">${det.join(' · ')}</span>` : ''}
     ${ult ? `<span class="es-franja-d">${ult}</span>` : ''}
-    <button type="button" class="es-franja-btn" onclick="segIr('${escapeHtml(String(c.id))}')">${modo === 'ficha' ? 'Hacer seguimiento' : 'Ir a Seguimiento'}</button>`;
+    ${caja.closest && caja.closest('#split-b') ? '' : `<button type="button" class="es-franja-btn" onclick="segIr('${escapeHtml(String(c.id))}')">${modo === 'ficha' ? 'Hacer seguimiento' : 'Ir a Seguimiento'}</button>`}`;
 }
 
 // La ficha: la franja + las tarjetas que llevan a cada pestaña.

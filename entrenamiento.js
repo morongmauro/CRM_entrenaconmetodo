@@ -577,9 +577,22 @@ function entGuardarEstado() {
 window.addEventListener('pagehide', entGuardarEstado);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') entGuardarEstado(); });
 
+// En la doble pantalla de Seguimiento el panel es de UN cliente: solo su
+// entrenamiento (calendario, rutinas, ciclos). Lo de todos —ciclos que vencen
+// de otros clientes, plantillas, galería, videos de YouTube— vive en
+// Entrenamiento, no en el panel del cliente.
+const entEnPanelCliente = () => !!(_ent.clienteId && view && view.closest && view.closest('#split-b'));
+
 routes.entrenamiento = async () => {
   cargando('Cargando entrenamiento…');
   await entDb.musculos();
+
+  if (entEnPanelCliente()) {
+    if (!_ent.rutinaId) _ent.tab = 'clientes';
+    view.innerHTML = '<div id="ent-body" data-ent-panel-cliente></div>';
+    await entVistaClientes();
+    return;
+  }
 
   // Todo empieza por el cliente: ahí están su calendario, sus rutinas y sus
   // ciclos. Lo demás son herramientas: qué ciclos vencen, las plantillas y
@@ -600,6 +613,8 @@ routes.entrenamiento = async () => {
     </div>
     <!-- Aviso de ciclos por vencer (ciclos-vencen.js); vacío si no hay nada. -->
     ${_ent.tab !== 'ciclos' ? '<div id="cic-aviso"></div>' : ''}
+    <!-- Los videos de YouTube que no se ven en la app (videos-rotos.js): en la galería. -->
+    ${_ent.tab === 'ejercicios' && typeof vrCajaHTML === 'function' ? vrCajaHTML() : ''}
     <div class="em-seg mb-5">
       ${tabs.map(([id, lab]) => `
         <button class="chip ${pestana === id ? 'active' : ''}" data-ent-tab="${id}" onclick="entTab('${id}')">${lab}</button>
@@ -609,6 +624,7 @@ routes.entrenamiento = async () => {
   `;
 
   if (typeof cicAviso === 'function' && _ent.tab !== 'ciclos') cicAviso('cic-aviso');
+  if (_ent.tab === 'ejercicios' && typeof vrPintar === 'function') vrPintar();
   if (_ent.tab === 'ejercicios') await entVistaEjercicios();
   else if (_ent.tab === 'rutinas') await entVistaRutinas();
   else if (_ent.tab === 'ciclos' && typeof cicVista === 'function') await cicVista();
@@ -3341,7 +3357,7 @@ async function entVistaClientes() {
   const cabecera = `
     <div class="flex justify-between items-start mb-4 gap-2 flex-wrap">
       <div>
-        <button class="btn btn-ghost btn-sm mb-1" onclick="entVerCliente(null)">← Todos los clientes</button>
+        ${entEnPanelCliente() ? '' : '<button class="btn btn-ghost btn-sm mb-1" onclick="entVerCliente(null)">← Todos los clientes</button>'}
         <div class="font-bold text-lg text-slate-900">${escapeHtml(cliente?.nombre || 'Cliente')}</div>
         <div class="text-xs text-slate-500">
           ${(cliente?.dias_entreno || []).length ? `Su ficha dice que entrena: ${cliente.dias_entreno.join(' · ')}` : 'Sin días de entreno definidos en su ficha'}
