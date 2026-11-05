@@ -4237,7 +4237,7 @@ async function renderSegFocus(clientes, allSegs, ultPorCliente) {
     }).catch(() => {});
     return;
   }
-  if (typeof vtPanel === 'function') vtPanel('#seg-vt', cliente.id);
+  if (typeof vtResumen === 'function') vtResumen('#seg-vt', cliente.id);
   if (typeof pfPanel === 'function') pfPanel('#seg-pf', cliente.id);
   esPintar(cliente);
 }

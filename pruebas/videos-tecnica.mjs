@@ -106,9 +106,11 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   await a.ctx.grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
   await p.evaluate(() => { fmt.hoy = () => '2026-09-10'; return verEntrenamientoCliente('c0'); });
   await p.waitForSelector('[data-traer-btn]', { timeout: 15000 });
-  await p.evaluate((id) => { _ent.faseId = id; return entSubtab('videos'); }, c18.id);
-  await p.waitForSelector('[data-vt-panel]', { timeout: 15000 });
-  ok(`${tag} · la pestaña «Videos de técnica» del cliente arranca vacía y ofrece pedirlos`, /Todavía no le has pedido videos/.test(await p.locator('[data-vt-panel]').innerText()));
+  ok(`${tag} · Entrenamiento ya no tiene la pestaña «Videos de técnica» (se revisan en Toques)`, !/Videos de técnica/.test(await p.locator('#view').innerText()));
+  // Se revisan en la ventana del cliente (la que abre Toques y el Seguimiento).
+  await p.evaluate(() => vtAbrir('c0'));
+  await p.waitForSelector('[data-vt-modal] [data-vt-panel]', { timeout: 15000 });
+  ok(`${tag} · la ventana de videos del cliente arranca vacía y ofrece pedirlos`, /Todavía no le has pedido videos/.test(await p.locator('[data-vt-panel]').innerText()));
 
   // Pedir dos de su rutina.
   await p.locator('[data-vt-pedir]').click();
@@ -119,6 +121,7 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   if (tag === 'ancho') await p.locator('#modal-content').screenshot({ path: path.join(CAPTURAS, 'videos-pedir.png') }).catch(() => {});
   await p.locator('[data-vt-confirmar]').click();
   await p.waitForSelector('[data-vt-estado="pedido"]', { timeout: 10000 });
+  ok(`${tag} · al pedir, vuelve a la ventana de videos`, await p.locator('[data-vt-modal] [data-vt-panel]').count() === 1);
   let f = await filas(p);
   ok(`${tag} · pedir guarda los dos como «por llegar», con su ejercicio`, f.length === 2 && f.every(x => x.estado === 'pedido' && x.ejercicio_id && x.cliente_id === 'c0'), JSON.stringify(f));
   const msg = await p.evaluate(() => navigator.clipboard.readText().catch(() => ''));
@@ -132,6 +135,7 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   await p.fill('#vt-nota', 'Rodillas hacia adentro al subir');
   await p.locator('[data-vt-guardar-mejorar]').click();
   await p.waitForSelector('[data-vt-estado="mejorar"]', { timeout: 10000 });
+  ok(`${tag} · después de la nota de «A mejorar», vuelve a la ventana de videos`, await p.locator('[data-vt-modal] [data-vt-panel]').count() === 1);
   ok(`${tag} · «a mejorar» muestra la nota y el botón para pedirlo de nuevo`, /Rodillas hacia adentro/.test(await p.locator(`[data-vt-fila="${x2.id}"]`).innerText()) && await p.locator(`[data-vt-fila="${x2.id}"] [data-vt-repedir]`).count() === 1);
   ok(`${tag} · las cuentas dicen 1 bien y 1 a mejorar`, /Bien · 1/.test(await p.locator('[data-vt-cuenta="bien"]').innerText()) && /A mejorar · 1/.test(await p.locator('[data-vt-cuenta="mejorar"]').innerText()));
   if (tag === 'ancho') await p.locator('[data-vt-panel]').screenshot({ path: path.join(CAPTURAS, 'videos-panel.png') }).catch(() => {});
@@ -145,8 +149,14 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   // En Seguimiento, el mismo panel para ese cliente.
   // (En el teléfono Seguimiento abre en la lista: se entra al cliente.)
   await p.evaluate(() => { _selectedClienteId = 'c0'; _segMovil = 'cliente'; return navigate('seguimiento'); });
-  await p.waitForSelector('[data-seg-videos] [data-vt-panel]', { timeout: 15000 });
-  ok(`${tag} · en Seguimiento sale lo mismo (1 bien, 1 por llegar)`, /Bien · 1/.test(await p.locator('[data-seg-videos] [data-vt-cuenta="bien"]').innerText()) && /Por llegar · 1/.test(await p.locator('[data-seg-videos] [data-vt-cuenta="pedido"]').innerText()));
+  await p.evaluate(() => vtCerrar());
+  await p.waitForSelector('[data-seg-videos] [data-vt-resumen]', { timeout: 15000 });
+  const res = (await p.locator('[data-seg-videos] [data-vt-resumen]').innerText()).replace(/\s+/g, ' ');
+  ok(`${tag} · en Seguimiento solo el resumen (1 por llegar, 1 bien… ) con «Revisar» y «+ Pedir videos»`, /1 por llegar/.test(res) && /Revisar/.test(res) && /Pedir videos/.test(res) && await p.locator('[data-seg-videos] [data-vt-fila]').count() === 0, res);
+  await p.locator('[data-seg-videos] [data-vt-revisar]').click();
+  await p.waitForSelector('[data-vt-modal] [data-vt-panel]', { timeout: 10000 });
+  ok(`${tag} · «Revisar» abre la ventana de videos`, await p.locator('[data-vt-modal] [data-vt-fila]').count() >= 2);
+  await p.evaluate(() => vtCerrar());
 
   // La etiqueta en cada ejercicio de la rutina (Entrenamiento → el cliente → Rutinas).
   await p.evaluate(() => verEntrenamientoCliente('c0'));
@@ -177,16 +187,13 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   f = await filas(p);
   ok(`${tag} · desde el 🎥 de un ejercicio sin pedir se pide ahí mismo`, f.filter(x => x.estado === 'pedido').length === 2, JSON.stringify(f.map(x => x.estado)));
   if (tag === 'ancho') await p.locator('.ent-tabla-ejs').first().screenshot({ path: path.join(CAPTURAS, 'videos-etiquetas.png') }).catch(() => {});
-  // «Lo que entrenó» también lleva el panel del cliente.
+  // «Lo que entrenó» ya no repite el panel, ni la lista de clientes la lista general.
   await p.evaluate(() => entSubtab('sesiones'));
-  await p.waitForSelector('[data-ses-videos] [data-vt-panel]', { timeout: 15000 });
-  ok(`${tag} · en «Lo que entrenó» va el panel de videos del cliente (los dos por llegar)`, /Por llegar · 2/.test(await p.locator('[data-ses-videos] [data-vt-cuenta="pedido"]').innerText()));
-  // Y en la lista de clientes de Entrenamiento, lo pendiente de todos.
+  await p.waitForTimeout(1200);
+  ok(`${tag} · «Lo que entrenó» ya no repite los videos`, await p.locator('[data-ses-videos]').count() === 0);
   await p.evaluate(() => entVerCliente(null));
-  await p.waitForSelector('[data-vt-general]', { timeout: 15000 });
-  const gen = await p.locator('[data-vt-general]').innerText();
-  ok(`${tag} · la lista general dice quién debe qué: Ana Pérez, los dos por llegar y, en el repetido, que antes estuvo nada bien y por qué`, /Ana Pérez/.test(gen) && /Por llegar · 2/.test(gen) && /antes nada bien: Espalda redondeada/.test(gen), gen.slice(0, 300));
-  if (tag === 'ancho') await p.locator('[data-vt-general]').screenshot({ path: path.join(CAPTURAS, 'videos-general.png') }).catch(() => {});
+  await p.waitForTimeout(1500);
+  ok(`${tag} · la lista de clientes de Entrenamiento ya no lleva la lista general de videos`, await p.locator('[data-vt-general]').count() === 0);
 
   ok(`${tag} · sin scroll de lado`, await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   ok(`${tag} · sin errores de JavaScript`, a.errores.length === 0, a.errores.join(' | '));

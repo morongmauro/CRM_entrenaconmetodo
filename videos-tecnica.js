@@ -68,9 +68,54 @@ function vtUltimos(filas) {
 }
 
 // ── El panel ───────────────────────────────────────────────────────────
-window.vtPanel = async (caja, clienteId) => {
-  _vt.caja = caja; _vt.clienteId = clienteId;
+// ── La ventana de un cliente (desde Toques y el Seguimiento) ─────────────
+// Los videos se revisan aquí: «Bien», «A mejorar», «Llegó», «Quitar» y pedir.
+// Si una acción abre otra ventana (la nota de «A mejorar», pedir), al terminar
+// vuelve a esta.
+function vtModalShell() {
+  const nom = _vt.nombre ? ` · ${escapeHtml(_vt.nombre)}` : '';
+  openModal(modalShell(`Videos de técnica${nom}`, '<div id="vt-modal" data-vt-modal></div>',
+    '<button class="btn btn-secondary" data-vt-cerrar onclick="vtCerrar()">Cerrar</button>'));
+}
+window.vtAbrir = async (clienteId) => {
+  let c = null;
+  try { c = await db.clientes.get(clienteId); } catch (e) { c = null; }
+  _vt.nombre = c ? String(c.nombre || '').split(' ')[0] : '';
+  _vt.enModal = true;
+  vtModalShell();
+  await vtPanel('#vt-modal', clienteId, { modal: true });
+};
+window.vtCerrar = () => {
+  _vt.enModal = false;
+  closeModal();
+  if (typeof _tq !== 'undefined') _tq.datos = null;
+  if (_currentView === 'toques') rerenderView();
+  const res = document.getElementById('seg-vt');
+  if (res && _vt.clienteId && typeof vtResumen === 'function') vtResumen(res, _vt.clienteId);
+};
+
+// En el Seguimiento: solo el resumen y los botones (se revisan en la ventana).
+window.vtResumen = async (caja, clienteId) => {
   const el = typeof caja === 'string' ? $(caja) : caja;
+  if (!el || !clienteId) return;
+  const filas = await vtDb.lista(clienteId);
+  if (!el.isConnected) return;
+  if (filas === null) { el.innerHTML = `<div class="text-sm text-slate-600">Para llevar la cuenta de los videos de técnica falta correr <code>${VT_SQL}</code> en Supabase.</div>`; return; }
+  const vig = Object.values(vtUltimos(filas));
+  const n = (e) => vig.filter(f => f.estado === e).length;
+  const partes = [[n('recibido'), 'por revisar', 'recibido'], [n('pedido'), 'por llegar', 'pedido'], [n('mejorar') + n('mal'), 'a mejorar', 'mejorar'], [n('bien'), 'bien', 'bien']].filter(x => x[0]);
+  el.innerHTML = `<div class="flex items-center gap-2 flex-wrap" data-vt-resumen>
+      <span class="text-sm" style="flex:1;min-width:200px">${partes.length ? partes.map(([k, t, e]) => `<span class="text-xs font-bold rounded-full px-2.5 py-1 mr-1" style="background:${VT_ESTADO[e].fondo};color:${VT_ESTADO[e].color}" data-vt-res="${e}">${k} ${t}</span>`).join('') : '<span class="text-slate-500">Todavía no le has pedido videos.</span>'}</span>
+      ${vig.length ? `<button type="button" class="btn btn-secondary btn-sm" data-vt-revisar onclick="vtAbrir('${clienteId}')">Revisar</button>` : ''}
+      <button type="button" class="btn btn-primary btn-sm" data-vt-pedir-res onclick="tqPedirVideo('${clienteId}')">+ Pedir videos</button>
+    </div>`;
+};
+
+window.vtPanel = async (caja, clienteId, { modal = false } = {}) => {
+  if (!modal && caja !== '#vt-modal') _vt.enModal = false;
+  _vt.caja = caja; _vt.clienteId = clienteId;
+  let el = typeof caja === 'string' ? $(caja) : caja;
+  if ((!el || !el.isConnected) && _vt.enModal) { vtModalShell(); _vt.caja = '#vt-modal'; el = $('#vt-modal'); }
   if (!el || !clienteId) return;
   el.innerHTML = '<div class="text-sm text-slate-400">Leyendo los videos…</div>';
   const filas = await vtDb.lista(clienteId);
@@ -80,7 +125,9 @@ window.vtPanel = async (caja, clienteId) => {
 };
 
 function vtPintar() {
-  const el = typeof _vt.caja === 'string' ? $(_vt.caja) : _vt.caja;
+  let el = typeof _vt.caja === 'string' ? $(_vt.caja) : _vt.caja;
+  // Otra ventana (la nota, pedir) tapó la de videos: se vuelve a abrir.
+  if ((!el || !el.isConnected) && _vt.enModal) { vtModalShell(); _vt.caja = '#vt-modal'; el = $('#vt-modal'); }
   if (!el) return;
   if (_vt.falta) {
     el.innerHTML = `<div class="text-sm text-slate-600" data-vt-falta>Para llevar la cuenta de los videos de técnica falta correr

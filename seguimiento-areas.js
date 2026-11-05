@@ -405,7 +405,7 @@ window.saPedirVideos = async () => {
   const lista = marcados.map(m => m.ejercicio_nombre);
   const txt = `Mándame un video de ${lista.length === 1 ? lista[0] : lista.slice(0, -1).join(', ') + ' y ' + lista[lista.length - 1]} la próxima vez que lo${lista.length === 1 ? '' : 's'} hagas: de lado, que se vea todo el movimiento.`;
   saUsar(txt, marcados.map(m => ({ tipo: 'video', texto: `Video de ${m.ejercicio_nombre}`, objetivo: { ejercicio: m.ejercicio_nombre } })));
-  if (typeof vtPanel === 'function') { const caja = document.getElementById('seg-vt'); if (caja) vtPanel(caja, c.id); }
+  if (typeof vtResumen === 'function') { const caja = document.getElementById('seg-vt'); if (caja) vtResumen(caja, c.id); }
   if (_sa.D) { _sa.D.videos = [...(_sa.D.videos || []), ...filas]; saPintarPedi(c, _sa.S, _sa.D); }
 };
 

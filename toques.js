@@ -290,7 +290,7 @@ routes.toques = async () => {
       <td>${semaforo(f)}</td>
       <td data-tq="semana">${tira(f)}<div class="tq-sub" data-tq-dias>${f.diasToque ? `<b>${f.diasToque}</b> de 7 días` : 'Sin tocarlo esta semana'}</div>${f.tipos.length ? `<div>${f.tipos.map(k => `<span class="tq-ch">${TQ_TIPO[k]}</span>`).join('')}</div>` : ''}</td>
       <td data-tq="seguimiento">${celdaSeg(f)}</td>
-      <td data-tq="videos">${celdaVid(f)}</td>
+      <td data-tq="videos" class="tq-vid-cel" onclick="vtAbrir('${f.c.id}')" title="Toca para revisar sus videos">${celdaVid(f)}<div class="tq-sub tq-wa-mas">revisar</div></td>
       <td data-tq="escribio-app">${celdaCanal(f.escApp)}</td>
       <td data-tq="escribio-wa" class="tq-wa-cel" onclick="tqWaCelda('${f.c.id}')" title="Toca para registrar que te escribió por WhatsApp">${celdaCanal(f.escWa, true)}<div class="tq-sub tq-wa-mas">+ registrar</div></td>
       <td data-tq="su-semana"><span class="tq-nw">${f.entrenos} entreno${f.entrenos === 1 ? '' : 's'}</span>${app(f)}</td>
@@ -320,6 +320,7 @@ routes.toques = async () => {
         <div><b>Tus toques</b>Un toque es un día en que le escribiste algo: seguimiento, pedirle video, responder su nota (o marcarla «Listo» en la Bandeja) o abrir su WhatsApp desde el CRM. Si el mismo día haces dos cosas, cuenta 1. En la semana: <span class="tq-dia t">L</span> lo tocaste ese día, <span class="tq-dia s">L</span> te escribió.</div>
         <div><b>Seguimiento semanal</b>Hecho si esta semana le mandaste el seguimiento (lo copiaste desde el CRM) o tocaste «Marcar hecho». «Esta semana no»: ya lo tocaste y no está frío; esta semana no cuenta como pendiente y la próxima sí. El botón «Seguimiento» lo abre en otra pestaña.</div>
         <div><b>Te escribió</b>En la app: sus notas (las de la Bandeja). Por WhatsApp: lo que registras tú tocando esa casilla. En rojo si todavía no le respondes; abrir su WhatsApp o responderle en la app cuenta como respuesta.</div>
+        <div><b>Videos</b>Toca la casilla para revisarlos: «Bien», «A mejorar», «Llegó», «Quitar» o pedir más. El cuadro de arriba «con videos por revisar» deja solo a los que tienen algo por revisar.</div>
         <div><b>Semáforo</b><b class="tq-r">Rojo</b>: le debes respuesta, o 15 días o más sin un toque tuyo. <b class="tq-a">Amarillo</b>: 8 a 14 días sin toque, o 4 días o más con toque en los últimos 7 (mejor esperar). <b class="tq-v">Verde</b>: bien.</div>
       </div>
     </details>`;
@@ -361,10 +362,10 @@ routes.toques = async () => {
   .tq-falta-card small{font-size:11.5px;color:#7A7A7A}
   .tq-falta-card.on{border-color:#1F1F1F}
   .tq-acc{display:grid;grid-template-columns:auto;gap:4px}
-  .tq-wa-cel{cursor:pointer}
-  .tq-wa-cel:hover{background:#F7F5F0}
+  .tq-wa-cel,.tq-vid-cel{cursor:pointer}
+  .tq-wa-cel:hover,.tq-vid-cel:hover{background:#F7F5F0}
   .tq-wa-mas{color:#3C7BD6;font-weight:700;opacity:0}
-  .tq-wa-cel:hover .tq-wa-mas{opacity:1}
+  .tq-wa-cel:hover .tq-wa-mas,.tq-vid-cel:hover .tq-wa-mas{opacity:1}
   .tq-acc .cp-btn{padding:5px 10px;font-size:12px;text-align:center}
   .tq-tabla{min-width:1020px}
   .tq-tabla td{min-width:0;vertical-align:middle;font-size:13.5px}

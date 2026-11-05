@@ -3302,10 +3302,8 @@ async function entVistaClientes() {
         }).join('')}
       </div>
       ${clientes.length === 0 ? '<div class="card text-center text-slate-500 py-8">No hay clientes activos.</div>' : ''}
-      <div id="ent-vt-general" class="mt-4"></div>
     `;
-    // Todo lo pendiente de videos de técnica, de todos (videos-tecnica.js).
-    if (typeof vtListaGeneral === 'function') vtListaGeneral('#ent-vt-general');
+    // Los videos de técnica de todos se revisan en Toques («con videos por revisar»).
     return;
   }
 
@@ -3417,7 +3415,6 @@ async function entVistaClientes() {
     ['lecturas', '🔎 Lecturas'],
     ['fases', '🗂️ Ciclos'],
     ['mezcla', '🔀 Unir y separar'],
-    ['videos', '🎥 Videos de técnica'],
   ];
 
   body.innerHTML = cabecera + (window.nsListaClienteHTML ? nsListaClienteHTML(_ent.clienteId) : '') + avisoCiclo + selectorFase + `
@@ -3428,10 +3425,9 @@ async function entVistaClientes() {
     </div>
     ${_ent.subtab === 'calendario' ? entCalendarioHTML(cliente, fase, rutinas, ejerciciosPorRutina)
       : _ent.subtab === 'rutinas'  ? entListaRutinasHTML(fase, rutinas, ejerciciosPorRutina)
-      : _ent.subtab === 'sesiones' ? `${typeof vtPanel === 'function' ? '<details class="card mb-3" open data-ses-videos><summary class="cursor-pointer text-xs font-bold text-slate-500 uppercase tracking-wider">🎥 Videos de técnica · pedidos, por revisar y a mejorar</summary><div class="mt-3" id="ent-ses-vt"></div></details>' : ''}<div id="ent-sesiones" class="card text-sm text-slate-400">Leyendo lo que registró…</div>`
+      : _ent.subtab === 'sesiones' ? `<div id="ent-sesiones" class="card text-sm text-slate-400">Leyendo lo que registró…</div>`
       : _ent.subtab === 'lecturas' ? '<div id="ent-lecturas" class="card text-sm text-slate-400">Calculando…</div>'
       : _ent.subtab === 'mezcla' ? '<div id="ent-mezcla"></div>'
-      : _ent.subtab === 'videos' ? '<div id="ent-videos-tec" class="card"></div>'
       : fases.map(f => entTarjetaFase(f, rutinasPorFase[f.id] || [])).join('')}
 
     <!-- El agente de rutinas se monta aquí si asistente-rutinas.js está
@@ -3441,9 +3437,8 @@ async function entVistaClientes() {
 
   if (typeof rutMontarPanel === 'function') rutMontarPanel();
   if (_ent.subtab === 'calendario') entPintarCalendario(cliente, fase, rutinas, ejerciciosPorRutina);
-  if (_ent.subtab === 'sesiones') { entPintarSesiones(cliente); if (typeof vtPanel === 'function') vtPanel('#ent-ses-vt', cliente?.id); }
+  if (_ent.subtab === 'sesiones') entPintarSesiones(cliente);
   if (_ent.subtab === 'lecturas') entPintarLecturas(cliente);
-  if (_ent.subtab === 'videos' && typeof vtPanel === 'function') vtPanel('#ent-videos-tec', cliente?.id);
   if (_ent.subtab === 'mezcla' && typeof mzAbrir === 'function') mzAbrir({ caja: '#ent-mezcla', fuentes: rutinas, faseId: fase?.id || null, clienteId: cliente?.id || null });
 }
 

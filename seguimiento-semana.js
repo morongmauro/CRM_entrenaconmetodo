@@ -1085,10 +1085,11 @@ function esArmazonHTML(c, { sinMensajes = false } = {}) {
     </div>`;
 }
 
-const esVideosHTML = () => (typeof vtPanel === 'function' ? `<details class="es-card es-vt" open data-seg-videos>
-        <summary class="es-k">Videos de técnica · pedidos, por revisar y a mejorar</summary>
+// Videos de técnica: aquí solo el resumen; se revisan en la ventana (la misma de Toques).
+const esVideosHTML = () => (typeof vtPanel === 'function' ? `<div class="es-card es-vt" data-seg-videos>
+        <div class="es-k">Videos de técnica</div>
         <div id="seg-vt"></div>
-      </details>` : '');
+      </div>` : '');
 const esRecHTML = () => `<details class="es-card es-vt" data-seg-recordatorios>
         <summary class="es-k">Lo que le sale en su app · recordatorios</summary>
         <div id="seg-rec"><div class="es-vacio">Leyendo su app…</div></div>
