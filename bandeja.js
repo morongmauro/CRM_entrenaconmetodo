@@ -635,6 +635,13 @@ window.bdjFiltro = (f) => { _bdj.filtro = f; routes.bandeja(); };
 window.bdjRecargar = async () => { await bdjCargar(true); routes.bandeja(); };
 window.bdjListo = async (id, notaId) => {
   bdjMarcarVisto(id);
+  // «Listo» en un mensaje suyo cuenta como toque tuyo en Toques (queda en su
+  // historial como «Bandeja: mensaje atendido»).
+  const it = bdjEsMensaje({ id }) && _bdj.datos ? _bdj.datos.atencion.find(a => a.id === id) : null;
+  if (it && typeof segRegistrar === 'function') {
+    try { await segRegistrar(it.cliente_id, { origen: 'nota', titulo: 'Bandeja: mensaje atendido', texto: `Atendiste su mensaje: «${String(it.detalle || '').slice(0, 200)}»` }); } catch (e) { /* sin tabla: no pasa nada */ }
+    if (typeof _tq !== 'undefined') _tq.datos = null;
+  }
   // Un aviso de ausencia: queda visto en la base (si lo cambia, vuelve a llegar).
   const aus = /^aus:([^:]+):/.exec(String(id));
   if (aus && typeof ausVista === 'function') await ausVista(aus[1]);

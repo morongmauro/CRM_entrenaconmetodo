@@ -125,6 +125,7 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   await p.waitForTimeout(600);
   c = await cuenta();
   ok(`${tag} · «Listo» la pasa a Listas`, c.nListas === 2 && !/máquina/.test(c.pendTxt) && /máquina/.test(c.listas), JSON.stringify(c));
+  ok(`${tag} · «Listo» cuenta como toque (queda en su historial para Toques)`, (await p.evaluate(() => (window.TABLAS_FALSAS.seguimiento_mensajes || []).filter(m => m.origen === 'nota' && m.titulo === 'Bandeja: mensaje atendido').length)) >= 1);
   ok(`${tag} · y queda marcada en la base`, await p.evaluate(() => !!TABLAS_FALSAS.notas_entreno.find(n => n.id === 'n1').leida_en));
   await p.locator('[data-notas-listas] [data-nota-deshacer]').filter({ hasText: 'Deshacer' }).nth(0).click();
   await p.waitForTimeout(800);
