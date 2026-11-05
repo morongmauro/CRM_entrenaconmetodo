@@ -861,8 +861,10 @@ function compFotosHTML() {
   if (fotos === null) return '<div class="card text-sm text-slate-400">Pidiendo las fotos…</div>';
   if (!fotos.length) {
     return `<div class="card text-sm text-slate-500">
-      Todavía no ha subido ninguna foto. Las sube él desde su app, en <strong>Entrena → Fotos</strong>.
-      Tú no puedes subirlas por él: son suyas.
+      <div class="flex items-center gap-3 flex-wrap">
+        <span style="flex:1;min-width:220px">Todavía no tiene fotos. Las sube desde su app, en <strong>Entrenamiento → Fotos de progreso</strong>. Si te las mandó por WhatsApp, súbelas tú aquí y le salen en su app.</span>
+        <button type="button" class="btn btn-primary btn-sm" data-fotos-subir onclick="compSubirFotos()">Subir fotos</button>
+      </div>
     </div>`;
   }
 
@@ -930,6 +932,7 @@ function compFotosHTML() {
       <div class="font-bold text-slate-900">Fotos de progreso</div>
       ${nuevas ? `<span class="tag" data-fotos-nuevas style="background:#E6F4EA;color:#2F7A45;font-weight:700">${nuevas} ${nuevas === 1 ? 'nueva' : 'nuevas'}</span>` : ''}
       <span class="text-xs text-slate-400 ml-auto">Te llega un aviso al teléfono cuando sube fotos, como con las medidas.</span>
+      <button type="button" class="btn btn-primary btn-sm" data-fotos-subir onclick="compSubirFotos()">Subir fotos</button>
     </div>
     ${comparadores}
     ${Object.entries(porPose).map(([pose, lista]) => `
@@ -954,6 +957,94 @@ function compFotosHTML() {
       Los enlaces caducan en 5 minutos. Si una imagen deja de verse, cambia de pestaña y vuelve.
     </div>`;
 }
+
+// ── Subir fotos que te mandó por WhatsApp ───────────────────────────────
+// Quedan igual que si las hubiera subido él desde su app: misma carpeta
+// (su id delante), misma tabla, y le salen en Entrenamiento → Fotos de
+// progreso con el comparativo. Desde aquí tampoco se borran.
+// Necesita migraciones/fotos-subir-crm.sql (el permiso para guardar en la
+// carpeta de fotos).
+const COMP_FOTO_TIPOS = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic' };
+const _compSubir = { archivos: [] };
+window.compSubirFotos = () => {
+  _compSubir.archivos = [];
+  const c = _comp.cliente;
+  const nombre = c && c.nombre ? String(c.nombre).split(' ')[0] : 'tu cliente';
+  openModal(modalShell(`Subir fotos de ${escapeHtml(nombre)}`, `
+    <p class="text-sm text-slate-600 mb-3">Elige las fotos que te mandó por WhatsApp (guárdalas antes en el computador). Le salen en su app como si las hubiera subido él, con el comparativo.</p>
+    <input type="file" id="cfs-archivos" accept="image/jpeg,image/png,image/webp,image/heic" multiple onchange="compSubirElegidas(this.files)" class="text-sm mb-3">
+    <div class="grid grid-cols-2 gap-3 mb-3">
+      <div class="text-xs text-slate-500"><span>Fecha en que se las tomó</span><input type="date" id="cfs-fecha" value="${fmt.hoy()}" max="${fmt.hoy()}" class="w-full mt-1"></div>
+      <div class="text-xs text-slate-500"><span>Peso ese día (opcional)</span><input type="text" inputmode="decimal" id="cfs-peso" placeholder="kg" class="w-full mt-1"></div>
+    </div>
+    <div id="cfs-lista" data-fotos-subir-lista></div>
+    <div id="cfs-estado" class="text-sm text-slate-500 mt-2"></div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" id="cfs-ok" data-fotos-subir-ok onclick="compSubirGuardar()" disabled>Subir</button>`));
+};
+window.compSubirElegidas = (files) => {
+  const poses = ['frente', 'lado', 'espalda'];
+  _compSubir.archivos = Array.from(files || []).map((f, i) => ({ f, pose: poses[i] || 'otra', url: URL.createObjectURL(f) }));
+  compSubirPintar();
+};
+window.compSubirPose = (i, pose) => { if (_compSubir.archivos[i]) _compSubir.archivos[i].pose = pose; };
+function compSubirPintar() {
+  const el = document.getElementById('cfs-lista');
+  if (!el) return;
+  el.innerHTML = _compSubir.archivos.length ? `<div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(120px,1fr))">${_compSubir.archivos.map((a, i) => `
+    <div data-fotos-subir-item>
+      <img src="${a.url}" alt="" class="w-full rounded-lg bg-slate-100" style="aspect-ratio:3/4;object-fit:cover">
+      <select class="mt-1 w-full text-xs" onchange="compSubirPose(${i}, this.value)">
+        ${Object.entries(COMP_POSES).map(([k, t]) => `<option value="${k}" ${k === a.pose ? 'selected' : ''}>${t}</option>`).join('')}
+      </select>
+    </div>`).join('')}</div>` : '';
+  const ok = document.getElementById('cfs-ok');
+  if (ok) ok.disabled = !_compSubir.archivos.length;
+}
+window.compSubirGuardar = async () => {
+  const id = _comp.clienteId;
+  const lista = _compSubir.archivos;
+  const fecha = (document.getElementById('cfs-fecha')?.value || '').trim();
+  const pesoTxt = (document.getElementById('cfs-peso')?.value || '').trim().replace(',', '.');
+  const peso = pesoTxt ? Number(pesoTxt) : null;
+  const estado = document.getElementById('cfs-estado');
+  const ok = document.getElementById('cfs-ok');
+  if (!id || !lista.length) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || fecha > fmt.hoy()) return toast('Revisa la fecha');
+  if (pesoTxt && !(peso > 20 && peso < 400)) return toast('Revisa el peso');
+  for (const a of lista) {
+    if (!COMP_FOTO_TIPOS[String(a.f.type || '').toLowerCase()]) return toast(`«${a.f.name}» no es una foto (JPG, PNG, WEBP o HEIC)`);
+    if (a.f.size > 10 * 1024 * 1024) return toast(`«${a.f.name}» pesa más de 10 MB`);
+  }
+  if (ok) ok.disabled = true;
+  let uid = null;
+  try { const { data: { user } } = await sb.auth.getUser(); uid = user && user.id; } catch (e) { uid = null; }
+  let bien = 0, sinPermiso = false;
+  const faltan = [];
+  for (let i = 0; i < lista.length; i++) {
+    const a = lista[i];
+    if (estado) estado.textContent = `Subiendo ${i + 1} de ${lista.length}…`;
+    const ext = COMP_FOTO_TIPOS[String(a.f.type).toLowerCase()];
+    const ruta = `${id}/${fecha}-${a.pose}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+    const { error: e1 } = await sb.storage.from('progreso').upload(ruta, a.f, { contentType: a.f.type, upsert: false });
+    if (e1) { if (/row-level|policy|unauthorized|403/i.test(e1.message || '')) sinPermiso = true; console.warn('subir foto', e1); faltan.push(a); continue; }
+    const { error: e2 } = await sb.from('fotos_progreso').insert({ user_id: uid, cliente_id: id, fecha, pose: a.pose, ruta, peso_kg: peso, nota: null });
+    if (e2) { console.warn('guardar foto', e2); faltan.push(a); continue; }
+    bien++;
+  }
+  if (bien === lista.length) {
+    closeModal();
+    toast(bien === 1 ? 'Foto subida. Ya le sale en su app' : `${bien} fotos subidas. Ya le salen en su app`);
+  } else {
+    // Quedan solo las que no se subieron: reintentar no duplica las demás.
+    _compSubir.archivos = faltan; compSubirPintar();
+    if (estado) estado.innerHTML = sinPermiso
+      ? '<span style="color:#B3261E">No hay permiso para guardar en la carpeta de fotos. Corre <code>migraciones/fotos-subir-crm.sql</code> en Supabase y vuelve a intentar.</span>'
+      : `<span style="color:#B3261E">Se subieron ${bien} de ${lista.length}. Vuelve a intentar con las que faltan.</span>`;
+  }
+  _comp.fotos = null; _comp.fotosEn = 0;
+  compCargarFotos();
+};
 
 window.compFotoLado = (pose, cual, id) => {
   _comp.fotosCmp = _comp.fotosCmp || {};
