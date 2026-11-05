@@ -105,7 +105,7 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   const a = await abrir(ancho, alto);
   const p = a.p;
   await p.evaluate(() => { try { localStorage.removeItem('bdj:vistos:v1'); } catch (e) {} navigate('bandeja'); });
-  await p.waitForSelector('text=Necesita tu atención', { timeout: 15000 });
+  await p.waitForSelector('[data-bdj-mensajes]', { timeout: 15000 });
   await p.evaluate(() => bdjFiltro('nota'));
   await p.waitForSelector('[data-notas-pendientes]', { timeout: 10000 });
   const cuenta = () => p.evaluate(() => ({
@@ -150,7 +150,7 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   ok(`${tag} · en la Bandeja ya no está pendiente`, !/máquina/.test(c.pendTxt) && /máquina/.test(c.listas), JSON.stringify(c));
   await p.evaluate(() => { const n = TABLAS_FALSAS.notas_entreno.find(x => x.id === 'n1'); n.leida_en = null; TABLAS_FALSAS.comentarios_coach.length = 0; });
   await p.evaluate(() => bdjFiltro('todo'));
-  ok(`${tag} · en «Todo» sigue como antes`, await p.locator('text=Necesita tu atención').count() === 1 && await p.locator('[data-notas-listas]').count() === 0);
+  ok(`${tag} · en «Todo» sigue como antes`, await p.locator('[data-bdj-mensajes]').count() === 1 && await p.locator('[data-notas-listas]').count() === 0);
   ok(`${tag} · sin scroll de lado`, await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   ok(`${tag} · sin errores de JavaScript`, a.errores.length === 0, a.errores.join(' | '));
   await a.ctx.close();

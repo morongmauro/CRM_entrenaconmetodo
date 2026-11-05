@@ -33,6 +33,11 @@ const BDJ_DIAS_NOTAS = 30;         // notas: pendientes y listas de un mes      
 const BDJ_CLAVE_VISTOS = 'bdj:vistos:v1';
 
 const _bdj = { filtro: 'todo', datos: null, cargando: null, cargadoEn: 0 };
+// Mensaje = lo que el cliente te ESCRIBIÓ (una nota en la app o al terminar un
+// entreno). Solo eso cuenta como pendiente en el número de la Bandeja: los
+// avisos (medidas, entrenos saltados, comida, estancados…) y las victorias
+// son para revisar, no mensajes por responder.
+const bdjEsMensaje = (a) => /^(nota|cierre):/.test(String(a && a.id));
 
 // ─── Utilidades de fecha (en local, como todo el CRM) ────────────────
 function bdjSumarDias(ymd, n) {
@@ -521,6 +526,8 @@ routes.bandeja = async () => {
   const vistos = bdjVistos();
   const pasa = (tipo) => _bdj.filtro === 'todo' || tipo === _bdj.filtro;
   const pendientes = d.atencion.filter(a => !vistos.has(a.id) && pasa(a.tipo));
+  const mensajes = pendientes.filter(bdjEsMensaje);
+  const avisos = pendientes.filter(a => !bdjEsMensaje(a));
   const felicitar = d.felicitar.filter(a => !vistos.has(a.id) && pasa(a.tipo));
   // Notas: pendientes y las que ya marcaste «Listo» (en la base o en este navegador).
   const notasPend = d.atencion.filter(a => a.tipo === 'nota' && !vistos.has(a.id));
@@ -592,20 +599,25 @@ routes.bandeja = async () => {
           : '<div class="text-sm text-slate-500 py-3">Todavía ninguna.</div>'}
       </div>
     </div>` : `
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-      <div class="card">
-        <div class="flex items-baseline justify-between mb-1">
-          <h3 class="font-bold text-slate-900">Necesita tu atención</h3>
-          <span class="text-xs text-slate-400">${pendientes.length}</span>
-        </div>
-        ${pendientes.length ? pendientes.map(a => tarjeta(a, 'Listo')).join('')
-          : '<div class="text-sm text-slate-500 py-3">Nada pendiente. 👌</div>'}
+    <div class="card mb-4" data-bdj-mensajes>
+      <div class="flex items-baseline justify-between mb-1">
+        <h3 class="font-bold text-slate-900">Mensajes por responder</h3>
+        <span class="text-xs text-slate-400">${mensajes.length}</span>
       </div>
-      <div class="card">
-        <div class="flex items-baseline justify-between mb-1">
-          <h3 class="font-bold text-slate-900">Para felicitar</h3>
-          <span class="text-xs text-slate-400">${felicitar.length}</span>
-        </div>
+      <p class="text-xs text-slate-500 mb-1">Lo que tus clientes te escribieron en la app. Es lo único que cuenta en el número de la Bandeja.</p>
+      ${mensajes.length ? mensajes.map(a => tarjeta(a, 'Listo')).join('')
+        : '<div class="text-sm text-slate-500 py-3">Ningún mensaje por responder.</div>'}
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+      <div class="card" data-bdj-avisos>
+        <h3 class="font-bold text-slate-900 mb-1">Avisos para revisar</h3>
+        <p class="text-xs text-slate-500 mb-1">Lo que pasó en su app: medidas, entrenos saltados, comida, estancados. No son mensajes; «Listo» los quita.</p>
+        ${avisos.length ? avisos.map(a => tarjeta(a, 'Listo')).join('')
+          : '<div class="text-sm text-slate-500 py-3">Nada para revisar.</div>'}
+      </div>
+      <div class="card" data-bdj-felicitar>
+        <h3 class="font-bold text-slate-900 mb-1">Para felicitar</h3>
+        <p class="text-xs text-slate-500 mb-1">Récords y semanas cumplidas.</p>
         ${felicitar.length ? felicitar.map(a => tarjeta(a, 'Hecho')).join('')
           : '<div class="text-sm text-slate-500 py-3">Esta semana todavía nada que celebrar.</div>'}
       </div>
@@ -658,12 +670,13 @@ window.bdjDeshacer = async (id, notaId) => {
   routes.bandeja();
 };
 
-// El número en el botón de la barra: lo pendiente que aún no marcaste.
+// El número en el botón de la barra: solo los MENSAJES que aún no marcaste
+// (no los avisos ni las victorias).
 function bdjPintarContador() {
   const btn = document.querySelector('.nav-item[data-view="bandeja"]');
   if (!btn || !_bdj.datos) return;
   const vistos = bdjVistos();
-  const n = _bdj.datos.atencion.filter(a => !vistos.has(a.id)).length;
+  const n = _bdj.datos.atencion.filter(a => bdjEsMensaje(a) && !vistos.has(a.id)).length;
   btn.textContent = n ? `📥 Bandeja (${n})` : '📥 Bandeja';
 }
 

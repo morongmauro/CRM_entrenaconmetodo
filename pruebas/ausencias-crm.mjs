@@ -130,7 +130,7 @@ const D = '/tmp/claude-0/-home-user/72c7c01f-58d6-5368-9640-a3136112d4a6/scratch
   console.log('\nBandeja (CRM de siempre)');
   const { ctx, p, errores } = await abrir(1440, 1000, false);
   await p.evaluate(() => navigate('bandeja'));
-  await p.waitForFunction(() => /Necesita tu atención/.test(document.getElementById('view').innerText), null, { timeout: 20000 });
+  await p.waitForFunction(() => /Mensajes por responder/.test(document.getElementById('view').innerText), null, { timeout: 20000 });
   await p.waitForTimeout(500);
   const txt = (await p.locator('#view').innerText()).replace(/\s+/g, ' ');
   ok('aviso: «Pablo Ríos · Avisó que va a estar fuera · Viaje» con fechas y su nota', /Pablo Ríos · Avisó que va a estar fuera · Viaje/.test(txt) && /Cartagena/.test(txt), txt.slice(0, 600));
