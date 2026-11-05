@@ -129,8 +129,8 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   ok(`${tag} · Marta: le falta el seguimiento semanal`, /^Falta/.test(await celda('c4', 'seguimiento')));
   ok(`${tag} · Ana: seguimiento y respuesta el mismo día = 1 toque`, (await p.locator('tr[data-tq-cliente="c0"] [data-tq-dias]').innerText()).trim() === '1 de 7 días' && /Seguimiento/.test(await celda('c0', 'semana')) && /Respuesta/.test(await celda('c0', 'semana')), await celda('c0', 'semana'));
   ok(`${tag} · Ana: el día de hoy marcado en su semana`, await p.locator('tr[data-tq-cliente="c0"] .tq-dia.t').count() === 1);
-  ok(`${tag} · Ana: te escribió y le respondiste`, /respondido/.test(await celda('c0', 'escribio')) && /^1 entreno/.test(await celda('c0', 'su-semana')));
-  ok(`${tag} · Carlos: «Responder» en vez de «Seguimiento»`, await p.locator('tr[data-tq-cliente="c1"] [data-tq-responder]').count() === 1 && /sin responder/.test(await celda('c1', 'escribio')));
+  ok(`${tag} · Ana: te escribió y le respondiste`, /respondido/.test(await celda('c0', 'escribio-app')) && /^1 entreno/.test(await celda('c0', 'su-semana')));
+  ok(`${tag} · Carlos: «Responder» en vez de «Seguimiento»`, await p.locator('tr[data-tq-cliente="c1"] [data-tq-responder]').count() === 1 && /sin responder/.test(await celda('c1', 'escribio-app')));
   const faltas = (await p.locator('[data-tq-faltas]').innerText()).replace(/\s+/g, ' ');
   ok(`${tag} · arriba: 3 sin seguimiento (2 de 5 hechos)`, /3 sin seguimiento esta semana 2 de 5 hechos/.test(faltas), faltas);
   await p.locator('[data-tq-filtro="sinSeg"]').click(); await p.waitForTimeout(600);
@@ -143,7 +143,7 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   await p.locator('tr[data-tq-cliente="c4"] [data-tq-seg-hecho]').click(); await p.waitForTimeout(1500);
   ok(`${tag} · «Marcar hecho»: Marta pasa a «Hecho» y queda guardado`, /^Hecho/.test(await celda('c4', 'seguimiento')) && (await p.evaluate(() => window.TABLAS_FALSAS.seguimiento_mensajes.filter(m => m.cliente_id === 'c4' && m.origen === 'manual').length)) === 1, await celda('c4', 'seguimiento'));
   await p.locator('tr[data-tq-cliente="c2"] [data-tq-nhf]').click(); await p.waitForTimeout(1500);
-  ok(`${tag} · «No hace falta»: Lucía sale como «No hace falta» y ya no cuenta en «sin seguimiento»`, /^No hace falta/.test(await celda('c2', 'seguimiento')) && /1 sin seguimiento/.test((await p.locator('[data-tq-faltas]').innerText()).replace(/\s+/g, ' ')) && (await p.evaluate(() => window.TABLAS_FALSAS.toques_semana.filter(x => x.cliente_id === 'c2').length)) === 1, (await p.locator('[data-tq-faltas]').innerText()).replace(/\s+/g, ' ') + ' · ' + JSON.stringify(await p.evaluate(() => window.TABLAS_FALSAS.toques_semana)));
+  ok(`${tag} · «Esta semana no»: Lucía sale como «Esta semana no» y ya no cuenta en «sin seguimiento»`, /^Esta semana no/.test(await celda('c2', 'seguimiento')) && /1 sin seguimiento/.test((await p.locator('[data-tq-faltas]').innerText()).replace(/\s+/g, ' ')) && (await p.evaluate(() => window.TABLAS_FALSAS.toques_semana.filter(x => x.cliente_id === 'c2').length)) === 1, (await p.locator('[data-tq-faltas]').innerText()).replace(/\s+/g, ' ') + ' · ' + JSON.stringify(await p.evaluate(() => window.TABLAS_FALSAS.toques_semana)));
   if (tag === 'ancho') await p.locator('[data-tq-tabla]').screenshot({ path: path.join(CAPTURAS, 'toques-no-hace-falta.png') }).catch(() => {});
   await p.locator('tr[data-tq-cliente="c2"] [data-tq-nhf-deshacer]').click(); await p.waitForTimeout(1500);
   ok(`${tag} · «deshacer» la vuelve a «Falta»`, /^Falta/.test(await celda('c2', 'seguimiento')));
@@ -174,9 +174,10 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   ok(`${tag} · un enlace de WhatsApp de otra parte cuenta para Marta`, (await p.evaluate(() => window.TABLAS_FALSAS.toques_cliente.filter(t => t.cliente_id === 'c4').length)) === 1);
   // «Me escribió» en Sofía → le debes respuesta.
   await p.evaluate(() => rerenderView()); await p.locator('tr[data-tq-cliente="c5"]').waitFor();
-  await p.locator('tr[data-tq-cliente="c5"] [data-tq-me-escribio]').click(); await p.waitForTimeout(1200);
-  ok(`${tag} · «Me escribió» guarda el toque`, (await p.evaluate(() => window.TABLAS_FALSAS.toques_cliente.filter(t => t.cliente_id === 'c5' && t.tipo === 'me_escribio').length)) === 1);
+  await p.locator('tr[data-tq-cliente="c5"] [data-tq="escribio-wa"]').click(); await p.waitForTimeout(400); await p.locator('[data-tq-wa-ok]').click(); await p.waitForTimeout(1200);
+  ok(`${tag} · la casilla «Te escribió por WhatsApp» lo registra`, (await p.evaluate(() => window.TABLAS_FALSAS.toques_cliente.filter(t => t.cliente_id === 'c5' && t.tipo === 'me_escribio').length)) === 1);
   ok(`${tag} · Sofía queda en rojo: le debes respuesta`, await p.locator('tr[data-tq-cliente="c5"]').getAttribute('data-tq-estado') === 'debe');
+  if (tag === 'ancho') { await p.evaluate(() => rerenderView()); await p.locator('tr[data-tq-cliente="c5"]').waitFor(); await p.waitForTimeout(800); await p.locator('[data-tq-tabla]').screenshot({ path: path.join(CAPTURAS, 'toques-canales.png') }).catch(() => {}); }
   // Pedir video abre el pedido para ese cliente.
   await p.locator('tr[data-tq-cliente="c1"] button', { hasText: 'Pedir video' }).click(); await p.waitForTimeout(800);
   ok(`${tag} · «Pedir video» abre el pedido`, await p.evaluate(() => _vt.clienteId === 'c1') && await p.evaluate(() => !modal.classList.contains('hidden') && modalContent.innerText.length > 0));
