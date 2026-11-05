@@ -227,13 +227,15 @@ window.vtPedir = async () => {
         <div class="vt-grupo">${escapeHtml(g.r.nombre)}</div>
         ${g.ejs.map(re => { const n = entNombres(re.ejercicios).grande, porLlegar = ult[re.ejercicio_id]?.estado === 'pedido'; return `
           <div class="vt-fila-pedir${porLlegar ? ' vt-por-llegar' : ''}" data-vt-ej-fila="${re.ejercicio_id}">
-            ${prev(re.ejercicios)}
-            <label class="vt-fila-txt" style="margin:0;text-transform:none;letter-spacing:0;font-weight:400">
-              <span class="flex items-start gap-2"><input type="checkbox" class="vt-ej" style="width:auto;margin-top:3px" value="${re.ejercicio_id}" data-nombre="${escapeHtml(n)}" ${porLlegar ? 'disabled' : ''}>
-              <span class="min-w-0"><span class="block text-sm font-semibold text-slate-900">${escapeHtml(n)}</span>
+            <input type="checkbox" class="vt-ej" id="vt-ej-${re.ejercicio_id}" style="width:auto;flex:none" value="${re.ejercicio_id}" data-nombre="${escapeHtml(n)}" ${porLlegar ? 'disabled' : ''}>
+            <div class="vt-izq" data-vt-recorte>
+              ${prev(re.ejercicios)}
+              <span class="vt-nombre" onclick="vtMarcarEj('${re.ejercicio_id}')">${escapeHtml(n)}</span>
+            </div>
+            <div class="vt-der" onclick="vtMarcarEj('${re.ejercicio_id}')">
               <span class="vt-lineas">${historia(re.ejercicio_id)}</span>
-              <span class="vt-lineas">${videos(re.ejercicio_id)}</span></span></span>
-            </label>
+              <span class="vt-lineas">${videos(re.ejercicio_id)}</span>
+            </div>
           </div>`; }).join('')}`).join('') : '<p class="text-sm text-slate-500">Su ciclo no tiene ejercicios de fuerza todavía.</p>'}
     </div>
     <div class="mt-3"><label style="text-transform:none;letter-spacing:0">Otro (escribe el nombre)</label><input id="vt-otro" placeholder="Hip thrust con barra"></div>
@@ -243,23 +245,28 @@ window.vtPedir = async () => {
       <button class="btn btn-primary" data-vt-confirmar onclick="vtConfirmarPedido()">Pedir</button>`), { wide: true });
 };
 
+// Tocar el nombre o los datos marca la casilla (si no está «Por llegar»).
+window.vtMarcarEj = (id) => { const c = document.getElementById(`vt-ej-${id}`); if (c && !c.disabled) c.checked = !c.checked; };
+
 (function () {
   const s = document.createElement('style');
   s.textContent = `
   .vt-grupo{font-size:13px;font-weight:700;color:#55565B;margin:12px 0 4px}
   .vt-fila-pedir{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid #F1EEE8}
-  .vt-fila-pedir .ent-mini-prev{width:112px}
-  .vt-fila-pedir .ent-mini-prev.reproduciendo{width:220px}
+  .vt-izq{display:flex;align-items:center;gap:12px;flex:0 0 46%;min-width:0;background:#fff;padding:4px 6px 4px 0}
+  .vt-izq .ent-mini-prev{width:112px}
+  .vt-izq .ent-mini-prev.reproduciendo{width:220px}
+  .vt-nombre{font-size:14px;font-weight:650;color:#1F1F1F;line-height:1.3;cursor:pointer;min-width:0}
   .vt-sin-video{display:grid;place-items:center;font-size:11px;color:#9A9AA0}
-  .vt-fila-txt{flex:1;min-width:0;cursor:pointer}
-  .vt-por-llegar .vt-fila-txt{cursor:default}
-  .vt-lineas{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:3px}
+  .vt-der{flex:1;min-width:0;cursor:pointer;border-left:1px solid #EFEBE3;padding-left:14px;align-self:stretch;display:flex;flex-direction:column;justify-content:center}
+  .vt-por-llegar .vt-der,.vt-por-llegar .vt-nombre{cursor:default}
+  .vt-lineas{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin:2px 0}
   .vt-h{font-size:12px;color:#1F1F1F}
   .vt-h.vt-gris{color:#7A7A7A}
   .vt-h.vt-nota{color:#A3301B;flex-basis:100%}
   .vt-h.vt-nuevo{background:#EAF1FB;color:#2F6CC4;font-weight:700;border-radius:999px;padding:1px 8px}
   .vt-est{font-size:11px;font-weight:700;border-radius:999px;padding:1px 8px}
-  @media (max-width: 640px){ .vt-fila-pedir{align-items:flex-start} .vt-fila-pedir .ent-mini-prev{width:84px} }`;
+  @media (max-width: 640px){ .vt-izq{flex-basis:52%;gap:8px} .vt-izq .ent-mini-prev{width:76px} .vt-nombre{font-size:13px} .vt-der{padding-left:10px} }`;
   document.head.appendChild(s);
 })();
 
