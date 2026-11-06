@@ -21,6 +21,7 @@ const DLG_CATS = [
   ['saludos', '👋', 'Saludos'],
   ['inicio', '🏁', 'Mensajes de inicio'],
   ['semana', '📅', 'Seguimiento semanal'],
+  ['sugeridos', '', 'Sugeridos del Seguimiento'],
   ['explicar', '🧭', 'Explicar el plan'],
   ['tecnica', '🎯', 'Revisión de ejercicio'],
   ['video', '🎥', 'Pedir video'],
@@ -332,6 +333,99 @@ Con dos o tres entrenos esa semana mantienes perfectamente. En comida, proteína
 Haz los primeros [N] ejercicios de fuerza, que son los que más pesan en tu progreso, y deja el resto para cuando tengas más espacio.` },
 ];
 
+// ── SUGERIDOS DEL SEGUIMIENTO ──
+// Los mensajes que te propone el Seguimiento de cada cliente salen de aquí.
+// Los {datos} se llenan con su semana. Si una línea lleva un dato que ese
+// cliente no tiene (no le faltó ningún entreno, no hay récord…), esa línea no
+// sale. Mientras no los edites, el Seguimiento rota cada semana entre varias
+// versiones de este mismo mensaje; si lo editas, usa el tuyo. Para que también
+// rote el tuyo, separa tus versiones con una línea que diga solo ---.
+const DLG_SEG_VARS = {
+  nombre: 'su nombre', hechas: 'entrenos hechos', plan: 'entrenos del plan', cardio: 'el cardio (si tiene)', cardio_completo: '«y el cardio completo» (si lo cumplió)',
+  faltaron: 'los entrenos que le faltaron', quedan: 'los que le quedan', foco: 'el foco de la semana', minimo: 'el mínimo realista', detalle: 'un dato concreto (avance, récord o comida)',
+  semana: '«esta semana» o «la semana pasada»', ultimo_entreno: 'su último entreno',
+  cardio_hechos: 'cardios hechos', cardio_plan: 'cardios del plan', cardio_faltaron: 'el cardio que le faltó', cardio_minutos: 'minutos de cardio',
+  dias_registro: 'días que registró comida', dias_base: 'días de la semana', n_sin_registro: 'días sin registrar', dias_sin_registro: 'qué días no registró',
+  prote_prom: 'proteína promedio', prote_meta: 'su meta de proteína', prote_falta: 'proteína que le falta', en_meta: 'días en su meta', dias_con_meta: 'días con meta',
+  ejercicio: 'el ejercicio que subió', de: 'el peso de antes', a: 'el peso de ahora', unidad: 'kg o lb', record: 'su récord',
+  rpe: 'intensidad promedio', racha: 'semanas seguidas cumpliendo', peso: 'su peso', pendiente_registro: 'lo que tiene pendiente (peso, medidas, fotos)',
+  bajo_ejercicio: 'el ejercicio que bajó', bajo_ahora: 'la serie de ahora', bajo_antes: 'la serie anterior',
+};
+// Dato que, si no hay, solo desaparece (sin borrar la línea).
+const DLG_SEG_SUAVES = ['cardio', 'cardio_completo'];
+const DLG_SEG = [
+  ['inicio', 'Saludo del check-in', `Hola {nombre}, ¿cómo vas? Espero que todo vaya bien, paso por acá al check-in periódico.`],
+  ['completa', 'Semana completa', `Hola {nombre}! Revisé tu semana: {hechas} de {plan} entrenos de fuerza{cardio_completo}. No se te escapó ninguno.
+
+{detalle}
+
+Así se construye. Esta semana mantenemos el ritmo.`],
+  ['media', 'Semana a medias', `Hola {nombre}! Revisé tu semana: {hechas} de {plan} entrenos de fuerza{cardio}.
+Se quedó pendiente {faltaron}.
+
+No hace falta hacerlo perfecto, hace falta hacerlo seguido. Para esta semana una sola cosa: {foco}.`],
+  ['floja', 'Semana floja', `Hola {nombre}! Vi que la semana costó: {hechas} de {plan} entrenos.
+
+Pasa, y es parte del proceso. Lo importante es no soltarlo todo: con {minimo} entrenos esta semana y registrar lo principal ya mantienes el avance.
+
+Si necesitas que ajuste la rutina a menos tiempo, me dices y lo hago.`],
+  ['retomar', 'Retomar', `Hola {nombre}! {Semana} no me aparece ningún entreno registrado en la app, ¿cómo vas?
+
+Si entrenaste y no lo anotaste, cuéntame. Si se complicó, no pasa nada: retomamos sin querer recuperar todo de golpe. ¿Qué día te queda bien empezar?`],
+  ['curso', 'A mitad de semana', `Hola {nombre}! ¿Cómo va la semana? Llevas {hechas} de {plan} entrenos.
+Te queda: {quedan}.
+
+{Faltaron} se quedó pendiente. Si puedes, recupéralo en un día libre y lo mueves en el calendario de la app.`],
+  ['registro', 'Volver a registrar', `{nombre}, {semana} se te pasaron {n_sin_registro} días sin registrar la comida.
+
+Sé que a veces da pereza, pero sin ese dato te ajusto a ciegas. Anota aunque sea lo principal y aproximado: me sirve mucho más que nada.`],
+  ['proteina', 'Subir la proteína', `{nombre}, revisando tus registros la proteína se queda corta: en promedio {prote_prom} g y tu meta es {prote_meta} g.
+
+Una forma fácil de cubrirla es sumar una porción de proteína en el desayuno o la merienda. No es comer más, es repartir mejor.`],
+  ['comidaBien', 'Comida bien', `{nombre}, en alimentación {semana} tuviste {en_meta} días dentro de tu meta de calorías. Eso es lo que más pesa en el resultado. Bien ahí.`],
+  ['avance', 'Felicitar el avance', `{nombre}, vi tu {ejercicio}: de {de} a {a} {unidad}. Así se progresa: sin apuro y con técnica.`],
+  ['racha', 'Racha de constancia', `Llevas {racha} semanas seguidas cumpliendo todos tus entrenos. Eso es lo que más resultados da. Sigamos así.`],
+  ['fatiga', 'Intensidad muy alta', `{nombre}, vi que {semana} marcaste la intensidad muy alta (promedio {rpe} de 10). ¿Cómo estás durmiendo y cómo te sientes de energía?
+
+Si vienes cargado, prefiero que bajemos un poco antes que forzar.`],
+  ['bajo', 'Bajó el rendimiento', `Vi que en {bajo_ejercicio} esta vez fue {bajo_ahora} y la anterior {bajo_antes}. Pasa, no todos los días se rinde igual. ¿Dormiste bien o venías cansado?`],
+  ['medicion', 'Registros pendientes', `{nombre}, te quedó pendiente {pendiente_registro}. Cuando puedas lo haces y lo marcas en la app: con eso reviso cómo va tu cuerpo y ajusto con datos.`],
+  ['cardio', 'Cardio pendiente', `{nombre}, del cardio tengo {cardio_hechos} de {cardio_plan} marcados. {Cardio_faltaron} quedó pendiente. Cuando lo hagas dale «Ya lo hice» en la app, así me queda el registro.`],
+  ['peso', 'Registró su peso', `Quedó tu peso registrado ({peso} kg). Con varias mediciones vemos la tendencia real.`],
+  ['pregunta', 'Para cerrar', `¿Cómo has dormido esta semana?
+---
+Del 1 al 10, ¿cómo está tu energía?
+---
+¿Algún dolor o molestia que deba saber?
+---
+¿Qué fue lo más difícil de la semana?`],
+];
+DLG_SEG.forEach(([sit, titulo, texto]) => DLG_BASE.push({ id: 'seg-' + sit, cat: 'sugeridos', titulo, texto, seg: true }));
+
+// Lo que el Seguimiento usa: el texto que editaste (o null: sus versiones de
+// siempre) y si lo ocultaste (entonces no lo sugiere).
+window.dlgSugerido = (sit) => {
+  const c = _dlg.custom;
+  if (!c) return { texto: null, oculto: false };
+  return { texto: c.editados['seg-' + sit] || null, oculto: (c.ocultos || []).includes('seg-' + sit) };
+};
+// Llena un sugerido con los datos de la semana. Una línea con un dato que no
+// hay no sale; {Dato} con mayúscula lo pone con la primera letra en mayúscula.
+window.dlgSegLlenar = (texto, vars) => {
+  const vacio = (v) => v == null || v === '' || v === false;
+  const lineas = String(texto || '').split('\n').filter(l => {
+    const ks = [...l.matchAll(/\{(\w+)\}/g)].map(m => m[1].toLowerCase());
+    return !ks.some(k => k in DLG_SEG_VARS && !DLG_SEG_SUAVES.includes(k) && vacio(vars[k]));
+  });
+  const t = lineas.join('\n').replace(/\{(\w+)\}/g, (m, k) => {
+    const kk = k.toLowerCase();
+    if (!(kk in DLG_SEG_VARS)) return m;
+    const v = vacio(vars[kk]) ? '' : String(vars[kk]);
+    return k[0] === k[0].toUpperCase() && k[0] !== k[0].toLowerCase() ? v.charAt(0).toUpperCase() + v.slice(1) : v;
+  });
+  return t.replace(/[ \t]+([.,])/g, '$1').replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+};
+
 const _dlg = { custom: null, columna: true, cliente: null, cat: 'saludos', q: '', editando: null };
 
 async function dlgCargarCustom(force = false) {
@@ -514,6 +608,8 @@ function dlgArmar(texto, c, datos) {
       const v = m[1] === 'nombre' ? (c ? dlgTrato(c) : '') : ((typeof _settings !== 'undefined' && _settings.nombre_coach) || '');
       if (v) { plano += v; html += m[1] === 'nombre' ? `<mark class="dlg-lleno">${escapeHtml(v)}</mark>` : escapeHtml(v); }
       else { plano += `[${m[1]}]`; html += `<mark class="dlg-falta">[${m[1]}]</mark>`; }
+    } else if (m[1].toLowerCase() in DLG_SEG_VARS && !(m[1] in DLG_DATOS)) {
+      plano += m[0]; html += `<mark class="dlg-seg" title="Se llena con su semana en el Seguimiento">[${escapeHtml(DLG_SEG_VARS[m[1].toLowerCase()])}]</mark>`;
     } else if (m[1] in DLG_DATOS) {
       const v = datos ? datos[m[1]] : null;
       if (v != null && v !== '') { plano += v; html += `<mark class="dlg-lleno" title="Sale de sus datos">${escapeHtml(v)}</mark>`; }
@@ -535,6 +631,7 @@ const DLG_ESTILOS = `
     <style>
       .dlg-hueco { background: #DBEAFE; color: #1E40AF; border-radius: 4px; padding: 0 2px; }
       .dlg-lleno { background: #DCFCE7; color: #166534; border-radius: 4px; padding: 0 2px; font-weight: 600; }
+      .dlg-seg { background: #EDE9FE; color: #5B21B6; border-radius: 4px; padding: 0 2px; font-weight: 600; }
       .dlg-falta { background: #FFEDD5; color: #9A3412; border-radius: 4px; padding: 0 2px; font-weight: 600; }
       .dlg-chip { border: 1px solid #e2e8f0; border-radius: 999px; padding: .3rem .7rem; font-size: .8rem; font-weight: 600; background: #fff; color: #334155; white-space: nowrap; }
       .dlg-chip.on { background: #1D1D1F; border-color: #1D1D1F; color: #fff; }
@@ -601,7 +698,8 @@ function dlgPintar(soloLista = false) {
     ? todos.filter(d => normalizeName(`${d.titulo} ${d.texto}`).includes(q))
     : todos.filter(d => d.cat === _dlg.cat);
   const c = _dlg.cliente;
-  $('#dlg-lista').innerHTML = lista.length ? lista.map(d => {
+  const notaSeg = !q && _dlg.cat === 'sugeridos' ? `<div class="dlg-card text-sm text-slate-600" data-dlg-nota-seg style="background:#FAF9F6">Son los mensajes que te sugiere el Seguimiento de cada cliente. Lo <mark class="dlg-seg">morado</mark> se llena con su semana; si a ese cliente le falta un dato, esa línea no sale. Mientras no los edites, el Seguimiento rota cada semana entre varias versiones; si editas uno, usa el tuyo (separa versiones con una línea que diga solo ---). Si ocultas uno, el Seguimiento deja de sugerirlo.</div>` : '';
+  $('#dlg-lista').innerHTML = notaSeg + (lista.length ? lista.map(d => {
     const armado = dlgArmar(d.texto, c, c ? (_dlg.datos || {}) : null);
     const texto = armado.plano;
     if (_dlg.editando === d.id) return dlgFormHtml(d);
@@ -623,7 +721,7 @@ function dlgPintar(soloLista = false) {
           </div>
         </div>
       </div>`;
-  }).join('') : '<div class="text-sm text-slate-500 text-center py-6">Nada por aquí todavía.</div>';
+  }).join('') : '<div class="text-sm text-slate-500 text-center py-6">Nada por aquí todavía.</div>');
 }
 
 // «Usar»: abre el texto para rellenar los [huecos] antes de copiarlo.
@@ -684,7 +782,7 @@ function dlgFormHtml(d) {
         <div><label>Categoría</label><select id="dlg-f-cat" ${d && !d.propio && !nuevo ? 'disabled' : ''}>${cats}</select></div>
       </div>
       <label class="mt-2 block">Texto · {nombre} y los {datos} se llenan solos; [corchetes] para lo que rellenas tú</label>
-      <div class="text-[11px] text-slate-500 leading-snug">Datos: ${Object.keys(DLG_DATOS).map(k => `{${k}}`).join(' ')}</div>
+      <div class="text-[11px] text-slate-500 leading-snug">Datos: ${d && d.seg ? Object.keys(DLG_SEG_VARS).map(k => `{${k}}`).join(' ') + ' · una línea con un dato que no hay no sale; separa versiones con ---' : Object.keys(DLG_DATOS).map(k => `{${k}}`).join(' ')}</div>
       <textarea id="dlg-f-texto" rows="9" class="w-full text-sm">${escapeHtml(d?.texto || 'Hola {nombre}! ')}</textarea>
       <div class="flex gap-1.5 flex-wrap mt-2">
         <button class="btn btn-primary btn-sm" data-dlg-f-guardar onclick="dlgGuardarForm('${nuevo ? '' : d.id}')">Guardar</button>

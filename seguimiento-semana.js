@@ -532,8 +532,20 @@ function esMensajes(c, S) {
 
   const semana = esSemanaAbs(S.lunes);
   const elegir = (sit) => {
-    const vs = ES_MSJ[sit];
+    // Diálogos es la biblioteca: si editaste este mensaje allá, va el tuyo
+    // (con sus datos); si lo ocultaste, no se sugiere.
+    const dl = typeof dlgSugerido === 'function' ? dlgSugerido(sit) : { texto: null, oculto: false };
+    if (dl.oculto) return null;
     const base = esHash(c.id + ':' + sit) + semana;
+    if (dl.texto && typeof dlgSegLlenar === 'function') {
+      const vt = dl.texto.split(/\n\s*-{3,}\s*\n/).map(x => x.trim()).filter(Boolean);
+      for (let i = 0; i < vt.length; i++) {
+        const k = (base + i) % vt.length;
+        const t = dlgSegLlenar(vt[k], esVars(d));
+        if (t) return { sit, titulo: sit === 'medicion' ? d.medTitulo : ES_TITULOS[sit], texto: t, version: k + 1, de: vt.length, propio: true };
+      }
+    }
+    const vs = ES_MSJ[sit];
     for (let i = 0; i < vs.length; i++) {
       const k = (base + i) % vs.length;
       const t = vs[k](d);
@@ -588,19 +600,41 @@ function esMensajes(c, S) {
     const ya = dicho(m.titulo, m.dias);
     return ya ? { ...m, hecho: String(ya.fecha).slice(0, 10) } : m;
   });
-  const pregunta = { sit: 'pregunta', titulo: 'Para cerrar', texto: ES_PREGUNTAS[(esHash(c.id + ':pregunta') + semana) % ES_PREGUNTAS.length] };
+  const dlg = (sit) => (typeof dlgSugerido === 'function' ? dlgSugerido(sit) : { texto: null, oculto: false });
+  const deDlg = (sit) => { const x = dlg(sit); if (!x.texto || typeof dlgSegLlenar !== 'function') return null; const vt = x.texto.split(/\n\s*-{3,}\s*\n/).map(t => t.trim()).filter(Boolean); return vt.length ? dlgSegLlenar(vt[(esHash(c.id + ':' + sit) + semana) % vt.length], esVars(d)) || null : null; };
+  const pregunta = dlg('pregunta').oculto ? null : { sit: 'pregunta', titulo: 'Para cerrar', texto: deDlg('pregunta') || ES_PREGUNTAS[(esHash(c.id + ':pregunta') + semana) % ES_PREGUNTAS.length] };
 
   // Siempre se abre con el saludo del check-in; los demás van después, así
   // que no repiten el «Hola Ana!» del comienzo.
   const sinSaludo = (m) => ({ ...m, texto: esSinSaludo(m.texto, n) });
   return [
-    { sit: 'inicio', titulo: 'Saludo del check-in', texto: esSaludo(n) },
+    ...(dlg('inicio').oculto ? [] : [{ sit: 'inicio', titulo: 'Saludo del check-in', texto: deDlg('inicio') || esSaludo(n) }]),
     ...avisos.filter(m => !m.hecho),
     ...out.map(sinSaludo),
     ...otros.map(sinSaludo),
-    pregunta,
+    ...(pregunta ? [pregunta] : []),
     ...avisos.filter(m => m.hecho),
   ];
+}
+
+// Los datos de la semana para los mensajes que editaste en Diálogos
+// (Diálogos → Sugeridos del Seguimiento).
+function esVars(d) {
+  const K = d.K || null, pr = K && K.prot ? K.prot : null;
+  return {
+    nombre: d.n, hechas: d.F.hechas, plan: d.F.plan, cardio: d.cardioTxt, cardio_completo: d.cardioOk,
+    faltaron: d.faltoTxt, quedan: d.quedanTxt, foco: d.foco, minimo: d.minimo, detalle: d.detalle || '',
+    semana: d.semTxt, ultimo_entreno: d.ultimoTxt,
+    cardio_hechos: d.C.hechos, cardio_plan: d.C.plan, cardio_faltaron: d.cardioFaltoTxt, cardio_minutos: d.cardioMin,
+    dias_registro: K ? K.dias : null, dias_base: K ? K.base : null, n_sin_registro: K && K.sinDias ? K.sinDias.length : null, dias_sin_registro: d.sinDiasTxt,
+    prote_prom: pr ? pr.prom : null, prote_meta: pr ? pr.meta : null, prote_falta: pr ? pr.meta - pr.prom : null,
+    en_meta: K ? K.enMeta : null, dias_con_meta: K ? K.conMeta : null,
+    ejercicio: d.prog ? d.prog.nombre : null, de: d.prog ? esNum(d.prog.de) : null, a: d.prog ? esNum(d.prog.a) : null, unidad: d.prog ? d.prog.unidad : null,
+    record: d.rec ? `${d.rec.nombre}${d.rec.peso ? ` ${esNum(d.rec.peso)} ${d.rec.unidad || 'kg'} por ${d.rec.reps}` : ` ${d.rec.reps} repeticiones`}` : null,
+    rpe: d.rpe ? esNum(d.rpe.prom) : null, racha: d.racha || null,
+    peso: d.peso && d.peso.ahora ? esNum(d.peso.ahora.peso) : null, pendiente_registro: d.medTxt,
+    bajo_ejercicio: d.bajo ? d.bajo.nombre : null, bajo_ahora: d.bajo ? esSerieTxt(d.bajo.ahora) : null, bajo_antes: d.bajo ? esSerieTxt(d.bajo.antes) : null,
+  };
 }
 
 const ES_PREGUNTAS = [
@@ -976,6 +1010,8 @@ window.esPintar = async (c, lunes = null) => {
     return;
   }
   _es.semana = S;
+  // Los textos que editaste en Diálogos (sus sugeridos) mandan.
+  if (typeof dlgCargarCustom === 'function') { try { await dlgCargarCustom(); } catch (e) { /* sin columna: los de siempre */ } }
   _es.mensajes = esMensajes(c, S);
   cuerpo.classList.remove('es-cargando');
   // Con las 6 áreas (seguimiento-areas.js), «Pesos y repeticiones» va en Fuerza.
