@@ -265,11 +265,10 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   await p.evaluate(() => navigate('hoy')); await p.waitForTimeout(2500);
   const tabs = await p.locator('[data-mv-tab]').evaluateAll(xs => xs.map(x => x.dataset.mvTab));
   ok('barra de abajo: Hoy, Bandeja, Toques, Equipo y Más', JSON.stringify(tabs) === '["hoy","bandeja","toques","equipo"]' && await p.locator('[data-mv-mas]').count() === 1, JSON.stringify(tabs));
-  ok('en Hoy: tarjeta para recibir aquí los avisos', await p.locator('[data-ca-banner]').count() === 1);
   ok('«+ Anotar» a la vista, sin tapar la barra', await p.evaluate(() => { const f = document.querySelector('[data-an-fab]').getBoundingClientRect(), b = document.querySelector('[data-mv-barra]').getBoundingClientRect(); return f.bottom <= b.top + 1; }));
   await p.screenshot({ path: path.join(CAPTURAS, 'coach-telefono-hoy.png') });
   await p.locator('[data-mv-mas]').click(); await p.waitForTimeout(400);
-  ok('«Más» tiene «Mi app (vista cliente)» y los avisos', await p.locator('[data-mv-mi-app]').count() === 1 && /\?crm=/.test(await p.locator('[data-mv-mi-app]').getAttribute('href')) && await p.locator('[data-ca-fila]').count() === 1);
+  ok('«Más» sin «Mi app» ni avisos del CRM (una sola app: la vista coach va dentro de la app)', await p.locator('[data-mv-mi-app]').count() === 0 && await p.locator('[data-ca-fila]').count() === 0);
   await p.screenshot({ path: path.join(CAPTURAS, 'coach-telefono-mas.png') });
   await p.evaluate(() => mvCerrarMas());
   await p.goto(BASE + '/?ver=bandeja'); await p.locator('#app-screen').waitFor({ state: 'visible', timeout: 20000 }); await p.waitForTimeout(2500);
