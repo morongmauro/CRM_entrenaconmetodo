@@ -50,7 +50,7 @@ function tablas() {
     cli('c5', 'Sofía Mora', '+57 300 000 0005'),
     cli('c3', 'Pedro Viejo', '+57 300 000 0006', { estado: 'inactivo' }),
   ];
-  const msj = (id, c, f) => ({ id, user_id: 'coach-1', cliente_id: c, fecha: f, created_at: f + 'T08:00:00Z', origen: 'seguimiento', titulo: 'Seguimiento', texto: 'Hola' });
+  const msj = (id, c, f) => ({ id, user_id: 'coach-1', cliente_id: c, fecha: f, created_at: f + 'T00:01:00Z', origen: 'seguimiento', titulo: 'Seguimiento', texto: 'Hola' });
   return {
     clientes,
     sesiones: [
@@ -211,6 +211,27 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   await p.waitForTimeout(2500);
   ok('?seg=c0 abre el Seguimiento de Ana y limpia la dirección', await p.evaluate(() => _currentView === 'seguimiento' && String(_selectedClienteId) === 'c0' && !location.search), await p.evaluate(() => `${_currentView} ${_selectedClienteId} ${location.search}`));
   ok('sin errores (enlace)', errores.length === 0, errores.join(' | '));
+  await ctx.close();
+}
+{
+  console.log('\nhistorial de semanas');
+  const { ctx, p, errores } = await abrir(1440, 900);
+  await p.evaluate(() => navigate('toques')); await p.locator('tr[data-tq-cliente="c0"]').waitFor({ timeout: 20000 });
+  const cajas = await p.locator('tr[data-tq-cliente="c0"] [data-tq="historial"] .tq-hw').count();
+  const esta = (await p.locator('tr[data-tq-cliente="c0"] [data-tq="historial"] .tq-hw.act').innerText()).replace(/\s+/g, ' ');
+  ok('columna «Últimas 3 semanas»: 3 recuadros y esta semana con «Seguimiento»', cajas === 3 && /Seguimiento/.test(esta), `${cajas} · ${esta}`);
+  await p.locator('[data-tq-semana="1"]').click(); await p.waitForTimeout(900);
+  const txt = await p.locator('#view').innerText();
+  ok('«Semana pasada»: la tabla muestra esa semana, sin «Marcar hecho»', /Así quedó esa semana/.test(txt) && await p.locator('[data-tq-seg-hecho]').count() === 0 && /sin seguimiento esa semana/.test(txt));
+  await p.locator('[data-tq-semana="0"]').click(); await p.waitForTimeout(900);
+  ok('«Esta semana» vuelve con «Marcar hecho»', await p.locator('[data-tq-seg-hecho]').count() > 0);
+  await p.locator('tr[data-tq-cliente="c4"] [data-tq="historial"]').click(); await p.waitForTimeout(700);
+  const h = await p.locator('[data-tq-historial]').innerText().catch(() => '');
+  ok('historial de Marta: 6 semanas, con el seguimiento de hace 10 días', await p.locator('[data-tq-historial] .tq-hi-sem').count() === 6 && /Seguimiento semanal enviado/.test(h), h.slice(0, 300));
+  await p.locator('[data-tq-historial]').screenshot({ path: path.join(CAPTURAS, 'toques-historial.png') }).catch(() => {});
+  await p.evaluate(() => closeModal());
+  await p.locator('[data-tq-tabla]').screenshot({ path: path.join(CAPTURAS, 'toques-semanas.png') }).catch(() => {});
+  ok('sin errores (historial)', errores.length === 0, errores.join(' | '));
   await ctx.close();
 }
 await b.close(); servidor.close();

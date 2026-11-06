@@ -24,7 +24,7 @@
 // Va DESPUÉS de crm-prueba.js (usa cpSeguimiento) y de videos-tecnica.js.
 // =====================================================
 
-const _tq = { tel: null, hoyYa: new Set(), sinTabla: false, filtro: 'todos', datos: null };
+const _tq = { tel: null, hoyYa: new Set(), sinTabla: false, filtro: 'todos', datos: null, atras: 0 };
 // Semáforo: rojo (le debes respuesta, o frío: 15 días o más sin un toque
 // tuyo), amarillo (8 a 14 días sin toque, o 4 días o más con toque en los
 // últimos 7: mejor esperar), verde (bien), gris (en pausa).
@@ -84,27 +84,44 @@ async function tqDesdeEnlace(url) {
 // pedirle video, responder su nota, abrir su WhatsApp desde el CRM). Si el
 // mismo día copias el seguimiento y abres su WhatsApp, cuenta 1, no 2.
 const TQ_DIAS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
-async function tqDatos(forzar = false) {
-  if (!forzar && _tq.datos && Date.now() - (_tq.leido || 0) < 120000) return _tq.datos;
-  const hoy = fmt.hoy(), lunes = tqLunes(hoy), desde = evtSumarDias(hoy, -30), hace7 = evtSumarDias(hoy, -6);
+// Lo leído de Supabase, una vez (2 min). Alcanza para 6 semanas de historial
+// (y para saber si alguien estaba frío al cierre de una semana pasada).
+async function tqCrudo(forzar = false) {
+  if (!forzar && _tq.crudo && _tq.datos && Date.now() - (_tq.leido || 0) < 120000) return _tq.crudo;
+  const hoy = fmt.hoy(), lunes = tqLunes(hoy), desde = evtSumarDias(lunes, -42);
   const leer = async (q) => { try { const { data, error } = await q; return error ? null : (data || []); } catch (e) { return null; } };
   const [msj, vids, notas, ses, resp, com, toq, nhf] = await Promise.all([
     leer(sb.from('seguimiento_mensajes').select('cliente_id, fecha, origen, created_at').gte('fecha', desde)),
-    leer(sb.from('videos_tecnica').select('cliente_id, ejercicio_id, ejercicio_nombre, pedido_en, estado, revisado_en, created_at').gte('pedido_en', evtSumarDias(hoy, -120))),
+    leer(sb.from('videos_tecnica').select('cliente_id, ejercicio_id, ejercicio_nombre, pedido_en, estado, revisado_en, created_at').gte('pedido_en', evtSumarDias(hoy, -160))),
     leer(sb.from('notas_entreno').select('cliente_id, fecha, created_at').gte('fecha', desde)),
     leer(sb.from('sesiones').select('cliente_id, fecha, estado, notas_cliente').gte('fecha', desde)),
     leer(sb.from('respuestas_coach').select('cliente_id, created_at').gte('created_at', desde)),
     leer(sb.from('comentarios_coach').select('cliente_id, creado_en').gte('creado_en', desde)),
     leer(sb.from('toques_cliente').select('cliente_id, fecha, tipo, created_at').gte('fecha', desde)),
-    leer(sb.from('toques_semana').select('cliente_id, lunes, motivo').eq('lunes', lunes)),
+    leer(sb.from('toques_semana').select('cliente_id, lunes, motivo').gte('lunes', evtSumarDias(lunes, -42))),
   ]);
   _tq.sinTabla = toq === null;
   _tq.sinTablaSemana = nhf === null;
-  const noHaceFalta = new Set((nhf || []).map(x => String(x.cliente_id)));
   let eng = null;
   try { eng = typeof engDatos === 'function' ? await engDatos() : null; } catch (e) { eng = null; }
   try { if (typeof ausCargar === 'function') await ausCargar(); } catch (e) { /* sin tabla */ }
   const clientes = (await db.clientes.list()).filter(c => String(c.estado || 'activo').toLowerCase() === 'activo');
+  _tq.crudo = { msj, vids, notas, ses, resp, com, toq, nhf, eng, clientes };
+  _tq.leido = Date.now();
+  return _tq.crudo;
+}
+// La tabla tal como quedó al cierre del día `ref`: hoy, o el domingo de una
+// semana pasada (solo cuenta lo que pasó hasta ese día).
+function tqCalcular(R, ref) {
+  const hoyReal = fmt.hoy(), hoy = ref, lunes = tqLunes(ref), hace7 = evtSumarDias(hoy, -6);
+  const actual = lunes === tqLunes(hoyReal);
+  const { eng, clientes } = R;
+  const noHaceFalta = new Set((R.nhf || []).filter(x => x.lunes === lunes).map(x => String(x.cliente_id)));
+  const hasta = (l, fn) => (l || []).filter(x => { const f = fn(x); return !!f && f <= hoy; });
+  const msj = hasta(R.msj, x => x.fecha), notas = hasta(R.notas, x => x.fecha || tqDia(x.created_at)), ses = hasta(R.ses, x => x.fecha);
+  const resp = hasta(R.resp, x => tqDia(x.created_at)), com = hasta(R.com, x => tqDia(x.creado_en)), toq = hasta(R.toq, x => x.fecha);
+  // Los videos como estaban ese día: lo revisado después seguía pendiente.
+  const vids = hasta(R.vids, x => x.pedido_en).map(x => (x.revisado_en && tqDia(x.revisado_en) > hoy ? { ...x, estado: 'pedido', revisado_en: null } : x));
   const de = (l, id) => (l || []).filter(x => String(x.cliente_id) === String(id));
   const semana = (f) => !!f && f >= lunes && f <= hoy;
   const diasSemana = TQ_DIAS.map((_, k) => evtSumarDias(lunes, k));
@@ -147,7 +164,7 @@ async function tqDatos(forzar = false) {
     const ultV = {};
     v.forEach(x => { const k = x.ejercicio_id || `n:${String(x.ejercicio_nombre || '').toLowerCase()}`; const u = ultV[k]; if (!u || String(x.pedido_en) > String(u.pedido_en) || (x.pedido_en === u.pedido_en && String(x.created_at) > String(u.created_at))) ultV[k] = x; });
     const vig = Object.values(ultV);
-    const videos = { pedidosSemana: v.filter(x => semana(x.pedido_en)).length, porLlegar: vig.filter(x => x.estado === 'pedido').length, porRevisar: vig.filter(x => x.estado === 'recibido').length };
+    const videos = { pedidosSemana: v.filter(x => semana(x.pedido_en)).length, revisadosSemana: v.filter(x => x.revisado_en && semana(tqDia(x.revisado_en))).length, porLlegar: vig.filter(x => x.estado === 'pedido').length, porRevisar: vig.filter(x => x.estado === 'recibido').length };
     const dias7 = new Set(tuyos.filter(x => x[1] >= hace7 && x[1] <= hoy).map(x => x[1])).size;
     const sinToque = ultTuyo ? tqEntre(ultTuyo, hoy) : null;
     const pausa = typeof ausHoy === 'function' ? ausHoy(c.id, hoy) : null;
@@ -162,19 +179,22 @@ async function tqDatos(forzar = false) {
     else estado = 'bien';
     return {
       c, estado, debe, ultTuyo, ultSuyo, sinToque, tipos, videos,
-      semana: diasSemana.map(d => ({ d, tuyo: diasTuyos.has(d), suyo: diasSuyos.has(d), futuro: d > hoy, hoy: d === hoy })),
+      semana: diasSemana.map(d => ({ d, tuyo: diasTuyos.has(d), suyo: diasSuyos.has(d), futuro: d > hoyReal, hoy: d === hoyReal })),
       diasToque: diasTuyos.size, contacto: diasTuyos.size + diasSuyos.size > 0,
       seguimiento: segSemana[0] || null, suyoPor: suyoUlt ? suyoUlt[0] : null,
       escApp, escWa,
       noHaceFalta: noHaceFalta.has(String(c.id)),
       entrenos: s.filter(x => x.estado === 'completada' && semana(x.fecha)).length,
-      app: e ? e.sinActividad : undefined,
+      app: e && actual ? e.sinActividad : undefined,
     };
   });
   // Por estado (rojo, amarillo, verde, en pausa) y, dentro de cada uno, en orden alfabético.
   filas.sort((a, b) => TQ_ORDEN[a.estado] - TQ_ORDEN[b.estado] || String(a.c.nombre).localeCompare(String(b.c.nombre), 'es', { sensitivity: 'base' }));
-  _tq.datos = { hoy, lunes, filas };
-  _tq.leido = Date.now();
+  return { hoy, lunes, filas, actual };
+}
+async function tqDatos(forzar = false) {
+  if (!forzar && _tq.datos && Date.now() - (_tq.leido || 0) < 120000) return _tq.datos;
+  _tq.datos = tqCalcular(await tqCrudo(true), fmt.hoy());
   return _tq.datos;
 }
 window.tqFiltro = (k) => { _tq.filtro = k; rerenderView(); };
@@ -256,11 +276,86 @@ const TQ_FALTA = {
 };
 const TQ_TIPO = { seguimiento: 'Seguimiento', video: 'Video', respuesta: 'Respuesta', whatsapp: 'WhatsApp' };
 
+// Semana corta: «3–9 nov» o «27 oct–2 nov».
+const TQ_MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+function tqRango(lunes) {
+  const a = new Date(lunes + 'T12:00:00Z'), b = new Date(evtSumarDias(lunes, 6) + 'T12:00:00Z');
+  return a.getUTCMonth() === b.getUTCMonth() ? `${a.getUTCDate()}–${b.getUTCDate()} ${TQ_MES[b.getUTCMonth()]}` : `${a.getUTCDate()} ${TQ_MES[a.getUTCMonth()]}–${b.getUTCDate()} ${TQ_MES[b.getUTCMonth()]}`;
+}
+const tqEt = (cl, t) => `<span class="tq-et ${cl}">${t}</span>`;
+// Las etiquetas de una semana: seguimiento, videos y si se te pasó.
+function tqEtiquetas(f, actual) {
+  if (f.estado === 'pausa') return tqEt('gr', 'En pausa');
+  const l = [];
+  if (f.seguimiento) l.push(tqEt('az', 'Seguimiento'));
+  else if (f.noHaceFalta) l.push(tqEt('am', 'Esta semana no'));
+  else if (actual) l.push(tqEt('ro', 'Falta seguimiento'));
+  else l.push(tqEt('ro', f.diasToque ? 'Sin seguimiento' : 'Sin toque'));
+  const v = f.videos;
+  if (v.pedidosSemana) l.push(tqEt('na', `Pedí ${v.pedidosSemana} video${v.pedidosSemana === 1 ? '' : 's'}`));
+  if (v.porLlegar) l.push(tqEt('na', `${v.porLlegar} por llegar`));
+  if (actual && v.porRevisar) l.push(tqEt('ve', `${v.porRevisar} por revisar`));
+  if (v.revisadosSemana) l.push(tqEt('gr', `Revisé ${v.revisadosSemana}`));
+  return l.join('');
+}
+window.tqSemana = (k) => { _tq.atras = k; rerenderView(); };
+
+// El historial de un cliente: 6 semanas, día por día.
+const TQ_DSEM = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+window.tqHistorial = async (id) => {
+  const R = _tq.crudo || await tqCrudo(true);
+  const c = (R.clientes || []).find(x => String(x.id) === String(id));
+  if (!c) return;
+  const de = (l) => (l || []).filter(x => String(x.cliente_id) === String(id));
+  const ev = [];   // [fecha, texto, tuyo]
+  const corto = (t, n = 90) => { t = String(t || '').trim().replace(/\s+/g, ' '); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+  de(R.msj).forEach(x => {
+    if (x.origen === 'videos') return;
+    ev.push([x.fecha, x.origen === 'nota' ? 'Atendiste su mensaje en la Bandeja' : x.origen === 'manual' ? 'Seguimiento semanal marcado hecho' : 'Seguimiento semanal enviado', true]);
+  });
+  const vs = de(R.vids), pedidos = {};
+  vs.forEach(x => { (pedidos[x.pedido_en] = pedidos[x.pedido_en] || []).push(x.ejercicio_nombre || 'ejercicio'); });
+  Object.entries(pedidos).forEach(([f, l]) => ev.push([f, `Pediste video${l.length === 1 ? '' : 's'}: ${l.join(', ')}`, true]));
+  const EST = { bien: 'bien', mejorar: 'a mejorar', mal: 'nada bien' };
+  vs.filter(x => x.revisado_en && EST[x.estado]).forEach(x => ev.push([tqDia(x.revisado_en), `Revisaste su video de ${x.ejercicio_nombre || 'ejercicio'}: ${EST[x.estado]}`, false]));
+  de(R.resp).forEach(x => ev.push([tqDia(x.created_at), 'Le respondiste en la app', true]));
+  de(R.com).forEach(x => ev.push([tqDia(x.creado_en), 'Le comentaste en la app', true]));
+  de(R.toq).forEach(x => ev.push([x.fecha, x.tipo === 'me_escribio' ? 'Te escribió por WhatsApp' : 'Abriste su WhatsApp', x.tipo !== 'me_escribio']));
+  de(R.notas).forEach(x => ev.push([x.fecha || tqDia(x.created_at), 'Te escribió en la app', false]));
+  de(R.ses).filter(x => String(x.notas_cliente || '').trim()).forEach(x => ev.push([x.fecha, `Te dejó una nota al terminar: «${escapeHtml(corto(x.notas_cliente))}»`, false]));
+  const hoy = fmt.hoy(), lunes = tqLunes(hoy);
+  const visto = new Set();
+  const semanas = [0, 1, 2, 3, 4, 5].map(k => {
+    const l = evtSumarDias(lunes, -7 * k), d = evtSumarDias(l, 6);
+    const lista = ev.filter(x => x[0] && x[0] >= l && x[0] <= d && x[0] <= hoy).sort((a, b) => a[0].localeCompare(b[0]))
+      .filter(x => { const kk = x[0] + x[1]; if (visto.has(kk)) return false; visto.add(kk); return true; });
+    const dias = new Set(lista.filter(x => x[2]).map(x => x[0])).size;
+    const entrenos = de(R.ses).filter(x => x.estado === 'completada' && x.fecha >= l && x.fecha <= d).length;
+    const nhf = (R.nhf || []).some(x => String(x.cliente_id) === String(id) && x.lunes === l);
+    const pausa = typeof ausHoy === 'function' ? ausHoy(id, k ? d : hoy) : null;
+    const etq = pausa ? tqEt('gr', 'En pausa') : nhf ? tqEt('am', 'Esta semana no') : (!dias && k ? tqEt('ro', 'Sin toque') : '');
+    return `<div class="tq-hi-sem${k ? '' : ' act'}" data-tq-hist-sem="${l}">
+      <div class="tq-hi-h">${k ? '' : 'Esta semana · '}${tqRango(l)} · ${dias} día${dias === 1 ? '' : 's'} con toque${entrenos ? ` · ${entrenos} entreno${entrenos === 1 ? '' : 's'}` : ''} ${etq}</div>
+      ${lista.length ? lista.map(x => { const t = new Date(x[0] + 'T12:00:00Z'); return `<div class="tq-hi-ev${x[2] ? '' : ' suyo'}"><span>${TQ_DSEM[t.getUTCDay()]} ${t.getUTCDate()}</span>${x[1]}</div>`; }).join('') : '<div class="tq-hi-ev"><span></span><i>Nada registrado</i></div>'}
+    </div>`;
+  }).join('');
+  openModal(modalShell(`Historial · ${escapeHtml(c.nombre)}`, `<div data-tq-historial><p class="text-sm text-slate-500" style="margin:0 0 12px">Seis semanas, de la más reciente a la más antigua. En negro lo que hiciste tú; en azul lo que hizo o te escribió.</p>${semanas}</div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>`));
+};
+
 routes.toques = async () => {
   cargando('Juntando los toques de la semana…');
-  let D;
-  try { D = await tqDatos(true); } catch (e) { D = { filas: [], hoy: fmt.hoy(), lunes: tqLunes(fmt.hoy()) }; console.warn('toques', e); }
+  let D, sems = [];
+  try {
+    const R = await tqCrudo(true), hoyR = fmt.hoy(), lunesR = tqLunes(hoyR);
+    _tq.datos = tqCalcular(R, hoyR);
+    // Las 3 semanas: hace 2, la pasada y esta (cada una como quedó al cerrar).
+    sems = [2, 1, 0].map(k => (k ? tqCalcular(R, evtSumarDias(lunesR, -7 * k + 6)) : _tq.datos));
+    D = sems[2 - _tq.atras] || _tq.datos;
+  } catch (e) { D = { filas: [], hoy: fmt.hoy(), lunes: tqLunes(fmt.hoy()), actual: true }; console.warn('toques', e); }
   finCargando();
+  const deSemana = (D.actual ? 'esta semana' : 'esa semana');
+  const porCliente = sems.map(S => new Map(S.filas.map(f => [String(f.c.id), f])));
   const color = (f) => TQ_TONO[f.estado][0];
   const lista = TQ_FALTA[_tq.filtro] ? D.filas.filter(TQ_FALTA[_tq.filtro]) : _tq.filtro === 'todos' ? D.filas : D.filas.filter(f => color(f) === _tq.filtro);
   const activos = D.filas.filter(f => f.estado !== 'pausa');
@@ -275,24 +370,32 @@ routes.toques = async () => {
   const dia = (f) => TQ_DIAS[(new Date(f + 'T12:00:00Z').getUTCDay() + 6) % 7];
   const celdaSeg = (f) => f.estado === 'pausa' ? '<span class="tq-cero">—</span>'
     : f.seguimiento ? `<span class="tq-ok">Hecho</span><div class="tq-sub">${['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'][TQ_DIAS.indexOf(dia(f.seguimiento))]}</div>`
-    : f.noHaceFalta ? `<span class="tq-nhf">Esta semana no</span><div class="tq-sub">la próxima sí · <a href="#" class="tq-ult-link" data-tq-nhf-deshacer onclick="event.preventDefault();tqNoHaceFalta('${f.c.id}', false)">deshacer</a></div>`
+    : f.noHaceFalta ? `<span class="tq-nhf">Esta semana no</span>${D.actual ? `<div class="tq-sub">la próxima sí · <a href="#" class="tq-ult-link" data-tq-nhf-deshacer onclick="event.preventDefault();tqNoHaceFalta('${f.c.id}', false)">deshacer</a></div>` : ''}`
+    : !D.actual ? `<span class="tq-rojo">No se hizo</span>`
     : `<span class="tq-falta">Falta</span><div class="tq-seg-btns"><button type="button" class="tq-hecho" data-tq-seg-hecho onclick="tqSegHecho('${f.c.id}')">Marcar hecho</button><button type="button" class="tq-hecho tq-hecho-s" data-tq-nhf onclick="tqNoHaceFalta('${f.c.id}', true)" title="Ya lo tocaste y no está frío: esta semana no le hace falta seguimiento. La próxima vuelve.">Esta semana no</button></div>`;
   const celdaVid = (f) => {
-    const l = [f.videos.porRevisar ? `<b>${f.videos.porRevisar} por revisar</b>` : '', f.videos.porLlegar ? `${f.videos.porLlegar} por llegar` : '', f.videos.pedidosSemana ? `<span class="tq-sub">${f.videos.pedidosSemana} pedido${f.videos.pedidosSemana === 1 ? '' : 's'} esta semana</span>` : ''].filter(Boolean);
+    const l = [f.videos.porRevisar ? `<b>${f.videos.porRevisar} por revisar</b>` : '', f.videos.porLlegar ? `${f.videos.porLlegar} por llegar` : '', f.videos.pedidosSemana ? `<span class="tq-sub">${f.videos.pedidosSemana} pedido${f.videos.pedidosSemana === 1 ? '' : 's'} ${deSemana}</span>` : ''].filter(Boolean);
     return l.length ? l.join('<br>') : '<span class="tq-cero">—</span>';
   };
   const celdaCanal = (x, wa) => !x ? '<span class="tq-cero">—</span>'
     : x.sinResponder ? `<span class="tq-rojo tq-nw">${tqCuando(x.f, D.hoy).replace(/^h/, 'H')} · sin responder</span>`
     : `${tqCuando(x.f, D.hoy).replace(/^h/, 'H')}<div class="tq-sub">respondido</div>`;
   const app = (f) => f.app === undefined ? '' : `<div class="tq-sub">App: ${f.app === null ? 'nunca' : f.app === 0 ? 'hoy' : f.app === 1 ? 'ayer' : `hace ${f.app} días`}</div>`;
+  // Las últimas 3 semanas de este cliente, con etiquetas cortas.
+  const histCel = (f) => `<div class="tq-hs">${porCliente.map((M, k) => {
+    const x = M.get(String(f.c.id)), S = sems[k];
+    if (!x) return `<div class="tq-hw${S.actual ? ' act' : ''}"><div class="tq-hw-t"><span>${S.actual ? 'Esta semana' : tqRango(S.lunes)}</span></div><span class="tq-cero">—</span></div>`;
+    return `<div class="tq-hw${S.actual ? ' act' : ''}${k === 2 - _tq.atras && !S.actual ? ' sel' : ''}" data-tq-hist-semana="${S.lunes}"><div class="tq-hw-t"><span>${S.actual ? 'Esta semana' : tqRango(S.lunes)}</span><b>${x.diasToque} día${x.diasToque === 1 ? '' : 's'}</b></div>${tqEtiquetas(x, S.actual)}</div>`;
+  }).join('')}</div>`;
   const fila = (f) => `<tr data-tq-cliente="${f.c.id}" data-tq-estado="${f.estado}" data-tq-color="${color(f)}">
-      <td class="lis-nom">${typeof entAvatar === 'function' ? entAvatar(f.c.nombre) : ''}<div><b>${escapeHtml(f.c.nombre)}</b><div class="tq-sub" data-tq-ultimo>Tu último toque: ${tqCuando(f.ultTuyo, D.hoy)}</div></div></td>
+      <td class="lis-nom tq-nom-cel" onclick="tqHistorial('${f.c.id}')" title="Ver su historial de 6 semanas">${typeof entAvatar === 'function' ? entAvatar(f.c.nombre) : ''}<div><b>${escapeHtml(f.c.nombre)}</b><div class="tq-sub" data-tq-ultimo>Tu último toque: ${tqCuando(f.ultTuyo, D.hoy)}</div></div></td>
       <td>${semaforo(f)}</td>
-      <td data-tq="semana">${tira(f)}<div class="tq-sub" data-tq-dias>${f.diasToque ? `<b>${f.diasToque}</b> de 7 días` : 'Sin tocarlo esta semana'}</div>${f.tipos.length ? `<div>${f.tipos.map(k => `<span class="tq-ch">${TQ_TIPO[k]}</span>`).join('')}</div>` : ''}</td>
+      <td data-tq="historial" class="tq-hist-cel" onclick="tqHistorial('${f.c.id}')" title="Toca para ver su historial de 6 semanas">${histCel(f)}</td>
+      <td data-tq="semana">${tira(f)}<div class="tq-sub" data-tq-dias>${f.diasToque ? `<b>${f.diasToque}</b> de 7 días` : `Sin tocarlo ${deSemana}`}</div>${f.tipos.length ? `<div>${f.tipos.map(k => `<span class="tq-ch">${TQ_TIPO[k]}</span>`).join('')}</div>` : ''}</td>
       <td data-tq="seguimiento">${celdaSeg(f)}</td>
       <td data-tq="videos" class="tq-vid-cel" onclick="vtAbrir('${f.c.id}')" title="Toca para revisar sus videos">${celdaVid(f)}<div class="tq-sub tq-wa-mas">revisar</div></td>
       <td data-tq="escribio-app">${celdaCanal(f.escApp)}</td>
-      <td data-tq="escribio-wa" class="tq-wa-cel" onclick="tqWaCelda('${f.c.id}')" title="Toca para registrar que te escribió por WhatsApp">${celdaCanal(f.escWa, true)}<div class="tq-sub tq-wa-mas">+ registrar</div></td>
+      ${D.actual ? `<td data-tq="escribio-wa" class="tq-wa-cel" onclick="tqWaCelda('${f.c.id}')" title="Toca para registrar que te escribió por WhatsApp">${celdaCanal(f.escWa, true)}<div class="tq-sub tq-wa-mas">+ registrar</div></td>` : `<td data-tq="escribio-wa">${celdaCanal(f.escWa, true)}</td>`}
       <td data-tq="su-semana"><span class="tq-nw">${f.entrenos} entreno${f.entrenos === 1 ? '' : 's'}</span>${app(f)}</td>
       <td><div class="tq-acc">
         ${f.debe ? `<button type="button" class="cp-btn" data-tq-responder onclick="tqResponder('${f.c.id}')">Responder</button>` : `<a class="cp-btn" data-tq-seg-pestana href="?seg=${encodeURIComponent(f.c.id)}" target="_blank" rel="noopener" title="Abre su seguimiento en otra pestaña">Seguimiento</a>`}
@@ -302,16 +405,17 @@ routes.toques = async () => {
   const tarjeta = (k, n, titulo, sub) => `<button type="button" class="tq-falta-card${_tq.filtro === k ? ' on' : ''}" data-tq-filtro="${k}" onclick="tqFiltro('${_tq.filtro === k ? 'todos' : k}')"><b>${n}</b><span>${titulo}</span><small>${sub}</small></button>`;
   view.innerHTML = `
     <div class="mb-3"><h2 class="text-2xl font-bold text-slate-900">Toques de la semana</h2>
-      <p class="text-sm text-slate-500">Semana del ${fmt.fechaCorta(D.lunes)} al ${fmt.fechaCorta(evtSumarDias(D.lunes, 6))}. Qué hiciste con cada cliente y qué te falta.</p></div>
+      <p class="text-sm text-slate-500">Semana del ${fmt.fechaCorta(D.lunes)} al ${fmt.fechaCorta(evtSumarDias(D.lunes, 6))}. ${D.actual ? 'Qué hiciste con cada cliente y qué te falta.' : 'Así quedó esa semana: lo que hiciste con cada cliente y lo que faltó.'}</p>
+      <div class="tq-semsel" data-tq-semanas>${[[2, 'Hace 2 semanas'], [1, 'Semana pasada'], [0, 'Esta semana']].map(([k, t]) => `<button type="button" class="tq-semsel-b${_tq.atras === k ? ' on' : ''}" data-tq-semana="${k}" onclick="tqSemana(${k})">${t}</button>`).join('')}</div></div>
     ${_tq.sinTabla ? `<div class="card mb-3 text-xs text-amber-900 bg-amber-50 border border-amber-200" data-tq-sin-tabla>Para registrar «Me escribió» y los WhatsApp que abres desde el CRM, corre <code>migraciones/toques-cliente.sql</code> en Supabase. Lo demás ya se ve.</div>` : ''}
     <div class="tq-faltas" data-tq-faltas>
-      ${tarjeta('sinSeg', activos.filter(TQ_FALTA.sinSeg).length, 'sin seguimiento esta semana', `${conSeg} de ${activos.length} hechos${activos.some(f => f.noHaceFalta && !f.seguimiento) ? ` · ${activos.filter(f => f.noHaceFalta && !f.seguimiento).length} esta semana no` : ''}`)}
-      ${tarjeta('sinContacto', activos.filter(TQ_FALTA.sinContacto).length, 'sin contacto esta semana', 'ni tú ni él escribieron')}
+      ${tarjeta('sinSeg', activos.filter(TQ_FALTA.sinSeg).length, `sin seguimiento ${deSemana}`, `${conSeg} de ${activos.length} hechos${activos.some(f => f.noHaceFalta && !f.seguimiento) ? ` · ${activos.filter(f => f.noHaceFalta && !f.seguimiento).length} ${D.actual ? 'esta semana no' : 'saltados'}` : ''}`)}
+      ${tarjeta('sinContacto', activos.filter(TQ_FALTA.sinContacto).length, `sin contacto ${deSemana}`, 'ni tú ni él escribieron')}
       ${tarjeta('revisar', D.filas.filter(TQ_FALTA.revisar).length, 'con videos por revisar', 'te llegaron y falta revisarlos')}
     </div>
     <div class="flex gap-1.5 flex-wrap" style="margin-bottom:10px" data-tq-chips>${TQ_FILTROS.map(([k, t]) => { const n = k === 'todos' ? D.filas.length : D.filas.filter(f => color(f) === k).length; return `<button type="button" class="chip ${_tq.filtro === k ? 'active' : ''}" data-tq-filtro="${k}" onclick="tqFiltro('${k}')">${k !== 'todos' ? `<i class="tq-punto" style="background:${TQ_COLOR[k][0]}"></i>` : ''}${t} · ${n}</button>`; }).join('')}</div>
     <div class="card lis-tabla-caja" data-tq-tabla>
-      <table class="lis-tabla tq-tabla"><thead><tr><th class="lis-nom">Cliente</th><th>Semáforo</th><th>Tus toques esta semana</th><th>Seguimiento<br>semanal</th><th>Videos</th><th>Te escribió<br>en la app</th><th>Te escribió<br>por WhatsApp</th><th>Su semana</th><th></th></tr></thead>
+      <table class="lis-tabla tq-tabla"><thead><tr><th class="lis-nom">Cliente</th><th>Semáforo</th><th>Últimas 3 semanas</th><th>Tus toques ${deSemana}</th><th>Seguimiento<br>semanal</th><th>Videos</th><th>Te escribió<br>en la app</th><th>Te escribió<br>por WhatsApp</th><th>Su semana</th><th></th></tr></thead>
       <tbody>${lista.map(fila).join('')}</tbody></table>
       ${lista.length ? '' : '<p class="text-sm text-slate-500" style="padding:0 16px 16px">Nadie en este filtro.</p>'}
     </div>
@@ -320,6 +424,7 @@ routes.toques = async () => {
         <div><b>Tus toques</b>Un toque es un día en que le escribiste algo: seguimiento, pedirle video, responder su nota (o marcarla «Listo» en la Bandeja) o abrir su WhatsApp desde el CRM. Si el mismo día haces dos cosas, cuenta 1. En la semana: <span class="tq-dia t">L</span> lo tocaste ese día, <span class="tq-dia s">L</span> te escribió.</div>
         <div><b>Seguimiento semanal</b>Hecho si esta semana le mandaste el seguimiento (lo copiaste desde el CRM) o tocaste «Marcar hecho». «Esta semana no»: ya lo tocaste y no está frío; esta semana no cuenta como pendiente y la próxima sí. El botón «Seguimiento» lo abre en otra pestaña.</div>
         <div><b>Te escribió</b>En la app: sus notas (las de la Bandeja). Por WhatsApp: lo que registras tú tocando esa casilla. En rojo si todavía no le respondes; abrir su WhatsApp o responderle en la app cuenta como respuesta.</div>
+        <div><b>Últimas 3 semanas</b>Un recuadro por semana (el azul es esta) con los días que lo tocaste y lo que pasó: <span class="tq-et az">Seguimiento</span> <span class="tq-et na">Pedí N videos</span> <span class="tq-et na">N por llegar</span> <span class="tq-et gr">Revisé N</span> <span class="tq-et am">Esta semana no</span> <span class="tq-et ro">Sin toque</span>. Toca el nombre o los recuadros para ver su historial de 6 semanas, día por día. Arriba eliges qué semana ver en la tabla.</div>
         <div><b>Videos</b>Toca la casilla para revisarlos: «Bien», «A mejorar», «Llegó», «Quitar» o pedir más. El cuadro de arriba «con videos por revisar» deja solo a los que tienen algo por revisar.</div>
         <div><b>Semáforo</b><b class="tq-r">Rojo</b>: le debes respuesta, o 15 días o más sin un toque tuyo. <b class="tq-a">Amarillo</b>: 8 a 14 días sin toque, o 4 días o más con toque en los últimos 7 (mejor esperar). <b class="tq-v">Verde</b>: bien.</div>
       </div>
@@ -367,7 +472,7 @@ routes.toques = async () => {
   .tq-wa-mas{color:#3C7BD6;font-weight:700;opacity:0}
   .tq-wa-cel:hover .tq-wa-mas,.tq-vid-cel:hover .tq-wa-mas{opacity:1}
   .tq-acc .cp-btn{padding:5px 10px;font-size:12px;text-align:center}
-  .tq-tabla{min-width:1020px}
+  .tq-tabla{min-width:1376px}
   .tq-tabla td{min-width:0;vertical-align:middle;font-size:13.5px}
   .tq-tabla th{text-transform:none;letter-spacing:0;font-size:11.5px;line-height:1.2;vertical-align:bottom}
   .tq-tabla td.lis-nom{min-width:180px}
@@ -379,6 +484,27 @@ routes.toques = async () => {
   .tq-que-g b{display:block;color:#1F1F1F;margin-bottom:2px}
   .tq-que-g .tq-dia,.tq-que-g b.tq-r,.tq-que-g b.tq-a,.tq-que-g b.tq-v{display:inline-grid;margin:0}
   .tq-que-g b.tq-r{display:inline;color:#B2402B}.tq-que-g b.tq-a{display:inline;color:#8A6410}.tq-que-g b.tq-v{display:inline;color:#2F7F45}
+  .tq-semsel{display:inline-flex;gap:4px;background:#ECE9E1;border-radius:999px;padding:4px;margin-top:10px;flex-wrap:wrap}
+  .tq-semsel-b{border:0;border-radius:999px;padding:7px 14px;font:inherit;font-size:13.5px;font-weight:700;cursor:pointer;background:transparent;color:#55565B}
+  .tq-semsel-b.on{background:#fff;color:#1F1F1F;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .tq-hist-cel,.tq-nom-cel{cursor:pointer}
+  .tq-hist-cel:hover{background:#F7F5F0}
+  .tq-hs{display:flex;gap:4px}
+  .tq-hw{width:108px;border-radius:10px;padding:5px 6px;background:#FAF9F6;border:1px solid #EEEAE1;box-sizing:border-box}
+  .tq-hw.act{border-color:#3C7BD6}
+  .tq-hw.sel{border-color:#1F1F1F}
+  .tq-hw-t{display:flex;justify-content:space-between;gap:4px;font-size:10px;color:#8A8A8A;font-weight:700;margin-bottom:3px;white-space:nowrap}
+  .tq-hw-t b{color:#1F1F1F}
+  .tq-et{display:inline-block;font-size:10.5px;font-weight:700;border-radius:999px;padding:1px 6px;margin:0 2px 3px 0;line-height:1.35}
+  .tq-et.az{background:#E3EEFB;color:#2F5FA6}.tq-et.na{background:#FDEBDD;color:#B25E1E}.tq-et.ve{background:#E2F1E5;color:#2F6B3C}
+  .tq-et.gr{background:#EFEDE7;color:#55565B}.tq-et.ro{background:#FBE5E1;color:#B2402B}.tq-et.am{background:#F6EFD2;color:#7A6216}
+  .tq-hi-sem{border-left:3px solid #E7E3DA;padding:2px 0 12px 12px;margin-left:2px}
+  .tq-hi-sem.act{border-color:#3C7BD6}
+  .tq-hi-h{font-size:13px;font-weight:800;color:#1F1F1F;margin-bottom:4px}
+  .tq-hi-ev{font-size:13px;color:#1F1F1F;line-height:1.55}
+  .tq-hi-ev.suyo{color:#2F5FA6}
+  .tq-hi-ev span{display:inline-block;width:56px;color:#8A8A8A}
+  .tq-hi-ev i{color:#9A978F}
   @media (max-width:760px){.tq-faltas{grid-template-columns:1fr}.tq-que-g{grid-template-columns:1fr}}`;
   document.head.appendChild(s);
 })();
