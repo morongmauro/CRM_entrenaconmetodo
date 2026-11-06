@@ -90,7 +90,7 @@ async function tqCrudo(forzar = false) {
   if (!forzar && _tq.crudo && _tq.datos && Date.now() - (_tq.leido || 0) < 120000) return _tq.crudo;
   const hoy = fmt.hoy(), lunes = tqLunes(hoy), desde = evtSumarDias(lunes, -42);
   const leer = async (q) => { try { const { data, error } = await q; return error ? null : (data || []); } catch (e) { return null; } };
-  const [msj, vids, notas, ses, resp, com, toq, nhf] = await Promise.all([
+  const [msj, vids, notas, ses, resp, com, toq, nhf, anot] = await Promise.all([
     leer(sb.from('seguimiento_mensajes').select('cliente_id, fecha, origen, created_at').gte('fecha', desde)),
     leer(sb.from('videos_tecnica').select('cliente_id, ejercicio_id, ejercicio_nombre, pedido_en, estado, revisado_en, created_at').gte('pedido_en', evtSumarDias(hoy, -160))),
     leer(sb.from('notas_entreno').select('cliente_id, fecha, created_at').gte('fecha', desde)),
@@ -99,6 +99,7 @@ async function tqCrudo(forzar = false) {
     leer(sb.from('comentarios_coach').select('cliente_id, creado_en').gte('creado_en', desde)),
     leer(sb.from('toques_cliente').select('cliente_id, fecha, tipo, created_at').gte('fecha', desde)),
     leer(sb.from('toques_semana').select('cliente_id, lunes, motivo').gte('lunes', evtSumarDias(lunes, -42))),
+    leer(sb.from('notas_cliente').select('cliente_id, fecha, texto, tipo').gte('fecha', desde)),
   ]);
   _tq.sinTabla = toq === null;
   _tq.sinTablaSemana = nhf === null;
@@ -106,7 +107,7 @@ async function tqCrudo(forzar = false) {
   try { eng = typeof engDatos === 'function' ? await engDatos() : null; } catch (e) { eng = null; }
   try { if (typeof ausCargar === 'function') await ausCargar(); } catch (e) { /* sin tabla */ }
   const clientes = (await db.clientes.list()).filter(c => String(c.estado || 'activo').toLowerCase() === 'activo');
-  _tq.crudo = { msj, vids, notas, ses, resp, com, toq, nhf, eng, clientes };
+  _tq.crudo = { msj, vids, notas, ses, resp, com, toq, nhf, anot, eng, clientes };
   _tq.leido = Date.now();
   return _tq.crudo;
 }
@@ -322,6 +323,8 @@ window.tqHistorial = async (id) => {
   de(R.com).forEach(x => ev.push([tqDia(x.creado_en), 'Le comentaste en la app', true]));
   de(R.toq).forEach(x => ev.push([x.fecha, x.tipo === 'me_escribio' ? 'Te escribió por WhatsApp' : 'Abriste su WhatsApp', x.tipo !== 'me_escribio']));
   de(R.notas).forEach(x => ev.push([x.fecha || tqDia(x.created_at), 'Te escribió en la app', false]));
+  const AN_NOM = { viaje: 'viaje', salud: 'salud', pendiente: 'pendiente', fijo: 'dato fijo', conversacion: 'conversación' };
+  de(R.anot).forEach(x => ev.push([x.fecha, `Anotaste (${AN_NOM[x.tipo] || 'nota'}): «${escapeHtml(corto(x.texto))}»`, true]));
   de(R.ses).filter(x => String(x.notas_cliente || '').trim()).forEach(x => ev.push([x.fecha, `Te dejó una nota al terminar: «${escapeHtml(corto(x.notas_cliente))}»`, false]));
   const hoy = fmt.hoy(), lunes = tqLunes(hoy);
   const visto = new Set();

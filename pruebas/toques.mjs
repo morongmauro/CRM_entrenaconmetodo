@@ -60,7 +60,7 @@ function tablas() {
     rutinas: [{ id: 'r1', nombre: 'Tren superior' }], fases: [],
     notas_entreno: [{ id: 'n1', cliente_id: 'c1', fecha: mas(HOY, -1), created_at: mas(HOY, -1) + 'T10:00:00Z', texto: 'Me duele la rodilla', leida_en: null }],
     respuestas_coach: [{ id: 'r0', cliente_id: 'c0', created_at: HOY + 'T12:00:00Z', texto: 'Bien' }],
-    comentarios_coach: [], videos_tecnica: [], toques_cliente: [], toques_semana: [],
+    comentarios_coach: [], videos_tecnica: [], toques_cliente: [], toques_semana: [], notas_cliente: [],
     seguimiento_mensajes: [msj('m1', 'c2', mas(HOY, -20)), msj('m2', 'c4', mas(HOY, -10)), msj('m3', 'c0', HOY), ...[0, 1, 2, 3].map(k => msj('ms' + k, 'c5', mas(HOY, -k)))],
     settings: [{ user_id: 'coach-1', usd_cop_rate: 4000, nombre_coach: 'Mauro', mealtracker_app_url: 'https://mt.prueba', mealtracker_coach_password: 'x' }],
     seguimientos: [], seguimiento_pedidos: [], pagos: [], pendientes: [], mediciones_corporales: [],
@@ -232,6 +232,31 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   await p.evaluate(() => closeModal());
   await p.locator('[data-tq-tabla]').screenshot({ path: path.join(CAPTURAS, 'toques-semanas.png') }).catch(() => {});
   ok('sin errores (historial)', errores.length === 0, errores.join(' | '));
+  await ctx.close();
+}
+{
+  console.log('\nAnotar');
+  const { ctx, p, errores } = await abrir(1440, 900);
+  await p.evaluate(() => navigate('toques')); await p.locator('tr[data-tq-cliente="c1"]').waitFor({ timeout: 20000 });
+  ok('botón «+ Anotar» a la vista', await p.locator('[data-an-fab]').isVisible());
+  await p.evaluate(() => anAbrir('c1')); await p.locator('#an-texto').waitFor();
+  await p.locator('#an-texto').fill('Me dijo que se va de viaje del 12 al 20 y que la rodilla sigue molestando'); await p.waitForTimeout(500);
+  const tipos = await p.locator('[data-an-parte]').evaluateAll(xs => xs.map(x => x.dataset.anTipo));
+  ok('separa en viaje y salud', JSON.stringify(tipos) === '["viaje","salud"]', JSON.stringify(tipos));
+  await p.locator('.modal-content, #modal').first().screenshot({ path: path.join(CAPTURAS, 'anotar-cajita.png') }).catch(() => {});
+  await p.locator('[data-an-guardar]').click(); await p.waitForTimeout(1500);
+  const T = await p.evaluate(() => ({ n: TABLAS_FALSAS.notas_cliente.filter(x => x.cliente_id === 'c1'), a: TABLAS_FALSAS.ausencias.filter(x => x.cliente_id === 'c1'), t: (TABLAS_FALSAS.pendientes || []).filter(x => x.cliente_id === 'c1'), q: TABLAS_FALSAS.toques_cliente.filter(x => x.cliente_id === 'c1').map(x => x.tipo) }));
+  ok('guarda las 2 notas, la ausencia (12 al 20) y la tarea de revisar', T.n.length === 2 && T.a.length === 1 && /-12$/.test(T.a[0].desde) && /-20$/.test(T.a[0].hasta) && T.t.length === 1 && /Revisar cómo sigue/.test(T.t[0].descripcion), JSON.stringify(T).slice(0, 400));
+  ok('cuenta como «hablamos» (te escribió y le respondiste)', JSON.stringify(T.q) === '["me_escribio","le_escribi_wa"]', JSON.stringify(T.q));
+  await p.evaluate(() => segIr('c1')); await p.locator('[data-an-seg]').waitFor({ timeout: 15000 }).catch(() => {});
+  const seg = (await p.locator('[data-an-seg]').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  ok('en su Seguimiento: «Sigue abierto» con la rodilla y el viaje', /Sigue abierto/.test(seg) && /rodilla/i.test(seg) && /viaje/i.test(seg), seg.slice(0, 300));
+  await p.locator('[data-an-seg]').screenshot({ path: path.join(CAPTURAS, 'anotar-seguimiento.png') }).catch(() => {});
+  await p.locator('[data-an-cerrar]').first().click(); await p.waitForTimeout(1000);
+  ok('«Ya está bien» cierra lo de salud y su tarea', await p.evaluate(() => TABLAS_FALSAS.notas_cliente.some(x => x.tipo === 'salud' && x.estado === 'cerrado') && TABLAS_FALSAS.pendientes.every(x => x.cliente_id !== 'c1' || x.estado === 'completado')));
+  await p.evaluate(() => tqHistorial('c1')); await p.waitForTimeout(600);
+  ok('el historial de Toques muestra lo anotado', /Anotaste \(salud\)/.test(await p.locator('[data-tq-historial]').innerText().catch(() => '')));
+  ok('sin errores (anotar)', errores.length === 0, errores.join(' | '));
   await ctx.close();
 }
 await b.close(); servidor.close();
