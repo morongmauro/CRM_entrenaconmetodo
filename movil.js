@@ -16,7 +16,9 @@
 
 const MV_KEY = 'crm:modo';
 const MV_ANCHO = 760;
-const MV_TABS = ['seguimiento', 'dialogos', 'pagos', 'bandeja'];
+// Lo del día a día del coach en el teléfono: Hoy, Bandeja (responder),
+// Toques (lo de la semana) y Equipo; lo demás en «Más».
+const MV_TABS = ['hoy', 'bandeja', 'toques', 'equipo'];
 const MV_ICONO_MAS = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>';
 
 function mvElegido() { try { return localStorage.getItem(MV_KEY); } catch (e) { return null; } }
@@ -64,7 +66,8 @@ function mvPintarBarra() {
 window.mvAbrirMas = () => {
   mvCerrarMas();
   const actual = typeof _currentView !== 'undefined' ? _currentView : '';
-  const items = [...document.querySelectorAll('.em-nav .nav-item')].filter(b => b.dataset.view);
+  // Las secciones que el menú esconde (se juntaron en otras) tampoco salen aquí.
+  const items = [...document.querySelectorAll('.em-nav .nav-item')].filter(b => b.dataset.view && b.style.getPropertyValue('display') !== 'none' && !b.hidden);
   const fondo = document.createElement('div');
   fondo.className = 'mv-hoja-fondo';
   fondo.dataset.mvHoja = '';
@@ -76,6 +79,8 @@ window.mvAbrirMas = () => {
       <div class="mv-hoja-lista">
         ${items.map(b => `<button type="button" class="mv-hoja-it${b.dataset.view === actual ? ' activa' : ''}" data-mv-ir="${b.dataset.view}" onclick="mvCerrarMas(); navigate('${b.dataset.view}')">${b.querySelector('svg')?.outerHTML || ''}<span>${escapeHtml(b.textContent.trim())}</span></button>`).join('')}
       </div>
+      ${typeof crmMiAppURL === 'function' && crmMiAppURL() ? `<a class="mv-hoja-modo" data-mv-mi-app href="${crmMiAppURL()}" target="_blank" rel="noopener">Mi app (vista cliente)</a>` : ''}
+      ${typeof crmAvisosFila === 'function' ? crmAvisosFila() : ''}
       <button type="button" class="mv-hoja-modo" data-mv-escritorio onclick="mvModo('escritorio')">Ver versión escritorio</button>
       <button type="button" class="mv-hoja-salir" onclick="mvCerrarMas(); document.getElementById('logout-btn')?.click()">Salir</button>
     </div>`;

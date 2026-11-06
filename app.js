@@ -2844,6 +2844,14 @@ async function volverDondeEstaba() {
     window.segIr(segPedido);
     return;
   }
+  // «?ver=<sección>»: los avisos de tus clientes en el teléfono abren aquí
+  // (la Bandeja si te escribió, Toques, Hoy…).
+  const verPedido = new URLSearchParams(location.search).get('ver');
+  if (verPedido && routes[verPedido]) {
+    try { history.replaceState(null, '', location.pathname); } catch (e) {}
+    await navigate(verPedido);
+    return;
+  }
   // El CRM abre en «Hoy» (la cola del día, crm-prueba.js).
   const vista = g && routes[g.vista] ? g.vista : (routes.hoy ? 'hoy' : (enMovil() ? 'seguimiento' : 'dashboard'));
   await navigate(vista);

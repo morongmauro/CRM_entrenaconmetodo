@@ -6,7 +6,7 @@
 // el resultado era el clásico "aprieto un botón y no hace nada… y al rato sí".
 // Ahora la red tiene 3,5 s; pasados esos, se sirve lo que haya en caché y la
 // respuesta de red, cuando llegue, solo se guarda para la próxima.
-const CACHE = 'ecm-crm-v4';
+const CACHE = 'ecm-crm-v5';
 const TIMEOUT_RED = 3500;
 
 self.addEventListener('install', () => self.skipWaiting());
@@ -41,4 +41,30 @@ self.addEventListener('fetch', (e) => {
     const ganador = await Promise.race([red.catch(() => null), reloj]);
     return ganador || guardada;
   })());
+});
+
+// ── Avisos de tus clientes (coach-avisos.js) ─────────────────────────────
+// Llegan desde la app (cuando un cliente te escribe, registra una medida,
+// sube una foto…). Al tocarlo se abre el CRM justo donde hay que actuar:
+// su Seguimiento (?seg=) o la Bandeja (?ver=bandeja).
+self.addEventListener('push', (event) => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch (e) { /* sin datos */ }
+  event.waitUntil(self.registration.showNotification(d.title || 'Entrena con Método · CRM', {
+    body: d.body || '',
+    icon: '/icons/app-192.png?v=4',
+    badge: '/icons/app-192.png?v=4',
+    tag: d.tag || 'ecm-crm',
+    data: { url: d.url || '/?ver=bandeja' },
+  }));
+});
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then((lista) => {
+    for (const c of lista) {
+      if ('focus' in c) { try { c.postMessage({ irA: url }); } catch (e) { /* nada */ } return c.focus(); }
+    }
+    return clients.openWindow(url);
+  }));
 });

@@ -8,17 +8,17 @@
        inputs ya lo evita movil.css poniéndolos en 16px. -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Entrena con Método · CRM</title>
-  <link rel="manifest" href="/manifest.json" />
+  <link rel="manifest" href="/manifest.json?v=2" />
   <meta name="theme-color" content="#EDECE5" />
   <!-- El mismo ícono de la app nueva (entrenaconmetodoapp). El SVG manda en
        navegadores modernos; el PNG es el respaldo y el ícono de iOS al
        "Agregar a inicio". Nombres nuevos para que iOS no use el viejo guardado. -->
   <link rel="icon" type="image/svg+xml" href="/icons/app.svg?v=4" />
   <link rel="icon" type="image/png" sizes="192x192" href="/icons/app-192.png?v=4" />
-  <link rel="apple-touch-icon" href="/icons/app-apple-touch-icon.png?v=4" />
+  <link rel="apple-touch-icon" href="/icons/coach-180.png?v=1" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-title" content="Entrena con Método" />
+  <meta name="apple-mobile-web-app-title" content="ECM Coach" />
   <!-- Versión fija: «@2» obligaba a preguntar cada vez cuál era la última. -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -133,7 +133,7 @@
   <div id="toast" class="hidden fixed bottom-6 right-6 bg-slate-900 text-white px-4 py-2 rounded-xl shadow-lg z-50 text-sm"></div>
 
   <script src="/config.js?v=20261104"></script>
-  <script src="/app.js?v=20261105e"></script>
+  <script src="/app.js?v=20261106"></script>
   <!-- Figura muscular: dibuja qué trabaja cada ejercicio. ANTES de
        entrenamiento.js, que la usa en la ficha y en el editor. No depende
        de nada: solo expone window.figuraMusculos. -->
@@ -246,6 +246,7 @@
   <!-- Más espacio: ocultar el menú y ajustar el ancho de las columnas. -->
   <script src="/columnas.js?v=20261104"></script>
   <!-- El mismo CRM en el teléfono: versión móvil o escritorio (al final). -->
-  <script src="/movil.js?v=20261104"></script>
+  <script src="/movil.js?v=20261106b"></script>
+  <script src="/coach-avisos.js?v=20261106"></script>
 </body>
 </html>
