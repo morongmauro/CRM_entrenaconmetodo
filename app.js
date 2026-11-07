@@ -4035,6 +4035,9 @@ routes.seguimiento = async () => {
   // Si el que estaba abierto pasó a pausa o se finalizó, se suelta la
   // selección en vez de dejar la pantalla en blanco.
   if (_selectedClienteId && !clientes.some(c => c.id === _selectedClienteId)) _selectedClienteId = null;
+  // Cada pestaña recuerda SU cliente (sessionStorage): al recargar o al
+  // volver a la pestaña sigue en el mismo, aunque en otra tengas a otro.
+  if (!_selectedClienteId) { const g = segClienteGuardado(); if (g && clientes.some(c => c.id === g)) _selectedClienteId = g; }
   if (!_selectedClienteId && clientes.length) _selectedClienteId = clientes[0].id;
 
   // Calcular última semana por cliente
@@ -4320,7 +4323,7 @@ function clienteSidebarItem(c, ult) {
   }
   const active = c.id === _selectedClienteId;
   return `
-    <button class="w-full flex items-center gap-3 p-2.5 rounded-xl ${active ? 'bg-emerald-50 ring-1 ring-emerald-200' : 'hover:bg-slate-50'}" onclick="seleccionarCliente('${c.id}')" data-nombre="${escapeHtml(c.nombre.toLowerCase())}">
+    <button class="w-full flex items-center gap-3 p-2.5 rounded-xl ${active ? 'bg-emerald-50 ring-1 ring-emerald-200' : 'hover:bg-slate-50'}" onclick="seleccionarCliente('${c.id}')" data-seg-cli="${c.id}" title="Ctrl/Cmd+clic: abrir en otra pestaña" data-nombre="${escapeHtml(c.nombre.toLowerCase())}">
       ${helpers.avatar(c.nombre, 10)}
       <div class="flex-1 text-left min-w-0">
         <div class="font-medium text-sm text-slate-900 truncate">${escapeHtml(c.nombre)}${c.estado !== 'activo' ? ` <span class="text-xs text-slate-400">(${c.estado})</span>` : ''}</div>
@@ -4338,8 +4341,30 @@ window.filtrarClientesSidebar = (q) => {
   });
 };
 
+// ---------- Un cliente distinto en cada pestaña ----------
+// El cliente abierto en Seguimiento se guarda en ESTA pestaña. Ctrl/Cmd+clic
+// (o clic con la rueda) en un cliente de la lista lo abre en otra pestaña,
+// sin cambiar el de esta.
+const SEG_CLIENTE_KEY = 'crm:segCliente';
+function segClienteGuardado() { try { return sessionStorage.getItem(SEG_CLIENTE_KEY); } catch (e) { return null; } }
+window.segRecordarCliente = (id) => { try { if (id) sessionStorage.setItem(SEG_CLIENTE_KEY, String(id)); } catch (e) {} };
+const segIdDeLista = (el) => {
+  const b = el && el.closest ? el.closest('[data-seg-li], [data-seg-cli]') : null;
+  return b ? (b.dataset.segLi || b.dataset.segCli) : null;
+};
+const segOtraPestana = (e) => {
+  const id = segIdDeLista(e.target);
+  if (!id) return;
+  e.preventDefault(); e.stopPropagation();
+  window.open(`${location.pathname}?seg=${encodeURIComponent(id)}`, '_blank', 'noopener');
+};
+document.addEventListener('click', (e) => { if (e.metaKey || e.ctrlKey) segOtraPestana(e); }, true);
+document.addEventListener('auxclick', (e) => { if (e.button === 1) segOtraPestana(e); }, true);
+document.addEventListener('mousedown', (e) => { if (e.button === 1 && segIdDeLista(e.target)) e.preventDefault(); }, true);
+
 window.seleccionarCliente = (id) => {
   _selectedClienteId = id;
+  segRecordarCliente(id);
   _segMovil = 'cliente';
   if (enMovil()) window.scrollTo({ top: 0, behavior: 'instant' });
   repintarSeguimiento();

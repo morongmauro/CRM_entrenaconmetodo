@@ -1202,6 +1202,7 @@ function esFichaHTML(c) {
 window.segIr = (clienteId) => {
   if (typeof closeModal === 'function') closeModal();
   _selectedClienteId = clienteId;
+  if (typeof segRecordarCliente === 'function') segRecordarCliente(clienteId);
   _segIrA = clienteId;
   _segMovil = 'cliente';
   _segView = 'focus';
@@ -1411,7 +1412,7 @@ function segListaHTML(clientes, U, sel) {
     const tareaHoy = t && t.vencen ? `<span class="seg-li-tarea" data-seg-li-tarea>${t.vencen === 1 ? '1 tarea' : t.vencen + ' tareas'} hoy</span>` : '';
     const tareas = t && !t.vencen && t.abiertas ? ` · ${t.abiertas === 1 ? '1 tarea' : t.abiertas + ' tareas'}` : '';
     return `
-    <div class="seg-li${x.c.id === sel ? ' activo' : ''}" role="button" tabindex="0" data-nombre="${escapeHtml(String(x.c.nombre || '').toLowerCase())}" data-seg-li="${x.c.id}" data-seg-dias="${x.d ?? ''}" onclick="seleccionarCliente('${x.c.id}')">
+    <div class="seg-li${x.c.id === sel ? ' activo' : ''}" role="button" tabindex="0" data-nombre="${escapeHtml(String(x.c.nombre || '').toLowerCase())}" data-seg-li="${x.c.id}" title="Ctrl/Cmd+clic: abrir en otra pestaña" data-seg-dias="${x.d ?? ''}" onclick="seleccionarCliente('${x.c.id}')">
       ${helpers.avatar(x.c.nombre, 10)}
       <div class="seg-li-txt"><b>${escapeHtml(x.c.nombre)}</b><span class="${x.c.estado === 'activo' && tarde(x) ? 'seg-li-tarde' : ''}">${cuando}${notas}${tareas}</span>${tareaHoy}</div>
       ${x.d === 0
