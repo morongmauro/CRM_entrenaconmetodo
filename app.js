@@ -3219,8 +3219,32 @@ let _currentView = 'dashboard';
 // que ya era instantáneo. Ahora solo aparece si de verdad se pasa de 160 ms,
 // y mientras tanto se queda lo que había (que es lo que hace una app nativa).
 let _tCargando = null;
+// Repintar la MISMA sección (tras marcar, guardar, filtrar…) nunca borra lo
+// que se ve: se queda en pantalla y se cambia cuando llega lo nuevo. Mientras
+// tanto, una barrita fina arriba dice que se está actualizando. El esqueleto
+// gris solo sale al ENTRAR a una sección nueva que tarda.
+let _mismaVista = false;
+function barraActualizando(on) {
+  let b = document.getElementById('crm-actualizando');
+  if (!on) { if (b) b.classList.remove('on'); return; }
+  if (!b) {
+    b = document.createElement('div');
+    b.id = 'crm-actualizando';
+    document.body.appendChild(b);
+    const st = document.createElement('style');
+    st.textContent = '#crm-actualizando{position:fixed;left:0;right:0;top:0;height:3px;z-index:9999;pointer-events:none;opacity:0;transition:opacity .15s;background:linear-gradient(90deg,rgba(242,201,76,0) 0%,#F2C94C 50%,rgba(242,201,76,0) 100%);background-size:50% 100%;background-repeat:no-repeat;animation:crm-act 1s linear infinite}'
+      + '#crm-actualizando.on{opacity:1}@keyframes crm-act{from{background-position:-50% 0}to{background-position:150% 0}}';
+    document.head.appendChild(st);
+  }
+  b.classList.add('on');
+}
 function cargando(msg = 'Cargando…') {
   const vista = _currentView;
+  if (_mismaVista && view && view.firstElementChild) {
+    clearTimeout(_tCargando);
+    _tCargando = setTimeout(() => barraActualizando(true), 160);
+    return;
+  }
   // A dónde escribe la vista AHORA. Hay que capturarlo: con la doble pantalla
   // `view` puede haber vuelto a su sitio cuando el temporizador dispare, y el
   // esqueleto borraría la pantalla entera en vez del panel que estaba
@@ -3248,7 +3272,7 @@ function cargando(msg = 'Cargando…') {
     </div>`;
   }, 160);
 }
-function finCargando() { clearTimeout(_tCargando); _tCargando = null; }
+function finCargando() { clearTimeout(_tCargando); _tCargando = null; barraActualizando(false); }
 
 // Si una consulta se cuelga o revienta, la pantalla no puede quedarse muerta:
 // se ve qué pasó y hay un botón para reintentar. Antes el error se iba a la
@@ -3327,8 +3351,15 @@ async function rerenderView(op = {}) {
   if (_renderEnCurso && !op.nueva) { _renderPendiente = true; return _renderEnCurso; }
   if (op.nueva) _renderPendiente = false;
   const gen = ++_renderGen;
+  const y = window.scrollY;
   const p = (async () => {
-    try { await correrVista(gen); } finally { if (_renderEnCurso === p) _renderEnCurso = null; }
+    _mismaVista = !op.nueva;
+    try { await correrVista(gen); } finally {
+      if (_renderEnCurso === p) _renderEnCurso = null;
+      // Misma sección: el scroll se queda donde estabas.
+      if (!op.nueva && gen === _renderGen && Math.abs(window.scrollY - y) > 2) window.scrollTo({ top: y, behavior: 'instant' });
+      if (gen === _renderGen) _mismaVista = false;
+    }
     if (_renderPendiente && !_renderEnCurso) { _renderPendiente = false; await rerenderView(); }
   })();
   _renderEnCurso = p;
