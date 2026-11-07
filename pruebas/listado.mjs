@@ -91,7 +91,8 @@ function comida() {
   const rd = {};
   [0, 1, 3, 4].map(L).filter(f => f <= HOY).forEach(f => { rd[f] = { kcal: 2050, p: 100, goal_kcal: 2100, goal_p: 140 }; });
   [0, 1, 2, 3, 4, 5, 6].map(P).forEach(f => { rd[f] = { kcal: 2000, p: 120, goal_kcal: 2100, goal_p: 140 }; });
-  return { clients: [{ name: 'Ana Pérez', last_active: HOY, recent_days: rd }] };
+  // Su app tiene 2.000 kcal; en el CRM la meta es 2.100 (para «Distinta»).
+  return { clients: [{ name: 'Ana Pérez', last_active: HOY, recent_days: rd, goals: { kcal: 2000, p: 140, c: 200, g: 60 } }] };
 }
 
 // Un segundo cliente, con números distintos a los de Ana.
@@ -99,6 +100,9 @@ function tablas() {
   const T = tablasBase();
   T.clientes.push({ id: 'c1', user_id: 'coach-1', nombre: 'Bruno Díaz', estado: 'activo', sexo: 'M', dias_entreno_cantidad: 3, fecha_inicio: '2026-01-05', created_at: '2026-01-01T00:00:00Z' });
   T.clientes[0].sexo = 'F'; T.clientes[0].dias_entreno_cantidad = 4;
+  // Ana: meta de 2.100 kcal calculada con 62 kg; hoy pesa 59 (amerita cambio). Bruno: sin meta.
+  Object.assign(T.clientes[0], { meta_calorias: 2100, meta_proteina_g: 140, meta_carbos_g: 220, meta_grasas_g: 60, meta_calculada_en: mas(HOY, -40) + 'T10:00:00Z' });
+  T.metas_historial.push({ id: 'mh1', cliente_id: 'c0', fecha: mas(HOY, -40), kcal: 2100, proteina_g: 140, carbos_g: 220, grasas_g: 60, peso_kg: 62, grasa_pct: 24, origen: 'calculo', created_at: mas(HOY, -40) + 'T10:00:00Z' });
   T.sesiones.forEach(s => { s.duracion_seg = 3000; s.origen = 'cliente'; });
   T.sesiones.push({ id: 'b1', cliente_id: 'c1', fase_id: null, fecha: mas(HOY, -10), rutina_id: 'r1', estado: 'completada', duracion_seg: 4200, origen: 'cliente' });
   T.seguimientos.push(
@@ -106,7 +110,7 @@ function tablas() {
     { id: 's2', cliente_id: 'c1', semana: '2026-W43', fecha: mas(HOY, -6), score_entreno: 40, score_alim_metas: 45, score_alim_registro: 30, score_global: 38 });
   T.mediciones_corporales.push(
     { id: 'm1', cliente_id: 'c0', fecha: mas(HOY, -60), peso: 60, grasa_pct: 24 }, { id: 'm2', cliente_id: 'c0', fecha: mas(HOY, -5), peso: 59, grasa_pct: 22.5 },
-    { id: 'm3', cliente_id: 'c1', fecha: mas(HOY, -20), peso: 90, grasa_pct: 28 });
+    { id: 'm3', cliente_id: 'c1', fecha: mas(HOY, -45), peso: 90, grasa_pct: 28 });
   T.encuesta_app = [{ id: 'e1', cliente_id: 'c0', util: 5, facil: 4, agradable: 5, recomienda: 9 }];
   return T;
 }
@@ -145,11 +149,11 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   await p.evaluate(() => navigate('listado'));
   await p.locator('[data-lis-tabla]').waitFor({ timeout: 15000 });
   const angulos = await p.locator('[data-lis-angulo]').count();
-  ok(`${tag} · Listado: está en el menú y trae los ángulos (${angulos})`, angulos === 12 && await p.locator('.nav-item[data-view="listado"]').count() === 1);
+  ok(`${tag} · Listado: está en el menú y trae los ángulos (${angulos})`, angulos === 13 && await p.locator('.nav-item[data-view="listado"]').count() === 1);
   const filas = await p.locator('[data-lis-fila]').count();
   ok(`${tag} · una fila por cliente activo (${filas})`, filas === 2);
   const ana = await p.locator('[data-lis-fila="c0"]').innerText();
-  ok(`${tag} · Ana: tiempo, alineación, performance, app, composición (ISSA) y seguimiento`, /50 min/.test(ana) && /85%/.test(ana) && /9\/10/.test(ana) && /22,5% grasa/.test(ana) && /Fit/.test(ana) && /-1,5 pts/.test(ana), ana.replace(/\s+/g, ' ').slice(0, 500));
+  ok(`${tag} · Ana: tiempo, alineación, performance, app, composición (ISSA) y seguimiento`, /50 min/.test(ana) && /85%/.test(ana) && /9\/10/.test(ana) && /22,5 % grasa/.test(ana) && /Vigente/.test(ana) && /Fit/.test(ana) && /-1,5 pts/.test(ana), ana.replace(/\s+/g, ' ').slice(0, 500));
   // Ordenar por performance: Ana (85) antes que Bruno (38); invertido, al revés.
   await p.locator('[data-lis-angulo="performance"]').click();
   let orden = await p.locator('[data-lis-fila]').evaluateAll(els => els.map(e => e.dataset.lisFila));
@@ -160,6 +164,22 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   await p.locator('[data-lis-angulo="tiempo"]').click();
   orden = await p.locator('[data-lis-fila]').evaluateAll(els => els.map(e => e.dataset.lisFila));
   ok(`${tag} · ángulo Tiempo: el que más tarda primero (Bruno 70 min)`, JSON.stringify(orden) === '["c1","c0"]' && /tiempo de entreno/i.test(await p.locator('th.lis-foco').innerText()), JSON.stringify(orden));
+  // Meta nutricional: lo que pide acción primero (Bruno sin meta, luego Ana a revisar).
+  await p.locator('[data-lis-angulo="nutri"]').click();
+  orden = await p.locator('[data-lis-fila]').evaluateAll(els => els.map(e => e.dataset.lisFila));
+  const nAna = (await p.locator('[data-lis-fila="c0"] [data-lis-col="nutri"]').innerText()).replace(/\s+/g, ' ');
+  const nBru = (await p.locator('[data-lis-fila="c1"] [data-lis-col="nutri"]').innerText()).replace(/\s+/g, ' ');
+  ok(`${tag} · Meta nutricional: sin meta primero, luego a revisar`, JSON.stringify(orden) === '["c1","c0"]' && /Ver lo mejor primero/.test(await p.locator('[data-lis-invertir]').innerText()), JSON.stringify(orden));
+  ok(`${tag} · Ana: 2.100 kcal, desde, «Sí, revisar» (bajó 3 kg) y su app muestra otra (2.000)`, /2\.100 kcal/.test(nAna) && /140 g proteína/.test(nAna) && /hace 5 semanas/.test(nAna) && /Sí, revisar/.test(nAna) && /bajó 3 kg/.test(nAna) && /Distinta/.test(nAna) && /2\.000 kcal/.test(nAna), nAna);
+  ok(`${tag} · Bruno: «Sin meta» y sin cuenta en la app`, /Sin meta/.test(nBru) && /Sin cuenta en la app/.test(nBru), nBru);
+  ok(`${tag} · resumen de Meta nutricional`, /1 con meta · 1 amerita cambio · 1 que su app no muestra bien · 1 sin meta/.test(await p.locator('[data-lis-resumen]').innerText()), await p.locator('[data-lis-resumen]').innerText());
+  if (tag === 'ancho') await p.screenshot({ path: path.join(CAPTURAS, 'listado-meta-nutricional.png') });
+  // Composición: vencida (Bruno, hace 45 días) antes que vigente.
+  await p.locator('[data-lis-angulo="composicion"]').click();
+  orden = await p.locator('[data-lis-fila]').evaluateAll(els => els.map(e => e.dataset.lisFila));
+  const cBru = (await p.locator('[data-lis-fila="c1"] [data-lis-col="composicion"]').innerText()).replace(/\s+/g, ' ');
+  ok(`${tag} · Composición: la vencida primero («Vencida · Hace 45 días»)`, JSON.stringify(orden) === '["c1","c0"]' && /Vencida/.test(cBru) && /Hace 45 días/.test(cBru), JSON.stringify(orden) + ' ' + cBru);
+  ok(`${tag} · resumen de Composición`, /2 con medición · 1 vigentes · 1 vencidas · 0 sin medición/.test(await p.locator('[data-lis-resumen]').innerText()), await p.locator('[data-lis-resumen]').innerText());
   for (const [id] of [['cumplimiento'], ['ciclo'], ['pago'], ['meta'], ['app'], ['dias'], ['composicion'], ['seguimiento'], ['actividad'], ['todo']]) await p.locator(`[data-lis-angulo="${id}"]`).click();
   ok(`${tag} · todos los ángulos se abren sin error`, errores.length === 0, errores.join(' | '));
   await p.locator('[data-lis-angulo="performance"]').click();

@@ -53,6 +53,7 @@ const LIS_ANGULOS = [
   ['ciclo', 'Ciclo'],
   ['pago', 'Pago'],
   ['meta', 'Alineación a meta'],
+  ['nutri', 'Meta nutricional'],
   ['performance', 'Performance'],
   ['app', 'Apreciación de la app'],
   ['dias', 'Días de entreno'],
@@ -67,14 +68,18 @@ async function lisDatos() {
   const ids = clientes.map(c => c.id);
   if (!ids.length) return [];
   const hace60 = evtSumarDias(hoy, -60), hace28 = evtSumarDias(hoy, -28), hace35 = evtSumarDias(hoy, -35), hace90 = evtSumarDias(hoy, -90);
-  const [fases, sesiones, segs, meds, encuestas, U] = await Promise.all([
+  const [fases, sesiones, segs, meds, encuestas, U, metasH, mtLista] = await Promise.all([
     lisLeer(sb.from('fases').select('id, cliente_id, nombre, fecha_inicio, semanas, estado, visible_cliente, orden, created_at')),
     lisLeer(sb.from('sesiones').select('cliente_id, fecha, estado, duracion_seg, cerrada_auto, origen').gte('fecha', hace60).lte('fecha', hoy)),
     lisLeer(sb.from('seguimientos').select('cliente_id, semana, fecha, score_entreno, score_alim_metas, score_alim_registro, score_global').gte('fecha', hace35)),
     lisLeer(sb.from('mediciones_corporales').select('cliente_id, fecha, peso, grasa_pct').order('fecha', { ascending: true })),
     lisLeer(sb.from('encuesta_app').select('cliente_id, util, facil, agradable, recomienda')),
     typeof segUltimos === 'function' ? segUltimos().catch(() => null) : null,
+    lisLeer(sb.from('metas_historial').select('*').order('fecha', { ascending: false }).order('created_at', { ascending: false })),
+    // La meta que tiene hoy la app de cada cliente (la misma lista de Uso de la app).
+    typeof mtApiGet === 'function' && typeof mtApiBase === 'function' && mtApiBase() ? mtApiGet('/api/coach-data?action=list').catch(() => null) : null,
   ]);
+  const mts = mtLista && Array.isArray(mtLista.clients) ? mtLista.clients : null;
   // Ciclos: el mismo cálculo del inicio de Entrenamiento.
   const estado = {};
   if (typeof cicEstado === 'function') {
@@ -102,6 +107,8 @@ async function lisDatos() {
     const ultimoEntreno = hechas.map(s => s.fecha).sort().pop() || null;
     const ss = segs.filter(s => s.cliente_id === c.id);
     const m = meds.filter(x => x.cliente_id === c.id && x.grasa_pct != null);
+    const medsC = meds.filter(x => x.cliente_id === c.id);
+    const ultMed = medsC[medsC.length - 1] || null;
     const ult = m[m.length - 1] || null;
     const ref90 = m.find(x => x.fecha >= hace90) || null;
     const enc = encuestas.find(e => e.cliente_id === c.id) || null;
@@ -121,6 +128,8 @@ async function lisDatos() {
       app: enc ? { recomienda: enc.recomienda, prom: lisProm([enc.util, enc.facil, enc.agradable]) } : null,
       dias: Math.round((dias28 / 4) * 10) / 10, diasPlan: c.dias_entreno_cantidad || (c.dias_entreno || []).length || null,
       grasa: ult ? Number(ult.grasa_pct) : null, grasaFecha: ult ? ult.fecha : null,
+      medFecha: ultMed ? ultMed.fecha : null, medDias: ultMed ? segHace(ultMed.fecha).d : null,
+      nutri: lisNutri(c, medsC, metasH.filter(x => x.cliente_id === c.id), mts, hoy),
       grasaCambio: ult && ref90 && ref90 !== ult ? Math.round((Number(ult.grasa_pct) - Number(ref90.grasa_pct)) * 10) / 10 : null,
       issa: ult ? lisIssa(c.sexo, Number(ult.grasa_pct)) : null,
       seguimiento: u ? segHace(u.fecha).d : null,
@@ -131,6 +140,67 @@ async function lisDatos() {
   });
 }
 
+// ── Meta nutricional: la vigente, si amerita cambio y si su app la muestra ──
+// Composición vigente = medida en los últimos 30 días. «¿Cambio?» usa la misma
+// regla del aviso de Composición (compEvaluarMeta: ±2,5 kg o 3 % del peso,
+// ±2 puntos de grasa o ±100 kcal al recalcular). Solo lee.
+const LIS_VIGENTE = 30;
+const lisNorm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const lisMiles = (n) => Number(n).toLocaleString('es-CO');
+function lisNutri(c, medsC, metasC, mts, hoy) {
+  const ref = metasC.find(m => m.kcal) || null;
+  const kcal = c.meta_calorias || (ref && ref.kcal) || null;
+  const prot = c.meta_calorias ? c.meta_proteina_g : (ref && ref.proteina_g);
+  const desde = (ref && ref.fecha) || String(c.meta_calculada_en || '').slice(0, 10) || null;
+  const r = { tiene: !!kcal, kcal, prot, desde, cambio: null, razon: '', app: null, appKcal: null };
+  // ¿Amerita cambio?
+  const conPeso = medsC.filter(x => x.peso != null);
+  const ultP = conPeso[conPeso.length - 1] || null;
+  const vieja = !ultP || segHace(ultP.fecha).d > LIS_VIGENTE;
+  if (kcal) {
+    let ev = null;
+    try { ev = typeof compEvaluarMeta === 'function' && ultP ? compEvaluarMeta(c, conPeso, metasC) : null; } catch (e) { ev = null; }
+    if (ev && ev.nivel === 'revisar') {
+      r.cambio = 'si';
+      const kg = ev.dPeso, gr = ev.dGrasa;
+      r.razon = kg != null && Math.abs(kg) >= 1 ? `${kg < 0 ? 'bajó' : 'subió'} ${String(Math.abs(Math.round(kg * 10) / 10)).replace('.', ',')} kg desde que se calculó`
+        : gr != null && Math.abs(gr) >= 1 ? `${gr < 0 ? 'bajó' : 'subió'} ${String(Math.abs(Math.round(gr * 10) / 10)).replace('.', ',')} puntos de grasa`
+        : ev.propuesta && ev.propuesta.kcal ? `recalculada daría ${lisMiles(ev.propuesta.kcal)} kcal` : 'revisar con la última medición';
+    } else if (vieja) { r.cambio = 'nose'; r.razon = ultP ? 'su medición es vieja: no hay con qué comparar' : 'sin medición para comparar'; }
+    else { r.cambio = 'no'; r.razon = 'cuadra con su última medición'; }
+  }
+  // ¿Su app la muestra?
+  if (mts) {
+    const mt = mts.find(m => c.mealtracker_id && m.user_id === c.mealtracker_id) || mts.find(m => lisNorm(m.name) === lisNorm(c.nombre)) || null;
+    if (!mt) r.app = 'cuenta';
+    else {
+      const g = mt.goals || {};
+      const k = Number(g.kcal ?? g.calories) || null;
+      r.appKcal = k;
+      r.app = !k ? 'sin' : kcal && Math.abs(k - Number(kcal)) >= 10 ? 'distinta' : kcal ? 'si' : 'sin_crm';
+    }
+  }
+  // Orden (mayor = mejor): sin meta, a revisar, la app no la muestra bien, no se sabe, todo bien.
+  r.valor = !r.tiene ? 0 : r.cambio === 'si' ? 1 : (r.app === 'distinta' || r.app === 'sin') ? 2 : r.cambio === 'nose' ? 3 : 4;
+  return r;
+}
+const LIS_CHIP = { ok: ['#E6F2E9', '#2F7F45'], ojo: ['#FCEBDD', '#B4541D'], mal: ['#FDECEA', '#B4321F'], nada: ['#EFEDE7', '#6B6B6B'] };
+const lisChip = (t, tono = 'nada') => `<span class="lis-chip" style="background:${LIS_CHIP[tono][0]};color:${LIS_CHIP[tono][1]}">${t}</span>`;
+const lisSub = (t) => t ? `<span class="lis-sub">${t}</span>` : '';
+const lisLinea = (et, v) => `<span class="lis-lin"><span>${et}</span>${v}</span>`;
+function lisNutriHTML(n) {
+  const app = n.app == null ? lisChip('Sin dato de la app') : n.app === 'cuenta' ? lisChip('Sin cuenta en la app')
+    : n.app === 'sin' ? lisChip('No tiene meta', 'mal') : n.app === 'distinta' ? lisChip('Distinta', 'ojo') + ` <span class="lis-mini">muestra ${lisMiles(n.appKcal)} kcal</span>`
+    : n.app === 'sin_crm' ? lisChip(`Tiene ${lisMiles(n.appKcal)} kcal`) : lisChip('Sí, la ve', 'ok');
+  if (!n.tiene) return lisChip('Sin meta', 'mal') + lisSub('Nunca se le calculó') + lisLinea('En su app', app);
+  const sem = n.desde ? Math.floor(segHace(n.desde).d / 7) : null;
+  const cambio = n.cambio === 'si' ? lisChip('Sí, revisar', 'ojo') : n.cambio === 'no' ? lisChip('No', 'ok') : lisChip('No se sabe');
+  return `<span class="lis-v">${lisMiles(n.kcal)} kcal${n.prot ? ` <span class="lis-mini">· ${n.prot} g proteína</span>` : ''}</span>`
+    + lisSub(n.desde ? `Desde el ${fmt.fechaCorta(n.desde)} · ${sem === 0 ? 'esta semana' : `hace ${sem} semana${sem === 1 ? '' : 's'}`}` : 'Sin fecha de cálculo')
+    + lisLinea('¿Cambio?', `${cambio}${n.razon && n.cambio !== 'no' ? ` <span class="lis-mini">${n.razon}</span>` : ''}`)
+    + lisLinea('En su app', app);
+}
+
 // Cómo se ordena cada ángulo: el valor (mayor = mejor) y si no hay dato.
 const LIS_VALOR = {
   todo: (f) => String(f.c.nombre || ''),
@@ -139,10 +209,12 @@ const LIS_VALOR = {
   ciclo: (f) => f.ciclo ? -f.ciclo.quedan : null,               // al que le queda menos, primero
   pago: (f) => f.pago ? (f.pago.debe ? -f.pago.meses : 1) : null,
   meta: (f) => f.meta,
+  nutri: (f) => f.nutri.valor,
   performance: (f) => f.performance,
   app: (f) => f.app ? f.app.recomienda : null,
   dias: (f) => f.dias,
-  composicion: (f) => f.issa ? -Math.abs(f.issa.i - 2) * 100 - (f.grasaCambio || 0) : null,   // más cerca de «Fit», y bajando
+  // Sin medición, luego vencida (la más vieja primero), luego vigente (más cerca de «Fit»).
+  composicion: (f) => f.medFecha == null ? 0 : f.medDias > LIS_VIGENTE ? 1 - Math.min(f.medDias, 999) / 1000 : 2 + (f.issa ? -Math.abs(f.issa.i - 2) / 10 : 0),
   seguimiento: (f) => f.seguimiento != null ? -f.seguimiento : null,
   actividad: (f) => f.sinEntrenar != null ? -f.sinEntrenar : null,
 };
@@ -166,12 +238,20 @@ const LIS_COL = {
   performance: { t: 'Performance', h: (f) => f.performance != null ? lisCelda(`${Math.round(f.performance)}%`, f.performance >= 75 ? 'ok' : f.performance >= 50 ? 'ojo' : 'mal', 'últimas 4 semanas') : lisCelda('—') },
   app: { t: 'Apreciación de la app', h: (f) => f.app ? lisCelda(`${f.app.recomienda}/10`, f.app.recomienda >= 9 ? 'ok' : f.app.recomienda >= 7 ? 'ojo' : 'mal', f.app.prom != null ? `promedio ${f.app.prom.toFixed(1)}/5` : '') : lisCelda('—', 'nada', 'sin encuesta') },
   dias: { t: 'Días de entreno', h: (f) => lisCelda(`${String(f.dias).replace('.', ',')}/sem`, f.diasPlan ? (f.dias >= f.diasPlan ? 'ok' : f.dias >= f.diasPlan * 0.6 ? 'ojo' : 'mal') : 'nada', f.diasPlan ? `de ${f.diasPlan} en su ficha` : 'últimas 4 semanas') },
-  composicion: { t: 'Composición', h: (f) => f.grasa != null ? lisCelda(`${String(f.grasa).replace('.', ',')}% grasa`, f.issa ? (f.issa.i === 2 || f.issa.i === 1 ? 'ok' : f.issa.i === 3 ? 'ojo' : 'mal') : 'nada',
-    `${f.issa ? f.issa.nombre : 'sin sexo en la ficha'}${f.grasaCambio != null ? ` · ${f.grasaCambio > 0 ? '+' : ''}${String(f.grasaCambio).replace('.', ',')} pts en 90 días` : ''}`) : lisCelda('—', 'nada', 'sin medición') },
+  // Vigente = medición de los últimos 30 días.
+  composicion: { t: 'Composición', h: (f) => {
+    if (f.medFecha == null) return lisChip('Sin medición', 'mal') + lisSub('Nunca se ha medido');
+    const vig = f.medDias <= LIS_VIGENTE;
+    const det = [f.medDias === 0 ? 'Hoy' : `Hace ${f.medDias} día${f.medDias === 1 ? '' : 's'}`,
+      f.grasa != null && f.grasaFecha === f.medFecha ? `${String(f.grasa).replace('.', ',')} % grasa` : '', f.issa && f.grasaFecha === f.medFecha ? f.issa.nombre : '',
+      f.grasaCambio != null ? `${f.grasaCambio > 0 ? '+' : ''}${String(f.grasaCambio).replace('.', ',')} pts en 90 días` : ''].filter(Boolean).join(' · ');
+    return lisChip(vig ? 'Vigente' : 'Vencida', vig ? 'ok' : 'ojo') + lisSub(det);
+  } },
+  nutri: { t: 'Meta nutricional', h: (f) => lisNutriHTML(f.nutri) },
   seguimiento: { t: 'Seguimiento', h: (f) => f.seguimiento != null ? lisCelda(f.seguimiento === 0 ? 'Hoy' : `Hace ${f.seguimiento} d`, f.seguimiento < 7 ? 'ok' : f.seguimiento < 14 ? 'ojo' : 'mal', f.seguimiento < 7 ? 'al día' : 'te toca') : lisCelda('Nunca', 'mal') },
   actividad: { t: 'Último entreno', h: (f) => f.sinEntrenar != null ? lisCelda(f.sinEntrenar === 0 ? 'Hoy' : f.sinEntrenar === 1 ? 'Ayer' : `Hace ${f.sinEntrenar} d`, f.sinEntrenar <= 3 ? 'ok' : f.sinEntrenar <= 7 ? 'ojo' : 'mal', [f.notas ? `${f.notas} nota${f.notas > 1 ? 's' : ''} sin responder` : '', f.tareas && f.tareas.abiertas ? `${f.tareas.abiertas} tarea${f.tareas.abiertas > 1 ? 's' : ''} tuya${f.tareas.abiertas > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ')) : lisCelda('Sin entrenos', 'mal', 'últimos 60 días') },
 };
-const LIS_ORDEN_COLS = ['tiempo', 'cumplimiento', 'ciclo', 'pago', 'meta', 'performance', 'app', 'dias', 'composicion', 'seguimiento', 'actividad'];
+const LIS_ORDEN_COLS = ['tiempo', 'cumplimiento', 'ciclo', 'pago', 'meta', 'nutri', 'performance', 'app', 'dias', 'composicion', 'seguimiento', 'actividad'];
 
 // Un resumen corto del ángulo elegido (cuántos van bien y cuántos no).
 function lisResumen(filas) {
@@ -185,7 +265,8 @@ function lisResumen(filas) {
     seguimiento: () => `${n(f => f.seguimiento != null && f.seguimiento < 7)} al día · ${n(f => f.seguimiento == null || f.seguimiento >= 7)} te toca`,
     dias: () => `${n(f => f.diasPlan && f.dias >= f.diasPlan)} entrenan los días de su plan · ${n(f => f.diasPlan && f.dias < f.diasPlan * 0.6)} entrenan mucho menos`,
     app: () => `${n(f => f.app)} respondieron la encuesta${n(f => f.app) ? ` · ${n(f => f.app && f.app.recomienda >= 9)} la recomiendan (9-10)` : ''}`,
-    composicion: () => `${n(f => f.grasa != null)} con medición · ${n(f => f.grasaCambio != null && f.grasaCambio < 0)} bajaron grasa en 90 días`,
+    composicion: () => `${n(f => f.medFecha != null)} con medición · ${n(f => f.medFecha != null && f.medDias <= LIS_VIGENTE)} vigentes · ${n(f => f.medFecha != null && f.medDias > LIS_VIGENTE)} vencidas · ${n(f => f.medFecha == null)} sin medición`,
+    nutri: () => `${n(f => f.nutri.tiene)} con meta · ${n(f => f.nutri.cambio === 'si')} amerita${n(f => f.nutri.cambio === 'si') === 1 ? '' : 'n'} cambio · ${n(f => f.nutri.app === 'distinta' || f.nutri.app === 'sin')} que su app no muestra bien · ${n(f => !f.nutri.tiene)} sin meta`,
     tiempo: () => { const t = filas.map(f => f.tiempo).filter(x => x != null); return t.length ? `Mediana del grupo: ${Math.round(lisMediana(t))} min · ${t.length} con datos` : 'Todavía no hay sesiones cerradas en la app'; },
     ciclo: () => `${n(f => f.ciclo && f.ciclo.quedan <= 7)} terminan su ciclo esta semana · ${n(f => !f.ciclo)} sin ciclo vigente`,
     actividad: () => `${n(f => f.sinEntrenar != null && f.sinEntrenar <= 3)} entrenaron en los últimos 3 días · ${n(f => f.sinEntrenar == null || f.sinEntrenar > 7)} hace más de una semana`,
@@ -233,5 +314,7 @@ function lisPintar() {
     </div>`;
 }
 
-window.lisAngulo = (id) => { _lis.angulo = id; _lis.invertido = false; lisPintar(); };
+// Estos dos se ven con lo que pide acción primero (sin meta, a revisar, sin medición…).
+const LIS_PEOR_PRIMERO = new Set(['nutri', 'composicion']);
+window.lisAngulo = (id) => { _lis.angulo = id; _lis.invertido = LIS_PEOR_PRIMERO.has(id); lisPintar(); };
 window.lisInvertir = () => { _lis.invertido = !_lis.invertido; lisPintar(); };
