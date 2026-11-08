@@ -191,8 +191,8 @@ function tqCalcular(R, ref) {
       app: e && actual ? e.sinActividad : undefined,
     };
   });
-  // Por estado (rojo, amarillo, verde, en pausa) y, dentro de cada uno, en orden alfabético.
-  filas.sort((a, b) => TQ_ORDEN[a.estado] - TQ_ORDEN[b.estado] || String(a.c.nombre).localeCompare(String(b.c.nombre), 'es', { sensitivity: 'base' }));
+  // Siempre en orden alfabético (para ver por estado están los filtros de arriba).
+  filas.sort((a, b) => String(a.c.nombre).localeCompare(String(b.c.nombre), 'es', { sensitivity: 'base' }));
   return { hoy, lunes, filas, actual };
 }
 async function tqDatos(forzar = false) {

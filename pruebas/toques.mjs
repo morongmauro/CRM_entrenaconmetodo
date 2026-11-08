@@ -122,7 +122,7 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   await p.evaluate(() => navigate('toques'));
   await p.locator('[data-tq-tabla]').waitFor({ timeout: 15000 });
   const est = await p.locator('tr[data-tq-cliente]').evaluateAll(els => els.map(e => `${e.dataset.tqCliente}:${e.dataset.tqEstado}`));
-  ok(`${tag} · orden y semáforo (${est})`, JSON.stringify(est) === JSON.stringify(['c1:debe', 'c2:frio', 'c4:enfria', 'c5:mucho', 'c0:bien']), JSON.stringify(est));
+  ok(`${tag} · en orden alfabético, cada uno con su semáforo (${est})`, JSON.stringify(est) === JSON.stringify(['c0:bien', 'c1:debe', 'c2:frio', 'c4:enfria', 'c5:mucho']), JSON.stringify(est));
   ok(`${tag} · sin el inactivo`, !/Pedro/.test(await p.locator('[data-tq-tabla]').innerText()));
   const celda = async (c, k) => (await p.locator(`tr[data-tq-cliente="${c}"] [data-tq="${k}"]`).innerText()).trim();
   ok(`${tag} · Sofía: seguimiento semanal hecho`, /^Hecho/.test(await celda('c5', 'seguimiento')));
