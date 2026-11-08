@@ -46,6 +46,7 @@ const tablas = () => ({
     ej('e8', 'Press de banca con barra', 'Barbell Bench Press'),
     ej('e9', 'Sentadilla búlgara con mancuernas', 'bulgarian split squat'),
     ej('e10', 'Cobra', null),
+    ej('e11', 'Y con mini banda inclinado', "Mini Band Bent Over Y's"),
   ],
   musculos: [], sesiones: [], series_log: [], eventos: [], evento_registros: [], actividades: [], ejercicio_video_estado: [],
   ejercicios_nombre_respaldo: [],
@@ -90,6 +91,7 @@ for (const [ancho, alto] of [[1440, 900], [390, 844]]) {
   ok('sin Trainerize → traducción (Barbell Calf Raise)', sug.e4 === 'Barbell Calf Raise', JSON.stringify(sug));
   ok('apodo con coma → Dumbbell Rear Delt Fly', sug.e7 === 'Dumbbell Rear Delt Fly', JSON.stringify(sug));
   ok('los que ya están en inglés no salen', !('e2' in sug) && !('e8' in sug) && !('e5' in sug), JSON.stringify(Object.keys(sug)));
+  ok("«Mini Band Bent Over Y's» ya está en inglés (la Y de la figura no es la «y» del español)", !('e11' in sug), JSON.stringify(Object.keys(sug)));
   if (FOTO) await p.screenshot({ path: path.join(CAPTURAS, `galeria-ingles-${ancho}-${FOTO}.png`), fullPage: true });
   await p.locator('[data-gr-sugerencia="e1"] [data-gr-poner]').click(); await p.waitForTimeout(600);
   const e1 = await p.evaluate(() => window.TABLAS_FALSAS.ejercicios.find(e => e.id === 'e1'));
@@ -102,7 +104,7 @@ for (const [ancho, alto] of [[1440, 900], [390, 844]]) {
   if (ancho === 1440) ok('«Poner las sugeridas»: los que no están en el diccionario los traduce el asistente', e9.alias === 'Dumbbell Bulgarian Split Squat' && e10.alias === 'Cobra Stretch' && e9.nombre === 'Sentadilla búlgara con mancuernas', JSON.stringify([e9, e10]));
   else ok('sin asistente: el apodo en inglés queda con mayúsculas y el que no tiene nada no se toca', e9.alias === 'Bulgarian Split Squat' && !e10.alias, JSON.stringify([e9, e10]));
   ok('el botón vuelve a su texto (o se va si ya no falta ninguno)', (await p.locator('[data-gr-todas]').count()) === 0 || (await p.locator('[data-gr-todas]').innerText()).includes('Poner las sugeridas'));
-  ok('nada se borró', t.length === 10 && t.every(e => e.nombre));
+  ok('nada se borró', t.length === 11 && t.every(e => e.nombre));
   ok('se guarda respaldo del nombre anterior', (await p.evaluate(() => window.TABLAS_FALSAS.ejercicios_nombre_respaldo.length)) >= 4);
   await p.locator('[data-nivel="repetidos"]').click(); await p.waitForTimeout(800);
   const grupos = await p.evaluate(() => [...document.querySelectorAll('[data-gr-grupo]')].map(g => [...g.querySelectorAll('[data-gr-ficha]')].map(f => f.getAttribute('data-gr-ficha'))));

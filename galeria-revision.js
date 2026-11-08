@@ -46,7 +46,9 @@ function grEsApodo(a) {
   if (/[,;]/.test(t)) return true;
   if (/[áéíóúñ]/i.test(t)) return true;
   if (t[0] !== t[0].toUpperCase() || !/[A-Z0-9]/.test(t[0])) return true;
-  return GR_PALABRAS_ES.test(grNorm(t));
+  // Palabras en español, pero solo en minúscula: «Press de banca» sí, y una
+  // letra de la figura en mayúscula («Bent Over Y's», «T Raise») no es la «y».
+  return t.split(/[^A-Za-z0-9áéíóúñÁÉÍÓÚÑ']+/).some(w => w && w === w.toLowerCase() && GR_PALABRAS_ES.test(w.replace(/'.*$/, '')));
 }
 function grNecesitaIngles(e) {
   if (!e || e.archivado) return false;
