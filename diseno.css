@@ -765,3 +765,5 @@ body.modo-movil [data-seg-mesa-btn] { display: none !important; }
 .aeu-otra { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
 .aeu-buscar { font: inherit; font-size: 13px; padding: 6px 10px; border: 1px solid #E4E1D8; border-radius: 10px; background: #fff; min-width: 220px; }
 @media (max-width: 720px) { .aeu-f { grid-template-columns: 1fr; } .aeu-vieja { border-right: 0; padding-right: 0; border-bottom: 1px solid #F3F1EB; padding-bottom: 12px; } .aeu-buscar { flex: 1; min-width: 0; } }
+.aeu-donde { margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: #55565B; line-height: 1.45; }
+.aeu-donde b { font-weight: 650; color: #1F1F1F; }

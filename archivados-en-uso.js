@@ -24,6 +24,55 @@ if (typeof ENT_ORIGEN_CAMBIO === 'object') ENT_ORIGEN_CAMBIO.galeria = 'desde la
 const aeuTandas = (ids, n = 80) => { const t = []; for (let i = 0; i < ids.length; i += n) t.push(ids.slice(i, i + n)); return t; };
 const aeuLeer = async (q) => { try { const { data, error } = await q; return error ? null : (data || []); } catch (e) { return null; } };
 
+// Dónde está cada ficha, con la MISMA regla de la app: el ciclo que ve hoy
+// cada cliente activo (de los enviados —activa y visible— el que empezó más
+// reciente; si ninguno empezó, el de mayor orden) y los que vienen (empiezan
+// después de hoy). Un ciclo viejo que siga marcado «activa» no cuenta: la app
+// ya no se lo muestra. { ejercicioId: [{ cliente, ciclo, rutina, cuando, reId, rutinaId, clienteId, orden, rutinaNombre }] }
+async function aeuDonde(ids) {
+  const out = Object.fromEntries(ids.map(id => [id, []]));
+  if (!ids.length) return out;
+  const filas = [];
+  for (const t of aeuTandas(ids)) {
+    for (let desde = 0; ; desde += 1000) {
+      const d = await aeuLeer(sb.from('rutina_ejercicios').select('id, rutina_id, ejercicio_id, orden').in('ejercicio_id', t).order('id').range(desde, desde + 999));
+      if (d === null) return null;
+      filas.push(...d);
+      if (d.length < 1000) break;
+    }
+  }
+  if (!filas.length) return out;
+  const ruts = [];
+  for (const t of aeuTandas([...new Set(filas.map(x => x.rutina_id))])) ruts.push(...((await aeuLeer(sb.from('rutinas').select('id, nombre, fase_id, archivada').in('id', t))) || []));
+  const fasesR = [];
+  for (const t of aeuTandas([...new Set(ruts.map(r => r.fase_id).filter(Boolean))])) fasesR.push(...((await aeuLeer(sb.from('fases').select('id, cliente_id').in('id', t))) || []));
+  const clis = (await aeuLeer(sb.from('clientes').select('id, nombre, estado'))) || [];
+  const activos = new Map(clis.filter(c => String(c.estado || 'activo').toLowerCase() === 'activo').map(c => [c.id, c.nombre || 'Sin nombre']));
+  const cliIds = [...new Set(fasesR.map(f => f.cliente_id))].filter(c => activos.has(c));
+  const suyas = [];
+  for (const t of aeuTandas(cliIds)) suyas.push(...((await aeuLeer(sb.from('fases').select('id, cliente_id, nombre, estado, fecha_inicio, visible_cliente, orden').in('cliente_id', t))) || []));
+  const hoy = fmt.hoy();
+  const dia = (f) => String(f.fecha_inicio || '').slice(0, 10);
+  const cuando = {};   // faseId → 'ahora' | 'viene'
+  cliIds.forEach(c => {
+    const lista = suyas.filter(f => f.cliente_id === c && f.estado !== 'archivada');
+    const enviadas = lista.filter(f => f.estado === 'activa' && f.visible_cliente === true).sort((a, b) => (b.orden || 0) - (a.orden || 0));
+    const empezadas = enviadas.filter(f => dia(f) && dia(f) <= hoy).sort((a, b) => dia(b).localeCompare(dia(a)) || (b.orden || 0) - (a.orden || 0));
+    const vig = empezadas[0] || enviadas[0] || null;
+    if (vig) cuando[vig.id] = 'ahora';
+    lista.filter(f => dia(f) > hoy && !(vig && f.id === vig.id)).forEach(f => { cuando[f.id] = 'viene'; });
+  });
+  const faseDe = Object.fromEntries(suyas.map(f => [f.id, f]));
+  const rutDe = Object.fromEntries(ruts.map(r => [r.id, r]));
+  filas.forEach(x => {
+    const r = rutDe[x.rutina_id];
+    const f = r && r.archivada !== true && r.fase_id ? faseDe[r.fase_id] : null;
+    if (!f || !cuando[f.id] || !activos.has(f.cliente_id)) return;
+    out[x.ejercicio_id].push({ cliente: activos.get(f.cliente_id), clienteId: f.cliente_id, ciclo: f.nombre || 'Ciclo', rutina: r.nombre || 'Rutina', cuando: cuando[f.id], reId: x.id, rutinaId: x.rutina_id, orden: x.orden });
+  });
+  return out;
+}
+
 // Las fichas archivadas que hoy están en el ciclo de algún cliente activo,
 // cada una con quiénes la tienen y las fichas que pueden reemplazarla.
 async function aeuCargar(force = false) {
@@ -39,8 +88,7 @@ async function aeuCargar(force = false) {
     const archivadas = [];
     for (const t of aeuTandas(ids)) archivadas.push(...((await aeuLeer(sb.from('ejercicios').select('*').in('id', t))) || []).filter(e => e.archivado));
     if (!archivadas.length) return (_aeu.lista = []);
-    const clis = (await aeuLeer(sb.from('clientes').select('id, nombre'))) || [];
-    const nombre = Object.fromEntries(clis.map(c => [c.id, c.nombre || 'Sin nombre']));
+    const donde = (await aeuDonde(archivadas.map(a => a.id))) || {};
     // Su par: la que marcaste como «el mismo» (duplicado_de) y las repetidas
     // por nombre (las mismas de «Repetidos»), primero las que usan clientes
     // y las que tienen video.
@@ -61,9 +109,10 @@ async function aeuCargar(force = false) {
       }
       const marcada = a.duplicado_de && vivosIds.has(a.duplicado_de) ? vivos.find(v => v.id === a.duplicado_de) : null;
       if (marcada) { const i = opciones.findIndex(o => o.id === marcada.id); if (i >= 0) opciones.splice(i, 1); opciones.unshift(marcada); }
-      const clientes = [...(quien.get(a.id) || [])].map(c => nombre[c] || '').filter(Boolean).sort((x, y) => x.localeCompare(y));
-      return { a, clientes, opciones };
-    }).sort((x, y) => y.clientes.length - x.clientes.length || entNombres(x.a).grande.localeCompare(entNombres(y.a).grande));
+      const d = donde[a.id] || [];
+      const clientes = [...new Set(d.map(x => x.cliente))].sort((x, y) => x.localeCompare(y));
+      return { a, clientes, donde: d, opciones };
+    }).filter(x => x.donde.length).sort((x, y) => y.clientes.length - x.clientes.length || entNombres(x.a).grande.localeCompare(entNombres(y.a).grande));
     return _aeu.lista;
   })();
   try { return await _aeu.cargando; } finally { _aeu.cargando = null; }
@@ -84,7 +133,7 @@ async function aeuPintar(force = false) {
   const prev = (e) => (typeof fbPrevFicha === 'function' ? fbPrevFicha(e) : '');
   const usoDe = (e) => { const k = _ent.enUso && _ent.enUso.get(e.id); return k ? `<span class="tag tag-blue">${k} ${k === 1 ? 'cliente' : 'clientes'} ahora</span>` : '<span class="tag tag-gray">nadie la usa</span>'; };
   const sinV = (e) => ((e.video_fuente || 'ninguno') === 'ninguno' ? '<span class="tag tag-red">sin video</span>' : '');
-  const filas = lista.map(({ a, clientes, opciones }) => {
+  const filas = lista.map(({ a, clientes, donde, opciones }) => {
     const n = entNombres(a);
     const cand = (o, i) => { const no = entNombres(o); return `
           <div class="aeu-op" data-aeu-op="${o.id}">
@@ -100,7 +149,8 @@ async function aeuPintar(force = false) {
           ${prev(a)}
           <div class="aeu-nn"><b>${escapeHtml(n.grande)}</b>${n.chico ? `<span>${escapeHtml(n.chico)}</span>` : ''}</div>
           <div class="aeu-tg">${sinV(a)}</div>
-          <div class="aeu-q">La tiene${clientes.length === 1 ? '' : 'n'} ${clientes.length} ${clientes.length === 1 ? 'cliente' : 'clientes'}: ${clientes.slice(0, 4).map(escapeHtml).join(', ')}${clientes.length > 4 ? ` y ${clientes.length - 4} más` : ''}</div>
+          <div class="aeu-q">La tiene${clientes.length === 1 ? '' : 'n'} ${clientes.length} ${clientes.length === 1 ? 'cliente' : 'clientes'}:</div>
+          <ul class="aeu-donde" data-aeu-donde>${[...new Map(donde.map(x => [`${x.clienteId}|${x.ciclo}|${x.rutina}`, x])).values()].slice(0, 8).map(x => `<li><b>${escapeHtml(x.cliente)}</b> · ${escapeHtml(x.ciclo)} ${x.cuando === 'ahora' ? '(el de ahora)' : '(el que viene)'} · ${escapeHtml(x.rutina)}</li>`).join('')}</ul>
           <button type="button" class="btn btn-ghost btn-sm" data-aeu-desarchivar="${a.id}" onclick="aeuDesarchivar('${a.id}')">Esta es la buena: desarchivarla</button>
         </div>
         <div class="aeu-ops">
@@ -132,49 +182,12 @@ window.aeuBuscado = (id, texto) => {
   if (e && e.id !== id) { btn.dataset.aeuA = e.id; btn.disabled = false; } else { delete btn.dataset.aeuA; btn.disabled = true; }
 };
 
-// Los ciclos que se cambian: los de ahora (la misma regla de «Los usan
-// ahora») y los que vienen. Los terminados no se tocan.
+// Lo que se cambia: las líneas de sus rutinas en el ciclo que ve hoy y en
+// los que vienen (aeuDonde). Los terminados no se tocan.
 async function aeuRutinasACambiar(viejaId) {
-  const res = [];
-  for (let desde = 0; ; desde += 1000) {
-    const d = await aeuLeer(sb.from('rutina_ejercicios').select('id, rutina_id, ejercicio_id, orden').eq('ejercicio_id', viejaId).order('id').range(desde, desde + 999));
-    if (d === null) return null;
-    res.push(...d);
-    if (d.length < 1000) break;
-  }
-  if (!res.length) return [];
-  const rutIds = [...new Set(res.map(x => x.rutina_id))];
-  const ruts = [];
-  for (const t of aeuTandas(rutIds)) ruts.push(...((await aeuLeer(sb.from('rutinas').select('id, nombre, fase_id, cliente_id, archivada').in('id', t))) || []));
-  const faseIds = [...new Set(ruts.map(r => r.fase_id).filter(Boolean))];
-  const fases = [];
-  for (const t of aeuTandas(faseIds)) fases.push(...((await aeuLeer(sb.from('fases').select('id, cliente_id, estado, fecha_inicio, semanas, visible_cliente, orden, created_at').in('id', t))) || []));
-  const clis = (await aeuLeer(sb.from('clientes').select('id, estado'))) || [];
-  const activos = new Set(clis.filter(c => String(c.estado || 'activo').toLowerCase() === 'activo').map(c => c.id));
-  // Todos los ciclos de esos clientes, para saber cuál es el de ahora.
-  const cliIds = [...new Set(fases.map(f => f.cliente_id))].filter(c => activos.has(c));
-  const suyas = [];
-  for (const t of aeuTandas(cliIds)) suyas.push(...((await aeuLeer(sb.from('fases').select('id, cliente_id, estado, fecha_inicio, semanas, visible_cliente, orden, created_at').in('cliente_id', t))) || []));
-  const hoy = fmt.hoy();
-  const fin = (f) => f.fecha_inicio ? evtSumarDias(String(f.fecha_inicio).slice(0, 10), (Number(f.semanas) || 4) * 7 - 1) : null;
-  const vale = new Set();
-  cliIds.forEach(c => {
-    const lista = suyas.filter(f => f.cliente_id === c && f.estado !== 'archivada');
-    let ahora = lista.filter(f => f.estado === 'activa' || f.visible_cliente || (f.fecha_inicio && String(f.fecha_inicio).slice(0, 10) <= hoy && fin(f) >= hoy));
-    if (!ahora.length && lista.length) {
-      ahora = [[...lista].sort((a, b) => String(b.fecha_inicio || '').localeCompare(String(a.fecha_inicio || ''))
-        || (b.orden || 0) - (a.orden || 0) || String(b.created_at || '').localeCompare(String(a.created_at || '')))[0]];
-    }
-    ahora.forEach(f => vale.add(f.id));
-    // Los que vienen (o en preparación, sin fecha).
-    lista.filter(f => !f.fecha_inicio || String(f.fecha_inicio).slice(0, 10) > hoy).forEach(f => vale.add(f.id));
-  });
-  const faseDe = Object.fromEntries(fases.map(f => [f.id, f]));
-  const rutDe = Object.fromEntries(ruts.map(r => [r.id, r]));
-  return res.filter(x => {
-    const r = rutDe[x.rutina_id];
-    return r && r.archivada !== true && r.fase_id && vale.has(r.fase_id);
-  }).map(x => ({ ...x, rutina: rutDe[x.rutina_id], cliente_id: faseDe[rutDe[x.rutina_id].fase_id].cliente_id }));
+  const d = await aeuDonde([viejaId]);
+  if (d === null) return null;
+  return (d[viejaId] || []).map(x => ({ id: x.reId, rutina_id: x.rutinaId, orden: x.orden, cliente_id: x.clienteId, rutina: { nombre: x.rutina } }));
 }
 
 window.aeuCambiar = async (viejaId, nuevaId) => {

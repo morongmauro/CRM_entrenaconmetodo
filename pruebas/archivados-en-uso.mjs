@@ -42,15 +42,18 @@ const tablas = () => ({
   settings: [{ user_id: 'coach-1', usd_cop_rate: 4000, nombre_coach: 'Mauro' }],
   fases: [
     { id: 'f0', cliente_id: 'c1', estado: 'finalizada', fecha_inicio: mas(HOY, -90), semanas: 6, visible_cliente: false, orden: 1 },
-    { id: 'f1', cliente_id: 'c1', estado: 'activa', fecha_inicio: mas(HOY, -14), semanas: 6, visible_cliente: true, orden: 2 },
+    { id: 'f1', cliente_id: 'c1', nombre: 'Ciclo 2', estado: 'activa', fecha_inicio: mas(HOY, -14), semanas: 6, visible_cliente: true, orden: 2 },
     { id: 'f2', cliente_id: 'c1', estado: 'borrador', fecha_inicio: mas(HOY, 30), semanas: 6, visible_cliente: false, orden: 3 },
-    { id: 'f3', cliente_id: 'c2', estado: 'activa', fecha_inicio: mas(HOY, -7), semanas: 6, visible_cliente: true, orden: 1 },
+    { id: 'f3', cliente_id: 'c2', nombre: 'Ciclo 4', estado: 'activa', fecha_inicio: mas(HOY, -7), semanas: 6, visible_cliente: true, orden: 2 },
+    // Luis: su ciclo anterior sigue marcado «activa» y visible, pero la app ya no se lo muestra.
+    { id: 'f4', cliente_id: 'c2', nombre: 'Ciclo 3', estado: 'activa', fecha_inicio: mas(HOY, -60), semanas: 6, visible_cliente: true, orden: 1 },
   ],
   rutinas: [
     { id: 'r0', fase_id: 'f0', cliente_id: 'c1', nombre: 'Push viejo', archivada: false },
     { id: 'r1', fase_id: 'f1', cliente_id: 'c1', nombre: 'Push', archivada: false },
     { id: 'r2', fase_id: 'f2', cliente_id: 'c1', nombre: 'Push próximo', archivada: false },
     { id: 'r3', fase_id: 'f3', cliente_id: 'c2', nombre: 'Hombro', archivada: false },
+    { id: 'r4', fase_id: 'f4', cliente_id: 'c2', nombre: 'Hombro viejo', archivada: false },
     { id: 'rb', fase_id: null, cliente_id: null, nombre: 'Plantilla', archivada: false },
   ],
   rutina_ejercicios: [
@@ -59,6 +62,7 @@ const tablas = () => ({
     { id: 'x2', rutina_id: 'r2', ejercicio_id: 'a1', orden: 1, series: 3, reps: '15', descanso_seg: 60 },
     { id: 'x3', rutina_id: 'r3', ejercicio_id: 'a1', orden: 3, series: 2, reps: '12', descanso_seg: 45 },
     { id: 'x4', rutina_id: 'r3', ejercicio_id: 'e2', orden: 1, series: 3, reps: '8' },
+    { id: 'x5', rutina_id: 'r4', ejercicio_id: 'a1', orden: 1, series: 3, reps: '10' },
     { id: 'xb', rutina_id: 'rb', ejercicio_id: 'a1', orden: 1, series: 3, reps: '10' },
   ],
   ejercicios: [
@@ -102,6 +106,8 @@ for (const [ancho, alto] of [[1440, 900], [390, 844]]) {
   ok('el aviso sale con la ficha archivada y sus 2 clientes', /1 ficha archivada/.test(txt) && /Seated Dumbbell Front Raise/.test(txt) && /2 clientes/.test(txt) && /Ana Pérez/.test(txt) && /Luis Gil/.test(txt), txt);
   ok('lado a lado: la archivada con su preview y la que quedó (Dumbbell Seated Front Raise) con la suya', (await p.locator('[data-aeu-ej="a1"] .aeu-vieja .fb-prev').count()) === 1 && (await p.locator('[data-aeu-op="e1"] .fb-prev').count()) === 1);
   ok('no propone una que no se parece (Overhead Press)', (await p.locator('[data-aeu-op="e2"]').count()) === 0);
+  const donde = (await p.locator('[data-aeu-ej="a1"] [data-aeu-donde]').innerText()).replace(/\s+/g, ' ');
+  ok('dice dónde: cliente, ciclo (el de ahora / el que viene) y rutina; no el ciclo viejo', /Ana Pérez · Ciclo 2 \(el de ahora\) · Push/.test(donde) && /el que viene\) · Push próximo/.test(donde) && /Luis Gil · Ciclo 4 \(el de ahora\) · Hombro/.test(donde) && !/Hombro viejo/.test(donde), donde);
   if (FOTO) await aviso.screenshot({ path: path.join(CAPTURAS, `archivados-en-uso-${ancho}-${FOTO}.png`) });
   await p.locator('[data-aeu-cambiar="a1"][data-aeu-a="e1"]').click();
   await p.waitForFunction(() => !document.querySelector('[data-aeu-aviso]'), null, { timeout: 15000 }).catch(() => {});
@@ -110,7 +116,7 @@ for (const [ancho, alto] of [[1440, 900], [390, 844]]) {
   const re = Object.fromEntries(t.rutina_ejercicios.map(x => [x.id, x]));
   ok('su ciclo de ahora y el que viene: quedó la ficha buena', re.x1.ejercicio_id === 'e1' && re.x2.ejercicio_id === 'e1' && re.x3.ejercicio_id === 'e1', JSON.stringify(re));
   ok('mismas series, reps, descansos, orden y notas', re.x1.series === 4 && re.x1.reps === '10' && re.x1.descanso_seg === 90 && re.x1.orden === 2 && re.x1.notas === 'Codos suaves');
-  ok('el ciclo terminado y la plantilla no se tocan', re.x0.ejercicio_id === 'a1' && re.xb.ejercicio_id === 'a1');
+  ok('el ciclo terminado, el viejo que sigue marcado «activa» y la plantilla no se tocan', re.x0.ejercicio_id === 'a1' && re.x5.ejercicio_id === 'a1' && re.xb.ejercicio_id === 'a1');
   ok('los otros ejercicios no se tocan', re.x4.ejercicio_id === 'e2');
   const a1 = t.ejercicios.find(e => e.id === 'a1');
   ok('la vieja sigue archivada (no se borra) y queda apuntando a la buena', a1 && a1.archivado === true && a1.duplicado_de === 'e1' && t.ejercicios.length === 3);
