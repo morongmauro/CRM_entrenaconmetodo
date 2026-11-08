@@ -70,6 +70,9 @@ function tablas() {
     fases, rutinas, rutina_ejercicios: [...re, ...re17, ...extra19], rutina_bloques: fixture.rutina_bloques,
     sesiones: fixture.sesiones, series_log: sl, ejercicios: fixture.ejercicios, trainerize_resumen: fixture.trainerize_resumen,
     comunidad_posts: [], comunidad_reacciones: [], comunidad_comentarios: [], comunidad_vistas: [],
+    // Le pediste el video de uno de su ciclo y aún no llega.
+    videos_tecnica: comun ? [{ id: 'vt1', user_id: 'coach-1', cliente_id: 'c0', ejercicio_id: comun, ejercicio_nombre: 'X', estado: 'pedido', pedido_en: '2026-11-01', created_at: '2026-11-01T10:00:00Z' }] : [],
+    pedidos_cliente: [],
   };
 }
 
@@ -131,6 +134,11 @@ for (const [tag, ancho, alto] of [['ancho', 1600, 900], ['telefono', 390, 844]])
     return [re.ejercicio_id, t ? t.textContent.trim() : ''];
   })));
   ok(`${tag} · en el 17 y en el 18 → «Lo usó en los últimos 2 ciclos»`, tags[C.comun] === 'Lo usó en los últimos 2 ciclos', JSON.stringify(tags));
+  // Video pedido: etiqueta en la fila y aviso antes de quitarlo.
+  ok(`${tag} · el ejercicio con video pedido lleva «Video pedido · hace N días»`, await p.locator(`[data-video-pedido="${C.comun}"]`).count() === 1 && /Video pedido · hace \d+ días/.test(await p.locator(`[data-video-pedido="${C.comun}"]`).innerText()));
+  const quitar = async (resp) => p.evaluate(async ([id, r]) => { let msg = ''; const c0 = window.confirm; window.confirm = (m) => { msg = m; return r; }; const re = _ent.rutina.ejercicios.find(x => x.ejercicio_id === id); await entQuitarRE(re.id); window.confirm = c0; return { msg, sigue: _ent.rutina.ejercicios.some(x => x.ejercicio_id === id) }; }, [C.comun, resp]);
+  let q = await quitar(false);
+  ok(`${tag} · al quitarlo te avisa del video pedido y si dices que no, se queda`, /video pedido que aún no llega/.test(q.msg) && /queda en pausa/.test(q.msg) && q.sigue, JSON.stringify(q));
   ok(`${tag} · solo en el 17 → «Lo usó hace 2 ciclos»`, tags[C.soloViejo] === 'Lo usó hace 2 ciclos', JSON.stringify(tags));
   ok(`${tag} · la del ciclo anterior va en amarillo`, await p.locator(`[data-tag-ciclos="1,2"].tag-yellow`).count() >= 1);
   ok(`${tag} · el texto para casos salteados`, await p.evaluate(() => typeof entTextoCiclos === 'function' ? [entTextoCiclos([1]), entTextoCiclos([1, 3]), entTextoCiclos([2, 4, 5]), entTextoCiclos([1, 2, 3])].join(' | ') : '')

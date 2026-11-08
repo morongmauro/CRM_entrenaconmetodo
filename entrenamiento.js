@@ -303,6 +303,8 @@ const entDb = {
     let antes = null;
     if (row && row.ejercicio_id) {
       antes = (_ent.rutina?.ejercicios || []).find(x => x.id === id);
+      // Un video pedido de ese ejercicio que aún no llega: avisar antes de cambiarlo.
+      if (antes && antes.ejercicio_id !== row.ejercicio_id && !meta.avisado && !entConfirmarVideoPedido([antes.ejercicio_id], 'cambiar')) return false;
       antes = antes ? { ejercicio_id: antes.ejercicio_id, rutina_id: antes.rutina_id || _ent.rutina.id, orden: antes.orden, ejercicios: antes.ejercicios } : null;
       if (!antes) {
         const { data } = await sb.from('rutina_ejercicios').select('ejercicio_id, rutina_id, orden').eq('id', id).maybeSingle();
@@ -2008,6 +2010,9 @@ async function entPintarConstructor() {
   // En qué ciclos anteriores del cliente estuvo cada ejercicio (la etiqueta
   // de cada fila). Si falla, la rutina se abre igual, sin etiqueta.
   _ent.histCiclos = r.fase_id && r.cliente_id ? await entHistorialCiclos(r).catch(() => null) : null;
+  // Los videos que le pediste y aún no llegan (etiqueta en la fila y aviso
+  // antes de quitarlo o cambiarlo).
+  _ent.vidPedidos = r.cliente_id ? await entVideosPedidos(r.cliente_id).catch(() => null) : null;
   await entDb.ejercicios();
   await entCargarCambios(r.id);
 
@@ -2556,6 +2561,7 @@ function entFilaRutina(re, i, total, bloques) {
             <div class="font-bold text-sm text-slate-900">${i + 1}. ${escapeHtml(entNombres(e).grande)}</div>
             ${entNombreChico(e)}
             ${entTagCiclosHTML(e)}
+            ${entVidPedidoHTML(e)}
             <div class="text-xs text-slate-500">${entLabel(ENT_TIPOS, e.tipo)} · ${entChipMusculos(e)}
               <span class="ent-tiempo-re" data-tiempo-re="${re.id}" title="Lo que pesa en el reloj (series, descansos y el cambio al siguiente)">${_ent.rutina ? (s2 => s2 ? `≈ ${entMin(s2)}` : '')(entEstimarTiempo(_ent.rutina).porRE[re.id]) : ''}</span></div>
             ${window.ccSiempreHTML ? ccSiempreHTML(re) : ''}
@@ -2667,6 +2673,8 @@ window.entGuardarRE = async (id, campo, valor) => {
 
 window.entQuitarRE = async (id) => {
   if (!_ent.rutina) return;
+  const reQ = _ent.rutina.ejercicios.find(x => x.id === id);
+  if (reQ && !entConfirmarVideoPedido([reQ.ejercicio_id], 'quitar')) return;
   const deBloque = _ent.rutina.ejercicios.find(x => x.id === id)?.bloque_id || null;
   _ent.rutina.ejercicios = _ent.rutina.ejercicios.filter(x => x.id !== id);
   entRepintarRutina();
@@ -2675,6 +2683,47 @@ window.entQuitarRE = async (id) => {
   if (deBloque) await entDeshacerSiSobra(deBloque);
   entRefrescarAsistencia();
 };
+
+// ---------- Videos pedidos en el constructor ----------
+// Lo último de cada ejercicio en videos_tecnica sigue «pedido» (y no lo
+// marcaste «Ya lo entregó» en Toques): el cliente aún no lo manda.
+async function entVideosPedidos(clienteId) {
+  const { data, error } = await sb.from('videos_tecnica').select('id, ejercicio_id, estado, pedido_en, created_at').eq('cliente_id', clienteId);
+  if (error) return null;
+  const ult = {};
+  (data || []).forEach(v => { if (!v.ejercicio_id) return; const u = ult[v.ejercicio_id]; if (!u || String(v.pedido_en) > String(u.pedido_en) || (v.pedido_en === u.pedido_en && String(v.created_at) > String(u.created_at))) ult[v.ejercicio_id] = v; });
+  let entregados = {};
+  try {
+    const { data: pc } = await sb.from('pedidos_cliente').select('detalle, entregado_en').eq('cliente_id', clienteId).eq('tipo', 'video').not('entregado_en', 'is', null);
+    (pc || []).forEach(x => { if (String(x.detalle || '').startsWith('ej:')) { const k = String(x.detalle).slice(3); if (!entregados[k] || x.entregado_en > entregados[k]) entregados[k] = x.entregado_en; } });
+  } catch (e) { entregados = {}; }
+  const m = new Map();
+  Object.values(ult).forEach(v => {
+    if (v.estado !== 'pedido') return;
+    const ent = entregados[v.ejercicio_id];
+    if (ent && String(ent).slice(0, 10) >= String(v.pedido_en || '').slice(0, 10)) return;
+    m.set(v.ejercicio_id, v);
+  });
+  return m;
+}
+const entHaceDias = (f) => { const d = Math.max(0, Math.round((Date.now() - Date.parse(String(f).slice(0, 10) + 'T12:00:00')) / 86400000)); return d === 0 ? 'hoy' : d === 1 ? 'ayer' : `hace ${d} días`; };
+function entVidPedidoHTML(e) {
+  const v = e && _ent.vidPedidos && _ent.vidPedidos.get(e.id);
+  if (!v) return '';
+  return `<span class="tag" data-video-pedido="${e.id}" style="background:#FCEBDD;color:#B4541D" title="Le pediste el video de técnica de este ejercicio y aún no llega">Video pedido · ${entHaceDias(v.pedido_en)}</span>`;
+}
+// Antes de quitar o cambiar un ejercicio con video pedido: decidir.
+function entConfirmarVideoPedido(ejIds, accion) {
+  const m = _ent.vidPedidos;
+  if (!m) return true;
+  const con = ejIds.filter(id => m.has(id));
+  if (!con.length) return true;
+  const nom = (id) => entNombres((_ent.ejercicios || []).find(x => x.id === id) || ((_ent.rutina?.ejercicios || []).find(x => x.ejercicio_id === id) || {}).ejercicios || {}).grande || 'ese ejercicio';
+  const lista = con.map(id => `«${nom(id)}» (pedido ${entHaceDias(m.get(id).pedido_en)})`).join(', ');
+  const que = accion === 'quitar' ? 'quitarlo' : accion === 'varios' ? 'cambiarlos' : 'cambiarlo';
+  return confirm(`${con.length === 1 ? 'Este ejercicio tiene' : 'Estos ejercicios tienen'} un video pedido que aún no llega: ${lista}.\n\nSi ${accion === 'quitar' ? 'lo quitas' : 'lo cambias'} y ya no queda en su ciclo, el pedido queda en pausa: la app deja de pedírselo, pero no se borra, y si el ejercicio vuelve, vuelve a salir.\n\n¿${que.charAt(0).toUpperCase() + que.slice(1)} igual?`);
+}
+window.entConfirmarVideoPedido = entConfirmarVideoPedido;
 
 // ---------- Arrastrar ejercicios dentro de la rutina ----------
 // Las flechas ↑↓ siguen ahí (en el móvil arrastrar es incómodo y son más

@@ -456,15 +456,18 @@ window.cxAplicar = async (modo) => {
       const orig = enOrden(porId[r.id]), ejs = enOrden(porId[nueva]);
       for (const f of cambios) {
         const re = ejs[orig.findIndex(x => x.id === f.reId)];
-        if (re && await entDb.actualizarRE(re.id, { ejercicio_id: f.elegido }, { origen: 'solo-ejercicios' }) === false) throw new Error('No se guardó');
+        if (re && await entDb.actualizarRE(re.id, { ejercicio_id: f.elegido }, { origen: 'solo-ejercicios', avisado: true }) === false) throw new Error('No se guardó');
       }
       closeModal();
       toast(`«${r.nombre} · variante» quedó en tu biblioteca con ${cambios.length} cambio${cambios.length === 1 ? '' : 's'}`, 4000);
       return;
     }
+    // Los que tienen un video pedido que aún no llega: una sola pregunta.
+    const viejos = cambios.map(f => ((r.ejercicios || []).find(x => x.id === f.reId) || {}).ejercicio_id).filter(Boolean);
+    if (window.entConfirmarVideoPedido && !entConfirmarVideoPedido(viejos, 'varios')) { _cx.aplicando = false; cxPintar(); return; }
     const nuevos = [];
     for (const f of cambios) {
-      if (await entDb.actualizarRE(f.reId, { ejercicio_id: f.elegido }, { origen: 'solo-ejercicios' }) === false) throw new Error('No se guardó');
+      if (await entDb.actualizarRE(f.reId, { ejercicio_id: f.elegido }, { origen: 'solo-ejercicios', avisado: true }) === false) throw new Error('No se guardó');
       const re = (r.ejercicios || []).find(x => x.id === f.reId);
       const nuevo = (_ent.ejercicios || []).find(x => x.id === f.elegido);
       if (re && nuevo) { re.ejercicio_id = nuevo.id; re.ejercicios = nuevo; nuevos.push(nuevo); }
