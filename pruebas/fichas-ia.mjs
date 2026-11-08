@@ -69,6 +69,8 @@ for (const [ancho, alto] of [[1440, 1000], [390, 844]]) {
     if (u.includes('/api/coach-ask')) {
       const cuerpo = JSON.parse(ruta.request().postData() || '{}');
       pedidos.push(cuerpo);
+      // En el teléfono, la primera tanda falla (servicio ocupado): se reintenta sola.
+      if (ancho === 390 && pedidos.length === 1) return ruta.fulfill({ status: 529, contentType: 'application/json', body: '{"error":"ocupado"}' });
       const pedido = JSON.parse(cuerpo.messages[0].content);
       const resp = Object.fromEntries(pedido.ejercicios.map(e => [e.id, IA[e.id] || {}]));
       return ruta.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(resp) }] }) });
@@ -91,8 +93,10 @@ for (const [ancho, alto] of [[1440, 1000], [390, 844]]) {
   ok('cabecera: «Fichas completas: 1 de 3» y qué falta', /Fichas completas: 1 de 3/.test(cab) && /patrón a 1/.test(cab) && /músculos a 2/.test(cab) && /errores comunes a 2/.test(cab), cab);
   if (ancho === 1440) await p.screenshot({ path: path.join(CAPTURAS, 'fichas-ia-lista.png') });
   await p.locator('[data-fi-completar]').click();
-  await p.locator('[data-fi-fila="1"]').waitFor({ timeout: 15000 });
+  await p.locator('[data-fi-fila="1"]').waitFor({ timeout: 30000 });
   await p.waitForTimeout(500);
+  if (ancho === 390) ok('la tanda que falló se pidió otra vez sola y llegaron las sugerencias', pedidos.length === 2 && (await p.locator('[data-fi-fila="1"]').innerText()).includes('Cuádriceps') && !(await p.locator('[data-fi-reintentar]').count()), String(pedidos.length));
+  if (ancho === 390) pedidos.shift();
   ok('pide a la IA con el perfil «ficha», los patrones, los músculos y solo lo que falta', pedidos.length === 1 && pedidos[0].perfil === 'ficha'
     && (() => { const q = JSON.parse(pedidos[0].messages[0].content); const e2 = q.ejercicios.find(x => x.id === 'e2'); return q.musculos.length === 5 && q.patrones.length > 3 && e2 && e2.falta.join() === 'musculos,errores'; })(), JSON.stringify(pedidos[0] || {}).slice(0, 300));
   ok('el que usan los clientes va primero', (await p.locator('[data-fi-fila="0"]').innerText()).includes('Barbell Bench Press'));

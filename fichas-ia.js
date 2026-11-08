@@ -78,8 +78,32 @@ async function fiPedirTanda(lista) {
   const r = await fetch('/api/coach-ask', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ perfil: 'ficha', nivel: 'rapido', messages: [{ role: 'user', content: JSON.stringify(cuerpo) }] }) });
   const d = await r.json().catch(() => ({}));
+  // Ocupado o límite de pedidos: se espera más antes de reintentar.
+  if (!r.ok) { const err = new Error(d.error || 'sin respuesta'); err.status = r.status; throw err; }
   const texto = (d.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
   try { return JSON.parse((texto.match(/\{[\s\S]*\}/) || ['{}'])[0]); } catch (e) { return {}; }
+}
+
+// Una tanda que falla (la respuesta llegó cortada, el servicio estaba
+// ocupado, se pasó el límite de pedidos) dejaba sin sugerencia a sus 6
+// ejercicios. Ahora los que no llegaron se piden otra vez solos, de a 2, hasta
+// 2 veces más, con una pausa entre intento e intento.
+const fiEspera = (ms) => new Promise(ok => setTimeout(ok, ms));
+const fiSinNada = (e, res) => !Object.keys(fiLimpiar(e, (res && res[e.id]) || {})).length;
+async function fiPedirConReintento(lista) {
+  let res = {}, pausa = 0;
+  try { res = await fiPedirTanda(lista); } catch (e) { res = {}; pausa = e.status === 429 || e.status === 529 ? 8000 : 2000; }
+  for (let intento = 0; intento < 2 && !_fi.parar; intento++) {
+    const faltan = lista.filter(e => fiSinNada(e, res));
+    if (!faltan.length) break;
+    await fiEspera(pausa || 1500);
+    pausa = 0;
+    for (let k = 0; k < faltan.length && !_fi.parar; k += 2) {
+      try { Object.assign(res, await fiPedirTanda(faltan.slice(k, k + 2))); }
+      catch (e) { pausa = e.status === 429 || e.status === 529 ? 8000 : 2000; }
+    }
+  }
+  return res;
 }
 
 // Lo que propone la IA, limpio y solo con valores válidos.
@@ -119,7 +143,7 @@ function fiHtmlFila(f, i) {
       <input type="checkbox" data-fi-marca="${i}" ${partes.length ? 'checked' : 'disabled'} class="mt-1">
       <div class="min-w-0 flex-1">
         <div class="font-bold text-slate-900 text-sm">${escapeHtml(n.grande)}${n.chico ? ` <span class="font-normal text-slate-400">· ${escapeHtml(n.chico)}</span>` : ''}</div>
-        ${partes.length ? '' : '<div class="text-xs text-slate-500 mt-1">No llegó sugerencia para este: complétalo a mano.</div>'}
+        ${partes.length ? '' : '<div class="text-xs text-slate-500 mt-1">No llegó sugerencia para este. Abajo: «Reintentar los que faltan».</div>'}
       </div>
     </label>
     <div class="pl-7">${partes.join('')}</div>
@@ -151,14 +175,41 @@ window.fiCompletar = async () => {
   for (let k = 0; k < pend.length && !_fi.parar; k += FI_TANDA) {
     const tanda = pend.slice(k, k + FI_TANDA);
     let res = {};
-    try { res = await fiPedirTanda(tanda); } catch (e) { res = {}; }
+    try { res = await fiPedirConReintento(tanda); } catch (e) { res = {}; }
     if (!document.getElementById('fi-filas')) { _fi.corriendo = false; return; }   // cerró la ventana
     tanda.forEach(e => _fi.filas.push({ e, propuesta: fiLimpiar(e, res[e.id] || {}) }));
     fiPintar(`Pensando… ${Math.min(k + FI_TANDA, pend.length)} de ${pend.length}`);
   }
   _fi.corriendo = false;
-  fiPintar(_fi.parar ? `Detenido: ${_fi.filas.length} de ${pend.length} con sugerencia.` : `Listo: ${_fi.filas.length} sugerencias para revisar.`);
-  const p = document.querySelector('[data-fi-parar]'); if (p) p.remove();
+  fiFin(pend.length);
+};
+// Al terminar: cuántas llegaron y, si faltan, «Reintentar los que faltan».
+function fiFin(total) {
+  const con = _fi.filas.filter(f => Object.keys(f.propuesta).length).length;
+  const faltan = _fi.filas.length - con;
+  fiPintar(_fi.parar ? `Detenido: ${con} de ${total} con sugerencia.` : `Listo: ${con} sugerencias para revisar${faltan ? ` · ${faltan} sin sugerencia` : ''}.`);
+  const p = document.querySelector('[data-fi-parar]');
+  if (faltan && !_fi.parar) {
+    if (p) { p.disabled = false; p.removeAttribute('data-fi-parar'); p.setAttribute('data-fi-reintentar', ''); p.textContent = `Reintentar los que faltan (${faltan})`; p.onclick = () => fiReintentar(); }
+  } else if (p) p.remove();
+}
+window.fiReintentar = async () => {
+  if (_fi.corriendo) return;
+  const b = document.querySelector('[data-fi-reintentar]');
+  if (b) { b.disabled = true; b.textContent = 'Pidiendo otra vez…'; }
+  _fi.corriendo = true; _fi.parar = false;
+  const idx = _fi.filas.map((f, i) => (Object.keys(f.propuesta).length ? -1 : i)).filter(i => i >= 0);
+  for (let k = 0; k < idx.length; k += 3) {
+    const grupo = idx.slice(k, k + 3);
+    const res = await fiPedirConReintento(grupo.map(i => _fi.filas[i].e)).catch(() => ({}));
+    if (!document.getElementById('fi-filas')) { _fi.corriendo = false; return; }
+    grupo.forEach(i => { const f = _fi.filas[i]; const pr = fiLimpiar(f.e, res[f.e.id] || {}); if (Object.keys(pr).length) f.propuesta = pr; });
+    fiPintar(`Pidiendo otra vez… ${Math.min(k + 3, idx.length)} de ${idx.length}`);
+  }
+  _fi.corriendo = false;
+  const btn = document.querySelector('[data-fi-reintentar]');
+  if (btn) btn.setAttribute('data-fi-parar', '');
+  fiFin(_fi.filas.length);
 };
 window.fiParar = () => { _fi.parar = true; const p = document.querySelector('[data-fi-parar]'); if (p) { p.disabled = true; p.textContent = 'Deteniendo…'; } };
 
