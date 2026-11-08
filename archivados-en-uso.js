@@ -205,7 +205,12 @@ window.aeuCambiar = async (viejaId, nuevaId) => {
   //    en la nueva en cuanto la vea en su rutina.
   const ahora = new Date().toISOString();
   const m = await sb.from('ejercicios').update({ duplicado_de: nueva.id, updated_at: ahora }).eq('id', viejaId);
-  if (m.error) { volver(); return toastError('No se pudo cambiar: ' + m.error.message); }
+  if (m.error) {
+    volver();
+    // Sin la columna todavía: no se cambió nada.
+    if (/duplicado_de/.test(m.error.message || '')) return toastError('Falta un paso: corre migraciones/fichas-reemplazadas.sql en Supabase y vuelve a tocar «Pasarles esta». No se cambió nada.', 12000);
+    return toastError('No se pudo cambiar: ' + m.error.message);
+  }
   // 2) Las líneas de sus rutinas: solo cambia el ejercicio.
   const filas = await aeuRutinasACambiar(viejaId);
   if (filas === null) { volver(); return toastError('No pude leer sus rutinas. Intenta de nuevo.'); }
