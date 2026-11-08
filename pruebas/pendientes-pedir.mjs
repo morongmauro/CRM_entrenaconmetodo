@@ -236,6 +236,14 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   ok(`Ciclo · Sofía: última semana y aún no ve el aviso (${ci})`, /Sem 5 de 5/.test(ci) && /Aún no ve el aviso de cambio/.test(ci), ci);
   ok('Ciclo · Carlos: sin ciclo vigente', /Sin ciclo vigente/.test(await ciclo('c1')));
   const tarjeta = (await p.locator('[data-tq-filtro="pendientes"]').innerText()).replace(/\s+/g, ' ');
+  // Filtros rápidos: «Por pedir video» (Lucía: ciclo nuevo; Carlos: recordar) y «Falta seguimiento».
+  await p.locator('[data-tq-rapido="pedirVideo"]').click(); await p.waitForTimeout(500);
+  const conVideo = await p.locator('tr[data-tq-cliente]').evaluateAll(l => l.map(x => x.dataset.tqCliente).sort());
+  ok('filtro «Por pedir video»: solo Carlos y Lucía', JSON.stringify(conVideo) === '["c1","c2"]', JSON.stringify(conVideo));
+  await p.locator('[data-tq-rapido="sinSeg"]').click(); await p.waitForTimeout(500);
+  const sinSeg = await p.locator('tr[data-tq-cliente]').evaluateAll(l => l.map(x => x.dataset.tqCliente));
+  ok('filtro «Falta seguimiento»: no salen los que ya tienen seguimiento (Ana y Sofía)', sinSeg.length > 0 && !sinSeg.includes('c0') && !sinSeg.includes('c5'), JSON.stringify(sinSeg));
+  await p.evaluate(() => tqFiltro('todos')); await p.waitForTimeout(400);
   ok(`la tarjeta de arriba (${tarjeta})`, /^\s*6 pendientes por pedir 3 pedidos sin llegar · 2 por recordar/.test(tarjeta), tarjeta);
   if (process.env.FOTO) await p.screenshot({ path: path.join(CAPTURAS, 'toques-pendientes.png') });
 

@@ -296,6 +296,8 @@ const TQ_FALTA = {
   sinContacto: (f) => f.estado !== 'pausa' && !f.contacto,
   revisar: (f) => f.videos.porRevisar > 0,
   pendientes: (f) => f.estado !== 'pausa' && typeof ppDe === 'function' && ppDe(f.c.id).some(x => x.estado === 'toca' || x.estado === 'recordar' || x.estado === 'pedido'),
+  // Filtros rápidos: a quién le toca pedir (o recordar) video, y a quién le falta el seguimiento.
+  pedirVideo: (f) => f.estado !== 'pausa' && typeof ppDe === 'function' && ppDe(f.c.id).some(x => x.tipo === 'video' && (x.estado === 'toca' || x.estado === 'recordar')),
 };
 const TQ_TIPO = { seguimiento: 'Seguimiento', video: 'Video', respuesta: 'Respuesta', whatsapp: 'WhatsApp' };
 
@@ -476,6 +478,7 @@ routes.toques = async () => {
     </div>
     <div class="tq-filtros" data-tq-chips>
       <div class="tq-chips">${[['todos', 'Todos'], ...TQ_ESTADOS.map(([k, t]) => [`est:${k}`, t])].map(([k, t]) => { const est = k.startsWith('est:') ? k.slice(4) : null; const n = est ? D.filas.filter(f => f.estado === est).length : D.filas.length; return `<button type="button" class="chip ${filtro === k ? 'active' : ''}" data-tq-filtro="${k}" onclick="tqFiltro('${k}')">${est ? `<i class="tq-punto" style="background:${TQ_COLOR[TQ_TONO[est][0]][0]}"></i>` : ''}${t} · ${n}</button>`; }).join('')}</div>
+      <div class="tq-chips" data-tq-rapidos>${[['sinSeg', D.actual ? 'Falta seguimiento' : 'Sin seguimiento'], ...(typeof ppDe === 'function' ? [['pedirVideo', 'Por pedir video']] : [])].map(([k, t]) => `<button type="button" class="chip ${filtro === k ? 'active' : ''}" data-tq-rapido="${k}" onclick="tqFiltro('${filtro === k ? 'todos' : k}')">${t} · ${D.filas.filter(TQ_FALTA[k]).length}</button>`).join('')}</div>
       <label class="tq-orden">Ordenar <select data-tq-orden onchange="tqOrden(this.value)">${TQ_ORDENES.map(([k, t]) => `<option value="${k}" ${_tq.orden === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
     </div>
     <div class="card lis-tabla-caja" data-tq-tabla>
