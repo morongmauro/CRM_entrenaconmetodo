@@ -100,9 +100,10 @@ for (const [ancho, alto] of [[1440, 900], [390, 844]]) {
   await aviso.waitFor({ timeout: 15000 });
   const txt = (await aviso.innerText()).replace(/\s+/g, ' ');
   ok('el aviso sale con la ficha archivada y sus 2 clientes', /1 ficha archivada/.test(txt) && /Seated Dumbbell Front Raise/.test(txt) && /2 clientes/.test(txt) && /Ana Pérez/.test(txt) && /Luis Gil/.test(txt), txt);
-  ok('propone la repetida que quedó (Dumbbell Seated Front Raise)', (await p.locator('[data-aeu-sel="a1"]').inputValue()) === 'e1');
+  ok('lado a lado: la archivada con su preview y la que quedó (Dumbbell Seated Front Raise) con la suya', (await p.locator('[data-aeu-ej="a1"] .aeu-vieja .fb-prev').count()) === 1 && (await p.locator('[data-aeu-op="e1"] .fb-prev').count()) === 1);
+  ok('no propone una que no se parece (Overhead Press)', (await p.locator('[data-aeu-op="e2"]').count()) === 0);
   if (FOTO) await aviso.screenshot({ path: path.join(CAPTURAS, `archivados-en-uso-${ancho}-${FOTO}.png`) });
-  await p.locator('[data-aeu-cambiar="a1"]').click();
+  await p.locator('[data-aeu-cambiar="a1"][data-aeu-a="e1"]').click();
   await p.waitForFunction(() => !document.querySelector('[data-aeu-aviso]'), null, { timeout: 15000 }).catch(() => {});
   ok('el confirm dice a quién, que no se borra nada y que los terminados no se tocan', /2 clientes/.test(dialogo) && /no se tocan/.test(dialogo) && /No se borra nada/.test(dialogo), dialogo);
   const t = await p.evaluate(() => window.TABLAS_FALSAS);

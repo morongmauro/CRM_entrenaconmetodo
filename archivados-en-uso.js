@@ -51,6 +51,14 @@ async function aeuCargar(force = false) {
       const g = grupos.find(gr => gr.some(x => x.id === a.id)) || [];
       const opciones = g.filter(x => vivosIds.has(x.id) && x.id !== a.id).map(x => vivos.find(v => v.id === x.id)).filter(Boolean)
         .sort((x, y) => uso(y) - uso(x) || conVideo(y) - conVideo(x) || entNombres(x).grande.localeCompare(entNombres(y).grande));
+      // Y las de nombre parecido (mismas palabras en inglés o en español,
+      // sin plurales ni guiones): «Pull Up» ↔ «Pull-ups», etc.
+      if (opciones.length < 3 && typeof fbTokens === 'function') {
+        const ka = [entNombres(a).grande, a.alias, a.nombre].filter(Boolean).map(fbTokens);
+        vivos.map(v => ({ v, p: Math.max(...ka.flatMap(k => [entNombres(v).grande, v.alias, v.nombre].filter(Boolean).map(n => fbParecido(k, fbTokens(n))))) }))
+          .filter(x => x.p >= 0.6 && !opciones.some(o => o.id === x.v.id))
+          .sort((x, y) => y.p - x.p || uso(y.v) - uso(x.v)).slice(0, 3 - opciones.length).forEach(x => opciones.push(x.v));
+      }
       const marcada = a.duplicado_de && vivosIds.has(a.duplicado_de) ? vivos.find(v => v.id === a.duplicado_de) : null;
       if (marcada) { const i = opciones.findIndex(o => o.id === marcada.id); if (i >= 0) opciones.splice(i, 1); opciones.unshift(marcada); }
       const clientes = [...(quien.get(a.id) || [])].map(c => nombre[c] || '').filter(Boolean).sort((x, y) => x.localeCompare(y));
@@ -73,49 +81,52 @@ async function aeuPintar(force = false) {
   if (!lista.length) { caja.innerHTML = ''; return; }
   const n = lista.length;
   const todos = (_ent.ejercicios || []);
+  const prev = (e) => (typeof fbPrevFicha === 'function' ? fbPrevFicha(e) : '');
+  const usoDe = (e) => { const k = _ent.enUso && _ent.enUso.get(e.id); return k ? `<span class="tag tag-blue">${k} ${k === 1 ? 'cliente' : 'clientes'} ahora</span>` : '<span class="tag tag-gray">nadie la usa</span>'; };
+  const sinV = (e) => ((e.video_fuente || 'ninguno') === 'ninguno' ? '<span class="tag tag-red">sin video</span>' : '');
   const filas = lista.map(({ a, clientes, opciones }) => {
-    const sel = opciones[0];
-    const elegir = opciones.length
-      ? `<select class="aeu-sel" data-aeu-sel="${a.id}" onchange="aeuElegir('${a.id}', this.value)">${opciones.map(o => `<option value="${o.id}">${escapeHtml(entNombres(o).grande)}${(o.video_fuente || 'ninguno') === 'ninguno' ? ' · sin video' : ''}</option>`).join('')}<option value="">Otra ficha…</option></select>`
-      : '';
-    const buscar = `<input class="aeu-buscar${opciones.length ? ' hidden' : ''}" list="aeu-fichas" placeholder="Busca la ficha buena" data-aeu-buscar="${a.id}" oninput="aeuBuscado('${a.id}', this.value)">`;
+    const n = entNombres(a);
+    const cand = (o, i) => { const no = entNombres(o); return `
+          <div class="aeu-op" data-aeu-op="${o.id}">
+            ${prev(o)}
+            <div class="aeu-nn"><b>${escapeHtml(no.grande)}</b>${no.chico ? `<span>${escapeHtml(no.chico)}</span>` : ''}</div>
+            <div class="aeu-tg">${usoDe(o)}${sinV(o)}${i === 0 && a.duplicado_de === o.id ? '<span class="tag tag-green">la que dejaste</span>' : ''}</div>
+            <button type="button" class="btn btn-primary btn-sm" data-aeu-cambiar="${a.id}" data-aeu-a="${o.id}" onclick="aeuCambiar('${a.id}', '${o.id}')">Pasarles esta</button>
+          </div>`; };
     return `
       <div class="aeu-f" data-aeu-ej="${a.id}">
-        <div class="aeu-izq">
-          <div class="aeu-n"><b>${escapeHtml(entNombres(a).grande)}</b> <span class="tag tag-gray">archivada</span></div>
+        <div class="aeu-vieja">
+          <div class="aeu-cab">La que tienen hoy (archivada)</div>
+          ${prev(a)}
+          <div class="aeu-nn"><b>${escapeHtml(n.grande)}</b>${n.chico ? `<span>${escapeHtml(n.chico)}</span>` : ''}</div>
+          <div class="aeu-tg">${sinV(a)}</div>
           <div class="aeu-q">La tiene${clientes.length === 1 ? '' : 'n'} ${clientes.length} ${clientes.length === 1 ? 'cliente' : 'clientes'}: ${clientes.slice(0, 4).map(escapeHtml).join(', ')}${clientes.length > 4 ? ` y ${clientes.length - 4} más` : ''}</div>
+          <button type="button" class="btn btn-ghost btn-sm" data-aeu-desarchivar="${a.id}" onclick="aeuDesarchivar('${a.id}')">Esta es la buena: desarchivarla</button>
         </div>
-        <div class="aeu-der">
-          <span class="aeu-por">Cambiarla por</span>
-          ${elegir}${buscar}
-          <button type="button" class="btn btn-primary btn-sm" data-aeu-cambiar="${a.id}" ${sel ? `data-aeu-a="${sel.id}"` : 'disabled'} onclick="aeuCambiar('${a.id}')">Cambiarlo en sus rutinas</button>
+        <div class="aeu-ops">
+          <div class="aeu-cab">${opciones.length ? 'Las de la galería que se parecen' : 'No encontré una parecida en la galería'}</div>
+          <div class="aeu-ops-g">${opciones.map(cand).join('')}</div>
+          <div class="aeu-otra">
+            <input class="aeu-buscar" list="aeu-fichas" placeholder="Otra ficha: búscala por nombre" data-aeu-buscar="${a.id}" oninput="aeuBuscado('${a.id}', this.value)">
+            <button type="button" class="btn btn-secondary btn-sm" data-aeu-cambiar-otra="${a.id}" disabled onclick="aeuCambiar('${a.id}', this.dataset.aeuA)">Pasarles esa</button>
+          </div>
         </div>
       </div>`;
   }).join('');
   caja.innerHTML = `
     <div class="aeu-aviso" data-aeu-aviso>
       <div class="aeu-t">${n} ficha${n === 1 ? '' : 's'} archivada${n === 1 ? '' : 's'} que tus clientes aún tienen en su ciclo</div>
-      <div class="aeu-d">Archivar no cambia sus rutinas: la siguen viendo con ese nombre y ese video. Al cambiarla, en su ciclo de ahora y en los que vienen queda la ficha buena con las mismas series, repeticiones, descansos y notas, y su última vez y su historial pasan a la nueva. No se borra nada.</div>
+      <div class="aeu-d">Archivar no cambia sus rutinas: la siguen viendo con ese nombre y ese video. Compara y elige: «Pasarles esta» deja en su ciclo de ahora y en los que vienen la ficha que elijas, con las mismas series, repeticiones, descansos y notas, y su última vez y su historial pasan a la nueva. Si la archivada era la buena, desarchívala. No se borra nada.</div>
       <div class="aeu-lista">${filas}</div>
       <datalist id="aeu-fichas">${todos.map(e => `<option value="${escapeHtml(entNombres(e).grande)}"></option>`).join('')}</datalist>
     </div>`;
 }
 window.aeuPintar = aeuPintar;
 
-window.aeuElegir = (id, valor) => {
-  const fila = document.querySelector(`[data-aeu-ej="${id}"]`);
-  if (!fila) return;
-  const btn = fila.querySelector('[data-aeu-cambiar]');
-  const input = fila.querySelector('[data-aeu-buscar]');
-  if (valor) { btn.dataset.aeuA = valor; btn.disabled = false; input.classList.add('hidden'); return; }
-  // «Otra ficha…»: se busca por nombre.
-  input.classList.remove('hidden'); input.value = ''; input.focus();
-  delete btn.dataset.aeuA; btn.disabled = true;
-};
 window.aeuBuscado = (id, texto) => {
   const fila = document.querySelector(`[data-aeu-ej="${id}"]`);
   if (!fila) return;
-  const btn = fila.querySelector('[data-aeu-cambiar]');
+  const btn = fila.querySelector('[data-aeu-cambiar-otra]');
   const t = String(texto || '').trim().toLowerCase();
   const e = (_ent.ejercicios || []).find(x => entNombres(x).grande.toLowerCase() === t);
   if (e && e.id !== id) { btn.dataset.aeuA = e.id; btn.disabled = false; } else { delete btn.dataset.aeuA; btn.disabled = true; }
@@ -166,17 +177,17 @@ async function aeuRutinasACambiar(viejaId) {
   }).map(x => ({ ...x, rutina: rutDe[x.rutina_id], cliente_id: faseDe[rutDe[x.rutina_id].fase_id].cliente_id }));
 }
 
-window.aeuCambiar = async (viejaId) => {
+window.aeuCambiar = async (viejaId, nuevaId) => {
   const item = (_aeu.lista || []).find(x => x.a.id === viejaId);
-  const btn = document.querySelector(`[data-aeu-cambiar="${viejaId}"]`);
-  const nuevaId = btn && btn.dataset.aeuA;
+  const btn = document.querySelector(`[data-aeu-cambiar="${viejaId}"][data-aeu-a="${nuevaId}"]`) || document.querySelector(`[data-aeu-cambiar-otra="${viejaId}"]`);
   const nueva = (_ent.ejercicios || []).find(e => e.id === nuevaId);
   if (!item || !nueva) return toast('Elige la ficha buena');
   const nv = entNombres(item.a).grande, nn = entNombres(nueva).grande;
   const quienes = item.clientes.slice(0, 6).join(', ') + (item.clientes.length > 6 ? ` y ${item.clientes.length - 6} más` : '');
   if (!confirm(`En las rutinas de ${item.clientes.length === 1 ? 'tu cliente' : `tus ${item.clientes.length} clientes`} (${quienes}), «${nv}» se cambia por «${nn}».\n\nMismo orden, mismas series, repeticiones, descansos y notas. Su última vez y su historial pasan a «${nn}».\n\nSe cambia en su ciclo de ahora y en los que vienen; los ciclos terminados no se tocan. No se borra nada: «${nv}» sigue archivada.`)) return;
   if (btn) { btn.disabled = true; btn.textContent = 'Cambiando…'; }
-  const volver = () => { if (btn) { btn.disabled = false; btn.textContent = 'Cambiarlo en sus rutinas'; } };
+  const textoBtn = btn ? btn.textContent : '';
+  const volver = () => { if (btn) { btn.disabled = false; btn.textContent = textoBtn; } };
   // 1) Primero la marca de «es la misma»: así la app ya junta su historial
   //    en la nueva en cuanto la vea en su rutina.
   const ahora = new Date().toISOString();
@@ -207,4 +218,17 @@ window.aeuCambiar = async (viejaId) => {
   _ent.enUso = null; _ent.quienUsa = null; _aeu.lista = null;
   await aeuPintar(true);
   if (typeof entRepintarGaleria === 'function' && document.getElementById('flt-lista')) entPintarListaGaleria();
+};
+
+// «Esta es la buena»: vuelve a la galería tal cual (sus clientes no notan
+// nada). La otra ficha sigue ahí: decide en «Repetidos» cuál dejar.
+window.aeuDesarchivar = async (id) => {
+  const item = (_aeu.lista || []).find(x => x.a.id === id);
+  if (!item) return;
+  if (!confirm(`«${entNombres(item.a).grande}» vuelve a la galería. Sus clientes no notan nada: ya la tienen.\n\nSi hay otra ficha igual, en «Repetidos» eliges cuál dejar.`)) return;
+  const { error } = await sb.from('ejercicios').update({ archivado: false, updated_at: new Date().toISOString() }).eq('id', id);
+  if (error) return toastError('No se pudo: ' + error.message);
+  toast('Listo: volvió a la galería');
+  _ent.ejercicios = null; _ent.enUso = null; _ent.quienUsa = null; _aeu.lista = null;
+  if (typeof entVistaEjercicios === 'function') entVistaEjercicios();
 };

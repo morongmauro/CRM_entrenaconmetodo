@@ -688,6 +688,9 @@ function entFiltrarSinOrden(lista) {
     //   «repetidos» → fichas que son el mismo ejercicio (galeria-revision.js).
     if (f.uso === 'ingles' && !(window.grNecesitaIngles && grNecesitaIngles(e))) return false;
     if (f.uso === 'repetidos' && !(_ent.grRep && _ent.grRep.has(e.id))) return false;
+    //   «fb-hoy» / «fb-analisis» → video de Functional Bodybuilding (functional-bodybuilding.js).
+    if (f.uso === 'fb-hoy' && !(window.fbPendiente && fbPendiente(e, 'hoy'))) return false;
+    if (f.uso === 'fb-analisis' && !(window.fbPendiente && fbPendiente(e, 'analisis'))) return false;
     //   «fichas» → les falta patrón, músculos, cómo hacerlo bien o errores (fichas-ia.js).
     if (f.uso === 'fichas' && !(window.fiIncompleta && fiIncompleta(e))) return false;
     if (musculos.length) {
@@ -860,7 +863,9 @@ function entNivelesCuenta() {
   const grupos = window.grGrupos ? grGrupos(todos) : [];
   _ent.grRep = new Set(grupos.flat().map(e => e.id));
   const fichas = window.fiIncompleta ? todos.filter(fiIncompleta).length : 0;
-  return { clientes: ahora && de(ahora), antes: antes && de(antes), analisis: analisis && de(analisis), duplicados: duplicados.length ? { n: duplicados.length, sin: 0 } : null,
+  const fb = window.fbCuenta && _ent.enUso ? fbCuenta(todos) : null;
+  return {
+    fbHoy: fb && fb.hoy ? { n: fb.hoy, sin: 0 } : null, fbAnalisis: fb && fb.analisis ? { n: fb.analisis, sin: 0, exactos: fb.exactos } : null, clientes: ahora && de(ahora), antes: antes && de(antes), analisis: analisis && de(analisis), duplicados: duplicados.length ? { n: duplicados.length, sin: 0 } : null,
     fichas: fichas ? { n: fichas, sin: 0 } : null,
     ingles: ingles ? { n: ingles, sin: 0 } : null, repetidos: grupos.length ? { n: grupos.length, sin: 0 } : null, '': de(todos) };
 }
@@ -916,6 +921,8 @@ function entNivelesOpciones() {
     ...(entNivelesCuenta().fichas ? [['fichas', entNivelEtiqueta('fichas', 'Ficha incompleta')]] : []),
     ...(entNivelesCuenta().ingles ? [['ingles', entNivelEtiqueta('ingles', 'Sin nombre en inglés')]] : []),
     ...(entNivelesCuenta().repetidos ? [['repetidos', `Repetidos (${entNivelesCuenta().repetidos.n} grupos)`]] : []),
+    ...(entNivelesCuenta().fbHoy ? [['fb-hoy', entNivelEtiqueta('fbHoy', 'Functional Bodybuilding · los de hoy')]] : []),
+    ...(entNivelesCuenta().fbAnalisis ? [['fb-analisis', entNivelEtiqueta('fbAnalisis', 'Functional Bodybuilding · en análisis')]] : []),
   ];
 }
 
@@ -974,7 +981,9 @@ function entNivelesResumen(compacto = false) {
       ${c.duplicados ? cajaDup(c.duplicados) : ''}
       ${caja('', '📚', '3 · Toda la galería', c[''])}
     </div>
-    ${c.ingles || c.repetidos || c.fichas ? `<div class="mt-2 grid ${compacto ? 'grid-cols-2' : 'grid-cols-1 md:grid-cols-3'} gap-2" data-niveles-revision>
+    ${c.ingles || c.repetidos || c.fichas || c.fbHoy || c.fbAnalisis ? `<div class="mt-2 grid ${compacto ? 'grid-cols-2' : 'grid-cols-1 md:grid-cols-3'} gap-2" data-niveles-revision>
+      ${c.fbHoy ? cajaRev('fb-hoy', 'Functional Bodybuilding · los de hoy', `<b class="text-slate-900">${c.fbHoy.n}</b> ejercicios · <b class="text-blue-700">compara y elige</b>`) : ''}
+      ${c.fbAnalisis ? cajaRev('fb-analisis', 'Functional Bodybuilding · en análisis', `<b class="text-slate-900">${c.fbAnalisis.n}</b> ejercicios${c.fbAnalisis.exactos ? ` · <b class="text-green-700">${c.fbAnalisis.exactos} con el mismo nombre</b>` : ''}`) : ''}
       ${c.fichas ? cajaRev('fichas', 'Ficha incompleta', `<b class="text-slate-900">${c.fichas.n}</b> ejercicios · <b class="text-green-700">complétalas con IA</b>`) : ''}
       ${c.ingles ? cajaRev('ingles', 'Sin nombre en inglés', `<b class="text-slate-900">${c.ingles.n}</b> ejercicios · <b class="text-blue-700">ponles el inglés</b>`) : ''}
       ${c.repetidos ? cajaRev('repetidos', 'Repetidos', `<b class="text-slate-900">${c.repetidos.n}</b> grupos · <b class="text-amber-700">elige cuál dejar</b>`) : ''}
@@ -1176,7 +1185,7 @@ window.entReporteSinHistorial = async () => {
 window.entIrNivel = (nivel) => {
   _ent.filtros.uso = nivel;
   // En duplicados se ven todos, tengan o no video: lo que falta es decidir.
-  _ent.filtros.video = ['duplicados', 'ingles', 'repetidos', 'fichas'].includes(nivel) ? '' : 'sin';
+  _ent.filtros.video = ['duplicados', 'ingles', 'repetidos', 'fichas', 'fb-hoy', 'fb-analisis'].includes(nivel) ? '' : 'sin';
   document.querySelectorAll('select[data-sel="uso"]').forEach(s => { s.value = nivel; });
   document.querySelectorAll('select[data-sel="video"]').forEach(s => { s.value = _ent.filtros.video; });
   entRepintarGaleria();
@@ -1270,6 +1279,8 @@ async function entVistaEjercicios() {
   await entDb.niveles();
   // Nombres en inglés y repetidos: el diccionario llega aparte y repinta.
   if (window.grCargarDiccionario && !_gr.listo) grCargarDiccionario().then(ok => { if (ok && document.getElementById('flt-lista')) entVistaEjercicios(); });
+  // Los videos de Functional Bodybuilding: llegan aparte y repintan.
+  if (window.fbCargar && !_fb.lista) fbCargar().then(l => { if (l.length && document.getElementById('flt-lista')) entRepintarGaleria(); });
 
   body.innerHTML = `
     <div class="flex flex-wrap justify-between items-center gap-2 mb-3">
@@ -1308,6 +1319,7 @@ async function entPintarListaGaleria() {
           : 'Ningún ejercicio coincide con esos filtros.'}
       </div>
     ` : _ent.filtros.uso === 'repetidos' && window.grHtmlRepetidos ? grHtmlRepetidos(lista)
+    : (_ent.filtros.uso === 'fb-hoy' || _ent.filtros.uso === 'fb-analisis') && window.fbHtml ? fbHtml(lista, _ent.filtros.uso === 'fb-hoy' ? 'hoy' : 'analisis')
     : `
       ${_ent.filtros.uso === 'fichas' && window.fiHtmlCabecera ? fiHtmlCabecera(todos) : ''}
       ${_ent.filtros.uso === 'ingles' ? `<div class="flex flex-wrap items-center justify-between gap-2 mb-3" data-gr-cabecera>
