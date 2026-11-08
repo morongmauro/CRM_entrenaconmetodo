@@ -276,6 +276,21 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   ok('sin errores (teléfono del coach)', errores.length === 0, errores.join(' | '));
   await ctx.close();
 }
+{
+  // «Listo» en la Bandeja: el mensaje ya no se debe (Carlos dejó una nota ayer).
+  console.log('\nListo en la Bandeja');
+  const { ctx, p, errores } = await abrir(1440, 1000, false);
+  await p.evaluate(() => navigate('toques'));
+  await p.locator('[data-tq-tabla]').waitFor({ timeout: 15000 });
+  ok('Carlos con su nota sin marcar → «Le debes respuesta»', await p.locator('tr[data-tq-cliente="c1"]').getAttribute('data-tq-estado') === 'debe');
+  await p.evaluate(() => { window.TABLAS_FALSAS.notas_entreno.find(n => n.id === 'n1').leida_en = new Date().toISOString(); _tq.datos = null; _tq.leido = 0; return rerenderView(); });
+  await p.waitForTimeout(1200);
+  const est = await p.locator('tr[data-tq-cliente="c1"]').getAttribute('data-tq-estado');
+  ok(`la nota marcada «Listo» → ya no «Le debes respuesta» (${est})`, est !== 'debe', est);
+  ok('…y sigue contando que te escribió en la app (sin «sin responder»)', !/sin responder/.test(await p.locator('tr[data-tq-cliente="c1"] [data-tq="escribio-app"]').innerText()));
+  ok('sin errores', !errores.length, errores.join(' | '));
+  await ctx.close();
+}
 await b.close(); servidor.close();
 console.log(mal ? `\n${mal} falla(s)` : '\ntodo bien');
 process.exit(mal ? 1 : 0);

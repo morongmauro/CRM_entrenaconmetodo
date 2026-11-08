@@ -93,8 +93,8 @@ async function tqCrudo(forzar = false) {
   const [msj, vids, notas, ses, resp, com, toq, nhf, anot] = await Promise.all([
     leer(sb.from('seguimiento_mensajes').select('cliente_id, fecha, origen, created_at').gte('fecha', desde)),
     leer(sb.from('videos_tecnica').select('cliente_id, ejercicio_id, ejercicio_nombre, pedido_en, estado, revisado_en, created_at').gte('pedido_en', evtSumarDias(hoy, -160))),
-    leer(sb.from('notas_entreno').select('cliente_id, fecha, created_at').gte('fecha', desde)),
-    leer(sb.from('sesiones').select('cliente_id, fecha, estado, notas_cliente').gte('fecha', desde)),
+    leer(sb.from('notas_entreno').select('id, cliente_id, fecha, created_at, leida_en').gte('fecha', desde)),
+    leer(sb.from('sesiones').select('id, cliente_id, fecha, estado, notas_cliente').gte('fecha', desde)),
     leer(sb.from('respuestas_coach').select('cliente_id, created_at').gte('created_at', desde)),
     leer(sb.from('comentarios_coach').select('cliente_id, creado_en').gte('creado_en', desde)),
     leer(sb.from('toques_cliente').select('cliente_id, fecha, tipo, created_at').gte('fecha', desde)),
@@ -128,6 +128,8 @@ function tqCalcular(R, ref) {
   const de = (l, id) => (l || []).filter(x => String(x.cliente_id) === String(id));
   const semana = (f) => !!f && f >= lunes && f <= hoy;
   const diasSemana = TQ_DIAS.map((_, k) => evtSumarDias(lunes, k));
+  let vistosBdj = new Set();
+  try { vistosBdj = new Set(JSON.parse(localStorage.getItem('bdj:vistos:v1') || '[]')); } catch (e) { /* sin almacenamiento */ }
   const filas = clientes.map(c => {
     const m = de(msj, c.id), v = de(vids, c.id), n = de(notas, c.id), s = de(ses, c.id), r = de(resp, c.id), cm = de(com, c.id), t = de(toq, c.id);
     const seg = m.filter(x => x.origen !== 'videos' && x.origen !== 'nota');
@@ -146,16 +148,21 @@ function tqCalcular(R, ref) {
       ...notaM.map(x => ['respuesta', x.fecha, mom(x.fecha, x.created_at)]),
       ...wa.map(x => ['whatsapp', x.fecha, mom(x.fecha, x.created_at)]),
     ].filter(x => x[1]);
+    // Lo que ya marcaste «Listo» en la Bandeja (la nota leída en la base, o
+    // marcada en este navegador) ya no se te debe: no cuenta para «Le debes
+    // respuesta» (sí sigue contando como que te escribió).
+    const listo = (x, id) => !!(x.leida_en || vistosBdj.has(id));
     const suyos = [
-      ...n.map(x => ['app', x.fecha || tqDia(x.created_at), mom(x.fecha, x.created_at)]),
-      ...notasSes.map(x => ['app', x.fecha, mom(x.fecha)]),
-      ...meWa.map(x => ['whatsapp', x.fecha, mom(x.fecha, x.created_at)]),
+      ...n.map(x => ['app', x.fecha || tqDia(x.created_at), mom(x.fecha, x.created_at), listo(x, `nota:${x.id}`)]),
+      ...notasSes.map(x => ['app', x.fecha, mom(x.fecha), listo(x, `cierre:${x.id}`)]),
+      ...meWa.map(x => ['whatsapp', x.fecha, mom(x.fecha, x.created_at), false]),
     ].filter(x => x[1]);
+    const suyosPend = suyos.filter(x => !x[3]);
     const ultDe = (l, i) => l.map(x => x[i]).sort().pop() || null;
     const ultTuyo = ultDe(tuyos, 1), ultSuyo = ultDe(suyos, 1), ultTuyoT = ultDe(tuyos, 2), ultSuyoT = ultDe(suyos, 2);
     const suyoUlt = suyos.slice().sort((a, b) => String(a[2]).localeCompare(String(b[2]))).pop() || null;
     // Por canal: lo de la app (la Bandeja) y lo de WhatsApp (lo que registras tú).
-    const canal = (k) => { const l = suyos.filter(x => x[0] === k); const f = ultDe(l, 1), t = ultDe(l, 2); return f ? { f, sinResponder: !ultTuyoT || t > ultTuyoT } : null; };
+    const canal = (k) => { const l = suyos.filter(x => x[0] === k); const f = ultDe(l, 1); const tp = ultDe(suyosPend.filter(x => x[0] === k), 2); return f ? { f, sinResponder: !!tp && (!ultTuyoT || tp > ultTuyoT) } : null; };
     const escApp = canal('app'), escWa = canal('whatsapp');
     // La semana, día por día: en qué días lo tocaste y en cuáles te escribió.
     const diasTuyos = new Set(tuyos.filter(x => semana(x[1])).map(x => x[1]));
@@ -172,7 +179,8 @@ function tqCalcular(R, ref) {
     const sinToque = ultTuyo ? tqEntre(ultTuyo, hoy) : null;
     const pausa = typeof ausHoy === 'function' ? ausHoy(c.id, hoy) : null;
     const e = eng ? eng.filas.find(f => f.c.id === c.id) : null;
-    const debe = !!(ultSuyoT && (!ultTuyoT || ultSuyoT > ultTuyoT));
+    const ultPendT = ultDe(suyosPend, 2);
+    const debe = !!(ultPendT && (!ultTuyoT || ultPendT > ultTuyoT));
     let estado;
     if (pausa) estado = 'pausa';
     else if (debe) estado = 'debe';
