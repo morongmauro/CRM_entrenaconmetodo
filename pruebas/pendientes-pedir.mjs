@@ -104,12 +104,15 @@ function tablas() {
     { id: 'fa2', cliente_id: 'c2', nombre: 'Ciclo 2', fecha_inicio: mas(LUNES, -14), semanas: 5, estado: 'activa', visible_cliente: true, orden: 2 },
     { id: 'fa4', cliente_id: 'c4', nombre: 'Ciclo 4', fecha_inicio: mas(LUNES, -56), semanas: 12, estado: 'activa', visible_cliente: true, orden: 1 },
     // Ana y Sofía, en la última semana de su ciclo (Ana ya vio el aviso; Sofía no).
+    // Marta: su ciclo anterior traía medirse los lunes y no lo hizo nunca.
+    { id: 'fa4v', cliente_id: 'c4', nombre: 'Ciclo 3', fecha_inicio: mas(LUNES, -100), semanas: 6, estado: 'finalizada', visible_cliente: false, orden: 0 },
     { id: 'fa0', cliente_id: 'c0', nombre: 'Ciclo 6', fecha_inicio: mas(LUNES, -28), semanas: 5, estado: 'activa', visible_cliente: true, orden: 1 },
     { id: 'fa5', cliente_id: 'c5', nombre: 'Ciclo 3', fecha_inicio: mas(LUNES, -28), semanas: 5, estado: 'activa', visible_cliente: true, orden: 1 },
   ];
   T.eventos = [
     ev('e0f', 'c0', 'fotos', { fecha: mas(HOY, -12) }),
     ev('e0m', 'c0', 'medidas', { fecha: LUNES }),
+    ev('e4m', 'c4', 'medidas', { fase_id: 'fa4v', dias_semana: ['L'], visible_cliente: null }),
     ev('e1f', 'c1', 'fotos', { fecha: mas(HOY, -3) }),
     ev('e1m', 'c1', 'medidas', { fecha: mas(HOY, -8) }),
     ev('e2p', 'c2', 'peso', { fase_id: 'fa2', dias_semana: ['L'] }),
@@ -132,6 +135,7 @@ function tablas() {
   T.rutina_ejercicios = [{ id: 're4', rutina_id: 'r4', ejercicio_id: 'x2', orden: 1 }];
   T.videos_tecnica.push({ id: 'v4p', cliente_id: 'c4', ejercicio_id: 'x9', ejercicio_nombre: 'Hip thrust', estado: 'pedido', pedido_en: mas(HOY, -10), revisado_en: null, created_at: mas(HOY, -10) + 'T10:00:00Z' });
   T.pedidos_cliente = [
+    { id: 'p0', user_id: 'coach-1', cliente_id: 'c4', tipo: 'medidas', pedido_en: mas(HOY, -9) + 'T10:00:00Z', entregado_en: null },
     { id: 'p1', user_id: 'coach-1', cliente_id: 'c2', tipo: 'fotos', pedido_en: mas(HOY, -3) + 'T10:00:00Z', entregado_en: null },
     { id: 'p2', user_id: 'coach-1', cliente_id: 'c2', tipo: 'medidas', pedido_en: LUNES + 'T09:00:00Z', entregado_en: LUNES + 'T18:00:00Z', entregado_por: 'coach' },
   ];
@@ -199,6 +203,8 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   ok('Ana: su app le recordó las fotos hace 12 días y no las subió → toca pedir', x && x.estado === 'toca' && /hace 12 días|lleva 12 días/.test(x.texto) && /Pedir/.test(x.texto) && /Ya lo pedí/.test(x.texto), JSON.stringify(x));
   x = await item(p, 'c0', 'medidas');
   ok('Ana: medición recordada el lunes y hecha → entregada por la app', x && x.estado === 'entregado' && /llegó por la app/.test(x.texto), JSON.stringify(x));
+  x = await item(p, 'c4', 'medidas');
+  ok('Marta: las medidas de su ciclo anterior siguen (no se apaga por tiempo ni por cambiar de ciclo), en UNA línea; pedido hace 9 días → «Recordar»', x && x.estado === 'recordar' && /Se lo pediste hace 9 días y no ha llegado/.test(x.texto) && /6 recordatorios sin hacer/.test(x.texto) && (await celda(p, 'c4').locator('[data-pp="medidas"] [data-pp-recordar]').count()) === 1 && /Ya lo entregó/.test(x.texto), JSON.stringify(x));
   x = await item(p, 'c1', 'video');
   ok('Carlos: en la fila solo el resumen: «Recordar · Pedí 2 · falta Press banca y 1 más · pedido hace 9 días» y «Ver videos»', x && x.estado === 'recordar' && /Pedí 2/.test(x.texto) && /falta Press banca y 1 más/.test(x.texto) && /hace 9 días/.test(x.texto) && /Ver videos/.test(x.texto) && await celda(p, 'c1').locator('[data-pp-entrego-ej]').count() === 0, JSON.stringify(x));
   ok('Carlos: fotos recordadas hace 3 días (aún en su semana) → no sale', (await item(p, 'c1', 'fotos')) === null, JSON.stringify(await item(p, 'c1', 'fotos')));
@@ -207,7 +213,7 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   x = await item(p, 'c2', 'video');
   ok('Lucía: ciclo nuevo sin video → toca pedir', x && x.estado === 'toca' && /ciclo nuevo/i.test(x.texto), JSON.stringify(x));
   x = await item(p, 'c2', 'peso');
-  ok('Lucía: peso de los lunes sin registrar → toca pedir (2 recordatorios vencidos)', x && x.estado === 'toca' && /2 recordatorios sin hacer/.test(x.texto), JSON.stringify(x));
+  ok('Lucía: peso de los lunes sin registrar → toca pedir, los 3 lunes juntos en una sola línea con un solo «Pedir»', x && x.estado === 'toca' && /3 recordatorios sin hacer/.test(x.texto) && (await celda(p, 'c2').locator('[data-pp="peso"]').count()) === 1 && (await celda(p, 'c2').locator('[data-pp="peso"] [data-pp-pedir]').count()) === 1, JSON.stringify(x));
   x = await item(p, 'c2', 'fotos');
   ok('Lucía: fotos que ya pediste → «Pedido»', x && x.estado === 'pedido' && /hace 3 días/.test(x.texto), JSON.stringify(x));
   x = await item(p, 'c2', 'medidas');
@@ -230,20 +236,26 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   ok(`Ciclo · Sofía: última semana y aún no ve el aviso (${ci})`, /Sem 5 de 5/.test(ci) && /Aún no ve el aviso de cambio/.test(ci), ci);
   ok('Ciclo · Carlos: sin ciclo vigente', /Sin ciclo vigente/.test(await ciclo('c1')));
   const tarjeta = (await p.locator('[data-tq-filtro="pendientes"]').innerText()).replace(/\s+/g, ' ');
-  ok(`la tarjeta de arriba (${tarjeta})`, /^\s*5 pendientes por pedir 2 pedidos sin llegar · 1 por recordar/.test(tarjeta), tarjeta);
+  ok(`la tarjeta de arriba (${tarjeta})`, /^\s*6 pendientes por pedir 3 pedidos sin llegar · 2 por recordar/.test(tarjeta), tarjeta);
   if (process.env.FOTO) await p.screenshot({ path: path.join(CAPTURAS, 'toques-pendientes.png') });
 
   // «Ya lo pedí» (fotos de Ana) → pedido, guardado en pedidos_cliente.
   await celda(p, 'c0').locator('[data-pp="fotos"] [data-pp-yapedi]').click();
   await p.waitForTimeout(1200);
   x = await item(p, 'c0', 'fotos');
-  ok('«Ya lo pedí» → queda «Pedido» (guardado)', x && x.estado === 'pedido' && /Pedido hoy/.test(x.texto) && await p.evaluate(() => window.TABLAS_FALSAS.pedidos_cliente.some(r => r.cliente_id === 'c0' && r.tipo === 'fotos' && !r.entregado_en)), JSON.stringify(x));
+  ok('«Ya lo pedí» → queda «Pedido» (guardado)', x && x.estado === 'pedido' && /Se lo pediste hoy/.test(x.texto) && await p.evaluate(() => window.TABLAS_FALSAS.pedidos_cliente.some(r => r.cliente_id === 'c0' && r.tipo === 'fotos' && !r.entregado_en)), JSON.stringify(x));
   // «Pedir» (medidas de Carlos) → abre su WhatsApp con el mensaje y queda pedido.
   await celda(p, 'c1').locator('[data-pp="medidas"] [data-pp-pedir]').click();
   await p.waitForTimeout(1200);
   const abiertos = await p.evaluate(() => window.ABIERTOS);
   x = await item(p, 'c1', 'medidas');
   ok('«Pedir» → abre su WhatsApp con el mensaje de medidas y queda «Pedido»', abiertos.some(u => /wa\.me\/573000000002\?text=/.test(u) && /medidas/.test(decodeURIComponent(u))) && x && x.estado === 'pedido', JSON.stringify(abiertos) + JSON.stringify(x));
+  // «Recordar» (medidas de Marta) → su WhatsApp con el recordatorio y la semana vuelve a contar.
+  await celda(p, 'c4').locator('[data-pp="medidas"] [data-pp-recordar]').click();
+  await p.waitForTimeout(1200);
+  const abiertos2 = await p.evaluate(() => window.ABIERTOS);
+  x = await item(p, 'c4', 'medidas');
+  ok('«Recordar» de medidas → WhatsApp «Te recuerdo tus medidas» y queda «Se lo recordaste hoy» (una sola línea)', abiertos2.some(u => /Te recuerdo tus medidas/.test(decodeURIComponent(u))) && x && x.estado === 'pedido' && /Se lo recordaste hoy/.test(x.texto) && /6 recordatorios sin hacer/.test(x.texto) && (await celda(p, 'c4').locator('[data-pp="medidas"]').count()) === 1, JSON.stringify(x));
   // «Ya lo entregó» (fotos de Lucía) → entregado, marcado por ti.
   await celda(p, 'c2').locator('[data-pp="fotos"] [data-pp-entrego]').click();
   await p.waitForTimeout(1200);

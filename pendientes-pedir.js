@@ -21,7 +21,10 @@
 
 const PP_DIAS = { video: 42 };
 const PP_ESPERA = 7;        // días que se le da al recordatorio antes de pedírselo tú
-const PP_VENTANA = 21;      // hasta cuántos días atrás se miran los recordatorios (los mismos que la app)
+// Lo que no hizo no se apaga por tiempo: sigue saliendo (junto con los
+// recordatorios que lleguen después) hasta que lo haga o lo marques. Se mira
+// hasta medio año atrás, también en ciclos que ya terminaron.
+const PP_HISTORIA = 180;
 // El tipo del recordatorio del calendario → el pendiente.
 const PP_DE_EVENTO = { fotos: 'fotos', peso: 'peso', medidas: 'medidas', medicion: 'medidas' };
 const PP_NOMBRE = { video: 'Video', fotos: 'Fotos', peso: 'Peso', medidas: 'Medidas' };
@@ -63,7 +66,11 @@ async function ppCargar(clientes, vids) {
     || (await leer(sb.from('eventos').select('id, cliente_id, fase_id, tipo, fecha, dias_semana, semanas, visible_cliente').in('tipo', tipos))) || [];
   eventos = eventos.filter(e => ids.some(id => String(id) === String(e.cliente_id)));
   let registros = [];
-  if (eventos.length) registros = (await leer(sb.from('evento_registros').select('evento_id, cliente_id, fecha, estado').in('evento_id', eventos.map(e => e.id)).gte('fecha', evtSumarDias(hoy, -PP_VENTANA - 1)))) || [];
+  if (eventos.length) registros = (await leer(sb.from('evento_registros').select('evento_id, cliente_id, fecha, estado').in('evento_id', eventos.map(e => e.id)).gte('fecha', evtSumarDias(hoy, -PP_HISTORIA - 1)))) || [];
+  // Todos sus ciclos (no solo el de ahora): lo que quedó sin hacer en el
+  // anterior no se pierde al cambiar de ciclo.
+  const fasesDe = {};
+  ids.forEach(id => { fasesDe[id] = (fases || []).filter(x => String(x.cliente_id) === String(id) && x.estado !== 'archivada'); });
   // Los ejercicios de su ciclo vigente: un video pedido de un ejercicio que
   // ya no está queda «en pausa» (la app no se lo pide; si vuelve, vuelve).
   const cicloEjs = {};
@@ -83,17 +90,23 @@ async function ppCargar(clientes, vids) {
       viejas.forEach(v => Object.values(cicloEjs).forEach(st => { if (st.has(String(v.duplicado_de))) st.add(String(v.id)); }));
     }
   }
-  _pp.crudo = { pedidos: pedidos || [], fotos: fotos || [], meds: meds || [], vids: vids || [], vigente, eventos, registros, uso, clientes, cicloEjs };
+  _pp.crudo = { pedidos: pedidos || [], fotos: fotos || [], meds: meds || [], vids: vids || [], vigente, fasesDe, eventos, registros, uso, clientes, cicloEjs };
   _pp.cache = new Map();
 }
 
 // Los días en que la app le mostró cada recordatorio (como expandirEventos de
 // la app: los de fecha fija y los que se repiten en su ciclo vigente).
 const PP_DIAS_COD = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
-function ppOcurrencias(evs, fase, desde, hasta) {
+// `fases`: todos sus ciclos; `vigente`: el de ahora. Los que se repiten en un
+// ciclo que ya terminó cuentan si ese ciclo se le mandó (no borrador).
+function ppOcurrencias(evs, fases, vigente, desde, hasta) {
   const out = [];
+  const lista = Array.isArray(fases) ? fases : (fases ? [fases] : []);
   evs.forEach(ev => {
-    const visible = ev.visible_cliente == null ? !!(fase && fase.visible_cliente) : !!ev.visible_cliente;
+    const fase = ev.fase_id ? (lista.find(f => String(f.id) === String(ev.fase_id)) || null) : vigente;
+    const esVigente = !!(fase && vigente && String(fase.id) === String(vigente.id));
+    const visibleFase = fase ? (esVigente ? !!fase.visible_cliente : (!!fase.visible_cliente || fase.estado !== 'borrador')) : false;
+    const visible = ev.visible_cliente == null ? visibleFase : !!ev.visible_cliente;
     if (!visible) return;
     if (ev.fecha) { const f = ppDia(ev.fecha); if (f >= desde && f <= hasta) out.push({ ev, f }); return; }
     if (!fase || !fase.fecha_inicio || !fase.semanas || ev.fase_id !== fase.id) return;
@@ -192,7 +205,7 @@ function ppDe(clienteId) {
   }
   // Fotos, peso y medidas: según sus recordatorios de la app.
   const evsC = R.eventos.filter(e => String(e.cliente_id) === k);
-  const ocurr = ppOcurrencias(evsC, R.vigente[k], evtSumarDias(hoy, -PP_VENTANA), hoy);
+  const ocurr = ppOcurrencias(evsC, (R.fasesDe && R.fasesDe[k]) || [], R.vigente[k], evtSumarDias(hoy, -PP_HISTORIA), hoy);
   const entregas = {   // lo que llegó por la app (fecha), por tipo
     fotos: de(R.fotos).map(x => ppDia(x.fecha)),
     medidas: de(R.meds).map(x => ppDia(x.fecha)),
@@ -213,14 +226,30 @@ function ppDe(clienteId) {
       return { listo: false };
     };
     const vistas = lista.map(o => ({ ...o, ...estadoDe(o) }));
-    const vencidas = vistas.filter(o => !o.listo && hace(o.f) >= PP_ESPERA);
-    if (vencidas.length) {
-      const o = vencidas[0];
-      const ab = abierto(tipo, o.f);
-      const n = vencidas.length;
+    // Cuenta lo que vino DESPUÉS de la última vez que lo hizo (o lo marcaste):
+    // cada recordatorio nuevo sin hacer se junta con los anteriores en UNA
+    // sola línea, y no se apaga por tiempo. Sale cuando el más viejo lleva
+    // 7 días (antes, su app se lo sigue recordando).
+    const iListo = vistas.map(o => !!o.listo).lastIndexOf(true);
+    const sinHacer = vistas.slice(iListo + 1).filter(o => !o.listo);
+    if (sinHacer.length && hace(sinHacer[0].f) >= PP_ESPERA) {
+      const o0 = sinHacer[0], oN = sinHacer[sinHacer.length - 1], n = sinHacer.length;
       const que = tipo === 'fotos' ? 'sin subirlas' : tipo === 'peso' ? 'sin registrarlo' : 'sin registrarlas';
-      if (ab) items.push({ tipo, estado: 'pedido', detalle: `Pedido ${cuando(ppDia(ab.pedido_en))} · recordatorio del ${diaSem(o.f)}` });
-      else items.push({ tipo, estado: 'toca', detalle: `Su app se lo recordó el ${diaSem(o.f)}: lleva ${hace(o.f)} días ${que}${n > 1 ? ` · ${n} recordatorios sin hacer` : ''}` });
+      const y = (l) => (l.length > 1 ? `${l.slice(0, -1).join(', ')} y ${l[l.length - 1]}` : l[0]);
+      const cuales = n <= 3 ? ` (${y(sinHacer.map(o => diaSem(o.f)))})` : ` (desde el ${fmt.fechaCorta(o0.f)})`;
+      const extra = n > 1 ? ` · <b>${n} recordatorios sin hacer</b>${cuales}` : '';
+      // Lo que le pediste (o le recordaste) después del primero sin hacer.
+      const ultimo = (filtro) => peds.filter(p => p.tipo === tipo && !p.entregado_en && ppDia(p.pedido_en) >= o0.f && filtro(p))
+        .sort((a, b) => String(b.pedido_en).localeCompare(String(a.pedido_en)))[0] || null;
+      const ped = ultimo(p => p.detalle !== 'recordatorio'), rec = ultimo(p => p.detalle === 'recordatorio');
+      if (ped || rec) {
+        const recordado = !!rec && (!ped || ppDia(rec.pedido_en) >= ppDia(ped.pedido_en));
+        const desde = ppDia((recordado ? rec : ped).pedido_en);
+        const base = `${recordado ? 'Se lo recordaste' : 'Se lo pediste'} ${cuando(desde)}`;
+        // Una semana sin llegar desde que se lo pediste (o recordaste): «Recordar».
+        if (hace(desde) >= PP_ESPERA) items.push({ tipo, estado: 'recordar', detalle: `${base} y no ha llegado${extra}` });
+        else items.push({ tipo, estado: 'pedido', detalle: `${base}${extra}` });
+      } else items.push({ tipo, estado: 'toca', detalle: `Su app se lo recordó el ${diaSem(oN.f)}: lleva ${hace(oN.f)} ${hace(oN.f) === 1 ? 'día' : 'días'} ${que}${extra}` });
       return;
     }
     // Lo último que se le recordó, ya hecho esta semana: entregado.
@@ -301,6 +330,12 @@ const PP_MSJ = {
   medidas: (n) => `Hola ${n}, ¿cómo vas? Toca medirnos: cuando puedas, registra tus medidas en la app, o me las mandas por acá.`,
   peso: (n) => `Hola ${n}, ¿cómo vas? Cuando puedas, registra tu peso de esta semana en la app, o me lo mandas por acá.`,
 };
+// «Recordar» de fotos, peso y medidas (ya se lo pediste hace una semana).
+const PP_MSJ_REC = {
+  fotos: (n) => `Hola ${n}, ¿cómo vas? Te recuerdo tus fotos de progreso: cuando puedas, súbelas en la app (frente, perfil y espalda), o me las mandas por acá.`,
+  medidas: (n) => `Hola ${n}, ¿cómo vas? Te recuerdo tus medidas: cuando puedas, regístralas en la app, o me las mandas por acá.`,
+  peso: (n) => `Hola ${n}, ¿cómo vas? Te recuerdo tu peso: cuando puedas, regístralo en la app, o me lo mandas por acá.`,
+};
 function ppAvisoTabla() { toast('Falta correr migraciones/pedidos-cliente.sql en Supabase'); }
 function ppRepintar() { _tq.datos = null; _tq.leido = 0; if (_currentView === 'toques') rerenderView(); }
 async function ppGuardar(fila) {
@@ -332,6 +367,11 @@ window.ppRecordar = async (id, tipo) => {
   const tel = String((c && c.telefono) || '').replace(/\D/g, '');
   if (!tel) return toast('No tiene teléfono guardado');
   const nombre = String((c && c.nombre) || '').trim().split(/\s+/)[0] || '';
+  if (tipo !== 'video') {
+    window.open(`https://wa.me/${tel}?text=${encodeURIComponent(PP_MSJ_REC[tipo](nombre))}`, '_blank', 'noopener');
+    if (await ppGuardar({ cliente_id: id, tipo, detalle: 'recordatorio', pedido_en: new Date().toISOString() })) { toast('Listo: la semana vuelve a contar desde hoy'); ppRepintar(); }
+    return;
+  }
   const it = ppDe(id).find(x => x.tipo === tipo);
   const n = it && it.ejercicios ? it.ejercicios.length : 0;
   const ej = it && it.ejercicio ? ` de ${it.ejercicio}` : '';
