@@ -297,14 +297,16 @@ function esCalcular(D, lunes, hoy) {
   }).filter(Boolean).sort((a, b) => b.pct - a.pct).slice(0, 2);
 
   const rpes = sesSem.map(s => Number(s.rpe)).filter(v => v > 0);
-  const rpe = rpes.length ? { prom: rpes.reduce((a, b) => a + b, 0) / rpes.length, n: rpes.length } : null;
+  const rpe = rpes.length ? { prom: rpes.reduce((a, b) => a + b, 0) / rpes.length, n: rpes.length, de: sesSem.length } : null;
 
   // La semana anterior, para comparar
   const lunesAnt = evtSumarDias(lunes, -7);
   const fechasAnt = Array.from({ length: 7 }, (_, i) => evtSumarDias(lunesAnt, i));
+  const rpesAnt = D.sesiones.filter(s => s.estado === 'completada' && fechasAnt.includes(dia10(s.fecha))).map(s => Number(s.rpe)).filter(v => v > 0);
   const prev = {
     plan: fechasAnt.filter(f => rutinaPlan(f)).length,
     hechas: D.sesiones.filter(s => s.estado === 'completada' && fechasAnt.includes(dia10(s.fecha))).length,
+    rpe: rpesAnt.length ? rpesAnt.reduce((a, b) => a + b, 0) / rpesAnt.length : null,
   };
   // El último entreno registrado (para «no veo entrenos desde…»)
   const ultimo = D.sesiones.filter(s => s.estado === 'completada').map(s => dia10(s.fecha)).sort().pop() || null;
@@ -830,6 +832,19 @@ function srBarra(x, color, cls = '') {
   return `<span class="sr-b ${cls}"><i style="width:${w}%;background:${color}"></i><u style="left:${100 / 1.25}%"></u></span>`;
 }
 const srTono = (x) => (x == null ? '#C9C5BC' : x >= 0.9 && x <= 1.1 ? '#46965A' : x >= 0.75 && x <= 1.25 ? '#E0A21A' : '#D2553F');
+// La intensidad (RPE de 1 a 10 que marca al terminar cada rutina), en promedio.
+function srIntensidadHTML(S) {
+  const r = S.rpe;
+  const ant = S.prev && S.prev.rpe != null ? ` · semana pasada ${esNum(S.prev.rpe)}` : '';
+  if (!r) return `<div class="sr-int" data-sr-intensidad><div class="sr-adh"><b>Intensidad promedio</b><span class="sr-nada">Sin dato</span></div><small>${S.F.hechas ? 'No marcó la intensidad al terminar sus rutinas' : 'Sin entrenos esta semana'}${ant}</small></div>`;
+  const p = r.prom;
+  const [txt, col] = p >= 9 ? ['Muy alta', '#D2553F'] : p >= 7 ? ['Buena', '#46965A'] : p >= 5.5 ? ['Moderada', '#E0A21A'] : ['Baja', '#E0A21A'];
+  return `<div class="sr-int" data-sr-intensidad>
+    <div class="sr-adh"><b>Intensidad promedio</b><span>${esNum(p)} de 10 <em style="font-style:normal;font-weight:700;color:${col}">· ${txt}</em></span></div>
+    ${srBarra(p / 10, col, 'sr-b-ad')}
+    <small>${r.n} de ${r.de} entreno${r.de === 1 ? '' : 's'} con intensidad marcada${ant}</small>
+  </div>`;
+}
 function srTopHTML(S) {
   const K = S.K;
   const ad = [
@@ -858,6 +873,7 @@ function srTopHTML(S) {
       ${esCumplimientoHTML(S)}
       <div class="es-k" style="margin-top:14px">Adherencia</div>
       <div class="sr-ads">${adHTML}</div>
+      ${srIntensidadHTML(S)}
     </div>
     <div class="es-card sr-mac" data-sr-macros>
       <div class="es-k">Comida contra su meta</div>
@@ -1198,6 +1214,7 @@ function esAreasHTML(c, sk, sinMensajes) {
   // contra su meta y qué decirle (Oportunidades de mejora). Después, lo que
   // ve en su app, por qué está en tu cola, lo que te ha dicho y las 6 áreas.
   return `<div class="sr-top" data-sr-top><div class="es-card es-sk"></div><div class="es-card es-sk"></div></div>
+    ${typeof qtHTML === 'function' ? qtHTML() : ''}
     ${typeof opHTML === 'function' ? opHTML() : ''}
     ${typeof paTarjetaHTML === 'function' ? paTarjetaHTML() : ''}
     ${saBarraHTML()}

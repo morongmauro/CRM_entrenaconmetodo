@@ -223,6 +223,8 @@ window.saPintar = async (c, S, D) => {
   saPintarCuerpo(c, S);
   // Oportunidades de mejora (oportunidades.js), arriba de las áreas.
   if (typeof opPintar === 'function') opPintar(c, S, D);
+  // Qué tocar esta semana y lo que le has dicho por tema (que-tocar.js).
+  if (typeof qtPintar === 'function') qtPintar(c, S);
 };
 
 // 1. Hoy
