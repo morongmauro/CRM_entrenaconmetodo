@@ -285,6 +285,11 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   const ventM = p.locator('[data-pp-videos="c4"]');
   await ventM.waitFor({ timeout: 8000 });
   ok('el detalle muestra Hip thrust «En pausa · ya no está en su ciclo» y la historia del de Sentadilla', await ventM.locator('[data-ppv-fila="x9"]').getAttribute('data-ppv-estado') === 'pausa' && /ya no está en su ciclo/.test(await ventM.innerText()) && await ventM.locator('[data-ppv-fila="x2"]').count() === 1);
+  // «Quitar (me equivoqué)»: se quita ese pedido (con confirmación).
+  p.once('dialog', d => d.accept());
+  await ventM.locator('[data-ppv-quitar="x9"]').click();
+  await p.waitForTimeout(1500);
+  ok('«Quitar (me equivoqué)» quita ese pedido y deja la historia del otro', await ventM.locator('[data-ppv-fila="x9"]').count() === 0 && await ventM.locator('[data-ppv-fila="x2"]').count() === 1 && await p.evaluate(() => !window.TABLAS_FALSAS.videos_tecnica.some(v => v.id === 'v4p')));
   await p.evaluate(() => closeModal());
   // El filtro de la tarjeta deja solo a quienes tienen algo por pedir o sin llegar.
   await p.locator('[data-tq-filtro="pendientes"]').first().click();

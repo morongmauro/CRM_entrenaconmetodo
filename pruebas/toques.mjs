@@ -152,9 +152,11 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   const frio = (await p.locator('tr[data-tq-cliente="c2"]').innerText()).replace(/\s+/g, ' ');
   ok(`${tag} · Lucía: «Frío», último toque hace 20 días`, /Frío/.test(frio) && /hace 20 días/.test(frio), frio);
   await p.screenshot({ path: path.join(CAPTURAS, `toques-matriz-${tag}.png`) });
-  // Filtro rojo.
-  await p.locator('[data-tq-filtro="rojo"]').click(); await p.waitForFunction(() => document.querySelector('[data-tq-filtro="rojo"].active') && !document.querySelector('tr[data-tq-color="verde"]'), null, { timeout: 10000 }).catch(() => {});
-  ok(`${tag} · filtro Rojo: Carlos y Lucía`, JSON.stringify(await p.locator('tr[data-tq-cliente]').evaluateAll(els => els.map(e => e.dataset.tqCliente))) === '["c1","c2"]');
+  // Filtros por estado del toque.
+  await p.locator('[data-tq-filtro="est:frio"]').click(); await p.waitForFunction(() => document.querySelector('[data-tq-filtro="est:frio"].active'), null, { timeout: 10000 }).catch(() => {});
+  ok(`${tag} · filtro «Frío»: Lucía`, JSON.stringify(await p.locator('tr[data-tq-cliente]').evaluateAll(els => els.map(e => e.dataset.tqCliente))) === '["c2"]');
+  await p.locator('[data-tq-filtro="est:debe"]').click(); await p.waitForFunction(() => document.querySelector('[data-tq-filtro="est:debe"].active'), null, { timeout: 10000 }).catch(() => {});
+  ok(`${tag} · filtro «Le debes respuesta»: Carlos`, JSON.stringify(await p.locator('tr[data-tq-cliente]').evaluateAll(els => els.map(e => e.dataset.tqCliente))) === '["c1"]');
   await p.locator('[data-tq-filtro="todos"]').click(); await p.locator('tr[data-tq-cliente="c0"]').waitFor();
   // WhatsApp desde la fila → abre wa.me y queda «Le escribí».
   await p.locator('tr[data-tq-cliente="c2"] [data-tq-wa]').click();
@@ -225,6 +227,26 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   ok('«Semana pasada»: la tabla muestra esa semana, sin «Marcar hecho»', /Así quedó esa semana/.test(txt) && await p.locator('[data-tq-seg-hecho]').count() === 0 && /sin seguimiento esa semana/.test(txt));
   await p.locator('[data-tq-semana="0"]').click(); await p.waitForTimeout(900);
   ok('«Esta semana» vuelve con «Marcar hecho»', await p.locator('[data-tq-seg-hecho]').count() > 0);
+  // Más atrás: la flecha ‹ y la lista de semanas.
+  await p.locator('[data-tq-sem-ant]').click(); await p.waitForTimeout(900);
+  ok('la flecha ‹ va a la semana pasada', /Así quedó esa semana/.test(await p.locator('#view').innerText()) && await p.locator('[data-tq-sem-sel]').inputValue() === '1');
+  const opciones = await p.locator('[data-tq-sem-sel] option').count();
+  // La más vieja con historial (el primer seguimiento guardado: hace 20 días).
+  const ultima = opciones - 1;
+  await p.locator('[data-tq-sem-sel]').selectOption(String(ultima)); await p.waitForTimeout(1200);
+  const lunV = await p.evaluate((k) => { const l = tqLunes(fmt.hoy()); return fmt.fechaCorta(evtSumarDias(l, -7 * k)); }, ultima);
+  ok(`la lista trae las semanas desde el primer historial (${opciones}) y salta a la más vieja (${lunV})`, opciones >= 3 && (await p.locator('#view').innerText()).includes(`Semana del ${lunV}`) && await p.locator('tr[data-tq-cliente="c0"] [data-tq="historial"] .tq-hw').count() === 3 && await p.locator('[data-tq-sem-ant]').isDisabled());
+  await p.locator('[data-tq-semana="0"]').click(); await p.waitForTimeout(900);
+  // Ordenar: más días sin toque (Lucía, 20) primero; más toques (Sofía, 4) primero.
+  await p.locator('[data-tq-orden]').selectOption('frio'); await p.waitForTimeout(900);
+  let ord = await p.locator('tr[data-tq-cliente]').evaluateAll(els => els.map(e => e.dataset.tqCliente));
+  ok(`ordenar «Más días sin toque»: primero Carlos (nunca lo tocaste) y luego Lucía (20 días) (${ord})`, ord[0] === 'c1' && ord[1] === 'c2', JSON.stringify(ord));
+  await p.locator('[data-tq-orden]').selectOption('mas'); await p.waitForTimeout(900);
+  ord = await p.locator('tr[data-tq-cliente]').evaluateAll(els => els.map(e => e.dataset.tqCliente));
+  ok(`ordenar «Más toques en la semana»: Sofía primero (${ord})`, ord[0] === 'c5', JSON.stringify(ord));
+  await p.locator('[data-tq-orden]').selectOption('alfa'); await p.waitForTimeout(900);
+  ord = await p.locator('tr[data-tq-cliente]').evaluateAll(els => els.map(e => e.dataset.tqCliente));
+  ok(`y «Alfabético» de vuelta (${ord})`, JSON.stringify(ord) === '["c0","c1","c2","c4","c5"]', JSON.stringify(ord));
   await p.locator('tr[data-tq-cliente="c4"] [data-tq="historial"]').click(); await p.waitForTimeout(700);
   const h = await p.locator('[data-tq-historial]').innerText().catch(() => '');
   ok('historial de Marta: 6 semanas, con el seguimiento de hace 10 días', await p.locator('[data-tq-historial] .tq-hi-sem').count() === 6 && /Seguimiento semanal enviado/.test(h), h.slice(0, 300));

@@ -24,7 +24,8 @@
 // Va DESPUÉS de crm-prueba.js (usa cpSeguimiento) y de videos-tecnica.js.
 // =====================================================
 
-const _tq = { tel: null, hoyYa: new Set(), sinTabla: false, filtro: 'todos', datos: null, atras: 0 };
+const _tq = { tel: null, hoyYa: new Set(), sinTabla: false, filtro: 'todos', datos: null, atras: 0, orden: 'alfa', inicio: null, semCargadas: 0 };
+try { const o = localStorage.getItem('crm:tqOrden'); if (o) _tq.orden = o; } catch (e) { /* sin almacenamiento */ }
 // Semáforo: rojo (le debes respuesta, o frío: 15 días o más sin un toque
 // tuyo), amarillo (8 a 14 días sin toque, o 4 días o más con toque en los
 // últimos 7: mejor esperar), verde (bien), gris (en pausa).
@@ -87,8 +88,12 @@ const TQ_DIAS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 // Lo leído de Supabase, una vez (2 min). Alcanza para 6 semanas de historial
 // (y para saber si alguien estaba frío al cierre de una semana pasada).
 async function tqCrudo(forzar = false) {
-  if (!forzar && _tq.crudo && _tq.datos && Date.now() - (_tq.leido || 0) < 120000) return _tq.crudo;
-  const hoy = fmt.hoy(), lunes = tqLunes(hoy), desde = evtSumarDias(lunes, -42);
+  // Las semanas que hacen falta: 6 (el historial de cada cliente) o, si estás
+  // mirando una semana vieja, hasta esa y las 2 de antes (sus «Últimas 3»).
+  const semanas = Math.max(6, (_tq.atras || 0) + 3);
+  if (!forzar && _tq.crudo && _tq.datos && _tq.semCargadas >= semanas && Date.now() - (_tq.leido || 0) < 120000) return _tq.crudo;
+  const hoy = fmt.hoy(), lunes = tqLunes(hoy), desde = evtSumarDias(lunes, -7 * semanas);
+  _tq.semCargadas = semanas;
   const leer = async (q) => { try { const { data, error } = await q; return error ? null : (data || []); } catch (e) { return null; } };
   const [msj, vids, notas, ses, resp, com, toq, nhf, anot] = await Promise.all([
     leer(sb.from('seguimiento_mensajes').select('cliente_id, fecha, origen, created_at').gte('fecha', desde)),
@@ -98,9 +103,15 @@ async function tqCrudo(forzar = false) {
     leer(sb.from('respuestas_coach').select('cliente_id, created_at').gte('created_at', desde)),
     leer(sb.from('comentarios_coach').select('cliente_id, creado_en').gte('creado_en', desde)),
     leer(sb.from('toques_cliente').select('cliente_id, fecha, tipo, created_at').gte('fecha', desde)),
-    leer(sb.from('toques_semana').select('cliente_id, lunes, motivo').gte('lunes', evtSumarDias(lunes, -42))),
+    leer(sb.from('toques_semana').select('cliente_id, lunes, motivo').gte('lunes', desde)),
     leer(sb.from('notas_cliente').select('cliente_id, fecha, texto, tipo').gte('fecha', desde)),
   ]);
+  // Desde cuándo hay historial (una vez): el primer seguimiento o toque guardado.
+  if (!_tq.inicio) {
+    const primero = async (tabla) => { try { const { data } = await sb.from(tabla).select('fecha').order('fecha', { ascending: true }).limit(1); return data && data[0] ? tqDia(data[0].fecha) : null; } catch (e) { return null; } };
+    const [a, b] = await Promise.all([primero('seguimiento_mensajes'), primero('toques_cliente')]);
+    _tq.inicio = [a, b].filter(Boolean).sort()[0] || evtSumarDias(lunes, -42);
+  }
   _tq.sinTabla = toq === null;
   _tq.sinTablaSemana = nhf === null;
   let eng = null;
@@ -310,7 +321,30 @@ function tqEtiquetas(f, actual) {
   if (v.revisadosSemana) l.push(tqEt('gr', `Revisé ${v.revisadosSemana}`));
   return l.join('');
 }
-window.tqSemana = (k) => { _tq.atras = k; rerenderView(); };
+window.tqSemana = (k) => { _tq.atras = Math.max(0, Math.min(tqMaxAtras(), Number(k) || 0)); rerenderView(); };
+window.tqOrden = (o) => { _tq.orden = o; try { localStorage.setItem('crm:tqOrden', o); } catch (e) { /* nada */ } rerenderView(); };
+// Hasta cuántas semanas atrás hay historial (como mucho 2 años).
+function tqMaxAtras() {
+  const ini = _tq.inicio || evtSumarDias(tqLunes(fmt.hoy()), -42);
+  return Math.max(1, Math.min(104, Math.round(tqEntre(tqLunes(ini), tqLunes(fmt.hoy())) / 7)));
+}
+// Los estados del toque (filtros) y las formas de ordenar.
+const TQ_ESTADOS = [['debe', 'Le debes respuesta'], ['frio', 'Frío'], ['enfria', 'Enfriándose'], ['mucho', 'Mucho esta semana'], ['bien', 'Bien'], ['pausa', 'En pausa']];
+const TQ_ORDENES = [['alfa', 'Alfabético'], ['ciclo', 'Ciclo por vencer'], ['app', 'Más días sin abrir la app'], ['frio', 'Más días sin toque'], ['mas', 'Más toques en la semana'], ['menos', 'Menos toques en la semana']];
+function tqOrdenar(lista) {
+  const alfa = (a, b) => String(a.c.nombre).localeCompare(String(b.c.nombre), 'es', { sensitivity: 'base' });
+  const NUNCA = 99999;
+  const val = {
+    ciclo: (f) => { const d = typeof ppFaltanCiclo === 'function' ? ppFaltanCiclo(f.c) : null; return d == null ? NUNCA : d; },
+    app: (f) => (f.app === undefined ? -1 : f.app === null ? NUNCA : f.app),
+    frio: (f) => (f.sinToque == null ? NUNCA : f.sinToque),
+    mas: (f) => f.diasToque || 0,
+    menos: (f) => f.diasToque || 0,
+  }[_tq.orden];
+  if (!val) return lista.slice().sort(alfa);
+  const sube = _tq.orden === 'ciclo' || _tq.orden === 'menos';
+  return lista.slice().sort((a, b) => (sube ? val(a) - val(b) : val(b) - val(a)) || alfa(a, b));
+}
 
 // El historial de un cliente: 6 semanas, día por día.
 const TQ_DSEM = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
@@ -363,15 +397,17 @@ routes.toques = async () => {
   try {
     const R = await tqCrudo(true), hoyR = fmt.hoy(), lunesR = tqLunes(hoyR);
     _tq.datos = tqCalcular(R, hoyR);
-    // Las 3 semanas: hace 2, la pasada y esta (cada una como quedó al cerrar).
-    sems = [2, 1, 0].map(k => (k ? tqCalcular(R, evtSumarDias(lunesR, -7 * k + 6)) : _tq.datos));
-    D = sems[2 - _tq.atras] || _tq.datos;
+    // La semana elegida y las 2 de antes (cada una como quedó al cerrar).
+    const at = Math.min(_tq.atras, tqMaxAtras());
+    sems = [at + 2, at + 1, at].map(k => (k ? tqCalcular(R, evtSumarDias(lunesR, -7 * k + 6)) : _tq.datos));
+    D = sems[2];
   } catch (e) { D = { filas: [], hoy: fmt.hoy(), lunes: tqLunes(fmt.hoy()), actual: true }; console.warn('toques', e); }
   finCargando();
   const deSemana = (D.actual ? 'esta semana' : 'esa semana');
   const porCliente = sems.map(S => new Map(S.filas.map(f => [String(f.c.id), f])));
   const color = (f) => TQ_TONO[f.estado][0];
-  const lista = TQ_FALTA[_tq.filtro] ? D.filas.filter(TQ_FALTA[_tq.filtro]) : _tq.filtro === 'todos' ? D.filas : D.filas.filter(f => color(f) === _tq.filtro);
+  const filtro = _tq.filtro || 'todos';
+  const lista = tqOrdenar(TQ_FALTA[filtro] ? D.filas.filter(TQ_FALTA[filtro]) : filtro.startsWith('est:') ? D.filas.filter(f => f.estado === filtro.slice(4)) : filtro === 'todos' ? D.filas : D.filas.filter(f => color(f) === filtro));
   const activos = D.filas.filter(f => f.estado !== 'pausa');
   const conSeg = activos.filter(f => f.seguimiento).length;
   const semaforo = (f) => {
@@ -399,7 +435,7 @@ routes.toques = async () => {
   const histCel = (f) => `<div class="tq-hs">${porCliente.map((M, k) => {
     const x = M.get(String(f.c.id)), S = sems[k];
     if (!x) return `<div class="tq-hw${S.actual ? ' act' : ''}"><div class="tq-hw-t"><span>${S.actual ? 'Esta semana' : tqRango(S.lunes)}</span></div><span class="tq-cero">—</span></div>`;
-    return `<div class="tq-hw${S.actual ? ' act' : ''}${k === 2 - _tq.atras && !S.actual ? ' sel' : ''}" data-tq-hist-semana="${S.lunes}"><div class="tq-hw-t"><span>${S.actual ? 'Esta semana' : tqRango(S.lunes)}</span><b>${x.diasToque} día${x.diasToque === 1 ? '' : 's'}</b></div>${tqEtiquetas(x, S.actual)}</div>`;
+    return `<div class="tq-hw${S.actual ? ' act' : ''}${k === 2 && !S.actual ? ' sel' : ''}" data-tq-hist-semana="${S.lunes}"><div class="tq-hw-t"><span>${S.actual ? 'Esta semana' : tqRango(S.lunes)}</span><b>${x.diasToque} día${x.diasToque === 1 ? '' : 's'}</b></div>${tqEtiquetas(x, S.actual)}</div>`;
   }).join('')}</div>`;
   const fila = (f) => `<tr data-tq-cliente="${f.c.id}" data-tq-estado="${f.estado}" data-tq-color="${color(f)}">
       <td class="lis-nom tq-nom-cel" onclick="tqHistorial('${f.c.id}')" title="Ver su historial de 6 semanas">${typeof entAvatar === 'function' ? entAvatar(f.c.nombre) : ''}<div><b>${escapeHtml(f.c.nombre)}</b><div class="tq-sub" data-tq-ultimo>Tu último toque: ${tqCuando(f.ultTuyo, D.hoy)}</div></div></td>
@@ -422,7 +458,15 @@ routes.toques = async () => {
   view.innerHTML = `
     <div class="mb-3"><h2 class="text-2xl font-bold text-slate-900">Toques de la semana</h2>
       <p class="text-sm text-slate-500">Semana del ${fmt.fechaCorta(D.lunes)} al ${fmt.fechaCorta(evtSumarDias(D.lunes, 6))}. ${D.actual ? 'Qué hiciste con cada cliente y qué te falta.' : 'Así quedó esa semana: lo que hiciste con cada cliente y lo que faltó.'}</p>
-      <div class="tq-semsel" data-tq-semanas>${[[2, 'Hace 2 semanas'], [1, 'Semana pasada'], [0, 'Esta semana']].map(([k, t]) => `<button type="button" class="tq-semsel-b${_tq.atras === k ? ' on' : ''}" data-tq-semana="${k}" onclick="tqSemana(${k})">${t}</button>`).join('')}</div></div>
+      <div class="tq-semfila" data-tq-semanas>
+        <div class="tq-semsel">${[[0, 'Esta semana'], [1, 'Semana pasada']].map(([k, t]) => `<button type="button" class="tq-semsel-b${_tq.atras === k ? ' on' : ''}" data-tq-semana="${k}" onclick="tqSemana(${k})">${t}</button>`).join('')}</div>
+        <div class="tq-semnav">
+          <button type="button" class="tq-semsel-b" data-tq-sem-ant onclick="tqSemana(${_tq.atras + 1})" ${_tq.atras >= tqMaxAtras() ? 'disabled' : ''} title="Semana anterior">‹</button>
+          <select data-tq-sem-sel onchange="tqSemana(this.value)" title="Ir a una semana">${Array.from({ length: tqMaxAtras() + 1 }, (_, k) => { const l = evtSumarDias(tqLunes(fmt.hoy()), -7 * k); return `<option value="${k}" ${k === _tq.atras ? 'selected' : ''}>${tqRango(l)}${k === 0 ? ' · esta semana' : k === 1 ? ' · la pasada' : ''}</option>`; }).join('')}</select>
+          <button type="button" class="tq-semsel-b" data-tq-sem-sig onclick="tqSemana(${_tq.atras - 1})" ${_tq.atras <= 0 ? 'disabled' : ''} title="Semana siguiente">›</button>
+        </div>
+        <span class="tq-sub">Historial desde el ${fmt.fechaCorta(tqLunes(_tq.inicio || fmt.hoy()))} · ${tqMaxAtras() + 1} semanas</span>
+      </div></div>
     ${_tq.sinTabla ? `<div class="card mb-3 text-xs text-amber-900 bg-amber-50 border border-amber-200" data-tq-sin-tabla>Para registrar «Me escribió» y los WhatsApp que abres desde el CRM, corre <code>migraciones/toques-cliente.sql</code> en Supabase. Lo demás ya se ve.</div>` : ''}
     <div class="tq-faltas${D.actual ? ' cuatro' : ''}" data-tq-faltas>
       ${tarjeta('sinSeg', activos.filter(TQ_FALTA.sinSeg).length, `sin seguimiento ${deSemana}`, `${conSeg} de ${activos.length} hechos${activos.some(f => f.noHaceFalta && !f.seguimiento) ? ` · ${activos.filter(f => f.noHaceFalta && !f.seguimiento).length} ${D.actual ? 'esta semana no' : 'saltados'}` : ''}`)}
@@ -430,7 +474,10 @@ routes.toques = async () => {
       ${tarjeta('revisar', D.filas.filter(TQ_FALTA.revisar).length, 'con videos por revisar', 'te llegaron y falta revisarlos')}
       ${D.actual && typeof ppDe === 'function' ? (() => { const its = activos.flatMap(f => ppDe(f.c.id)); const rec = its.filter(x => x.estado === 'recordar').length; return tarjeta('pendientes', its.filter(x => x.estado === 'toca' || x.estado === 'recordar').length, 'pendientes por pedir', `${its.filter(x => x.estado === 'pedido' || x.estado === 'recordar').length} pedidos sin llegar${rec ? ` · ${rec} por recordar` : ''}`); })() : ''}
     </div>
-    <div class="flex gap-1.5 flex-wrap" style="margin-bottom:10px" data-tq-chips>${TQ_FILTROS.map(([k, t]) => { const n = k === 'todos' ? D.filas.length : D.filas.filter(f => color(f) === k).length; return `<button type="button" class="chip ${_tq.filtro === k ? 'active' : ''}" data-tq-filtro="${k}" onclick="tqFiltro('${k}')">${k !== 'todos' ? `<i class="tq-punto" style="background:${TQ_COLOR[k][0]}"></i>` : ''}${t} · ${n}</button>`; }).join('')}</div>
+    <div class="tq-filtros" data-tq-chips>
+      <div class="tq-chips">${[['todos', 'Todos'], ...TQ_ESTADOS.map(([k, t]) => [`est:${k}`, t])].map(([k, t]) => { const est = k.startsWith('est:') ? k.slice(4) : null; const n = est ? D.filas.filter(f => f.estado === est).length : D.filas.length; return `<button type="button" class="chip ${filtro === k ? 'active' : ''}" data-tq-filtro="${k}" onclick="tqFiltro('${k}')">${est ? `<i class="tq-punto" style="background:${TQ_COLOR[TQ_TONO[est][0]][0]}"></i>` : ''}${t} · ${n}</button>`; }).join('')}</div>
+      <label class="tq-orden">Ordenar <select data-tq-orden onchange="tqOrden(this.value)">${TQ_ORDENES.map(([k, t]) => `<option value="${k}" ${_tq.orden === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+    </div>
     <div class="card lis-tabla-caja" data-tq-tabla>
       <table class="lis-tabla tq-tabla"><thead><tr><th class="lis-nom">Cliente</th><th>Semáforo</th><th>Últimas 3 semanas</th><th>Tus toques ${deSemana}</th><th>Seguimiento<br>semanal</th><th>Ciclo</th><th>Pendientes<br>por pedir</th><th>Videos</th><th>Te escribió<br>en la app</th><th>Te escribió<br>por WhatsApp</th><th>Su semana</th><th></th></tr></thead>
       <tbody>${lista.map(fila).join('')}</tbody></table>
@@ -479,12 +526,22 @@ routes.toques = async () => {
   .tq-dia.t.s{box-shadow:inset 0 0 0 2px #3C7BD6;color:#fff}
   .tq-dia.f{background:transparent;color:#CFCCC4}
   .tq-dia.h:not(.t){color:#1F1F1F}
-  .tq-faltas{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:10px}
+  .tq-faltas{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:8px}
   .tq-faltas.cuatro{grid-template-columns:repeat(4,minmax(0,1fr))}
-  .tq-falta-card{display:flex;flex-direction:column;align-items:flex-start;text-align:left;background:#fff;border:1.5px solid transparent;border-radius:14px;padding:10px 14px;cursor:pointer;font-family:inherit;color:#1F1F1F}
-  .tq-falta-card b{font-size:22px;line-height:1.1}
-  .tq-falta-card span{font-size:13px;font-weight:700}
-  .tq-falta-card small{font-size:11.5px;color:#7A7A7A}
+  .tq-falta-card{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:6px;row-gap:0;text-align:left;background:#fff;border:1.5px solid transparent;border-radius:12px;padding:6px 12px;cursor:pointer;font-family:inherit;color:#1F1F1F}
+  .tq-falta-card b{font-size:17px;line-height:1.2}
+  .tq-falta-card span{font-size:12.5px;font-weight:700}
+  .tq-falta-card small{flex-basis:100%;font-size:11px;color:#7A7A7A;line-height:1.25}
+  .tq-semfila{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .tq-semfila .tq-semsel{margin-top:0}
+  .tq-semnav{display:inline-flex;align-items:center;gap:2px;background:#fff;border-radius:999px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+  .tq-semnav .tq-semsel-b{padding:5px 11px}
+  .tq-semnav .tq-semsel-b:disabled{opacity:.35;cursor:default}
+  .tq-semnav select{border:0;background:transparent;font:inherit;font-size:13.5px;font-weight:700;color:#1F1F1F;padding:4px 6px;width:auto;cursor:pointer}
+  .tq-filtros{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+  .tq-chips{display:flex;gap:5px;flex-wrap:wrap}
+  .tq-orden{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:#8A8780;text-transform:none;letter-spacing:0;margin:0}
+  .tq-orden select{width:auto;font:inherit;font-size:13px;font-weight:700;color:#1F1F1F;border-radius:999px;padding:6px 12px;border:1px solid #E4E0D8;background:#fff}
   .tq-falta-card.on{border-color:#1F1F1F}
   .tq-acc{display:grid;grid-template-columns:auto;gap:4px}
   .tq-wa-cel,.tq-vid-cel{cursor:pointer}
@@ -504,8 +561,8 @@ routes.toques = async () => {
   .tq-que-g b{display:block;color:#1F1F1F;margin-bottom:2px}
   .tq-que-g .tq-dia,.tq-que-g b.tq-r,.tq-que-g b.tq-a,.tq-que-g b.tq-v{display:inline-grid;margin:0}
   .tq-que-g b.tq-r{display:inline;color:#B2402B}.tq-que-g b.tq-a{display:inline;color:#8A6410}.tq-que-g b.tq-v{display:inline;color:#2F7F45}
-  .tq-semsel{display:inline-flex;gap:4px;background:#ECE9E1;border-radius:999px;padding:4px;margin-top:10px;flex-wrap:wrap}
-  .tq-semsel-b{border:0;border-radius:999px;padding:7px 14px;font:inherit;font-size:13.5px;font-weight:700;cursor:pointer;background:transparent;color:#55565B}
+  .tq-semsel{display:inline-flex;gap:4px;background:#ECE9E1;border-radius:999px;padding:3px;margin-top:8px;flex-wrap:wrap}
+  .tq-semsel-b{border:0;border-radius:999px;padding:6px 13px;font:inherit;font-size:13.5px;font-weight:700;cursor:pointer;background:transparent;color:#55565B}
   .tq-semsel-b.on{background:#fff;color:#1F1F1F;box-shadow:0 1px 3px rgba(0,0,0,.08)}
   .tq-hist-cel,.tq-nom-cel{cursor:pointer}
   .tq-hist-cel:hover{background:#F7F5F0}

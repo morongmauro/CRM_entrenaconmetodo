@@ -231,6 +231,13 @@ function ppDe(clienteId) {
 // El aviso es la ventana que la app le muestra una vez, el primer día que
 // abre la app dentro de la última semana del ciclo.
 const ppNorm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+// Días que le faltan al ciclo vigente (para ordenar «Ciclo por vencer»).
+function ppFaltanCiclo(c) {
+  const R = _pp.crudo;
+  const f = R && R.vigente ? R.vigente[String(c.id)] || R.vigente[c.id] : null;
+  if (!f || !f.fecha_inicio) return null;
+  return tqEntre(fmt.hoy(), evtSumarDias(ppDia(f.fecha_inicio), Math.max(1, Number(f.semanas) || 1) * 7 - 1));
+}
 function ppCiclo(c) {
   const R = _pp.crudo;
   const f = R && R.vigente ? R.vigente[String(c.id)] || R.vigente[c.id] : null;
@@ -370,9 +377,11 @@ window.ppVideos = async (id) => {
   const filaPedido = (o) => {
     const { k, x, m } = o;
     let est, btn = '';
+    // Te equivocaste de ejercicio: se quita ESE pedido (lo de antes de ese ejercicio se queda).
+    const quitar = x.id ? b('Quitar (me equivoqué)', false, `data-ppv-quitar="${escapeHtml(k)}"`, `ppQuitarVideo('${id}','${x.id}','${encodeURIComponent(x.ejercicio_nombre || '')}')`) : '';
     if (x.estado === 'pedido' && m) { est = chip(`Entregado · marcado por ti ${hace(m.entregado_en)}`, 'entregado'); btn = b('Desmarcar', false, `data-ppv-desmarcar="${escapeHtml(k)}"`, `ppDesmarcar('${id}','${encodeURIComponent(k)}')`); }
-    else if (x.estado === 'pedido' && o.fuera) { est = chip('En pausa · ya no está en su ciclo (no se le pide)', 'falta'); btn = b('Ya lo entregó', false, `data-ppv-entrego="${escapeHtml(k)}"`, `ppEntrego('${id}','video','${encodeURIComponent(k)}')`); }
-    else if (x.estado === 'pedido') { est = chip(`Por llegar · ${hace(x.pedido_en)}`, dias(x.pedido_en) >= PP_ESPERA ? 'tarde' : 'falta'); btn = b('Ya lo entregó', false, `data-ppv-entrego="${escapeHtml(k)}"`, `ppEntrego('${id}','video','${encodeURIComponent(k)}')`); }
+    else if (x.estado === 'pedido' && o.fuera) { est = chip('En pausa · ya no está en su ciclo (no se le pide)', 'falta'); btn = b('Ya lo entregó', false, `data-ppv-entrego="${escapeHtml(k)}"`, `ppEntrego('${id}','video','${encodeURIComponent(k)}')`) + quitar; }
+    else if (x.estado === 'pedido') { est = chip(`Por llegar · ${hace(x.pedido_en)}`, dias(x.pedido_en) >= PP_ESPERA ? 'tarde' : 'falta'); btn = b('Ya lo entregó', false, `data-ppv-entrego="${escapeHtml(k)}"`, `ppEntrego('${id}','video','${encodeURIComponent(k)}')`) + quitar; }
     else if (x.estado === 'recibido') { est = chip('Llegó por la app · falta revisarlo', 'recibido'); btn = b('Revisar', true, 'data-ppv-revisar', `closeModal();vtAbrir('${id}')`); }
     else { const t = (typeof VT_ESTADO !== 'undefined' && VT_ESTADO[x.estado] ? VT_ESTADO[x.estado].txt : x.estado); est = chip(`Revisado · ${t}`, PPV_ESTADO[x.estado] ? x.estado : 'bien'); }
     return `<div class="ppv-f" data-ppv-fila="${escapeHtml(k)}" data-ppv-estado="${x.estado === 'pedido' ? (m ? 'entregado' : o.fuera ? 'pausa' : 'falta') : x.estado}"${o.fuera && !m ? ' style="opacity:.7"' : ''}>${prev(x.ejercicio_id, x.ejercicio_nombre)}
@@ -416,6 +425,13 @@ async function ppRefrescarVideos(id) {
   if (_currentView === 'toques' && typeof rerenderView === 'function') await rerenderView();
   if (document.querySelector(`[data-pp-videos="${id}"]`)) await ppVideos(id);
 }
+window.ppQuitarVideo = async (id, filaId, nombreEnc) => {
+  const nombre = decodeURIComponent(nombreEnc || '') || 'este video';
+  if (!confirm(`¿Quitar el pedido de ${nombre}? Es para cuando te equivocaste: deja de pedírsele en su app. Lo que antes le pediste de ese ejercicio se queda.`)) return;
+  if (typeof vtDb === 'undefined' || !(await vtDb.borrar(filaId))) return;
+  toast(`Quitado: ${nombre}`);
+  await ppRefrescarVideos(id);
+};
 window.ppDesmarcar = async (id, claveEj) => {
   const clave = decodeURIComponent(claveEj);
   const ids = ((_pp.crudo && _pp.crudo.pedidos) || []).filter(p => String(p.cliente_id) === String(id) && p.tipo === 'video' && p.detalle === `ej:${clave}` && p.entregado_en).map(p => p.id);
