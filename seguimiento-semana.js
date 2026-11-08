@@ -258,6 +258,22 @@ function esCalcular(D, lunes, hoy) {
     };
     K.kcalProm = K.diasLista.length ? Math.round(K.diasLista.reduce((a, v) => a + Number(v.kcal), 0) / K.diasLista.length) : null;
     if (K.prot) K.prot.pct = K.prot.meta ? K.prot.prom / K.prot.meta : null;
+    // Calorías y macros contra su meta, de dos formas:
+    //   · «reg»: solo los días que registró (lo que comió esos días contra
+    //     la meta de esos días) → cómo come cuando registra.
+    //   · «sem»: la semana del plan (los días que ya pasaron; hoy solo si ya
+    //     registró): lo no registrado cuenta como 0 → cuánto de la semana
+    //     está cubierto con datos.
+    K.macros = {};
+    ['kcal', 'p', 'c', 'g'].forEach(k => {
+      const l = regs.filter(v => Number(v['goal_' + k]) > 0 && v[k] != null);
+      if (!l.length) return;
+      const comido = l.reduce((a, v) => a + Number(v[k] || 0), 0);
+      const meta = l.reduce((a, v) => a + Number(v['goal_' + k]), 0);
+      const metaDia = meta / l.length;
+      K.macros[k] = { dias: l.length, plan: K.base, metaDia: Math.round(metaDia), promReg: Math.round(comido / l.length),
+        reg: meta ? comido / meta : null, sem: K.base && metaDia ? comido / (metaDia * K.base) : null };
+    });
   } else {
     dias.forEach(d => { d.comida = 'nodata'; });
   }
@@ -807,6 +823,50 @@ function esCumplimientoHTML(S) {
     <div class="es-ley">Color = lo hizo · borde rojo = le tocaba y no lo hizo · punteado = le toca · rayas = no registró</div>`;
 }
 
+// ── Lo primero: calendario + cumplimiento, y la comida contra su meta ──
+const srPct = (x) => (x == null ? '—' : `${Math.round(x * 100)} %`);
+function srBarra(x, color, cls = '') {
+  const w = x == null ? 0 : Math.max(0, Math.min(1.25, x)) / 1.25 * 100;
+  return `<span class="sr-b ${cls}"><i style="width:${w}%;background:${color}"></i><u style="left:${100 / 1.25}%"></u></span>`;
+}
+const srTono = (x) => (x == null ? '#C9C5BC' : x >= 0.9 && x <= 1.1 ? '#46965A' : x >= 0.75 && x <= 1.25 ? '#E0A21A' : '#D2553F');
+function srTopHTML(S) {
+  const K = S.K;
+  const ad = [
+    ['Entrenamiento', S.F.plan ? S.F.hechas / S.F.plan : null, `${S.F.hechas} de ${S.F.plan} rutinas`, '#3C7BD6'],
+    ...(S.C.plan ? [['Cardio', S.C.hechos / S.C.plan, `${S.C.hechos} de ${S.C.plan}`, '#46965A']] : []),
+    ['Comida · días registrados', K && K.base ? K.dias / K.base : null, K ? `${K.dias} de ${K.base} días` : 'sin datos', '#EE8434'],
+    ['Comida · días en su meta', K && K.base ? K.enMeta / K.base : null, K ? `${K.enMeta} de ${K.base} días (±10 % de calorías)` : 'sin datos', '#EE8434'],
+  ];
+  const adHTML = ad.map(([t, x, sub, col]) => `<div class="sr-ad" data-sr-adh="${escapeHtml(t)}"><div class="sr-adh"><b>${t}</b><span>${srPct(x)}</span></div>${srBarra(x == null ? null : Math.min(x, 1), col, 'sr-b-ad')}<small>${sub}</small></div>`).join('');
+  const M = (K && K.macros) || {};
+  const nom = { kcal: 'Calorías', p: 'Proteína', c: 'Carbohidratos', g: 'Grasa' }, uni = { kcal: '', p: ' g', c: ' g', g: ' g' };
+  const filas = ['kcal', 'p', 'c', 'g'].map(k => {
+    const m = M[k];
+    if (!m) return `<div class="sr-mf" data-sr-macro="${k}"><b>${nom[k]}</b><span class="sr-nada">Sin dato (su app aún no lo envía)</span></div>`;
+    return `<div class="sr-mf" data-sr-macro="${k}">
+      <div class="sr-mh"><b>${nom[k]}</b><small>meta ${m.metaDia}${uni[k]} al día · registró ${m.promReg}${uni[k]} en promedio</small></div>
+      <div class="sr-ml"><span>Lo que registró</span>${srBarra(m.reg, srTono(m.reg))}<em data-sr-reg>${srPct(m.reg)}</em></div>
+      <div class="sr-ml"><span>Toda la semana</span>${srBarra(m.sem, '#9AA6B8')}<em data-sr-sem>${srPct(m.sem)}</em></div>
+    </div>`;
+  }).join('');
+  const nota = K && K.base ? (K.dias < K.base
+    ? `Registró <b>${K.dias} de ${K.base} días</b>. «Lo que registró» es cómo come cuando registra; «Toda la semana» cuenta como 0 lo que no registró: la diferencia es lo que no sabes.`
+    : `Registró <b>todos los días</b>: las dos lecturas coinciden.`) : 'Sin registros de comida esta semana.';
+  return `
+    <div class="es-card sr-cal" data-sr-calendario>
+      ${esCumplimientoHTML(S)}
+      <div class="es-k" style="margin-top:14px">Adherencia</div>
+      <div class="sr-ads">${adHTML}</div>
+    </div>
+    <div class="es-card sr-mac" data-sr-macros>
+      <div class="es-k">Comida contra su meta</div>
+      <div class="sr-ley"><span><i style="background:#46965A"></i>Lo que registró (días con registro)</span><span><i style="background:#9AA6B8"></i>Toda la semana (los días que ya pasaron)</span><span><u></u>100 % = su meta</span></div>
+      ${filas}
+      <div class="sr-nota" data-sr-nota>${nota}</div>
+    </div>`;
+}
+
 function esMensajesHTML(ms) {
   const pie = ms.length > 1
     ? 'Primero el saludo; luego lo que tienes que avisarle (sale hasta que lo copias); después los elegidos por cómo le fue y al final una pregunta. Cada semana sale otra versión.'
@@ -1016,8 +1076,10 @@ window.esPintar = async (c, lunes = null) => {
   cuerpo.classList.remove('es-cargando');
   // Con las 6 áreas (seguimiento-areas.js), «Pesos y repeticiones» va en Fuerza.
   const enFuerza = caja.querySelector('[data-sa-fuerza-sob]');
+  const arriba = caja.querySelector('[data-sr-top]');
+  if (arriba) arriba.innerHTML = srTopHTML(S);
   cuerpo.innerHTML = `
-    <div class="es-card" data-es-cumplimiento>${esCumplimientoHTML(S)}</div>
+    ${arriba ? '' : `<div class="es-card" data-es-cumplimiento>${esCumplimientoHTML(S)}</div>`}
     <div class="es-card es-txt" data-es-resumen><div class="es-k">En pocas palabras</div>${esResumenHTML(c, S)}</div>
     ${enFuerza ? '' : `<div class="es-card" data-es-sobrecarga>${esSobrecargaHTML(S)}</div>`}
     <div class="es-card" data-es-comentarios>${esComentariosHTML(c, S)}</div>`;
@@ -1103,7 +1165,7 @@ function esArmazonHTML(c, { sinMensajes = false } = {}) {
   const sk = '<div class="es-card es-sk"></div>';
   return `
     <div class="es-sem" id="seg-semana" data-lunes="${ini}">
-      ${typeof paTarjetaHTML === 'function' ? paTarjetaHTML() : ''}
+      ${typeof paTarjetaHTML === 'function' && typeof saBarraHTML !== 'function' ? paTarjetaHTML() : ''}
       <div class="es-semh">
         <b data-es-titulo>${ini === actual ? 'Esta semana' : 'La semana pasada'} · ${esFechaCorta(ini)} al ${esFechaCorta(evtSumarDias(ini, 6))}</b>
         <div class="es-tog">
@@ -1132,8 +1194,13 @@ const esRecHTML = () => `<details class="es-card es-vt" data-seg-recordatorios>
       </details>`;
 // Las 6 áreas en el orden en que se revisa (seguimiento-areas.js).
 function esAreasHTML(c, sk, sinMensajes) {
-  return `${saBarraHTML()}
+  // Lo primero que ves al abrir: su calendario y su cumplimiento, la comida
+  // contra su meta y qué decirle (Oportunidades de mejora). Después, lo que
+  // ve en su app, por qué está en tu cola, lo que te ha dicho y las 6 áreas.
+  return `<div class="sr-top" data-sr-top><div class="es-card es-sk"></div><div class="es-card es-sk"></div></div>
     ${typeof opHTML === 'function' ? opHTML() : ''}
+    ${typeof paTarjetaHTML === 'function' ? paTarjetaHTML() : ''}
+    ${saBarraHTML()}
     ${saAreaHTML('hoy', 1, `${typeof tcTarjetaHTML === 'function' ? tcTarjetaHTML(c) : ''}<div class="es-grid" data-es-cuerpo>${sk}${sk}</div>`)}
     ${saAreaHTML('pedi', 2, `<div data-sa-vez><div class="es-card es-sk"></div></div>${esVideosHTML()}<div data-sa-sinvideo></div>${esRecHTML()}`)}
     ${saAreaHTML('comida', 3, `<div data-sa-comida><div class="es-card es-sk"></div></div>`)}

@@ -767,3 +767,31 @@ body.modo-movil [data-seg-mesa-btn] { display: none !important; }
 @media (max-width: 720px) { .aeu-f { grid-template-columns: 1fr; } .aeu-vieja { border-right: 0; padding-right: 0; border-bottom: 1px solid #F3F1EB; padding-bottom: 12px; } .aeu-buscar { flex: 1; min-width: 0; } }
 .aeu-donde { margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: #55565B; line-height: 1.45; }
 .aeu-donde b { font-weight: 650; color: #1F1F1F; }
+
+/* Seguimiento · lo primero: calendario + adherencia, y comida contra su meta (seguimiento-semana.js › srTopHTML) */
+.sr-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin: 0 0 14px; }
+.sr-top > .es-card { margin: 0; }
+.sr-ads { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin-top: 6px; }
+.sr-adh { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; color: #1F1F1F; }
+.sr-adh b { font-weight: 650; }
+.sr-adh span { font-weight: 800; font-variant-numeric: tabular-nums; }
+.sr-ad small { display: block; font-size: 11.5px; color: #8A877F; margin-top: 3px; }
+.sr-b { position: relative; display: block; height: 9px; border-radius: 99px; background: #F1EEE8; overflow: visible; flex: 1; }
+.sr-b i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 99px; }
+.sr-b u { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #1F1F1F; opacity: .35; border-radius: 2px; }
+.sr-b-ad { margin-top: 5px; }
+.sr-b-ad u { display: none; }
+.sr-ley { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11.5px; color: #6B6B70; margin: 4px 0 10px; }
+.sr-ley span { display: inline-flex; align-items: center; gap: 6px; }
+.sr-ley i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.sr-ley u { width: 2px; height: 12px; background: #1F1F1F; opacity: .35; display: inline-block; }
+.sr-mf { padding: 8px 0; border-top: 1px solid #F3F1EB; }
+.sr-mh { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 13.5px; color: #1F1F1F; margin-bottom: 5px; }
+.sr-mh b { font-weight: 700; }
+.sr-mh small { font-size: 11.5px; color: #8A877F; }
+.sr-ml { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #6B6B70; margin: 4px 0; }
+.sr-ml > span:first-child { width: 104px; flex: none; }
+.sr-ml em { font-style: normal; font-weight: 800; color: #1F1F1F; width: 48px; text-align: right; font-variant-numeric: tabular-nums; flex: none; }
+.sr-nada { font-size: 12px; color: #8A877F; margin-left: 8px; }
+.sr-nota { margin-top: 10px; font-size: 12.5px; color: #55565B; background: #F7F5F0; border-radius: 10px; padding: 8px 10px; line-height: 1.45; }
+@media (max-width: 900px) { .sr-top { grid-template-columns: 1fr; } .sr-ads { grid-template-columns: 1fr; } }

@@ -95,7 +95,7 @@ function tablas() {
 function app(accion) {
   const rd = {}, hist = {}, det = {};
   [0, 1, 3, 4].map(L).filter(f => f <= HOY).forEach(f => {
-    rd[f] = { kcal: 2050, p: 100, goal_kcal: 2100, goal_p: 140 };
+    rd[f] = { kcal: 2050, p: 100, c: 230, g: 70, goal_kcal: 2100, goal_p: 140, goal_c: 220, goal_g: 75 };
     hist[f] = { kcal: 2050, p: 100, c: 230, g: 70 };
     det[f] = [
       { id: f + 'a', meal: 'desayuno', time: '07:30', kcal: 450, p: 18, c: 50, g: 18, rawInput: 'arepa con huevo y café', items: [{ name: 'Arepa', kcal: 200, p: 4, c: 40, g: 3 }, { name: 'Huevo', kcal: 150, p: 12, c: 1, g: 10 }, { name: 'Café con leche', kcal: 100, p: 2, c: 9, g: 5 }] },
@@ -204,6 +204,15 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
   const rev = await p.locator('[data-sa-revisado]').innerText();
   ok(`${tag} · «Revisado x de 6» cuenta lo que ya miraste (${rev})`, /Revisado [1-6] de 6/.test(rev) && /[1-6]/.test(rev) && await p.locator('[data-sa-chip="meta"].visto').count() === 1, rev);
   if (tag === 'telefono') ok(`${tag} · sin scroll de lado`, await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), await p.evaluate(() => document.documentElement.scrollWidth + ' ' + [...document.querySelectorAll('body *')].filter(e => e.getBoundingClientRect().right >= document.documentElement.scrollWidth - 2).slice(0, 8).map(e => `${e.tagName}.${e.className}`.slice(0, 60) + ' ' + Math.round(e.getBoundingClientRect().right)).join(' | ')));
+  // Lo primero al abrir: calendario + adherencia, comida contra su meta y qué decirle.
+  const orden = await p.evaluate(() => { const q = (s) => document.querySelector(s); const pos = (e) => (e ? e.getBoundingClientRect().top + window.scrollY : 1e9); return [pos(q('[data-sr-top]')), pos(q('[data-op-mejora]')), pos(q('[data-sa-barra]')), pos(q('#sa-hoy'))]; });
+  ok(`${tag} · arriba de todo: calendario y comida contra su meta, luego «Oportunidades de mejora», luego las 6 áreas`, orden[0] < orden[1] && orden[1] < orden[3], JSON.stringify(orden));
+  ok(`${tag} · el calendario (fuerza, cardio, comida) y la adherencia van arriba, y no se repiten en «Hoy»`, (await p.locator('[data-sr-calendario] .es-fila').count()) >= 3 && (await p.locator('[data-sr-adh]').count()) >= 3 && (await p.locator('#sa-hoy [data-es-cumplimiento]').count()) === 0);
+  const kc = await p.locator('[data-sr-macro="kcal"]').innerText();
+  const pr = await p.locator('[data-sr-macro="p"]').innerText();
+  ok(`${tag} · calorías: «Lo que registró» 98 % (2050 de 2100) y «Toda la semana» menor si faltan días`, /Lo que registró\s*98 %/.test(kc) && /Toda la semana/.test(kc), kc);
+  ok(`${tag} · proteína 71 % de lo registrado; carbohidratos y grasa también`, /71 %/.test(pr) && (await p.locator('[data-sr-macro="c"] [data-sr-reg]').innerText()) === '105 %' && (await p.locator('[data-sr-macro="g"] [data-sr-reg]').innerText()) === '93 %', pr);
+  if (tag === 'ancho') await p.locator('#seg-semana').screenshot({ path: path.join(CAPTURAS, 'seguimiento-arriba.png'), clip: undefined }).catch(() => {});
   await p.screenshot({ path: path.join(CAPTURAS, `seguimiento-areas-${tag}.png`), fullPage: true });
   await p.locator('[data-sa-hecho]').click();
   await p.waitForTimeout(1500);
