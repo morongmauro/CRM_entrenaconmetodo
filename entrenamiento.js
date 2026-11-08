@@ -1283,9 +1283,12 @@ async function entVistaEjercicios() {
         <button class="btn btn-primary btn-sm" onclick="entEditarEjercicio()">+ Nuevo ejercicio</button>
       </div>
     </div>
+    ${window.aeuCajaHTML ? aeuCajaHTML() : ''}
     ${entBarraFiltros('flt')}
     <div id="flt-lista"></div>
   `;
+  // Fichas archivadas que tus clientes aún tienen (archivados-en-uso.js).
+  if (window.aeuPintar) aeuPintar();
   await entPintarListaGaleria();
 }
 

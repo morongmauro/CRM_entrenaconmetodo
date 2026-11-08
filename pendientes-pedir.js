@@ -77,6 +77,10 @@ async function ppCargar(clientes, vids) {
       ruts.forEach(r => { const cid = clienteDeFase[r.fase_id]; if (cid && !cicloEjs[cid]) cicloEjs[cid] = new Set(); });
       const faseDe = Object.fromEntries(ruts.map(r => [r.id, r.fase_id]));
       res.forEach(x => { const cid = clienteDeFase[faseDe[x.rutina_id]]; if (cid && x.ejercicio_id) cicloEjs[cid].add(String(x.ejercicio_id)); });
+      // Una ficha repetida que cambiaste en sus rutinas (Galería): sus videos
+      // pedidos cuentan como de la ficha nueva, no quedan en pausa.
+      const viejas = (await leer(sb.from('ejercicios').select('id, duplicado_de').eq('archivado', true).not('duplicado_de', 'is', null))) || [];
+      viejas.forEach(v => Object.values(cicloEjs).forEach(st => { if (st.has(String(v.duplicado_de))) st.add(String(v.id)); }));
     }
   }
   _pp.crudo = { pedidos: pedidos || [], fotos: fotos || [], meds: meds || [], vids: vids || [], vigente, eventos, registros, uso, clientes, cicloEjs };

@@ -746,3 +746,18 @@ body.modo-movil [data-seg-mesa-btn] { display: none !important; }
 .vr-usa { color: #B4541D; font-weight: 700; }
 .vr-nadie { color: #8A8A90; }
 @media (max-width: 520px) { .vr-aviso { flex-direction: column; align-items: stretch; } .vr-aviso .btn { justify-content: center; text-align: center; } }
+
+/* Galería · fichas archivadas que tus clientes aún tienen (archivados-en-uso.js) */
+.aeu-aviso { margin: 0 0 14px; padding: 12px 14px 10px 16px; background: #fff; border-radius: 16px; border-left: 4px solid #3C7BD6; box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 18px rgba(40,40,30,.05); }
+.aeu-t { font-size: 14px; font-weight: 750; color: #1F1F1F; }
+.aeu-d { font-size: 12.5px; color: #6B6B70; margin-top: 2px; line-height: 1.4; max-width: 900px; }
+.aeu-lista { margin-top: 8px; }
+.aeu-f { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 9px 0; border-top: 1px solid #F3F1EB; }
+.aeu-izq { min-width: 0; flex: 1 1 260px; }
+.aeu-n { font-size: 13.5px; color: #1F1F1F; }
+.aeu-n b { font-weight: 700; }
+.aeu-q { font-size: 12.5px; color: #6B6B70; margin-top: 2px; }
+.aeu-der { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.aeu-por { font-size: 12.5px; color: #6B6B70; }
+.aeu-sel, .aeu-buscar { font: inherit; font-size: 13px; padding: 6px 10px; border: 1px solid #E4E1D8; border-radius: 10px; background: #fff; max-width: 280px; }
+@media (max-width: 520px) { .aeu-der { width: 100%; } .aeu-sel, .aeu-buscar { flex: 1; max-width: none; } .aeu-der .btn { width: 100%; justify-content: center; } }
