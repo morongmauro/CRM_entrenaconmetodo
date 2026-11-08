@@ -80,7 +80,8 @@ const LUNES = (() => { const [y, m, d] = HOY.split('-').map(Number); const x = n
 // recordatorio y lleva 1 semana o más sin hacerlo):
 //   Ana (c0): recordatorio de fotos hace 12 días, no las subió → toca pedir;
 //     medición recordada el lunes y hecha → entregada por la app.
-//   Carlos (c1): video de Press banca pedido hace 9 días → «Recordar»;
+//   Carlos (c1): videos de Press banca y Remo pedidos hace 9 días → «Recordar»;
+//     cada uno con su «Ya lo entregó»; con los dos entregados → «Todos enviados»;
 //     recordatorio de fotos hace 3 días (aún dentro de la semana) → nada;
 //     medidas recordadas hace 8 días sin hacer → toca pedir.
 //   Lucía (c2): ciclo nuevo sin video → toca; peso de los lunes sin registrar
@@ -117,6 +118,7 @@ function tablas() {
   T.evento_registros = [mas(LUNES, -14), mas(LUNES, -7), LUNES].map((f, i) => ({ id: 'g' + i, cliente_id: 'c4', evento_id: 'e4p', fecha: f, estado: 'hecho' }));
   T.videos_tecnica = [
     { id: 'v1', cliente_id: 'c1', ejercicio_id: 'x1', ejercicio_nombre: 'Press banca', estado: 'pedido', pedido_en: mas(HOY, -9), revisado_en: null, created_at: mas(HOY, -9) + 'T10:00:00Z' },
+    { id: 'v1b', cliente_id: 'c1', ejercicio_id: 'x3', ejercicio_nombre: 'Remo con barra', estado: 'pedido', pedido_en: mas(HOY, -9), revisado_en: null, created_at: mas(HOY, -9) + 'T10:05:00Z' },
     { id: 'v0', cliente_id: 'c0', ejercicio_id: 'x2', ejercicio_nombre: 'Sentadilla', estado: 'bien', pedido_en: mas(HOY, -10), revisado_en: mas(HOY, -8) + 'T10:00:00Z', created_at: mas(HOY, -10) + 'T10:00:00Z' },
     { id: 'v4', cliente_id: 'c4', ejercicio_id: 'x2', ejercicio_nombre: 'Sentadilla', estado: 'bien', pedido_en: mas(HOY, -20), revisado_en: mas(HOY, -19) + 'T10:00:00Z', created_at: mas(HOY, -20) + 'T10:00:00Z' },
     { id: 'v5', cliente_id: 'c5', ejercicio_id: 'x2', ejercicio_nombre: 'Sentadilla', estado: 'bien', pedido_en: mas(HOY, -20), revisado_en: mas(HOY, -19) + 'T10:00:00Z', created_at: mas(HOY, -20) + 'T10:00:00Z' },
@@ -189,7 +191,7 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   x = await item(p, 'c0', 'medidas');
   ok('Ana: medición recordada el lunes y hecha → entregada por la app', x && x.estado === 'entregado' && /llegó por la app/.test(x.texto), JSON.stringify(x));
   x = await item(p, 'c1', 'video');
-  ok('Carlos: video pedido hace 9 días sin llegar → «Recordar» con «Recordar» y «Ya lo entregó»', x && x.estado === 'recordar' && /Press banca/.test(x.texto) && /hace 9 días/.test(x.texto) && /Ya lo entregó/.test(x.texto), JSON.stringify(x));
+  ok('Carlos: 2 videos pedidos hace 9 días sin llegar → «Recordar», cada ejercicio con su «Ya lo entregó»', x && x.estado === 'recordar' && /2 videos/.test(x.texto) && /hace 9 días/.test(x.texto) && /Press banca/.test(x.texto) && /Remo con barra/.test(x.texto) && await celda(p, 'c1').locator('[data-pp-entrego-ej]').count() === 2, JSON.stringify(x));
   ok('Carlos: fotos recordadas hace 3 días (aún en su semana) → no sale', (await item(p, 'c1', 'fotos')) === null, JSON.stringify(await item(p, 'c1', 'fotos')));
   x = await item(p, 'c1', 'medidas');
   ok('Carlos: medidas recordadas hace 8 días sin hacer → toca pedir', x && x.estado === 'toca' && /8 días/.test(x.texto), JSON.stringify(x));
@@ -230,12 +232,16 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   await p.waitForTimeout(1200);
   const ab2 = await p.evaluate(() => window.ABIERTOS);
   x = await item(p, 'c1', 'video');
-  ok('«Recordar» → abre su WhatsApp con el recordatorio del video y vuelve a «Pedido»', ab2.some(u => /wa\.me\/573000000002\?text=/.test(u) && /recuerdo el video de Press banca/.test(decodeURIComponent(u))) && x && x.estado === 'pedido' && /se lo recordaste hoy/.test(x.texto), JSON.stringify(x));
-  // El video que estaba pedido: «Ya lo entregó» también.
-  await celda(p, 'c1').locator('[data-pp="video"] [data-pp-entrego]').click();
+  ok('«Recordar» → abre su WhatsApp con el recordatorio de los videos y vuelve a «Pedido»', ab2.some(u => /wa\.me\/573000000002\?text=/.test(u) && /recuerdo los videos de Press banca, Remo con barra/.test(decodeURIComponent(u))) && x && x.estado === 'pedido' && /se lo recordaste hoy/.test(x.texto), JSON.stringify(x));
+  // «Ya lo entregó» es por ejercicio: Press banca sí, Remo sigue pendiente.
+  await celda(p, 'c1').locator('[data-pp-entrego-ej="x1"]').click();
   await p.waitForTimeout(1200);
   x = await item(p, 'c1', 'video');
-  ok('video pedido → «Ya lo entregó» lo deja entregado', x && x.estado === 'entregado', JSON.stringify(x));
+  ok('«Ya lo entregó» de Press banca → queda solo Remo pendiente', x && x.estado === 'pedido' && !/Press banca/.test(x.texto) && /Remo con barra/.test(x.texto), JSON.stringify(x));
+  await celda(p, 'c1').locator('[data-pp-entrego-ej="x3"]').click();
+  await p.waitForTimeout(1200);
+  x = await item(p, 'c1', 'video');
+  ok('con los dos entregados → «Todos enviados» y «Pedir nuevos»', x && x.estado === 'entregado' && /Todos enviados/.test(x.texto) && /Pedir nuevos/.test(x.texto), JSON.stringify(x));
   // El filtro de la tarjeta deja solo a quienes tienen algo por pedir o sin llegar.
   await p.locator('[data-tq-filtro="pendientes"]').first().click();
   await p.waitForTimeout(800);

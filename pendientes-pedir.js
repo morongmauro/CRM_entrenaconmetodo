@@ -98,33 +98,48 @@ function ppDe(clienteId) {
   const abierto = (tipo, despuesDe) => peds.filter(p => p.tipo === tipo && !p.entregado_en && (!despuesDe || ppDia(p.pedido_en) >= despuesDe))
     .sort((a, b) => String(b.pedido_en).localeCompare(String(a.pedido_en)))[0] || null;
   const items = [];
-  // Video
+  // Video: cada ejercicio pedido va por su lado («Ya lo entregó» es por
+  // ejercicio). Cuando ya no queda ninguno por llegar: «Todos enviados».
   const vids = de(R.vids);
+  const claveV = (x) => x.ejercicio_id || `n:${String(x.ejercicio_nombre || '').toLowerCase()}`;
   const ultV = {};
-  vids.forEach(x => { const kk = x.ejercicio_id || `n:${String(x.ejercicio_nombre || '').toLowerCase()}`; const u = ultV[kk]; if (!u || String(x.pedido_en) > String(u.pedido_en)) ultV[kk] = x; });
-  const manV = ppMax(manual('video'));
-  const porLlegar = Object.values(ultV).filter(x => x.estado === 'pedido' && !(manV && manV >= ppDia(x.pedido_en))).sort((a, b) => String(b.pedido_en).localeCompare(String(a.pedido_en)));
-  const abV = abierto('video', null);
+  vids.forEach(x => { const kk = claveV(x); const u = ultV[kk]; if (!u || String(x.pedido_en) > String(u.pedido_en)) ultV[kk] = x; });
+  const pedsV = peds.filter(p => p.tipo === 'video');
+  const esEj = (p) => String(p.detalle || '').startsWith('ej:');
+  const manV = ppMax(pedsV.filter(p => p.entregado_en && !esEj(p) && p.detalle !== 'recordatorio').map(p => ppDia(p.entregado_en)));
+  const manEj = {};
+  pedsV.filter(p => p.entregado_en && esEj(p)).forEach(p => { const kk = String(p.detalle).slice(3); const f = ppDia(p.entregado_en); if (!manEj[kk] || f > manEj[kk]) manEj[kk] = f; });
+  const porLlegar = Object.entries(ultV)
+    .filter(([kk, x]) => x.estado === 'pedido' && !(manV && manV >= ppDia(x.pedido_en)) && !(manEj[kk] && manEj[kk] >= ppDia(x.pedido_en)))
+    .map(([kk, x]) => ({ clave: kk, nombre: x.ejercicio_nombre || 'Video', pedido: ppDia(x.pedido_en) }))
+    .sort((a, b) => a.pedido.localeCompare(b.pedido));
+  const abiertoV = (filtro) => pedsV.filter(p => !p.entregado_en && filtro(p)).sort((a, b) => String(b.pedido_en).localeCompare(String(a.pedido_en)))[0] || null;
+  const abV = abiertoV(p => p.detalle !== 'recordatorio' && !esEj(p));         // «Ya lo pedí» sin ejercicio
+  const recV = abiertoV(p => p.detalle === 'recordatorio');                    // tu último «Recordar»
   const llegados = vids.filter(x => x.estado !== 'pedido');
-  const ultLlegado = ppMax([...llegados.map(x => ppDia(x.revisado_en) || ppDia(x.pedido_en)), manV]);
+  const entregasEj = Object.values(manEj);
+  const ultLlegado = ppMax([...llegados.map(x => ppDia(x.revisado_en) || ppDia(x.pedido_en)), manV, ...entregasEj]);
   const abVVale = abV && (!ultLlegado || ppDia(abV.pedido_en) >= ultLlegado);
   if (porLlegar.length || abVVale) {
     // Pedido y sin llegar. Si ya pasó una semana desde que se lo pediste (o
     // desde tu último recordatorio), sale «Recordar».
-    const ultPedido = ppMax([porLlegar.length ? ppDia(porLlegar[0].pedido_en) : null, abVVale ? ppDia(abV.pedido_en) : null]);
-    const nombre = porLlegar.length ? escapeHtml(porLlegar[0].ejercicio_nombre || 'Video') : '';
-    const mas = porLlegar.length > 1 ? ` · y ${porLlegar.length - 1} más` : '';
-    const recordado = abVVale && porLlegar.length && ppDia(abV.pedido_en) > ppDia(porLlegar[0].pedido_en);
-    const dias = hace(ultPedido);
-    if (dias >= PP_ESPERA) items.push({ tipo: 'video', estado: 'recordar', video: true, ejercicio: porLlegar.length ? porLlegar[0].ejercicio_nombre : '', detalle: `${nombre ? `${nombre} · ` : ''}${recordado ? 'se lo recordaste' : 'pedido'} hace ${dias} días y no ha llegado${mas}` });
-    else items.push({ tipo: 'video', estado: 'pedido', video: true, detalle: `${nombre ? `${nombre} · ` : ''}${recordado ? 'se lo recordaste' : 'pedido'} ${cuando(ultPedido)}${mas}` });
+    const ultPedido = ppMax([porLlegar.length ? porLlegar[porLlegar.length - 1].pedido : null, abVVale ? ppDia(abV.pedido_en) : null]);
+    const recordado = recV && ppDia(recV.pedido_en) >= (ultPedido || '');
+    const desde = recordado ? ppDia(recV.pedido_en) : ultPedido;
+    const dias = hace(desde);
+    const nombres = porLlegar.map(v => v.nombre);
+    const base = { tipo: 'video', video: true, ejercicios: porLlegar.map(v => ({ ...v, dias: hace(v.pedido) })), ejercicio: nombres.join(', ') };
+    const cuantos = porLlegar.length > 1 ? `${porLlegar.length} videos` : '';
+    if (dias >= PP_ESPERA) items.push({ ...base, estado: 'recordar', detalle: `${cuantos ? `${cuantos} · ` : ''}${recordado ? 'se lo recordaste' : 'pedido'} hace ${dias} días y no ha llegado` });
+    else items.push({ ...base, estado: 'pedido', detalle: `${cuantos ? `${cuantos} · ` : ''}${recordado ? 'se lo recordaste' : 'pedido'} ${cuando(desde)}` });
   } else {
     const revSemana = ppMax(llegados.map(x => ppDia(x.revisado_en)).filter(f => f >= lunes));
+    const manSemana = ppMax([manV, ...entregasEj].filter(f => f && f >= lunes));
     const ciclo = R.vigente[k];
     const inicio = ciclo ? ppDia(ciclo.fecha_inicio) : null;
-    const ultAlgo = ppMax([...vids.map(x => ppDia(x.pedido_en)), manV]);
-    if (manV && manV >= lunes) items.push({ tipo: 'video', estado: 'entregado', detalle: `${diaSem(manV)} · marcado por ti` });
-    else if (revSemana) items.push({ tipo: 'video', estado: 'entregado', detalle: `${diaSem(revSemana)} · llegó por la app` });
+    const ultAlgo = ppMax([...vids.map(x => ppDia(x.pedido_en)), manV, ...entregasEj]);
+    const fin = ppMax([manSemana, revSemana]);
+    if (fin) items.push({ tipo: 'video', estado: 'entregado', todos: true, detalle: `Todos enviados · ${diaSem(fin)}. Ya puedes pedir nuevos` });
     else if (inicio && (!ultAlgo || ultAlgo < inicio)) items.push({ tipo: 'video', estado: 'toca', detalle: `Ciclo nuevo desde el ${fmt.fechaCorta(inicio)}, sin video` });
     else if (!ultAlgo) items.push({ tipo: 'video', estado: 'toca', detalle: 'Nunca ha mandado video' });
     else if (hace(ultAlgo) >= PP_DIAS.video) items.push({ tipo: 'video', estado: 'toca', detalle: `Último video hace ${Math.floor(hace(ultAlgo) / 7)} semanas` });
@@ -178,11 +193,15 @@ function ppCelda(f) {
   const id = f.c.id;
   return items.map(x => {
     const [bg, col, t] = PP_TONO[x.estado];
-    const btn = x.estado === 'toca'
-      ? `<button type="button" class="pp-b o" data-pp-pedir="${x.tipo}" onclick="ppPedir('${id}','${x.tipo}')">Pedir</button><button type="button" class="pp-b" data-pp-yapedi="${x.tipo}" onclick="ppYaPedi('${id}','${x.tipo}')">Ya lo pedí</button>`
-      : x.estado === 'recordar' ? `<button type="button" class="pp-b o" data-pp-recordar="${x.tipo}" onclick="ppRecordar('${id}','${x.tipo}')">Recordar</button><button type="button" class="pp-b" data-pp-entrego="${x.tipo}" onclick="ppEntrego('${id}','${x.tipo}')">Ya lo entregó</button>`
-      : x.estado === 'pedido' ? `<button type="button" class="pp-b" data-pp-entrego="${x.tipo}" onclick="ppEntrego('${id}','${x.tipo}')">Ya lo entregó</button>` : '';
-    return `<div class="pp-it" data-pp="${x.tipo}" data-pp-estado="${x.estado}"><div class="pp-h"><b>${PP_NOMBRE[x.tipo]}</b><span class="pp-e" style="background:${bg};color:${col}">${t}</span></div><div class="pp-d">${x.detalle}</div>${btn ? `<div class="pp-bs">${btn}</div>` : ''}</div>`;
+    const b = (txt, oscuro, attr, fn) => `<button type="button" class="pp-b${oscuro ? ' o' : ''}" ${attr} onclick="${fn}">${txt}</button>`;
+    let btn = '';
+    if (x.estado === 'toca') btn = b('Pedir', true, `data-pp-pedir="${x.tipo}"`, `ppPedir('${id}','${x.tipo}')`) + b('Ya lo pedí', false, `data-pp-yapedi="${x.tipo}"`, `ppYaPedi('${id}','${x.tipo}')`);
+    else if (x.estado === 'recordar') btn = b('Recordar', true, `data-pp-recordar="${x.tipo}"`, `ppRecordar('${id}','${x.tipo}')`);
+    if ((x.estado === 'pedido' || x.estado === 'recordar') && !(x.ejercicios && x.ejercicios.length)) btn += b('Ya lo entregó', false, `data-pp-entrego="${x.tipo}"`, `ppEntrego('${id}','${x.tipo}')`);
+    if (x.todos) btn = b('Pedir nuevos', true, 'data-pp-nuevos="video"', `ppPedir('${id}','video')`);
+    // Los videos pedidos, uno por ejercicio, cada uno con su «Ya lo entregó».
+    const ejs = (x.ejercicios || []).map(v => `<div class="pp-ej" data-pp-ej="${escapeHtml(v.clave)}"><span>${escapeHtml(v.nombre)}<i>pedido ${v.dias === 0 ? 'hoy' : v.dias === 1 ? 'ayer' : `hace ${v.dias} días`}</i></span>${b('Ya lo entregó', false, `data-pp-entrego-ej="${escapeHtml(v.clave)}"`, `ppEntrego('${id}','video','${encodeURIComponent(v.clave)}')`)}</div>`).join('');
+    return `<div class="pp-it" data-pp="${x.tipo}" data-pp-estado="${x.estado}"><div class="pp-h"><b>${PP_NOMBRE[x.tipo]}</b><span class="pp-e" style="background:${bg};color:${col}">${x.todos ? 'Todos enviados' : t}</span></div><div class="pp-d">${x.detalle}</div>${ejs ? `<div class="pp-ejs">${ejs}</div>` : ''}${btn ? `<div class="pp-bs">${btn}</div>` : ''}</div>`;
   }).join('');
 }
 
@@ -224,13 +243,26 @@ window.ppRecordar = async (id, tipo) => {
   if (!tel) return toast('No tiene teléfono guardado');
   const nombre = String((c && c.nombre) || '').trim().split(/\s+/)[0] || '';
   const it = ppDe(id).find(x => x.tipo === tipo);
+  const n = it && it.ejercicios ? it.ejercicios.length : 0;
   const ej = it && it.ejercicio ? ` de ${it.ejercicio}` : '';
-  const msj = `Hola ${nombre}, ¿cómo vas? Te recuerdo el video${ej} que te pedí. Cuando puedas, súbelo en la app (o me lo mandas por acá) y te digo cómo vas.`;
+  const msj = `Hola ${nombre}, ¿cómo vas? Te recuerdo ${n > 1 ? 'los videos' : 'el video'}${ej} que te pedí. Cuando puedas, ${n > 1 ? 'súbelos' : 'súbelo'} en la app (o me ${n > 1 ? 'los' : 'lo'} mandas por acá) y te digo cómo vas.`;
   window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msj)}`, '_blank', 'noopener');
   if (await ppGuardar({ cliente_id: id, tipo, detalle: 'recordatorio', pedido_en: new Date().toISOString() })) ppRepintar();
 };
-window.ppEntrego = async (id, tipo) => {
+window.ppEntrego = async (id, tipo, claveEj = null) => {
   const ahora = new Date().toISOString();
+  // Un video en particular (por ejercicio): queda entregado solo ese.
+  if (claveEj) {
+    const clave = decodeURIComponent(claveEj);
+    const it = ppDe(id).find(x => x.tipo === 'video');
+    const v = it && (it.ejercicios || []).find(e => e.clave === clave);
+    if (await ppGuardar({ cliente_id: id, tipo: 'video', detalle: `ej:${clave}`, pedido_en: v ? `${v.pedido}T12:00:00Z` : ahora, entregado_en: ahora, entregado_por: 'coach' })) {
+      const quedan = it ? (it.ejercicios || []).filter(e => e.clave !== clave).length : 0;
+      toast(quedan ? `Listo: ${v ? v.nombre : 'ese video'} entregado · quedan ${quedan}` : 'Listo: todos los videos enviados');
+      ppRepintar();
+    }
+    return;
+  }
   const ab = _pp.crudo && _pp.crudo.pedidos.filter(p => String(p.cliente_id) === String(id) && p.tipo === tipo && !p.entregado_en)
     .sort((a, b) => String(b.pedido_en).localeCompare(String(a.pedido_en)))[0];
   try {
@@ -256,6 +288,10 @@ window.ppEntrego = async (id, tipo) => {
   .pp-bs{display:flex;gap:5px;margin-top:5px;flex-wrap:wrap}
   .pp-b{border:0;border-radius:999px;padding:4px 10px;font:inherit;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;background:#F1EFE9;color:#1F1F1F}
   .pp-b.o{background:#1F1F1F;color:#fff}
-  .pp-nada{font-size:12.5px;font-weight:700;color:#2F7F45}`;
+  .pp-nada{font-size:12.5px;font-weight:700;color:#2F7F45}
+  .pp-ejs{margin-top:4px}
+  .pp-ej{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:3px 0;font-size:12px;color:#1F1F1F}
+  .pp-ej i{display:block;font-style:normal;font-size:11px;color:#8A8A8A}
+  .pp-ej .pp-b{padding:3px 9px;font-size:11px}`;
   document.head.appendChild(s);
 })();
