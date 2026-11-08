@@ -2,11 +2,12 @@
 // PENDIENTES POR PEDIR · la columna de Toques
 // =====================================================
 // Lo que le toca pedirle a cada cliente y en qué va cada cosa:
-//   · Fotos de progreso → cada 30 días (desde las últimas que subió).
-//   · Medidas           → cada 30 días (desde su última medición).
-//   · Peso              → según su recordatorio de peso de esta semana.
-//   · Video de técnica  → si empezó un ciclo nuevo y no ha mandado video
-//                         desde entonces, o si lleva 6 semanas sin video.
+//   · Fotos, peso y medidas → SOLO cuando su app ya le mostró el
+//     recordatorio (el que le pusiste en su calendario) y lleva 1 semana o
+//     más sin hacerlo. Mientras está dentro de esa semana, la app se lo sigue
+//     recordando y aquí no sale nada.
+//   · Video de técnica → si empezó un ciclo nuevo y no ha mandado video
+//                        desde entonces, o si lleva 6 semanas sin video.
 // Cada una pasa por tres estados:
 //   Toca pedir → («Pedir» o «Ya lo pedí») → Pedido → Entregado.
 // «Entregado» se marca solo cuando llega por la app (sus fotos, su medición,
@@ -18,12 +19,15 @@
 // Carga DESPUÉS de toques.js.
 // =====================================================
 
-const PP_DIAS = { fotos: 30, medidas: 30, video: 42 };
+const PP_DIAS = { video: 42 };
+const PP_ESPERA = 7;        // días que se le da al recordatorio antes de pedírselo tú
+const PP_VENTANA = 21;      // hasta cuántos días atrás se miran los recordatorios (los mismos que la app)
+// El tipo del recordatorio del calendario → el pendiente.
+const PP_DE_EVENTO = { fotos: 'fotos', peso: 'peso', medidas: 'medidas', medicion: 'medidas' };
 const PP_NOMBRE = { video: 'Video', fotos: 'Fotos', peso: 'Peso', medidas: 'Medidas' };
 const _pp = { crudo: null, sinTabla: false, cache: new Map() };
 const ppDia = (v) => String(v || '').slice(0, 10);
 const ppMax = (l) => l.filter(Boolean).sort().pop() || null;
-const PP_LETRA = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 
 // Lo que se lee (junto con lo de Toques, cada vez que se arma la vista).
 async function ppCargar(clientes, vids) {
@@ -34,7 +38,7 @@ async function ppCargar(clientes, vids) {
     leer(sb.from('pedidos_cliente').select('id, cliente_id, tipo, detalle, pedido_en, entregado_en, entregado_por').gte('pedido_en', desde)),
     leer(sb.from('fotos_progreso').select('cliente_id, fecha').gte('fecha', desde)),
     leer(sb.from('mediciones_corporales').select('cliente_id, fecha, peso').gte('fecha', desde)),
-    leer(sb.from('fases').select('id, cliente_id, fecha_inicio, estado, visible_cliente, orden')),
+    leer(sb.from('fases').select('id, cliente_id, fecha_inicio, semanas, estado, visible_cliente, orden')),
   ]);
   _pp.sinTabla = pedidos === null;
   // El ciclo vigente de cada uno, y sus recordatorios de peso de esta semana.
@@ -43,15 +47,40 @@ async function ppCargar(clientes, vids) {
     const f = (fases || []).filter(x => String(x.cliente_id) === String(id));
     vigente[id] = typeof entCicloVigente === 'function' ? entCicloVigente(f, hoy) : null;
   });
-  const faseIds = Object.values(vigente).filter(Boolean).map(f => f.id);
-  let eventos = [], registros = [];
-  if (faseIds.length) {
-    eventos = (await leer(sb.from('eventos').select('id, cliente_id, fase_id, tipo, fecha, dias_semana').in('fase_id', faseIds))) || [];
-    eventos = eventos.filter(e => e.tipo === 'peso');
-    if (eventos.length) registros = (await leer(sb.from('evento_registros').select('evento_id, cliente_id, fecha, estado').in('evento_id', eventos.map(e => e.id)).gte('fecha', evtSumarDias(hoy, -7)))) || [];
-  }
+  // Sus recordatorios de fotos, peso y medidas (los del calendario, que la
+  // app le muestra) y lo que marcó de cada uno.
+  const tipos = Object.keys(PP_DE_EVENTO);
+  let eventos = (await leer(sb.from('eventos').select('id, cliente_id, fase_id, tipo, fecha, dias_semana, semanas, visible_cliente, fechas_excluidas').in('tipo', tipos)))
+    || (await leer(sb.from('eventos').select('id, cliente_id, fase_id, tipo, fecha, dias_semana, semanas, visible_cliente').in('tipo', tipos))) || [];
+  eventos = eventos.filter(e => ids.some(id => String(id) === String(e.cliente_id)));
+  let registros = [];
+  if (eventos.length) registros = (await leer(sb.from('evento_registros').select('evento_id, cliente_id, fecha, estado').in('evento_id', eventos.map(e => e.id)).gte('fecha', evtSumarDias(hoy, -PP_VENTANA - 1)))) || [];
   _pp.crudo = { pedidos: pedidos || [], fotos: fotos || [], meds: meds || [], vids: vids || [], vigente, eventos, registros };
   _pp.cache = new Map();
+}
+
+// Los días en que la app le mostró cada recordatorio (como expandirEventos de
+// la app: los de fecha fija y los que se repiten en su ciclo vigente).
+const PP_DIAS_COD = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+function ppOcurrencias(evs, fase, desde, hasta) {
+  const out = [];
+  evs.forEach(ev => {
+    const visible = ev.visible_cliente == null ? !!(fase && fase.visible_cliente) : !!ev.visible_cliente;
+    if (!visible) return;
+    if (ev.fecha) { const f = ppDia(ev.fecha); if (f >= desde && f <= hasta) out.push({ ev, f }); return; }
+    if (!fase || !fase.fecha_inicio || !fase.semanas || ev.fase_id !== fase.id) return;
+    const quitados = new Set((ev.fechas_excluidas || []).map(ppDia));
+    for (let sem = 1; sem <= fase.semanas; sem++) {
+      if (Array.isArray(ev.semanas) && ev.semanas.length && !ev.semanas.includes(sem)) continue;
+      (ev.dias_semana || []).forEach(c => {
+        const off = PP_DIAS_COD.indexOf(c);
+        if (off < 0) return;
+        const f = evtSumarDias(ppDia(fase.fecha_inicio), (sem - 1) * 7 + off);
+        if (f >= desde && f <= hasta && !quitados.has(f)) out.push({ ev, f });
+      });
+    }
+  });
+  return out.sort((a, b) => a.f.localeCompare(b.f));
 }
 
 // Los pendientes de un cliente: [{ tipo, estado: 'toca'|'pedido'|'entregado', detalle, video }]
@@ -68,16 +97,6 @@ function ppDe(clienteId) {
   const manual = (tipo) => peds.filter(p => p.tipo === tipo && p.entregado_en).map(p => ppDia(p.entregado_en));
   const abierto = (tipo, despuesDe) => peds.filter(p => p.tipo === tipo && !p.entregado_en && (!despuesDe || ppDia(p.pedido_en) >= despuesDe))
     .sort((a, b) => String(b.pedido_en).localeCompare(String(a.pedido_en)))[0] || null;
-  // Fotos y medidas: la última entrega (por la app o marcada por ti).
-  const porPlazo = (tipo, autos, nunca, ultTexto) => {
-    const auto = ppMax(autos), man = ppMax(manual(tipo)), ult = ppMax([auto, man]);
-    const ab = abierto(tipo, null);
-    if (ab && (!ult || ppDia(ab.pedido_en) >= ult)) return { tipo, estado: 'pedido', detalle: `Pedido ${cuando(ppDia(ab.pedido_en))}` };
-    if (ult && ult >= lunes) return { tipo, estado: 'entregado', detalle: `${diaSem(ult)} · ${ult === auto ? 'llegó por la app' : 'marcado por ti'}` };
-    if (!ult) return { tipo, estado: 'toca', detalle: nunca };
-    if (hace(ult) >= PP_DIAS[tipo]) return { tipo, estado: 'toca', detalle: ultTexto(hace(ult)) };
-    return null;
-  };
   const items = [];
   // Video
   const vids = de(R.vids);
@@ -88,9 +107,18 @@ function ppDe(clienteId) {
   const abV = abierto('video', null);
   const llegados = vids.filter(x => x.estado !== 'pedido');
   const ultLlegado = ppMax([...llegados.map(x => ppDia(x.revisado_en) || ppDia(x.pedido_en)), manV]);
-  if (porLlegar.length) items.push({ tipo: 'video', estado: 'pedido', video: true, detalle: `${escapeHtml(porLlegar[0].ejercicio_nombre || 'Video')} · ${cuando(ppDia(porLlegar[0].pedido_en))}${porLlegar.length > 1 ? ` · y ${porLlegar.length - 1} más` : ''}` });
-  else if (abV && (!ultLlegado || ppDia(abV.pedido_en) >= ultLlegado)) items.push({ tipo: 'video', estado: 'pedido', detalle: `Pedido ${cuando(ppDia(abV.pedido_en))}` });
-  else {
+  const abVVale = abV && (!ultLlegado || ppDia(abV.pedido_en) >= ultLlegado);
+  if (porLlegar.length || abVVale) {
+    // Pedido y sin llegar. Si ya pasó una semana desde que se lo pediste (o
+    // desde tu último recordatorio), sale «Recordar».
+    const ultPedido = ppMax([porLlegar.length ? ppDia(porLlegar[0].pedido_en) : null, abVVale ? ppDia(abV.pedido_en) : null]);
+    const nombre = porLlegar.length ? escapeHtml(porLlegar[0].ejercicio_nombre || 'Video') : '';
+    const mas = porLlegar.length > 1 ? ` · y ${porLlegar.length - 1} más` : '';
+    const recordado = abVVale && porLlegar.length && ppDia(abV.pedido_en) > ppDia(porLlegar[0].pedido_en);
+    const dias = hace(ultPedido);
+    if (dias >= PP_ESPERA) items.push({ tipo: 'video', estado: 'recordar', video: true, ejercicio: porLlegar.length ? porLlegar[0].ejercicio_nombre : '', detalle: `${nombre ? `${nombre} · ` : ''}${recordado ? 'se lo recordaste' : 'pedido'} hace ${dias} días y no ha llegado${mas}` });
+    else items.push({ tipo: 'video', estado: 'pedido', video: true, detalle: `${nombre ? `${nombre} · ` : ''}${recordado ? 'se lo recordaste' : 'pedido'} ${cuando(ultPedido)}${mas}` });
+  } else {
     const revSemana = ppMax(llegados.map(x => ppDia(x.revisado_en)).filter(f => f >= lunes));
     const ciclo = R.vigente[k];
     const inicio = ciclo ? ppDia(ciclo.fecha_inicio) : null;
@@ -101,42 +129,48 @@ function ppDe(clienteId) {
     else if (!ultAlgo) items.push({ tipo: 'video', estado: 'toca', detalle: 'Nunca ha mandado video' });
     else if (hace(ultAlgo) >= PP_DIAS.video) items.push({ tipo: 'video', estado: 'toca', detalle: `Último video hace ${Math.floor(hace(ultAlgo) / 7)} semanas` });
   }
-  // Fotos
-  const fotos = porPlazo('fotos', de(R.fotos).map(x => ppDia(x.fecha)), 'Nunca ha subido fotos', (d) => `Últimas fotos hace ${d} días`);
-  if (fotos) items.push(fotos);
-  // Peso: el recordatorio de esta semana (hasta hoy).
-  const evs = R.eventos.filter(e => String(e.cliente_id) === k);
-  if (evs.length) {
-    const ocurr = [];
-    evs.forEach(e => {
-      if (e.fecha) { const f = ppDia(e.fecha); if (f >= lunes && f <= hoy) ocurr.push([e.id, f]); }
-      (e.dias_semana || []).forEach(l => { const i = PP_LETRA.indexOf(l); const f = i >= 0 ? evtSumarDias(lunes, i) : null; if (f && f <= hoy) ocurr.push([e.id, f]); });
-    });
-    if (ocurr.length) {
-      ocurr.sort((a, b) => a[1].localeCompare(b[1]));
-      const pesos = de(R.meds).filter(m => m.peso != null).map(m => ppDia(m.fecha));
-      const hecho = ([id, f]) => R.registros.some(r => r.evento_id === id && ppDia(r.fecha) === f && r.estado === 'hecho') || pesos.some(p => p >= f && p <= hoy);
-      const man = manual('peso').filter(f => f >= lunes);
-      const falta = ocurr.filter(o => !hecho(o) && !man.some(m => m >= o[1])).pop();
-      if (falta) {
-        const ab = abierto('peso', falta[1]);
-        items.push(ab ? { tipo: 'peso', estado: 'pedido', detalle: `Pedido ${cuando(ppDia(ab.pedido_en))} · el de ${diaSem(falta[1])}` }
-          : { tipo: 'peso', estado: 'toca', detalle: `El de ${diaSem(falta[1])} · sin registrar` });
-      } else {
-        const ult = ocurr[ocurr.length - 1][1];
-        const manOk = man.some(m => m >= ult) && !hecho(ocurr[ocurr.length - 1]);
-        items.push({ tipo: 'peso', estado: 'entregado', detalle: `El de ${diaSem(ult)} · ${manOk ? 'marcado por ti' : 'llegó por la app'}` });
-      }
+  // Fotos, peso y medidas: según sus recordatorios de la app.
+  const evsC = R.eventos.filter(e => String(e.cliente_id) === k);
+  const ocurr = ppOcurrencias(evsC, R.vigente[k], evtSumarDias(hoy, -PP_VENTANA), hoy);
+  const entregas = {   // lo que llegó por la app (fecha), por tipo
+    fotos: de(R.fotos).map(x => ppDia(x.fecha)),
+    medidas: de(R.meds).map(x => ppDia(x.fecha)),
+    peso: de(R.meds).filter(x => x.peso != null).map(x => ppDia(x.fecha)),
+  };
+  ['fotos', 'peso', 'medidas'].forEach(tipo => {
+    const lista = ocurr.filter(o => PP_DE_EVENTO[o.ev.tipo] === tipo);
+    if (!lista.length) return;
+    const man = manual(tipo);
+    // Cómo quedó cada vez que se le mostró: lo marcó en la app, llegó el dato
+    // (desde 3 días antes, como en la app), lo marcaste tú, o dijo que no puede.
+    const estadoDe = (o) => {
+      const reg = R.registros.find(r => r.evento_id === o.ev.id && ppDia(r.fecha) === o.f);
+      if (reg && reg.estado === 'saltado') return { listo: true, salto: true };
+      const auto = ppMax([reg && reg.estado === 'hecho' ? o.f : null, ...entregas[tipo].filter(f => f >= evtSumarDias(o.f, -3) && f <= hoy)].filter(Boolean));
+      const mano = ppMax(man.filter(f => f >= o.f));
+      if (auto || mano) return { listo: true, cuando: ppMax([auto, mano]), porTi: !auto };
+      return { listo: false };
+    };
+    const vistas = lista.map(o => ({ ...o, ...estadoDe(o) }));
+    const vencidas = vistas.filter(o => !o.listo && hace(o.f) >= PP_ESPERA);
+    if (vencidas.length) {
+      const o = vencidas[0];
+      const ab = abierto(tipo, o.f);
+      const n = vencidas.length;
+      const que = tipo === 'fotos' ? 'sin subirlas' : tipo === 'peso' ? 'sin registrarlo' : 'sin registrarlas';
+      if (ab) items.push({ tipo, estado: 'pedido', detalle: `Pedido ${cuando(ppDia(ab.pedido_en))} · recordatorio del ${diaSem(o.f)}` });
+      else items.push({ tipo, estado: 'toca', detalle: `Su app se lo recordó el ${diaSem(o.f)}: lleva ${hace(o.f)} días ${que}${n > 1 ? ` · ${n} recordatorios sin hacer` : ''}` });
+      return;
     }
-  }
-  // Medidas
-  const medidas = porPlazo('medidas', de(R.meds).map(x => ppDia(x.fecha)), 'Nunca se ha medido', (d) => `Última medición hace ${d} días`);
-  if (medidas) items.push(medidas);
+    // Lo último que se le recordó, ya hecho esta semana: entregado.
+    const ult = vistas.filter(o => o.listo && !o.salto && o.cuando && o.cuando >= lunes).pop();
+    if (ult) items.push({ tipo, estado: 'entregado', detalle: `${diaSem(ult.cuando)} · ${ult.porTi ? 'marcado por ti' : 'llegó por la app'}` });
+  });
   _pp.cache.set(k, items);
   return items;
 }
 
-const PP_TONO = { toca: ['#FCEBDD', '#B4541D', 'Toca pedir'], pedido: ['#EFEDE7', '#55565B', 'Pedido'], entregado: ['#E6F2E9', '#2F7F45', 'Entregado'] };
+const PP_TONO = { toca: ['#FCEBDD', '#B4541D', 'Toca pedir'], recordar: ['#FDECEA', '#B4321F', 'Recordar'], pedido: ['#EFEDE7', '#55565B', 'Pedido'], entregado: ['#E6F2E9', '#2F7F45', 'Entregado'] };
 function ppCelda(f) {
   if (f.estado === 'pausa') return '<span class="tq-cero">—</span>';
   const items = ppDe(f.c.id);
@@ -146,6 +180,7 @@ function ppCelda(f) {
     const [bg, col, t] = PP_TONO[x.estado];
     const btn = x.estado === 'toca'
       ? `<button type="button" class="pp-b o" data-pp-pedir="${x.tipo}" onclick="ppPedir('${id}','${x.tipo}')">Pedir</button><button type="button" class="pp-b" data-pp-yapedi="${x.tipo}" onclick="ppYaPedi('${id}','${x.tipo}')">Ya lo pedí</button>`
+      : x.estado === 'recordar' ? `<button type="button" class="pp-b o" data-pp-recordar="${x.tipo}" onclick="ppRecordar('${id}','${x.tipo}')">Recordar</button><button type="button" class="pp-b" data-pp-entrego="${x.tipo}" onclick="ppEntrego('${id}','${x.tipo}')">Ya lo entregó</button>`
       : x.estado === 'pedido' ? `<button type="button" class="pp-b" data-pp-entrego="${x.tipo}" onclick="ppEntrego('${id}','${x.tipo}')">Ya lo entregó</button>` : '';
     return `<div class="pp-it" data-pp="${x.tipo}" data-pp-estado="${x.estado}"><div class="pp-h"><b>${PP_NOMBRE[x.tipo]}</b><span class="pp-e" style="background:${bg};color:${col}">${t}</span></div><div class="pp-d">${x.detalle}</div>${btn ? `<div class="pp-bs">${btn}</div>` : ''}</div>`;
   }).join('');
@@ -179,6 +214,20 @@ window.ppPedir = async (id, tipo) => {
   const nombre = String((c && c.nombre) || '').trim().split(/\s+/)[0] || '';
   window.open(`https://wa.me/${tel}?text=${encodeURIComponent(PP_MSJ[tipo](nombre))}`, '_blank', 'noopener');
   if (await ppGuardar({ cliente_id: id, tipo, pedido_en: new Date().toISOString() })) ppRepintar();
+};
+// «Recordar» (un pedido de hace una semana o más que no ha llegado): abre su
+// WhatsApp con el recordatorio y la semana vuelve a contar desde hoy.
+window.ppRecordar = async (id, tipo) => {
+  const f = _tq.datos && _tq.datos.filas.find(x => String(x.c.id) === String(id));
+  const c = (f && f.c) || await db.clientes.get(id);
+  const tel = String((c && c.telefono) || '').replace(/\D/g, '');
+  if (!tel) return toast('No tiene teléfono guardado');
+  const nombre = String((c && c.nombre) || '').trim().split(/\s+/)[0] || '';
+  const it = ppDe(id).find(x => x.tipo === tipo);
+  const ej = it && it.ejercicio ? ` de ${it.ejercicio}` : '';
+  const msj = `Hola ${nombre}, ¿cómo vas? Te recuerdo el video${ej} que te pedí. Cuando puedas, súbelo en la app (o me lo mandas por acá) y te digo cómo vas.`;
+  window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msj)}`, '_blank', 'noopener');
+  if (await ppGuardar({ cliente_id: id, tipo, detalle: 'recordatorio', pedido_en: new Date().toISOString() })) ppRepintar();
 };
 window.ppEntrego = async (id, tipo) => {
   const ahora = new Date().toISOString();

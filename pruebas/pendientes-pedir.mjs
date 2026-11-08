@@ -76,37 +76,47 @@ function tablasBase() {
   };
 }
 const LUNES = (() => { const [y, m, d] = HOY.split('-').map(Number); const x = new Date(y, m - 1, d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return iso(x); })();
-// Los casos:
-//   Ana (c0): fotos hace 34 días → toca pedir; medición en esta semana → entregada por la app.
-//   Carlos (c1): video de Press banca pedido hace 5 días → pedido; nunca fotos ni medidas → toca.
-//   Lucía (c2): ciclo nuevo sin video → toca; peso del lunes sin registrar → toca;
-//     fotos pedidas («Ya lo pedí») hace 3 días → pedido; medidas marcadas por ti esta semana → entregado.
-//   Marta (c4): peso del lunes registrado en la app → entregado; fotos de esta semana → entregado.
+// Los casos (fotos, peso y medidas: SOLO si su app ya le mostró el
+// recordatorio y lleva 1 semana o más sin hacerlo):
+//   Ana (c0): recordatorio de fotos hace 12 días, no las subió → toca pedir;
+//     medición recordada el lunes y hecha → entregada por la app.
+//   Carlos (c1): video de Press banca pedido hace 9 días → «Recordar»;
+//     recordatorio de fotos hace 3 días (aún dentro de la semana) → nada;
+//     medidas recordadas hace 8 días sin hacer → toca pedir.
+//   Lucía (c2): ciclo nuevo sin video → toca; peso de los lunes sin registrar
+//     3 semanas → toca; fotos recordadas hace 10 días que ya le pediste hace 3 → pedido;
+//     medidas recordadas hace 9 días que marcaste tú esta semana → entregado.
+//   Sofía (c5): sin recordatorios y con video reciente → «Nada pendiente».
+//   Marta (c4): peso de los lunes registrado → entregado; fotos del lunes subidas → entregado.
 function tablas() {
   const T = tablasBase();
+  const ev = (id, c, tipo, extra) => ({ id, cliente_id: c, fase_id: null, tipo, titulo: tipo, visible_cliente: true, ...extra });
   T.fotos_progreso = [
-    { id: 'f0', cliente_id: 'c0', fecha: mas(HOY, -34), pose: 'frente' },
+    { id: 'f0', cliente_id: 'c0', fecha: mas(HOY, -40), pose: 'frente' },
     { id: 'f4', cliente_id: 'c4', fecha: LUNES, pose: 'frente' },
-    { id: 'f2', cliente_id: 'c2', fecha: mas(HOY, -40), pose: 'frente' },
-    { id: 'f5', cliente_id: 'c5', fecha: mas(HOY, -10), pose: 'frente' },
   ];
   T.mediciones_corporales = [
     { id: 'm0', cliente_id: 'c0', fecha: LUNES, peso: 60 },
     { id: 'm2', cliente_id: 'c2', fecha: mas(HOY, -50), peso: 70 },
-    { id: 'm4', cliente_id: 'c4', fecha: mas(HOY, -10), peso: 65 },
-    { id: 'm5', cliente_id: 'c5', fecha: mas(HOY, -10), peso: 65 },
   ];
   T.fases = [
-    { id: 'fa2', cliente_id: 'c2', nombre: 'Ciclo 2', fecha_inicio: mas(HOY, -10), semanas: 5, estado: 'activa', visible_cliente: true, orden: 2 },
-    { id: 'fa4', cliente_id: 'c4', nombre: 'Ciclo 4', fecha_inicio: mas(HOY, -60), semanas: 12, estado: 'activa', visible_cliente: true, orden: 1 },
+    { id: 'fa2', cliente_id: 'c2', nombre: 'Ciclo 2', fecha_inicio: mas(LUNES, -14), semanas: 5, estado: 'activa', visible_cliente: true, orden: 2 },
+    { id: 'fa4', cliente_id: 'c4', nombre: 'Ciclo 4', fecha_inicio: mas(LUNES, -56), semanas: 12, estado: 'activa', visible_cliente: true, orden: 1 },
   ];
   T.eventos = [
-    { id: 'e2', cliente_id: 'c2', fase_id: 'fa2', tipo: 'peso', titulo: 'Peso', dias_semana: ['L'] },
-    { id: 'e4', cliente_id: 'c4', fase_id: 'fa4', tipo: 'peso', titulo: 'Peso', dias_semana: ['L'] },
+    ev('e0f', 'c0', 'fotos', { fecha: mas(HOY, -12) }),
+    ev('e0m', 'c0', 'medidas', { fecha: LUNES }),
+    ev('e1f', 'c1', 'fotos', { fecha: mas(HOY, -3) }),
+    ev('e1m', 'c1', 'medidas', { fecha: mas(HOY, -8) }),
+    ev('e2p', 'c2', 'peso', { fase_id: 'fa2', dias_semana: ['L'] }),
+    ev('e2f', 'c2', 'fotos', { fecha: mas(HOY, -10) }),
+    ev('e2m', 'c2', 'medidas', { fecha: mas(HOY, -9) }),
+    ev('e4p', 'c4', 'peso', { fase_id: 'fa4', dias_semana: ['L'] }),
+    ev('e4f', 'c4', 'fotos', { fecha: LUNES }),
   ];
-  T.evento_registros = [{ id: 'g4', cliente_id: 'c4', evento_id: 'e4', fecha: LUNES, estado: 'hecho' }];
+  T.evento_registros = [mas(LUNES, -14), mas(LUNES, -7), LUNES].map((f, i) => ({ id: 'g' + i, cliente_id: 'c4', evento_id: 'e4p', fecha: f, estado: 'hecho' }));
   T.videos_tecnica = [
-    { id: 'v1', cliente_id: 'c1', ejercicio_id: 'x1', ejercicio_nombre: 'Press banca', estado: 'pedido', pedido_en: mas(HOY, -5), revisado_en: null, created_at: mas(HOY, -5) + 'T10:00:00Z' },
+    { id: 'v1', cliente_id: 'c1', ejercicio_id: 'x1', ejercicio_nombre: 'Press banca', estado: 'pedido', pedido_en: mas(HOY, -9), revisado_en: null, created_at: mas(HOY, -9) + 'T10:00:00Z' },
     { id: 'v0', cliente_id: 'c0', ejercicio_id: 'x2', ejercicio_nombre: 'Sentadilla', estado: 'bien', pedido_en: mas(HOY, -10), revisado_en: mas(HOY, -8) + 'T10:00:00Z', created_at: mas(HOY, -10) + 'T10:00:00Z' },
     { id: 'v4', cliente_id: 'c4', ejercicio_id: 'x2', ejercicio_nombre: 'Sentadilla', estado: 'bien', pedido_en: mas(HOY, -20), revisado_en: mas(HOY, -19) + 'T10:00:00Z', created_at: mas(HOY, -20) + 'T10:00:00Z' },
     { id: 'v5', cliente_id: 'c5', ejercicio_id: 'x2', ejercicio_nombre: 'Sentadilla', estado: 'bien', pedido_en: mas(HOY, -20), revisado_en: mas(HOY, -19) + 'T10:00:00Z', created_at: mas(HOY, -20) + 'T10:00:00Z' },
@@ -175,17 +185,18 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   await p.waitForTimeout(800);
   ok('la tabla trae la columna «Pendientes por pedir»', /Pendientes\s*por pedir/.test(await p.locator('[data-tq-tabla] thead').innerText()));
   let x = await item(p, 'c0', 'fotos');
-  ok('Ana: fotos hace 34 días → toca pedir', x && x.estado === 'toca' && /hace 34 días/.test(x.texto) && /Pedir/.test(x.texto) && /Ya lo pedí/.test(x.texto), JSON.stringify(x));
+  ok('Ana: su app le recordó las fotos hace 12 días y no las subió → toca pedir', x && x.estado === 'toca' && /hace 12 días|lleva 12 días/.test(x.texto) && /Pedir/.test(x.texto) && /Ya lo pedí/.test(x.texto), JSON.stringify(x));
   x = await item(p, 'c0', 'medidas');
-  ok('Ana: medición de esta semana → entregada por la app', x && x.estado === 'entregado' && /llegó por la app/.test(x.texto), JSON.stringify(x));
+  ok('Ana: medición recordada el lunes y hecha → entregada por la app', x && x.estado === 'entregado' && /llegó por la app/.test(x.texto), JSON.stringify(x));
   x = await item(p, 'c1', 'video');
-  ok('Carlos: video de Press banca pedido → «Pedido» con «Ya lo entregó»', x && x.estado === 'pedido' && /Press banca/.test(x.texto) && /hace 5 días/.test(x.texto) && /Ya lo entregó/.test(x.texto), JSON.stringify(x));
-  x = await item(p, 'c1', 'fotos');
-  ok('Carlos: nunca ha subido fotos → toca pedir', x && x.estado === 'toca' && /Nunca ha subido fotos/.test(x.texto), JSON.stringify(x));
+  ok('Carlos: video pedido hace 9 días sin llegar → «Recordar» con «Recordar» y «Ya lo entregó»', x && x.estado === 'recordar' && /Press banca/.test(x.texto) && /hace 9 días/.test(x.texto) && /Ya lo entregó/.test(x.texto), JSON.stringify(x));
+  ok('Carlos: fotos recordadas hace 3 días (aún en su semana) → no sale', (await item(p, 'c1', 'fotos')) === null, JSON.stringify(await item(p, 'c1', 'fotos')));
+  x = await item(p, 'c1', 'medidas');
+  ok('Carlos: medidas recordadas hace 8 días sin hacer → toca pedir', x && x.estado === 'toca' && /8 días/.test(x.texto), JSON.stringify(x));
   x = await item(p, 'c2', 'video');
   ok('Lucía: ciclo nuevo sin video → toca pedir', x && x.estado === 'toca' && /Ciclo nuevo/.test(x.texto), JSON.stringify(x));
   x = await item(p, 'c2', 'peso');
-  ok('Lucía: el peso del lunes sin registrar → toca pedir', x && x.estado === 'toca' && /lun/.test(x.texto) && /sin registrar/.test(x.texto), JSON.stringify(x));
+  ok('Lucía: peso de los lunes sin registrar → toca pedir (2 recordatorios vencidos)', x && x.estado === 'toca' && /2 recordatorios sin hacer/.test(x.texto), JSON.stringify(x));
   x = await item(p, 'c2', 'fotos');
   ok('Lucía: fotos que ya pediste → «Pedido»', x && x.estado === 'pedido' && /hace 3 días/.test(x.texto), JSON.stringify(x));
   x = await item(p, 'c2', 'medidas');
@@ -195,14 +206,14 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   ok('Marta: fotos de esta semana → entregado', (await item(p, 'c4', 'fotos'))?.estado === 'entregado');
   ok('Sofía: nada pendiente', /Nada pendiente/.test(await celda(p, 'c5').innerText()), await celda(p, 'c5').innerText());
   const tarjeta = (await p.locator('[data-tq-filtro="pendientes"]').innerText()).replace(/\s+/g, ' ');
-  ok(`la tarjeta de arriba: cuántos toca pedir y cuántos sin llegar (${tarjeta})`, /^\s*5 pendientes por pedir 2 pedidos sin llegar/.test(tarjeta), tarjeta);
+  ok(`la tarjeta de arriba (${tarjeta})`, /^\s*5 pendientes por pedir 2 pedidos sin llegar · 1 por recordar/.test(tarjeta), tarjeta);
   if (process.env.FOTO) await p.screenshot({ path: path.join(CAPTURAS, 'toques-pendientes.png') });
 
-  // «Ya lo pedí» (fotos de Carlos) → pedido, guardado en pedidos_cliente.
-  await celda(p, 'c1').locator('[data-pp="fotos"] [data-pp-yapedi]').click();
+  // «Ya lo pedí» (fotos de Ana) → pedido, guardado en pedidos_cliente.
+  await celda(p, 'c0').locator('[data-pp="fotos"] [data-pp-yapedi]').click();
   await p.waitForTimeout(1200);
-  x = await item(p, 'c1', 'fotos');
-  ok('«Ya lo pedí» → queda «Pedido» (guardado)', x && x.estado === 'pedido' && /Pedido hoy/.test(x.texto) && await p.evaluate(() => window.TABLAS_FALSAS.pedidos_cliente.some(r => r.cliente_id === 'c1' && r.tipo === 'fotos' && !r.entregado_en)), JSON.stringify(x));
+  x = await item(p, 'c0', 'fotos');
+  ok('«Ya lo pedí» → queda «Pedido» (guardado)', x && x.estado === 'pedido' && /Pedido hoy/.test(x.texto) && await p.evaluate(() => window.TABLAS_FALSAS.pedidos_cliente.some(r => r.cliente_id === 'c0' && r.tipo === 'fotos' && !r.entregado_en)), JSON.stringify(x));
   // «Pedir» (medidas de Carlos) → abre su WhatsApp con el mensaje y queda pedido.
   await celda(p, 'c1').locator('[data-pp="medidas"] [data-pp-pedir]').click();
   await p.waitForTimeout(1200);
@@ -214,6 +225,12 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   await p.waitForTimeout(1200);
   x = await item(p, 'c2', 'fotos');
   ok('«Ya lo entregó» → «Entregado · marcado por ti»', x && x.estado === 'entregado' && /marcado por ti/.test(x.texto) && await p.evaluate(() => window.TABLAS_FALSAS.pedidos_cliente.some(r => r.id === 'p1' && r.entregado_en && r.entregado_por === 'coach')), JSON.stringify(x));
+  // «Recordar» el video → abre su WhatsApp con el recordatorio y vuelve a «Pedido».
+  await celda(p, 'c1').locator('[data-pp="video"] [data-pp-recordar]').click();
+  await p.waitForTimeout(1200);
+  const ab2 = await p.evaluate(() => window.ABIERTOS);
+  x = await item(p, 'c1', 'video');
+  ok('«Recordar» → abre su WhatsApp con el recordatorio del video y vuelve a «Pedido»', ab2.some(u => /wa\.me\/573000000002\?text=/.test(u) && /recuerdo el video de Press banca/.test(decodeURIComponent(u))) && x && x.estado === 'pedido' && /se lo recordaste hoy/.test(x.texto), JSON.stringify(x));
   // El video que estaba pedido: «Ya lo entregó» también.
   await celda(p, 'c1').locator('[data-pp="video"] [data-pp-entrego]').click();
   await p.waitForTimeout(1200);
