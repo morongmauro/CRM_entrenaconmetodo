@@ -806,3 +806,9 @@ body.modo-movil [data-seg-mesa-btn] { display: none !important; }
 .sr-nada { font-size: 12px; color: #8A877F; margin-left: 8px; }
 .sr-nota { margin-top: 10px; font-size: 12.5px; color: #55565B; background: #F7F5F0; border-radius: 10px; padding: 8px 10px; line-height: 1.45; }
 @media (max-width: 900px) { .sr-top { grid-template-columns: 1fr; } .sr-ads { grid-template-columns: 1fr; } }
+/* Encuesta: quién no la ha respondido y por qué */
+.enc-motivos { margin-top: 10px; border-top: 1px solid #F1EEE8; padding-top: 10px; }
+.enc-mot-t { font-size: 12.5px; color: #55565B; margin-bottom: 6px; }
+.enc-mot { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 4px 0; font-size: 13px; color: #1F1F1F; }
+.enc-mot span { font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 2px 9px; text-align: right; }
+@media (max-width: 640px) { .enc-mot { flex-direction: column; align-items: flex-start; gap: 3px; } }

@@ -1435,16 +1435,13 @@ window.entVerFicha = async (id) => {
 
     <div class="grid md:grid-cols-[1fr_auto] gap-5">
       <div>
-        <div class="sec-title">Cómo se hace</div>
-        ${e.descripcion
-          ? `<p class="text-sm text-slate-700 whitespace-pre-line">${escapeHtml(e.descripcion)}</p>`
-          : `<p class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-               ⚠ Este ejercicio no tiene descripción. El cliente lo verá sin instrucciones.
-               <button class="btn btn-ghost btn-sm ml-1" onclick="closeModal(); entEditarEjercicio('${e.id}')">Escribirla</button>
+        ${claves.length ? '' : `<p class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+               ⚠ Este ejercicio no tiene claves. El cliente no verá cómo hacerlo bien.
+               <button class="btn btn-ghost btn-sm ml-1" onclick="closeModal(); entEditarEjercicio('${e.id}')">Escribirlas</button>
              </p>`}
 
         ${claves.length ? `
-          <div class="sec-title mt-4">Claves técnicas</div>
+          <div class="sec-title">Claves técnicas</div>
           <ul class="text-sm text-slate-700 list-disc pl-5 space-y-1">
             ${claves.map(c => `<li>${escapeHtml(c)}</li>`).join('')}
           </ul>` : ''}
@@ -1563,8 +1560,9 @@ window.entEditarEjercicio = async (id) => {
     </div>
 
     <div class="sec-title">Lo que ve el cliente</div>
-    <div class="mb-2"><label>Descripción / cómo se hace</label>
-      <textarea id="ej-descripcion" rows="3" placeholder="Acuéstate en el banco, pies firmes…">${escapeHtml(e.descripcion || '')}</textarea></div>
+    <!-- La descripción ya no se muestra en la app (el cliente ve el video, las
+         claves y los errores): el campo queda escondido y lo que ya tenía se guarda igual. -->
+    <div class="mb-2" hidden data-ej-descripcion-oculta><textarea id="ej-descripcion" rows="3">${escapeHtml(e.descripcion || '')}</textarea></div>
     <div class="mb-2"><div class="flex items-center justify-between gap-2"><label>Cómo hacerlo bien (una por línea)</label>
       <button type="button" class="btn btn-secondary btn-sm" data-ej-sugerir onclick="entSugerirTecnica()">Sugerir con IA</button></div>
       <textarea id="ej-claves" rows="3" placeholder="Escápulas juntas y pecho arriba&#10;Pies firmes en el piso">${escapeHtml((e.claves_tecnicas || []).join('\n'))}</textarea></div>
@@ -2193,8 +2191,11 @@ function entCabConstructorHTML(r) {
   // Los que llegarían al cliente sin una sola línea de cómo se hacen. De la
   // galería importada de Trainerize son la mayoría, así que decir cuántos hay
   // y cuáles evita ir fila por fila buscando el triángulo amarillo.
+  // Lo que el cliente ve de cada ejercicio es el video, las claves y los
+  // errores (la descripción ya no se muestra en la app): se avisa de los que
+  // no tienen claves.
   const sinTexto = r.ejercicios
-    .filter(re => !String(re.ejercicios?.descripcion || '').trim())
+    .filter(re => !(re.ejercicios?.claves_tecnicas || []).length)
     .map(re => entNombres(re.ejercicios || {}).grande);
   return `
     <div class="card mb-4">
@@ -2206,7 +2207,7 @@ function entCabConstructorHTML(r) {
           ${entTiempoCabHTML(r)}
           ${sinTexto.length ? `
             <div class="text-xs text-amber-700 mt-1">
-              ⚠ ${sinTexto.length} sin descripción: el cliente los verá sin instrucciones
+              ⚠ ${sinTexto.length} sin claves: el cliente no verá cómo hacerlos bien
               (${sinTexto.slice(0, 3).map(n => escapeHtml(n)).join(', ')}${sinTexto.length > 3 ? '…' : ''})
             </div>` : ''}
         </div>
@@ -2532,10 +2533,10 @@ function entTagCiclosHTML(e) {
 
 function entFilaRutina(re, i, total, bloques) {
   const e = re.ejercicios || {};
-  // Un ejercicio sin descripción llega al cliente sin ninguna instrucción de
-  // cómo hacerlo. Se avisa AQUÍ, al meterlo en la rutina, porque es el único
-  // momento en que alguien lo está mirando con la intención de mandárselo.
-  const sinTexto = !String(e.descripcion || '').trim();
+  // Un ejercicio sin claves llega al cliente sin indicaciones de cómo hacerlo
+  // bien (la descripción ya no se muestra en la app). Se avisa AQUÍ, al
+  // meterlo en la rutina, porque es el momento en que alguien lo está mirando.
+  const sinTexto = !(e.claves_tecnicas || []).length;
   // La foto del video manda (es como uno reconoce el ejercicio de un vistazo);
   // el dibujo de músculos queda para los que todavía no tienen video.
   const foto = entMiniatura(e);
@@ -2567,8 +2568,8 @@ function entFilaRutina(re, i, total, bloques) {
             ${window.ccSiempreHTML ? ccSiempreHTML(re) : ''}
             ${sinTexto ? `
               <button class="ent-aviso" onclick="entEditarEjercicio('${e.id}')"
-                      title="El cliente lo verá sin ninguna instrucción de cómo hacerlo">
-                ⚠ Sin descripción · escribirla
+                      title="El cliente no verá las claves de cómo hacerlo bien">
+                ⚠ Sin claves · escribirlas
               </button>` : ''}
           </div>
         </div>

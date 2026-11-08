@@ -27,9 +27,38 @@ const encProm = (v) => { const x = v.filter(Number.isFinite); return x.length ? 
 const encNum = (v, d = 1) => (v == null ? '—' : Number(v).toLocaleString('es-CO', { minimumFractionDigits: d, maximumFractionDigits: d }));
 const encTipo = (x) => (x >= 9 ? 'pro' : x <= 6 ? 'det' : 'pas');
 
+// Por qué no la ha respondido cada uno (lo cuenta la app en app_uso, de las
+// últimas 8 semanas): le salió y tocó «Ahora no», le salió y no respondió,
+// sigue en la dirección vieja (ahí no sale), aún no cumple los 15 días desde
+// su primer uso o los 5 días de uso. Mismas reglas que api/training (encuesta).
+const ENC_DIAS = 15, ENC_MIN_USO = 5;
+const encNorm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/\s+/g, ' ');
+const encEntre = (a, b) => Math.round((Date.parse(b + 'T12:00:00Z') - Date.parse(String(a).slice(0, 10) + 'T12:00:00Z')) / 86400000);
+function encMotivo(c, filasUso, hoy) {
+  const nombres = [c.nombre, ...(c.nombres_alternos || [])].map(encNorm);
+  const suyas = (filasUso || []).filter(u => (c.mealtracker_id && (u.user_id === c.mealtracker_id || u.clave === c.mealtracker_id)) || nombres.includes(encNorm(u.name)))
+    .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
+  if (!suyas.length) return { k: 'nunca', orden: 5, tono: 'gr', txt: 'No ha abierto la app en 8 semanas' };
+  const sec = (u) => (u && u.secciones) || {};
+  const luego = suyas.filter(u => sec(u).encuesta === 'luego').pop();
+  if (luego) return { k: 'luego', orden: 0, tono: 'na', txt: `Le salió y tocó «Ahora no» (${fmt.fechaCorta(String(luego.fecha).slice(0, 10))})` };
+  const vista = suyas.filter(u => sec(u).encuesta === 'vista').pop();
+  if (vista) return { k: 'vista', orden: 1, tono: 'ro', txt: `Le salió y no respondió (${fmt.fechaCorta(String(vista.fecha).slice(0, 10))})` };
+  const dir = suyas.filter(u => sec(u).visual).map(u => sec(u).visual).pop() || null;
+  if (dir === 'vieja') return { k: 'vieja', orden: 2, tono: 'gr', txt: 'Sigue en la dirección vieja: ahí no le sale' };
+  const desde = encEntre(suyas[0].fecha, hoy);
+  const dias = new Set(suyas.map(u => String(u.fecha).slice(0, 10))).size;
+  if (desde < ENC_DIAS) return { k: 'dias', orden: 3, tono: 'gr', txt: `No le ha salido: lleva ${desde} de ${ENC_DIAS} días con la app` };
+  if (dias < ENC_MIN_USO) return { k: 'uso', orden: 4, tono: 'gr', txt: `Usó la app solo ${dias} día${dias === 1 ? '' : 's'}: le sale con ${ENC_MIN_USO}` };
+  return { k: 'toca', orden: 2.5, tono: 'az', txt: dir ? 'Ya le toca: le sale la próxima vez que abra la app' : 'Le toca: le sale al abrir la app (si está en la dirección nueva)' };
+}
+
 window.encPintarInicio = async (activos, clientes = []) => {
   const caja = document.getElementById('inicio-encuesta');
   if (!caja) return;
+  // Lo que cuenta la app (para el «por qué no la ha respondido»).
+  let uso = null;
+  try { const r = typeof mtApiGet === 'function' ? await mtApiGet('/api/coach-data?action=uso') : null; uso = r && r.ok && Array.isArray(r.uso) ? r.uso : null; } catch (e) { uso = null; }
   let filas;
   try {
     const { data, error } = await sb.from('encuesta_app').select('*').order('fecha', { ascending: true });
@@ -41,10 +70,10 @@ window.encPintarInicio = async (activos, clientes = []) => {
     return;
   }
   if (!caja.isConnected) return;
-  caja.innerHTML = encInicioHTML(filas, activos || [], fmt.hoy(), clientes || []);
+  caja.innerHTML = encInicioHTML(filas, activos || [], fmt.hoy(), clientes || [], uso);
 };
 
-function encInicioHTML(filas, activos, hoy, clientes = []) {
+function encInicioHTML(filas, activos, hoy, clientes = [], uso = null) {
   const porId = Object.fromEntries([...clientes, ...activos].map(c => [String(c.id), c]));
   const nombre = (id) => (porId[id] || {}).nombre || 'Cliente';
   const respondieron = new Set(filas.map(f => String(f.cliente_id)));
@@ -53,8 +82,17 @@ function encInicioHTML(filas, activos, hoy, clientes = []) {
   const N = encNps(filas.map(f => Number(f.recomienda)));
   const prom = (k) => encProm(filas.map(f => Number(f[k])));
   const resp = elegibles.length ? Math.round(elegibles.filter(c => respondieron.has(String(c.id))).length / elegibles.length * 100) : null;
+  // Quién no la ha respondido y por qué (primero los que la vieron y no respondieron).
+  const sinResp = activos.filter(c => !respondieron.has(String(c.id)));
+  const conMotivo = uso ? sinResp.map(c => ({ c, m: encMotivo(c, uso, hoy) })).sort((a, b) => a.m.orden - b.m.orden || String(a.c.nombre).localeCompare(String(b.c.nombre), 'es')) : [];
+  const TONO = { na: ['#FDEFD9', '#9A5B12'], ro: ['#FBE3DE', '#B2402B'], gr: ['#F1EEE8', '#5A5A5F'], az: ['#EAF1FB', '#1E4E8C'] };
+  const ignoran = conMotivo.filter(x => x.m.k === 'luego' || x.m.k === 'vista').length;
+  const lista = conMotivo.length ? `<div class="enc-motivos" data-enc-motivos>
+      <div class="enc-mot-t">Quién no la ha respondido y por qué${ignoran ? ` · <b>${ignoran} la vi${ignoran === 1 ? 'o' : 'eron'} y no respondi${ignoran === 1 ? 'ó' : 'eron'}</b>` : ''}</div>
+      ${conMotivo.map(({ c, m }) => `<div class="enc-mot" data-enc-motivo="${m.k}"><b>${escapeHtml(c.nombre)}</b><span style="background:${TONO[m.tono][0]};color:${TONO[m.tono][1]}">${escapeHtml(m.txt)}</span></div>`).join('')}
+    </div>` : '';
   const pie = `<div class="enc-pie">${elegibles.length ? `Respondieron ${elegibles.length - faltan.length} de ${elegibles.length} clientes activos desde su segunda semana (${resp}%).` : 'Todavía ningún cliente activo llegó a su segunda semana.'}
-    ${faltan.length ? ` Le falta a: ${faltan.slice(0, 8).map(c => escapeHtml(c.nombre)).join(', ')}${faltan.length > 8 ? ` y ${faltan.length - 8} más` : ''} (le sale al abrir la app).` : ''}</div>`;
+    ${!uso && faltan.length ? ` Le falta a: ${faltan.slice(0, 8).map(c => escapeHtml(c.nombre)).join(', ')}${faltan.length > 8 ? ` y ${faltan.length - 8} más` : ''}.` : ''}</div>${lista}`;
   if (!N) return `<div class="text-sm text-slate-500" data-enc-vacia>Todavía nadie la ha respondido. A cada cliente le sale una sola vez al abrir la app, desde su segunda semana.</div>${pie}`;
 
   const pct = (x) => Math.round(x / N.n * 100);

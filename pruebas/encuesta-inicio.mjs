@@ -102,6 +102,16 @@ async function abrir(ancho, alto, conComida = true) {
     if (u.includes('cdn.tailwindcss.com')) return ruta.fulfill({ contentType: 'text/javascript', body: `(function(){var s=document.createElement('style');s.textContent=${JSON.stringify(tailwind)};document.head.prepend(s);window.tailwind={config:{}};})();` });
     if (u.includes('supabase-js')) return ruta.fulfill({ contentType: 'text/javascript', body: falso });
     if (u.startsWith('https://mt.prueba/api/coach-auth')) return ruta.fulfill({ contentType: 'application/json', body: JSON.stringify({ token: 't', expiresAt: Date.now() + 3600e3 }) });
+    // Lo que cuenta la app de cada uno (para «por qué no la ha respondido»).
+    if (u.startsWith('https://mt.prueba/api/coach-data') && u.includes('action=uso')) {
+      const dia = (k) => mas(HOY, -k);
+      return ruta.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, uso: [
+        { clave: 'n:Diego Mora', name: 'Diego Mora', fecha: dia(30), secciones: { dash: 1, visual: 'nueva' } },
+        { clave: 'n:Diego Mora', name: 'Diego Mora', fecha: dia(2), secciones: { dash: 1, encuesta: 'luego', visual: 'nueva' } },
+        { clave: 'n:Eva Gil', name: 'Eva Gil', fecha: dia(4), secciones: { dash: 1, visual: 'nueva' } },
+        { clave: 'n:Eva Gil', name: 'Eva Gil', fecha: dia(1), secciones: { dash: 1, visual: 'nueva' } },
+      ] }) });
+    }
     if (u.startsWith('https://mt.prueba/api/coach-data')) return ruta.fulfill({ contentType: 'application/json', body: JSON.stringify(conComida ? comida() : { clients: [] }) });
     if (u.includes('fonts.googleapis.com') || u.includes('fonts.gstatic.com')) return ruta.continue().catch(() => ruta.abort());
     return ruta.fulfill({ status: 200, contentType: 'application/json', body: u.includes('/rest/v1/') ? '[]' : '{}' });
@@ -137,7 +147,9 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   ok(`${tag} · promedios: útil 4,7 · fácil 4,0 · agradable 4,3`, /4,7[\s\S]*4,0[\s\S]*4,3/.test(r.txt), r.txt);
   ok(`${tag} · barras de cada nota del 0 al 10 y la gráfica por mes`, r.hist === 11 && r.svg);
   ok(`${tag} · la respuesta de cada cliente (3 filas)`, r.filas === 3 && /Bruno Díaz/.test(await p.locator('[data-enc-tabla]').innerHTML()));
-  ok(`${tag} · cuántos faltan: Diego sí (ya pasó su 2ª semana), Eva no (es nueva)`, /Respondieron 3 de 4/.test(r.txt) && /Diego Mora/.test(r.txt) && !/Eva Gil/.test(r.txt), r.txt);
+  ok(`${tag} · cuántos faltan: respondieron 3 de 4 (Diego ya pasó su 2ª semana; Eva sale solo con su motivo, es nueva)`, /Respondieron 3 de 4/.test(r.txt) && /Diego Mora/.test(r.txt), r.txt);
+  ok(`${tag} · por qué no la ha respondido: Diego tocó «Ahora no»; Eva lleva 4 de 15 días`, (await p.locator('[data-enc-motivo="luego"]').innerText().catch(() => '')).includes('Diego Mora')
+    && /lleva 4 de 15 días/.test(await p.locator('[data-enc-motivo="dias"]').innerText().catch(() => '')), r.txt.slice(-400));
   if (tag === 'ancho') {
     await p.locator('[data-enc-tabla] summary').click();
     await p.locator('[data-inicio-encuesta]').screenshot({ path: path.join(CAPTURAS, 'inicio-encuesta.png') });
