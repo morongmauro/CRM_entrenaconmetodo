@@ -9379,46 +9379,48 @@ window.addEventListener('beforeunload', (e) => {
 });
 
 // ── Auto-actualización del CRM ──────────────────────────────────────────
-// El CRM es una SPA que el coach deja abierta días: sin esto, subir un
-// app.js nuevo NO se reflejaba hasta un refresh manual, y daba la impresión
-// de que el cambio "no quedó". Compara la firma (ETag/Last-Modified) de
-// /app.js contra el servidor al volver a la pestaña y cada 5 minutos, y si
-// cambió recarga — pero NUNCA con un modal abierto (no bota un formulario a
-// medio llenar; espera al siguiente momento seguro).
+// El CRM es una SPA que el coach deja abierta días: sin esto, una versión
+// nueva no se veía hasta recargar a mano. Pero recargar EN LA CARA (al volver
+// a la pestaña) es molesto: la página se pone gris y vuelve a cargar.
+// Ahora:
+//   · La firma son las versiones (?v=…) de los archivos que pide la página.
+//     Solo cambian cuando se publica algo de verdad (la ETag del servidor
+//     podía variar sin que cambiara nada y recargaba sin motivo).
+//   · Se revisa cada 5 minutos y al salir o volver a la pestaña; si hay
+//     versión nueva, la recarga se hace SOLO mientras la pestaña no se ve
+//     (estás en otra). Al volver, ya está la nueva, en la misma sección.
+//   · Nunca con una ventana abierta ni a mitad de una generación con IA.
 (() => {
   let firma = null;
+  let nueva = false;
   let recargado = false;
-  // La firma junta la de /app.js y la de la página (index.html): un cambio
-  // que solo toca otros archivos (toques.js, listado.js…) cambia la página
-  // (sube su ?v=) y también tiene que recargar las pestañas abiertas.
   const leerFirma = async () => {
     try {
-      const [r, pag] = await Promise.all(['/app.js', '/'].map(u => fetch(u, { method: 'HEAD', cache: 'no-store' }).catch(() => null)));
-      if (!r || !r.ok) return null;
-      const f = (x) => (x && x.ok ? (x.headers.get('etag') || x.headers.get('last-modified') || '') : '');
-      const firma = `${f(r)}|${f(pag)}`;
-      return firma === '|' ? null : firma;
+      const r = await fetch('/', { cache: 'no-store' });
+      if (!r.ok) return null;
+      const html = await r.text();
+      const v = (html.match(/[\w-]+\.(?:js|css)\?v=[\w.-]+/g) || []).sort().join('|');
+      return v || null;
     } catch (e) { return null; }
   };
   leerFirma().then(f => { firma = f; });
+  const sePuede = () => !(modal && !modal.classList.contains('hidden'))
+    && !(typeof hayTrabajoEnCurso === 'function' && hayTrabajoEnCurso());
+  const recargarSiNoSeVe = () => {
+    if (!nueva || recargado || document.visibilityState !== 'hidden' || !sePuede()) return;
+    recargado = true;
+    try { if (typeof recordarVista === 'function') recordarVista(); } catch (e) { /* nada */ }
+    location.reload();
+  };
   const chequear = async () => {
     if (recargado || !firma) return;
-    if (modal && !modal.classList.contains('hidden')) return; // formulario abierto: no molestar
-    // Ni encima de una generación en curso. Sin esto pasaba lo peor: subes un
-    // app.js nuevo, el coach le da a "Generar oportunidades", y a mitad de la
-    // respuesta el vigilante recarga la página. Se pierde el análisis, se paga
-    // igual, y en pantalla queda el estado vacío — como si nunca hubiera
-    // pasado nada. Un fallo invisible que parece "no funciona".
-    if (typeof hayTrabajoEnCurso === 'function' && hayTrabajoEnCurso()) return;
-    const f = await leerFirma();
-    if (f && f !== firma) {
-      recargado = true;
-      location.reload();
+    if (!nueva) {
+      const f = await leerFirma();
+      if (f && f !== firma) nueva = true;
     }
+    recargarSiNoSeVe();
   };
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') chequear();
-  });
+  document.addEventListener('visibilitychange', () => { chequear(); });
   setInterval(chequear, 5 * 60 * 1000);
 })();
 
