@@ -9388,11 +9388,16 @@ window.addEventListener('beforeunload', (e) => {
 (() => {
   let firma = null;
   let recargado = false;
+  // La firma junta la de /app.js y la de la página (index.html): un cambio
+  // que solo toca otros archivos (toques.js, listado.js…) cambia la página
+  // (sube su ?v=) y también tiene que recargar las pestañas abiertas.
   const leerFirma = async () => {
     try {
-      const r = await fetch('/app.js', { method: 'HEAD', cache: 'no-store' });
-      if (!r.ok) return null;
-      return r.headers.get('etag') || r.headers.get('last-modified') || null;
+      const [r, pag] = await Promise.all(['/app.js', '/'].map(u => fetch(u, { method: 'HEAD', cache: 'no-store' }).catch(() => null)));
+      if (!r || !r.ok) return null;
+      const f = (x) => (x && x.ok ? (x.headers.get('etag') || x.headers.get('last-modified') || '') : '');
+      const firma = `${f(r)}|${f(pag)}`;
+      return firma === '|' ? null : firma;
     } catch (e) { return null; }
   };
   leerFirma().then(f => { firma = f; });
