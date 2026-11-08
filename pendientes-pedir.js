@@ -38,8 +38,17 @@ async function ppCargar(clientes, vids) {
     leer(sb.from('pedidos_cliente').select('id, cliente_id, tipo, detalle, pedido_en, entregado_en, entregado_por').gte('pedido_en', desde)),
     leer(sb.from('fotos_progreso').select('cliente_id, fecha').gte('fecha', desde)),
     leer(sb.from('mediciones_corporales').select('cliente_id, fecha, peso').gte('fecha', desde)),
-    leer(sb.from('fases').select('id, cliente_id, fecha_inicio, semanas, estado, visible_cliente, orden')),
+    leer(sb.from('fases').select('id, cliente_id, nombre, fecha_inicio, semanas, estado, visible_cliente, orden')),
   ]);
+  // Lo que anota la app (app_uso): si ya le salió la ventana de la última
+  // semana del ciclo (secciones.aviso_ciclo = id del ciclo).
+  let uso = null;
+  try {
+    if (typeof mtApiGet === 'function' && typeof mtApiBase === 'function' && mtApiBase()) {
+      const r = await mtApiGet('/api/coach-data?action=uso');
+      uso = r && r.ok && Array.isArray(r.uso) ? r.uso : null;
+    }
+  } catch (e) { uso = null; }
   _pp.sinTabla = pedidos === null;
   // El ciclo vigente de cada uno, y sus recordatorios de peso de esta semana.
   const vigente = {};
@@ -55,7 +64,7 @@ async function ppCargar(clientes, vids) {
   eventos = eventos.filter(e => ids.some(id => String(id) === String(e.cliente_id)));
   let registros = [];
   if (eventos.length) registros = (await leer(sb.from('evento_registros').select('evento_id, cliente_id, fecha, estado').in('evento_id', eventos.map(e => e.id)).gte('fecha', evtSumarDias(hoy, -PP_VENTANA - 1)))) || [];
-  _pp.crudo = { pedidos: pedidos || [], fotos: fotos || [], meds: meds || [], vids: vids || [], vigente, eventos, registros };
+  _pp.crudo = { pedidos: pedidos || [], fotos: fotos || [], meds: meds || [], vids: vids || [], vigente, eventos, registros, uso, clientes };
   _pp.cache = new Map();
 }
 
@@ -191,6 +200,36 @@ function ppDe(clienteId) {
   });
   _pp.cache.set(k, items);
   return items;
+}
+
+// ── La columna «Ciclo»: qué semana va, cuánto le falta y el aviso de cambio ──
+// El aviso es la ventana que la app le muestra una vez, el primer día que
+// abre la app dentro de la última semana del ciclo.
+const ppNorm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+function ppCiclo(c) {
+  const R = _pp.crudo;
+  const f = R && R.vigente ? R.vigente[String(c.id)] || R.vigente[c.id] : null;
+  if (!f || !f.fecha_inicio) return '<span class="tq-cero">Sin ciclo vigente</span>';
+  const hoy = fmt.hoy(), ini = ppDia(f.fecha_inicio), n = Math.max(1, Number(f.semanas) || 1);
+  const fin = evtSumarDias(ini, n * 7 - 1), ultima = evtSumarDias(ini, (n - 1) * 7);
+  const sem = Math.min(n, Math.floor(tqEntre(ini, hoy) / 7) + 1);
+  const faltan = tqEntre(hoy, fin);
+  const diaSem = (x) => { const t = new Date(x + 'T12:00:00Z'); return `${TQ_DSEM[t.getUTCDay()]} ${t.getUTCDate()}`; };
+  const nombre = f.nombre ? escapeHtml(String(f.nombre)) : 'Ciclo';
+  if (faltan < 0) return `<span class="pp-l">${nombre}</span><div class="tq-sub" style="color:#B2402B;font-weight:700">Terminó hace ${-faltan} día${faltan === -1 ? '' : 's'} · sin ciclo nuevo</div>`;
+  const resto = faltan === 0 ? 'termina hoy' : `faltan ${faltan} día${faltan === 1 ? '' : 's'}`;
+  let aviso = '';
+  if (sem === n) {
+    // ¿Ya le salió? Por su cuenta de la app (o su nombre) y el id del ciclo.
+    const filas = (R.uso || []).filter(u => (c.mealtracker_id && (u.user_id === c.mealtracker_id || u.clave === c.mealtracker_id)) || ppNorm(u.name) === ppNorm(c.nombre));
+    const visto = filas.filter(u => u.secciones && u.secciones.aviso_ciclo === String(f.id)).map(u => ppDia(u.fecha)).sort()[0] || null;
+    aviso = R.uso == null ? '<div class="tq-sub">Aviso de cambio: sin dato de la app</div>'
+      : visto ? `<span class="pp-e" data-tq-aviso="visto" style="background:#E6F2E9;color:#2F7F45;display:inline-block;margin-top:4px">Ya vio el aviso de cambio · ${diaSem(visto)}</span>`
+      : `<span class="pp-e" data-tq-aviso="no" style="background:#FCEBDD;color:#B4541D;display:inline-block;margin-top:4px">Aún no ve el aviso de cambio</span>`;
+  } else {
+    aviso = `<div class="tq-sub" data-tq-aviso="pronto">El aviso de cambio le sale el ${diaSem(ultima)}</div>`;
+  }
+  return `<span class="pp-l" data-tq-semana-ciclo="${sem}">Sem ${sem} de ${n}</span><div class="tq-sub">${nombre} · ${resto}</div>${aviso}`;
 }
 
 const PP_TONO = { aldia: ['#E6F2E9', '#2F7F45', 'Al día'], toca: ['#FCEBDD', '#B4541D', 'Toca pedir'], recordar: ['#FDECEA', '#B4321F', 'Recordar'], pedido: ['#EFEDE7', '#55565B', 'Pedido'], entregado: ['#E6F2E9', '#2F7F45', 'Entregado'] };

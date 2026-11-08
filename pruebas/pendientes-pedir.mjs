@@ -103,6 +103,9 @@ function tablas() {
   T.fases = [
     { id: 'fa2', cliente_id: 'c2', nombre: 'Ciclo 2', fecha_inicio: mas(LUNES, -14), semanas: 5, estado: 'activa', visible_cliente: true, orden: 2 },
     { id: 'fa4', cliente_id: 'c4', nombre: 'Ciclo 4', fecha_inicio: mas(LUNES, -56), semanas: 12, estado: 'activa', visible_cliente: true, orden: 1 },
+    // Ana y Sofía, en la última semana de su ciclo (Ana ya vio el aviso; Sofía no).
+    { id: 'fa0', cliente_id: 'c0', nombre: 'Ciclo 6', fecha_inicio: mas(LUNES, -28), semanas: 5, estado: 'activa', visible_cliente: true, orden: 1 },
+    { id: 'fa5', cliente_id: 'c5', nombre: 'Ciclo 3', fecha_inicio: mas(LUNES, -28), semanas: 5, estado: 'activa', visible_cliente: true, orden: 1 },
   ];
   T.eventos = [
     ev('e0f', 'c0', 'fotos', { fecha: mas(HOY, -12) }),
@@ -130,6 +133,7 @@ function tablas() {
   return T;
 }
 function app(accion) {
+  if (accion === 'uso') return { ok: true, uso: [{ clave: '11111111-1111-1111-1111-111111111111', user_id: '11111111-1111-1111-1111-111111111111', name: 'Ana Pérez', fecha: LUNES, secciones: { dash: 1, aviso_ciclo: 'fa0' } }] };
   const dias = (n, salto = 0) => Object.fromEntries(Array.from({ length: n }, (_, k) => [mas(HOY, -k - salto), 0.9]));
   const rd = (n) => Object.fromEntries(Array.from({ length: n }, (_, k) => [mas(HOY, -k), { kcal: 1900, protein: 130 }]));
   if (accion === 'list') return { clients: [
@@ -207,6 +211,16 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   ok('Marta: peso del lunes registrado en la app → entregado', x && x.estado === 'entregado' && /llegó por la app/.test(x.texto), JSON.stringify(x));
   ok('Marta: fotos de esta semana → entregado', (await item(p, 'c4', 'fotos'))?.estado === 'entregado');
   ok('Sofía: nada pendiente (su video, al día)', (await celda(p, 'c5').locator('[data-pp-estado="toca"], [data-pp-estado="pedido"], [data-pp-estado="recordar"]').count()) === 0 && /Al día/.test(await celda(p, 'c5').innerText()), await celda(p, 'c5').innerText());
+  // La columna «Ciclo».
+  const ciclo = async (id) => (await p.locator(`tr[data-tq-cliente="${id}"] [data-tq="ciclo"]`).innerText()).replace(/\s+/g, ' ');
+  ok('Ciclo: la tabla trae la columna', /Ciclo/.test(await p.locator('[data-tq-tabla] thead').innerText()));
+  let ci = await ciclo('c2');
+  ok(`Ciclo · Lucía: semana 3 de 5 y los días que faltan (${ci})`, /Sem 3 de 5/.test(ci) && /Ciclo 2/.test(ci) && /faltan \d+ días/.test(ci) && /El aviso de cambio le sale el/.test(ci), ci);
+  ci = await ciclo('c0');
+  ok(`Ciclo · Ana: última semana y ya vio el aviso de cambio (${ci})`, /Sem 5 de 5/.test(ci) && /Ya vio el aviso de cambio/.test(ci), ci);
+  ci = await ciclo('c5');
+  ok(`Ciclo · Sofía: última semana y aún no ve el aviso (${ci})`, /Sem 5 de 5/.test(ci) && /Aún no ve el aviso de cambio/.test(ci), ci);
+  ok('Ciclo · Carlos: sin ciclo vigente', /Sin ciclo vigente/.test(await ciclo('c1')));
   const tarjeta = (await p.locator('[data-tq-filtro="pendientes"]').innerText()).replace(/\s+/g, ' ');
   ok(`la tarjeta de arriba (${tarjeta})`, /^\s*5 pendientes por pedir 2 pedidos sin llegar · 1 por recordar/.test(tarjeta), tarjeta);
   if (process.env.FOTO) await p.screenshot({ path: path.join(CAPTURAS, 'toques-pendientes.png') });
