@@ -133,7 +133,7 @@ function entPintarVideoRapido() {
   // YouTube no deja ver este video fuera de YouTube (entreno-youtube.js).
   const ytMal = actual && window.entYtEtiqueta ? entYtEtiqueta(actual) : '';
   const avisoYt = ytMal ? `<div class="rounded-lg text-sm p-2.5 mb-2" style="background:rgba(238,132,52,.1);color:#8a4a12" data-yt-aviso>
-      ${ytMal} <b>No se reproduce en la app:</b> ${escapeHtml(entYtMotivo(entYtEstadoRef(actual).codigo))}. Elige otro abajo o pega tu link.</div>` : '';
+      ${ytMal} <b>No se reproduce en la app:</b> ${escapeHtml(entYtMotivo(entYtEstadoRef(actual).codigo))}. Elige otro abajo o pega tu link.${(() => { const l = typeof vrUsoDe === 'function' ? vrUsoDe(id) : undefined; return l === undefined ? '' : `<div class="mt-1" data-vr-uso-ficha="${l.length}" style="font-weight:700">${l.length ? `Lo usa${l.length === 1 ? '' : 'n'} ahora: ${l.slice(0, 4).map(escapeHtml).join(', ')}${l.length > 4 ? ` y ${l.length - 4} más` : ''}` : 'Ningún cliente lo usa ahora'}</div>`; })()}</div>` : '';
   const bloqueActual = actual
     ? avisoYt + entMiniaturaVideo(actual, e.video_inicio_seg, 'Ahora')
     : e.video_fuente === 'archivo'

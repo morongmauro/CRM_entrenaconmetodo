@@ -740,4 +740,9 @@ body.modo-movil [data-seg-mesa-btn] { display: none !important; }
 .vr-t { font-size: 14px; font-weight: 750; color: #1F1F1F; }
 .vr-d { font-size: 12.5px; color: #6B6B70; margin-top: 2px; line-height: 1.4; }
 .vr-aviso .btn { flex-shrink: 0; }
+.vr-lista { margin-top: 6px; display: grid; gap: 3px; }
+.vr-f { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 12.5px; }
+.vr-f b { font-weight: 700; color: #1F1F1F; }
+.vr-usa { color: #B4541D; font-weight: 700; }
+.vr-nadie { color: #8A8A90; }
 @media (max-width: 520px) { .vr-aviso { flex-direction: column; align-items: stretch; } .vr-aviso .btn { justify-content: center; text-align: center; } }

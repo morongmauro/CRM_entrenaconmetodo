@@ -215,6 +215,7 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   x = await item(p, 'c4', 'peso');
   ok('Marta: peso del lunes registrado en la app → entregado', x && x.estado === 'entregado' && /llegó por la app/.test(x.texto), JSON.stringify(x));
   ok('Marta: fotos de esta semana → entregado', (await item(p, 'c4', 'fotos'))?.estado === 'entregado');
+  ok('lo entregado trae «Ver fotos ›» / «Ver registro ›»', await celda(p, 'c4').locator('[data-pp-ver-carga="fotos"]').count() === 1 && await celda(p, 'c0').locator('[data-pp-ver-carga="medidas"]').count() === 1);
   x = await item(p, 'c4', 'video');
   ok('Marta: el video de Hip thrust (ya no está en su ciclo) queda en pausa, no como pendiente', x && x.estado === 'aldia' && /1 en pausa \(fuera de su ciclo\)/.test(x.texto), JSON.stringify(x));
   ok('Sofía: nada pendiente (su video, al día)', (await celda(p, 'c5').locator('[data-pp-estado="toca"], [data-pp-estado="pedido"], [data-pp-estado="recordar"]').count()) === 0 && /Al día/.test(await celda(p, 'c5').innerText()), await celda(p, 'c5').innerText());
@@ -296,6 +297,14 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   await p.waitForTimeout(800);
   const quedan = await p.locator('tr[data-tq-cliente]').evaluateAll(els => els.map(e => e.dataset.tqCliente).sort());
   ok(`el filtro deja a los que tienen algo pendiente (${quedan})`, !quedan.includes('c5') && quedan.includes('c0') && quedan.includes('c2'), JSON.stringify(quedan));
+  // «Ver fotos ›» lleva a Composición → Fotos de Marta.
+  await p.locator('[data-tq-filtro="todos"]').first().click(); await p.waitForTimeout(800);
+  await celda(p, 'c4').locator('[data-pp-ver-carga="fotos"]').click();
+  await p.waitForTimeout(1800);
+  ok('«Ver fotos ›» abre Composición en Fotos, del cliente', await p.evaluate(() => _currentView === 'composicion' && _comp.tab === 'fotos' && String(_comp.clienteId) === 'c4'));
+  await p.evaluate(() => navigate('toques'));
+  await p.locator('[data-tq-tabla]').waitFor({ timeout: 15000 });
+  await p.waitForTimeout(600);
   // Semana pasada: la columna no aplica.
   await p.locator('[data-tq-filtro="todos"]').first().click();
   await p.locator('[data-tq-semana="1"]').click();

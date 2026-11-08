@@ -37,7 +37,10 @@ function tablas(estados) {
     clientes: [cliente], seguimientos: [], pagos: [], pendientes: [], mediciones_corporales: [], fotos_progreso: [],
     settings: [{ user_id: 'coach-1', usd_cop_rate: 4000, nombre_coach: 'Mauro' }],
     metas_historial: [], nutricion_insights: [], ia_uso: [], push_pago_log: [],
-    fases: [], rutinas: [], rutina_ejercicios: [], rutina_bloques: [], sesiones: [], series_log: [], eventos: [], evento_registros: [], actividades: [], notas_entreno: [],
+    // Ana tiene Press banca (e1) en su ciclo vigente; nadie tiene Remo (e2).
+    fases: [{ id: 'f1', cliente_id: 'c0', nombre: 'Ciclo 1', fecha_inicio: '2026-01-05', semanas: 200, estado: 'activa', visible_cliente: true, orden: 1 }],
+    rutinas: [{ id: 'r1', fase_id: 'f1', cliente_id: 'c0', nombre: 'Push', archivada: false }],
+    rutina_ejercicios: [{ id: 're1', rutina_id: 'r1', ejercicio_id: 'e1', orden: 1 }], rutina_bloques: [], sesiones: [], series_log: [], eventos: [], evento_registros: [], actividades: [], notas_entreno: [],
     comentarios_coach: [], videos_tecnica: [], cambios_ejercicio: [], rutina_movimientos: [], rutina_extras: [], rutina_dias_quitados: [],
     comunidad_posts: [], comunidad_reacciones: [], comunidad_comentarios: [], comunidad_vistas: [], musculos: [],
     ejercicios: [ej('e1', 'Press banca', 'Bench Press', 'aaa111'), ej('e2', 'Remo con barra', 'Barbell Row', 'bbb222'), ej('e3', 'Sentadilla', 'Back Squat', 'ccc333'), ej('e4', 'Curl', 'Biceps Curl', 'ddd444')],
@@ -82,6 +85,7 @@ const FOTO = process.env.FOTO || '';
   const t = await p.locator('[data-vr-aviso]').innerText().catch(() => '');
   ok('la galería avisa arriba cuántos no se ven en la app', /2 videos de YouTube no se ven en la app/.test(t), t);
   ok('…con los ejercicios (los que encontró la revisión semanal y el botón)', /Bench Press/.test(t) && /Barbell Row/.test(t) && !/Back Squat/.test(t), t);
+  ok('…y si lo usan clientes ahora: Press banca, Ana; Remo, nadie', /1 en uso por clientes ahora/.test(t) && await p.locator('[data-vr-ej="e1"]').getAttribute('data-vr-uso') === '1' && /Ana Pérez/.test(await p.locator('[data-vr-ej="e1"]').innerText()) && /Ningún cliente lo usa ahora/.test(await p.locator('[data-vr-ej="e2"]').innerText()), t);
   ok('va arriba de la galería', await p.evaluate(() => { const a = document.getElementById('seg-videos-rotos'), c = document.getElementById('ent-body'); return !!a && !!c && !!(a.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING); }));
   await p.evaluate(() => { try { localStorage.setItem('crm:segModo', 'semana'); } catch (e) {} navigate('seguimiento'); });
   await p.locator('#seg-content').waitFor({ timeout: 15000 }); await p.waitForTimeout(1500);

@@ -283,6 +283,8 @@ function ppCelda(f) {
     else if (x.estado === 'recordar') btn = b('Recordar', true, `data-pp-recordar="${x.tipo}"`, `ppRecordar('${id}','${x.tipo}')`);
     if ((x.estado === 'pedido' || x.estado === 'recordar') && !(x.ejercicios && x.ejercicios.length)) btn += b('Ya lo entregó', false, `data-pp-entrego="${x.tipo}"`, `ppEntrego('${id}','${x.tipo}')`);
     if (x.todos) btn = b('Pedir nuevos', true, 'data-pp-nuevos="video"', `ppPedir('${id}','video')`);
+    // Lo que ya entregó (fotos, peso, medidas): ir a verlo en su Composición.
+    if (x.estado === 'entregado' && x.tipo !== 'video') btn = b(x.tipo === 'fotos' ? 'Ver fotos ›' : 'Ver registro ›', false, `data-pp-ver-carga="${x.tipo}"`, `ppVerCarga('${id}','${x.tipo}')`);
     // Los videos pedidos, uno por ejercicio, cada uno con su «Ya lo entregó».
     const ejs = (x.ejercicios || []).map(v => `<div class="pp-ej" data-pp-ej="${escapeHtml(v.clave)}"><span>${escapeHtml(v.nombre)}<i>pedido ${v.dias === 0 ? 'hoy' : v.dias === 1 ? 'ayer' : `hace ${v.dias} días`}</i></span>${b('Ya lo entregó', false, `data-pp-entrego-ej="${escapeHtml(v.clave)}"`, `ppEntrego('${id}','video','${encodeURIComponent(v.clave)}')`)}</div>`).join('');
     return `<div class="pp-it" data-pp="${x.tipo}" data-pp-estado="${x.estado}"><div class="pp-h"><b>${PP_NOMBRE[x.tipo]}</b><span class="pp-e" style="background:${bg};color:${col}">${x.todos ? 'Todos enviados' : t}</span></div><div class="pp-d">${x.detalle}</div>${ejs ? `<div class="pp-ejs">${ejs}</div>` : ''}${btn ? `<div class="pp-bs">${btn}</div>` : ''}</div>`;
@@ -425,6 +427,14 @@ async function ppRefrescarVideos(id) {
   if (_currentView === 'toques' && typeof rerenderView === 'function') await rerenderView();
   if (document.querySelector(`[data-pp-videos="${id}"]`)) await ppVideos(id);
 }
+// Ir a lo último que cargó: sus fotos o su peso y medidas, en Composición.
+window.ppVerCarga = async (id, tipo) => {
+  if (typeof compCargar !== 'function' || typeof _comp === 'undefined') return;
+  await navigate('composicion');
+  _comp.vistaEquipo = false;
+  _comp.tab = tipo === 'fotos' ? 'fotos' : 'corporal';
+  await compCargar(id);
+};
 window.ppQuitarVideo = async (id, filaId, nombreEnc) => {
   const nombre = decodeURIComponent(nombreEnc || '') || 'este video';
   if (!confirm(`¿Quitar el pedido de ${nombre}? Es para cuando te equivocaste: deja de pedírsele en su app. Lo que antes le pediste de ese ejercicio se queda.`)) return;
