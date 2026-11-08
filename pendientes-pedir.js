@@ -130,6 +130,13 @@ function ppDe(clienteId) {
     const nombres = porLlegar.map(v => v.nombre);
     const base = { tipo: 'video', video: true, ejercicios: porLlegar.map(v => ({ ...v, dias: hace(v.pedido) })), ejercicio: nombres.join(', ') };
     const cuantos = porLlegar.length > 1 ? `${porLlegar.length} videos` : '';
+    // El resumen de la celda: de esta tanda (desde el pedido más viejo que
+    // falta), cuántos entregó y cuál falta.
+    const ronda = porLlegar.length ? Object.values(ultV).filter(x => ppDia(x.pedido_en) >= porLlegar[0].pedido).length : 0;
+    const entrego = Math.max(0, ronda - porLlegar.length);
+    base.resumen = porLlegar.length
+      ? { linea: entrego ? `Entregó ${entrego} de ${ronda}` : `Pedí ${ronda}`, sub: `falta ${porLlegar[0].nombre}${porLlegar.length > 1 ? ` y ${porLlegar.length - 1} más` : ''} · ${recordado ? 'se lo recordaste' : 'pedido'} ${cuando(desde)}` }
+      : { linea: 'Pedí videos', sub: `${recordado ? 'se lo recordaste' : 'pedido'} ${cuando(desde)}` };
     if (dias >= PP_ESPERA) items.push({ ...base, estado: 'recordar', detalle: `${cuantos ? `${cuantos} · ` : ''}${recordado ? 'se lo recordaste' : 'pedido'} hace ${dias} días y no ha llegado` });
     else items.push({ ...base, estado: 'pedido', detalle: `${cuantos ? `${cuantos} · ` : ''}${recordado ? 'se lo recordaste' : 'pedido'} ${cuando(desde)}` });
   } else {
@@ -139,10 +146,11 @@ function ppDe(clienteId) {
     const inicio = ciclo ? ppDia(ciclo.fecha_inicio) : null;
     const ultAlgo = ppMax([...vids.map(x => ppDia(x.pedido_en)), manV, ...entregasEj]);
     const fin = ppMax([manSemana, revSemana]);
-    if (fin) items.push({ tipo: 'video', estado: 'entregado', todos: true, detalle: `Todos enviados · ${diaSem(fin)}. Ya puedes pedir nuevos` });
-    else if (inicio && (!ultAlgo || ultAlgo < inicio)) items.push({ tipo: 'video', estado: 'toca', detalle: `Ciclo nuevo desde el ${fmt.fechaCorta(inicio)}, sin video` });
-    else if (!ultAlgo) items.push({ tipo: 'video', estado: 'toca', detalle: 'Nunca ha mandado video' });
-    else if (hace(ultAlgo) >= PP_DIAS.video) items.push({ tipo: 'video', estado: 'toca', detalle: `Último video hace ${Math.floor(hace(ultAlgo) / 7)} semanas` });
+    if (fin) items.push({ tipo: 'video', estado: 'entregado', todos: true, detalle: `Todos enviados · ${diaSem(fin)}. Ya puedes pedir nuevos`, resumen: { linea: 'Todos entregados', sub: `${diaSem(fin)} · ya puedes pedir nuevos` } });
+    else if (inicio && (!ultAlgo || ultAlgo < inicio)) items.push({ tipo: 'video', estado: 'toca', detalle: `Ciclo nuevo desde el ${fmt.fechaCorta(inicio)}, sin video`, resumen: { linea: 'No le has pedido', sub: `ciclo nuevo desde el ${fmt.fechaCorta(inicio)}` } });
+    else if (!ultAlgo) items.push({ tipo: 'video', estado: 'toca', detalle: 'Nunca ha mandado video', resumen: { linea: 'No le has pedido', sub: 'nunca ha mandado video' } });
+    else if (hace(ultAlgo) >= PP_DIAS.video) items.push({ tipo: 'video', estado: 'toca', detalle: `Último video hace ${Math.floor(hace(ultAlgo) / 7)} semanas`, resumen: { linea: 'Sin videos recientes', sub: `el último hace ${Math.floor(hace(ultAlgo) / 7)} semanas` } });
+    else if (ultAlgo) items.push({ tipo: 'video', estado: 'aldia', detalle: 'Al día', resumen: { linea: 'Al día', sub: `el último ${cuando(ultAlgo)}` } });
   }
   // Fotos, peso y medidas: según sus recordatorios de la app.
   const evsC = R.eventos.filter(e => String(e.cliente_id) === k);
@@ -185,7 +193,7 @@ function ppDe(clienteId) {
   return items;
 }
 
-const PP_TONO = { toca: ['#FCEBDD', '#B4541D', 'Toca pedir'], recordar: ['#FDECEA', '#B4321F', 'Recordar'], pedido: ['#EFEDE7', '#55565B', 'Pedido'], entregado: ['#E6F2E9', '#2F7F45', 'Entregado'] };
+const PP_TONO = { aldia: ['#E6F2E9', '#2F7F45', 'Al día'], toca: ['#FCEBDD', '#B4541D', 'Toca pedir'], recordar: ['#FDECEA', '#B4321F', 'Recordar'], pedido: ['#EFEDE7', '#55565B', 'Pedido'], entregado: ['#E6F2E9', '#2F7F45', 'Entregado'] };
 function ppCelda(f) {
   if (f.estado === 'pausa') return '<span class="tq-cero">—</span>';
   const items = ppDe(f.c.id);
@@ -194,6 +202,11 @@ function ppCelda(f) {
   return items.map(x => {
     const [bg, col, t] = PP_TONO[x.estado];
     const b = (txt, oscuro, attr, fn) => `<button type="button" class="pp-b${oscuro ? ' o' : ''}" ${attr} onclick="${fn}">${txt}</button>`;
+    // El video, en la fila, solo con su resumen; el detalle (cada video, su
+    // vista previa y su estado) se abre con «Ver videos».
+    if (x.tipo === 'video' && x.resumen) {
+      return `<div class="pp-it pp-it-v" data-pp="video" data-pp-estado="${x.estado}" role="button" tabindex="0" onclick="ppVideos('${id}')"><div class="pp-h"><b>Video</b><span class="pp-e" style="background:${bg};color:${col}">${x.todos ? 'Todos enviados' : t}</span></div><div class="pp-d"><b class="pp-l">${escapeHtml(x.resumen.linea)}</b>${x.resumen.sub ? ` · ${escapeHtml(x.resumen.sub)}` : ''}</div><div class="pp-bs"><button type="button" class="pp-b" data-pp-ver>Ver videos ›</button></div></div>`;
+    }
     let btn = '';
     if (x.estado === 'toca') btn = b('Pedir', true, `data-pp-pedir="${x.tipo}"`, `ppPedir('${id}','${x.tipo}')`) + b('Ya lo pedí', false, `data-pp-yapedi="${x.tipo}"`, `ppYaPedi('${id}','${x.tipo}')`);
     else if (x.estado === 'recordar') btn = b('Recordar', true, `data-pp-recordar="${x.tipo}"`, `ppRecordar('${id}','${x.tipo}')`);
@@ -247,7 +260,119 @@ window.ppRecordar = async (id, tipo) => {
   const ej = it && it.ejercicio ? ` de ${it.ejercicio}` : '';
   const msj = `Hola ${nombre}, ¿cómo vas? Te recuerdo ${n > 1 ? 'los videos' : 'el video'}${ej} que te pedí. Cuando puedas, ${n > 1 ? 'súbelos' : 'súbelo'} en la app (o me ${n > 1 ? 'los' : 'lo'} mandas por acá) y te digo cómo vas.`;
   window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msj)}`, '_blank', 'noopener');
-  if (await ppGuardar({ cliente_id: id, tipo, detalle: 'recordatorio', pedido_en: new Date().toISOString() })) ppRepintar();
+  if (await ppGuardar({ cliente_id: id, tipo, detalle: 'recordatorio', pedido_en: new Date().toISOString() })) await ppRefrescarVideos(id);
+};
+// ── «Ver videos»: el detalle de los videos de un cliente ─────────────────
+// Lo que le pediste (cada video con su vista previa, su estado y marcar o
+// desmarcar «Ya lo entregó») y los ejercicios de su ciclo que no le has
+// pedido, para marcar y pedirlos.
+const PPV_ESTADO = {
+  falta: ['#EFEDE7', '#55565B'], tarde: ['#FDECEA', '#B4321F'], entregado: ['#E6F2E9', '#2F7F45'],
+  recibido: ['#EAF1FB', '#1E4E8C'], bien: ['#E6F2E9', '#2F7F45'], mejorar: ['#FCEBDD', '#B4541D'], mal: ['#FDECEA', '#B4321F'],
+};
+window.ppVideos = async (id) => {
+  const hoy = fmt.hoy();
+  const dias = (f) => tqEntre(ppDia(f), hoy);
+  const hace = (f) => { const d = dias(f); return d === 0 ? 'hoy' : d === 1 ? 'ayer' : `hace ${d} días`; };
+  const c = (_tq.datos && (_tq.datos.filas.find(x => String(x.c.id) === String(id)) || {}).c) || await db.clientes.get(id);
+  const [vids] = await Promise.all([
+    typeof vtDb !== 'undefined' ? vtDb.lista(id) : Promise.resolve([]),
+    typeof entDb !== 'undefined' ? entDb.ejercicios().catch(() => []) : null,
+  ]);
+  const filas = vids || [];
+  const clave = (x) => x.ejercicio_id || `n:${String(x.ejercicio_nombre || '').toLowerCase()}`;
+  const ult = {};
+  filas.forEach(x => { const k = clave(x); const u = ult[k]; if (!u || String(x.pedido_en) > String(u.pedido_en) || (x.pedido_en === u.pedido_en && String(x.created_at) > String(u.created_at))) ult[k] = x; });
+  const peds = ((_pp.crudo && _pp.crudo.pedidos) || []).filter(p => String(p.cliente_id) === String(id) && p.tipo === 'video' && String(p.detalle || '').startsWith('ej:'));
+  const marcado = (k, pedido) => peds.filter(p => p.detalle === `ej:${k}` && p.entregado_en && ppDia(p.entregado_en) >= ppDia(pedido)).sort((a, b) => String(b.entregado_en).localeCompare(String(a.entregado_en)))[0] || null;
+  // Lo que le pediste: lo que falta (de cualquier fecha) y lo de los últimos 60 días.
+  const pedidos = Object.entries(ult).map(([k, x]) => ({ k, x, m: x.estado === 'pedido' ? marcado(k, x.pedido_en) : null }))
+    .filter(o => o.x.estado === 'pedido' || o.x.estado === 'recibido' || dias(o.x.pedido_en) <= 60)
+    .sort((a, b) => {
+      const peso = (o) => (o.x.estado === 'pedido' && !o.m ? 0 : o.x.estado === 'recibido' ? 1 : 2);
+      return peso(a) - peso(b) || String(b.x.pedido_en).localeCompare(String(a.x.pedido_en));
+    });
+  const faltan = pedidos.filter(o => o.x.estado === 'pedido' && !o.m);
+  const entregados = pedidos.filter(o => o.m || o.x.estado !== 'pedido');
+  const prev = (ejId, nombre) => {
+    const h = ejId && typeof entMiniPreviewHTML === 'function' ? entMiniPreviewHTML({ id: ejId }) : '';
+    return `<div class="ppv-prev">${h || 'Sin video'}</div>`;
+  };
+  const chip = (t, k) => `<span class="ppv-e" style="background:${PPV_ESTADO[k][0]};color:${PPV_ESTADO[k][1]}">${t}</span>`;
+  const b = (t, osc, attr, fn) => `<button type="button" class="pp-b${osc ? ' o' : ''}" ${attr} onclick="${fn}">${t}</button>`;
+  const filaPedido = (o) => {
+    const { k, x, m } = o;
+    let est, btn = '';
+    if (x.estado === 'pedido' && m) { est = chip(`Entregado · marcado por ti ${hace(m.entregado_en)}`, 'entregado'); btn = b('Desmarcar', false, `data-ppv-desmarcar="${escapeHtml(k)}"`, `ppDesmarcar('${id}','${encodeURIComponent(k)}')`); }
+    else if (x.estado === 'pedido') { est = chip(`Por llegar · ${hace(x.pedido_en)}`, dias(x.pedido_en) >= PP_ESPERA ? 'tarde' : 'falta'); btn = b('Ya lo entregó', false, `data-ppv-entrego="${escapeHtml(k)}"`, `ppEntrego('${id}','video','${encodeURIComponent(k)}')`); }
+    else if (x.estado === 'recibido') { est = chip('Llegó por la app · falta revisarlo', 'recibido'); btn = b('Revisar', true, 'data-ppv-revisar', `closeModal();vtAbrir('${id}')`); }
+    else { const t = (typeof VT_ESTADO !== 'undefined' && VT_ESTADO[x.estado] ? VT_ESTADO[x.estado].txt : x.estado); est = chip(`Revisado · ${t}`, PPV_ESTADO[x.estado] ? x.estado : 'bien'); }
+    return `<div class="ppv-f" data-ppv-fila="${escapeHtml(k)}" data-ppv-estado="${x.estado === 'pedido' ? (m ? 'entregado' : 'falta') : x.estado}">${prev(x.ejercicio_id, x.ejercicio_nombre)}
+      <div style="flex:1;min-width:0"><div class="ppv-n">${escapeHtml(x.ejercicio_nombre || 'Video')}</div><div class="ppv-s">Pedido el ${fmt.fechaCorta(ppDia(x.pedido_en))} · ${hace(x.pedido_en)}</div>${est}</div>
+      <div class="ppv-b">${btn}</div></div>`;
+  };
+  // De su ciclo, sin pedir (lo que no está esperando ni por revisar).
+  let ciclo = [];
+  try {
+    if (typeof entDb !== 'undefined') {
+      const fases = await entDb.fases(id);
+      const fase = typeof entCicloVigente === 'function' ? entCicloVigente(fases) : null;
+      const rutinas = fase ? await entDb.rutinasDeFase(fase.id) : [];
+      const porRutina = rutinas.length ? await entDb.ejerciciosDeRutinas(rutinas.map(r => r.id)) : {};
+      const vistos = new Set();
+      rutinas.forEach(r => (porRutina[r.id] || []).forEach(re => {
+        if (!re.ejercicios || vistos.has(re.ejercicio_id) || ['calentamiento', 'estiramiento_pasivo', 'cardio'].includes(re.ejercicios.tipo)) return;
+        vistos.add(re.ejercicio_id);
+        const u = ult[re.ejercicio_id];
+        if (u && (u.estado === 'pedido' || u.estado === 'recibido')) return;
+        ciclo.push({ id: re.ejercicio_id, nombre: typeof entNombres === 'function' ? entNombres(re.ejercicios).grande : (re.ejercicios.nombre || 'Ejercicio'), u });
+      }));
+    }
+  } catch (e) { ciclo = []; }
+  const filaCiclo = (e) => `<label class="ppv-f" data-ppv-ciclo="${e.id}" style="cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400">
+      <input type="checkbox" class="ppv-chk" value="${e.id}" data-nombre="${escapeHtml(e.nombre)}" style="width:18px;height:18px;flex:none">${prev(e.id, e.nombre)}
+      <div style="flex:1;min-width:0"><div class="ppv-n">${escapeHtml(e.nombre)}</div><div class="ppv-s">${e.u ? `Último video: <b>${escapeHtml(typeof VT_ESTADO !== 'undefined' && VT_ESTADO[e.u.estado] ? VT_ESTADO[e.u.estado].txt : e.u.estado)}</b> · ${hace(e.u.pedido_en)}` : 'Nunca le pediste video'}</div></div></label>`;
+  const resumen = pedidos.length ? `${pedidos.length} pedido${pedidos.length === 1 ? '' : 's'} · <b style="color:#2F7F45">${entregados.length} entregado${entregados.length === 1 ? '' : 's'}</b>${faltan.length ? ` · <b style="color:#B4321F">${faltan.length} falta${faltan.length === 1 ? '' : 'n'}</b>` : ' · <b style="color:#2F7F45">todos enviados</b>'}` : 'Todavía no le has pedido videos.';
+  openModal(modalShell(`Videos · ${escapeHtml((c && c.nombre) || '')}`, `<div data-pp-videos="${id}">
+      <div class="ppv-res">${resumen}</div>
+      ${pedidos.length ? `<div class="ppv-t">LO QUE LE PEDISTE</div>${pedidos.map(filaPedido).join('')}` : ''}
+      ${ciclo.length ? `<div class="ppv-t">DE SU CICLO, SIN PEDIR</div>${ciclo.map(filaCiclo).join('')}` : ''}
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>
+     ${faltan.length ? `<button class="btn btn-secondary" data-ppv-recordar onclick="ppRecordar('${id}','video')">Recordar los que faltan</button>` : ''}
+     ${ciclo.length ? `<button class="btn btn-primary" data-ppv-pedir onclick="ppPedirMarcados('${id}')">Pedir los marcados</button>` : ''}`), { wide: true });
+};
+// Lo de la ventana cambió: se repinta la fila y la ventana.
+async function ppRefrescarVideos(id) {
+  _tq.datos = null; _tq.leido = 0;
+  if (_currentView === 'toques' && typeof rerenderView === 'function') await rerenderView();
+  if (document.querySelector(`[data-pp-videos="${id}"]`)) await ppVideos(id);
+}
+window.ppDesmarcar = async (id, claveEj) => {
+  const clave = decodeURIComponent(claveEj);
+  const ids = ((_pp.crudo && _pp.crudo.pedidos) || []).filter(p => String(p.cliente_id) === String(id) && p.tipo === 'video' && p.detalle === `ej:${clave}` && p.entregado_en).map(p => p.id);
+  if (!ids.length) return;
+  try {
+    const { error } = await sb.from('pedidos_cliente').update({ entregado_en: null, entregado_por: null }).in('id', ids);
+    if (error) { toast('No pude desmarcarlo'); return; }
+  } catch (e) { toast('No pude desmarcarlo'); return; }
+  toast('Desmarcado: vuelve a «Por llegar»');
+  await ppRefrescarVideos(id);
+};
+window.ppPedirMarcados = async (id) => {
+  const marcados = [...document.querySelectorAll('.ppv-chk:checked')].map(i => ({ ejercicio_id: i.value, ejercicio_nombre: i.dataset.nombre }));
+  if (!marcados.length) return toast('Marca al menos uno');
+  const filas = marcados.map(m => ({ cliente_id: id, ...m, estado: 'pedido', pedido_en: fmt.hoy() }));
+  if (typeof vtDb === 'undefined' || !(await vtDb.crear(filas))) return;
+  const c = (_tq.datos && (_tq.datos.filas.find(x => String(x.c.id) === String(id)) || {}).c) || await db.clientes.get(id);
+  const nombre = String((c && c.nombre) || '').trim().split(/\s+/)[0] || '';
+  const texto = [`Hola${nombre ? ' ' + nombre : ''}, ¿cómo vas? Para revisar tu técnica, cuando puedas súbeme en la app (o me mandas por acá) un video de:`, ...marcados.map(m => `• ${m.ejercicio_nombre}`), '', '¡Gracias!'].join('\n');
+  const tel = String((c && c.telefono) || '').replace(/\D/g, '');
+  if (tel) window.open(`https://wa.me/${tel}?text=${encodeURIComponent(texto)}`, '_blank', 'noopener');
+  else { try { await navigator.clipboard.writeText(texto); toast('Mensaje copiado: pégalo en WhatsApp'); } catch (e) { /* nada */ } }
+  if (typeof segRegistrar === 'function') segRegistrar(id, { origen: 'videos', titulo: 'Pedir video', texto });
+  toast(`${filas.length} video${filas.length === 1 ? '' : 's'} pedido${filas.length === 1 ? '' : 's'}`);
+  await ppRefrescarVideos(id);
 };
 window.ppEntrego = async (id, tipo, claveEj = null) => {
   const ahora = new Date().toISOString();
@@ -259,7 +384,7 @@ window.ppEntrego = async (id, tipo, claveEj = null) => {
     if (await ppGuardar({ cliente_id: id, tipo: 'video', detalle: `ej:${clave}`, pedido_en: v ? `${v.pedido}T12:00:00Z` : ahora, entregado_en: ahora, entregado_por: 'coach' })) {
       const quedan = it ? (it.ejercicios || []).filter(e => e.clave !== clave).length : 0;
       toast(quedan ? `Listo: ${v ? v.nombre : 'ese video'} entregado · quedan ${quedan}` : 'Listo: todos los videos enviados');
-      ppRepintar();
+      await ppRefrescarVideos(id);
     }
     return;
   }
@@ -289,6 +414,20 @@ window.ppEntrego = async (id, tipo, claveEj = null) => {
   .pp-b{border:0;border-radius:999px;padding:4px 10px;font:inherit;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;background:#F1EFE9;color:#1F1F1F}
   .pp-b.o{background:#1F1F1F;color:#fff}
   .pp-nada{font-size:12.5px;font-weight:700;color:#2F7F45}
+  .pp-it-v{cursor:pointer}
+  .pp-l{color:#1F1F1F;font-weight:700}
+  .ppv-res{font-size:13.5px;color:#6B6B6B;margin:-4px 0 10px}
+  .ppv-t{font-size:12px;font-weight:800;color:#8A8780;letter-spacing:.02em;margin-top:12px}
+  .ppv-f{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #F0EEE8}
+  .ppv-f:last-child{border-bottom:0}
+  .ppv-prev{width:112px;height:63px;flex:none;border-radius:10px;overflow:hidden;background:#EEEBE4;display:grid;place-items:center;font-size:11px;color:#8A8780}
+  .ppv-prev .ent-mini-prev{width:112px;height:63px;border-radius:10px}
+  .ppv-prev .ent-mini-prev img{width:100%;height:100%;object-fit:cover}
+  .ppv-n{font-size:14.5px;font-weight:700;color:#1F1F1F}
+  .ppv-s{font-size:12.5px;color:#6B6B6B;margin-top:2px}
+  .ppv-e{display:inline-block;font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 9px;margin-top:5px;white-space:nowrap}
+  .ppv-b{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex:none}
+  .ppv-b .pp-b{padding:6px 12px;font-size:12.5px}
   .pp-ejs{margin-top:4px}
   .pp-ej{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:3px 0;font-size:12px;color:#1F1F1F}
   .pp-ej i{display:block;font-style:normal;font-size:11px;color:#8A8A8A}

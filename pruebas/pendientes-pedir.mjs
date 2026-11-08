@@ -191,12 +191,12 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   x = await item(p, 'c0', 'medidas');
   ok('Ana: medición recordada el lunes y hecha → entregada por la app', x && x.estado === 'entregado' && /llegó por la app/.test(x.texto), JSON.stringify(x));
   x = await item(p, 'c1', 'video');
-  ok('Carlos: 2 videos pedidos hace 9 días sin llegar → «Recordar», cada ejercicio con su «Ya lo entregó»', x && x.estado === 'recordar' && /2 videos/.test(x.texto) && /hace 9 días/.test(x.texto) && /Press banca/.test(x.texto) && /Remo con barra/.test(x.texto) && await celda(p, 'c1').locator('[data-pp-entrego-ej]').count() === 2, JSON.stringify(x));
+  ok('Carlos: en la fila solo el resumen: «Recordar · Pedí 2 · falta Press banca y 1 más · pedido hace 9 días» y «Ver videos»', x && x.estado === 'recordar' && /Pedí 2/.test(x.texto) && /falta Press banca y 1 más/.test(x.texto) && /hace 9 días/.test(x.texto) && /Ver videos/.test(x.texto) && await celda(p, 'c1').locator('[data-pp-entrego-ej]').count() === 0, JSON.stringify(x));
   ok('Carlos: fotos recordadas hace 3 días (aún en su semana) → no sale', (await item(p, 'c1', 'fotos')) === null, JSON.stringify(await item(p, 'c1', 'fotos')));
   x = await item(p, 'c1', 'medidas');
   ok('Carlos: medidas recordadas hace 8 días sin hacer → toca pedir', x && x.estado === 'toca' && /8 días/.test(x.texto), JSON.stringify(x));
   x = await item(p, 'c2', 'video');
-  ok('Lucía: ciclo nuevo sin video → toca pedir', x && x.estado === 'toca' && /Ciclo nuevo/.test(x.texto), JSON.stringify(x));
+  ok('Lucía: ciclo nuevo sin video → toca pedir', x && x.estado === 'toca' && /ciclo nuevo/i.test(x.texto), JSON.stringify(x));
   x = await item(p, 'c2', 'peso');
   ok('Lucía: peso de los lunes sin registrar → toca pedir (2 recordatorios vencidos)', x && x.estado === 'toca' && /2 recordatorios sin hacer/.test(x.texto), JSON.stringify(x));
   x = await item(p, 'c2', 'fotos');
@@ -206,7 +206,7 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   x = await item(p, 'c4', 'peso');
   ok('Marta: peso del lunes registrado en la app → entregado', x && x.estado === 'entregado' && /llegó por la app/.test(x.texto), JSON.stringify(x));
   ok('Marta: fotos de esta semana → entregado', (await item(p, 'c4', 'fotos'))?.estado === 'entregado');
-  ok('Sofía: nada pendiente', /Nada pendiente/.test(await celda(p, 'c5').innerText()), await celda(p, 'c5').innerText());
+  ok('Sofía: nada pendiente (su video, al día)', (await celda(p, 'c5').locator('[data-pp-estado="toca"], [data-pp-estado="pedido"], [data-pp-estado="recordar"]').count()) === 0 && /Al día/.test(await celda(p, 'c5').innerText()), await celda(p, 'c5').innerText());
   const tarjeta = (await p.locator('[data-tq-filtro="pendientes"]').innerText()).replace(/\s+/g, ' ');
   ok(`la tarjeta de arriba (${tarjeta})`, /^\s*5 pendientes por pedir 2 pedidos sin llegar · 1 por recordar/.test(tarjeta), tarjeta);
   if (process.env.FOTO) await p.screenshot({ path: path.join(CAPTURAS, 'toques-pendientes.png') });
@@ -227,21 +227,38 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   await p.waitForTimeout(1200);
   x = await item(p, 'c2', 'fotos');
   ok('«Ya lo entregó» → «Entregado · marcado por ti»', x && x.estado === 'entregado' && /marcado por ti/.test(x.texto) && await p.evaluate(() => window.TABLAS_FALSAS.pedidos_cliente.some(r => r.id === 'p1' && r.entregado_en && r.entregado_por === 'coach')), JSON.stringify(x));
-  // «Recordar» el video → abre su WhatsApp con el recordatorio y vuelve a «Pedido».
-  await celda(p, 'c1').locator('[data-pp="video"] [data-pp-recordar]').click();
-  await p.waitForTimeout(1200);
+  // «Ver videos»: el detalle, con cada video, su estado y marcar / desmarcar.
+  const vent = p.locator('[data-pp-videos="c1"]');
+  const estadoV = (k) => vent.locator(`[data-ppv-fila="${k}"]`).getAttribute('data-ppv-estado');
+  await celda(p, 'c1').locator('[data-pp="video"] [data-pp-ver]').click();
+  await vent.waitFor({ timeout: 8000 });
+  ok('«Ver videos» abre el detalle: los 2 pedidos, por llegar, cada uno con su vista previa', await vent.locator('[data-ppv-fila]').count() === 2 && await estadoV('x1') === 'falta' && await estadoV('x3') === 'falta' && await vent.locator('.ppv-prev').count() >= 2 && /2 pedidos · 0 entregados · 2 faltan/.test(await vent.innerText()));
+  if (process.env.FOTO) await p.screenshot({ path: path.join(CAPTURAS, 'toques-videos-detalle.png') });
+  // «Recordar los que faltan» → su WhatsApp con el recordatorio de los dos.
+  await p.locator('[data-ppv-recordar]').click();
+  await p.waitForTimeout(1500);
   const ab2 = await p.evaluate(() => window.ABIERTOS);
+  ok('«Recordar los que faltan» → su WhatsApp con el recordatorio de los videos', ab2.some(u => /wa\.me\/573000000002\?text=/.test(u) && /recuerdo los videos de Press banca, Remo con barra/.test(decodeURIComponent(u))));
   x = await item(p, 'c1', 'video');
-  ok('«Recordar» → abre su WhatsApp con el recordatorio de los videos y vuelve a «Pedido»', ab2.some(u => /wa\.me\/573000000002\?text=/.test(u) && /recuerdo los videos de Press banca, Remo con barra/.test(decodeURIComponent(u))) && x && x.estado === 'pedido' && /se lo recordaste hoy/.test(x.texto), JSON.stringify(x));
+  ok('…y la fila vuelve a «Pedido» (se lo recordaste hoy)', x && x.estado === 'pedido' && /se lo recordaste hoy/.test(x.texto), JSON.stringify(x));
   // «Ya lo entregó» es por ejercicio: Press banca sí, Remo sigue pendiente.
-  await celda(p, 'c1').locator('[data-pp-entrego-ej="x1"]').click();
-  await p.waitForTimeout(1200);
+  await vent.locator('[data-ppv-entrego="x1"]').click();
+  await p.waitForTimeout(1500);
+  ok('«Ya lo entregó» de Press banca → entregado (con «Desmarcar»); Remo sigue por llegar', await estadoV('x1') === 'entregado' && await estadoV('x3') === 'falta' && await vent.locator('[data-ppv-desmarcar="x1"]').count() === 1);
   x = await item(p, 'c1', 'video');
-  ok('«Ya lo entregó» de Press banca → queda solo Remo pendiente', x && x.estado === 'pedido' && !/Press banca/.test(x.texto) && /Remo con barra/.test(x.texto), JSON.stringify(x));
-  await celda(p, 'c1').locator('[data-pp-entrego-ej="x3"]').click();
-  await p.waitForTimeout(1200);
+  ok('la fila dice «Entregó 1 de 2 · falta Remo con barra»', x && /Entregó 1 de 2/.test(x.texto) && /falta Remo con barra/.test(x.texto), JSON.stringify(x));
+  // Te equivocaste: «Desmarcar» lo devuelve a «Por llegar».
+  await vent.locator('[data-ppv-desmarcar="x1"]').click();
+  await p.waitForTimeout(1500);
+  ok('«Desmarcar» → Press banca vuelve a «Por llegar»', await estadoV('x1') === 'falta' && await p.evaluate(() => !window.TABLAS_FALSAS.pedidos_cliente.some(r => r.cliente_id === 'c1' && r.detalle === 'ej:x1' && r.entregado_en)));
+  await vent.locator('[data-ppv-entrego="x1"]').click();
+  await p.waitForTimeout(1500);
+  await vent.locator('[data-ppv-entrego="x3"]').click();
+  await p.waitForTimeout(1500);
+  ok('con los dos entregados → la ventana dice «todos enviados»', /todos enviados/.test(await vent.innerText()));
   x = await item(p, 'c1', 'video');
-  ok('con los dos entregados → «Todos enviados» y «Pedir nuevos»', x && x.estado === 'entregado' && /Todos enviados/.test(x.texto) && /Pedir nuevos/.test(x.texto), JSON.stringify(x));
+  ok('…y la fila «Todos enviados · Todos entregados»', x && x.estado === 'entregado' && /Todos enviados/.test(x.texto) && /Todos entregados/.test(x.texto), JSON.stringify(x));
+  await p.evaluate(() => closeModal());
   // El filtro de la tarjeta deja solo a quienes tienen algo por pedir o sin llegar.
   await p.locator('[data-tq-filtro="pendientes"]').first().click();
   await p.waitForTimeout(800);
