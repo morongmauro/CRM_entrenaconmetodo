@@ -126,6 +126,11 @@ function tablas() {
     { id: 'v4', cliente_id: 'c4', ejercicio_id: 'x2', ejercicio_nombre: 'Sentadilla', estado: 'bien', pedido_en: mas(HOY, -20), revisado_en: mas(HOY, -19) + 'T10:00:00Z', created_at: mas(HOY, -20) + 'T10:00:00Z' },
     { id: 'v5', cliente_id: 'c5', ejercicio_id: 'x2', ejercicio_nombre: 'Sentadilla', estado: 'bien', pedido_en: mas(HOY, -20), revisado_en: mas(HOY, -19) + 'T10:00:00Z', created_at: mas(HOY, -20) + 'T10:00:00Z' },
   ];
+  // Marta: su ciclo trae Sentadilla (x2); le pediste Hip thrust (x9), que ya
+  // no está en su ciclo → en pausa (no cuenta como pendiente).
+  T.rutinas = [...(T.rutinas || []), { id: 'r4', nombre: 'Pierna', fase_id: 'fa4', archivada: false }];
+  T.rutina_ejercicios = [{ id: 're4', rutina_id: 'r4', ejercicio_id: 'x2', orden: 1 }];
+  T.videos_tecnica.push({ id: 'v4p', cliente_id: 'c4', ejercicio_id: 'x9', ejercicio_nombre: 'Hip thrust', estado: 'pedido', pedido_en: mas(HOY, -10), revisado_en: null, created_at: mas(HOY, -10) + 'T10:00:00Z' });
   T.pedidos_cliente = [
     { id: 'p1', user_id: 'coach-1', cliente_id: 'c2', tipo: 'fotos', pedido_en: mas(HOY, -3) + 'T10:00:00Z', entregado_en: null },
     { id: 'p2', user_id: 'coach-1', cliente_id: 'c2', tipo: 'medidas', pedido_en: LUNES + 'T09:00:00Z', entregado_en: LUNES + 'T18:00:00Z', entregado_por: 'coach' },
@@ -210,6 +215,8 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   x = await item(p, 'c4', 'peso');
   ok('Marta: peso del lunes registrado en la app → entregado', x && x.estado === 'entregado' && /llegó por la app/.test(x.texto), JSON.stringify(x));
   ok('Marta: fotos de esta semana → entregado', (await item(p, 'c4', 'fotos'))?.estado === 'entregado');
+  x = await item(p, 'c4', 'video');
+  ok('Marta: el video de Hip thrust (ya no está en su ciclo) queda en pausa, no como pendiente', x && x.estado === 'aldia' && /1 en pausa \(fuera de su ciclo\)/.test(x.texto), JSON.stringify(x));
   ok('Sofía: nada pendiente (su video, al día)', (await celda(p, 'c5').locator('[data-pp-estado="toca"], [data-pp-estado="pedido"], [data-pp-estado="recordar"]').count()) === 0 && /Al día/.test(await celda(p, 'c5').innerText()), await celda(p, 'c5').innerText());
   // La columna «Ciclo».
   const ciclo = async (id) => (await p.locator(`tr[data-tq-cliente="${id}"] [data-tq="ciclo"]`).innerText()).replace(/\s+/g, ' ');
@@ -272,6 +279,12 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   ok('con los dos entregados → la ventana dice «todos enviados»', /todos enviados/.test(await vent.innerText()));
   x = await item(p, 'c1', 'video');
   ok('…y la fila «Todos enviados · Todos entregados»', x && x.estado === 'entregado' && /Todos enviados/.test(x.texto) && /Todos entregados/.test(x.texto), JSON.stringify(x));
+  await p.evaluate(() => closeModal());
+  // En el detalle de Marta: Hip thrust «En pausa · ya no está en su ciclo».
+  await celda(p, 'c4').locator('[data-pp="video"] [data-pp-ver]').click();
+  const ventM = p.locator('[data-pp-videos="c4"]');
+  await ventM.waitFor({ timeout: 8000 });
+  ok('el detalle muestra Hip thrust «En pausa · ya no está en su ciclo» y la historia del de Sentadilla', await ventM.locator('[data-ppv-fila="x9"]').getAttribute('data-ppv-estado') === 'pausa' && /ya no está en su ciclo/.test(await ventM.innerText()) && await ventM.locator('[data-ppv-fila="x2"]').count() === 1);
   await p.evaluate(() => closeModal());
   // El filtro de la tarjeta deja solo a quienes tienen algo por pedir o sin llegar.
   await p.locator('[data-tq-filtro="pendientes"]').first().click();

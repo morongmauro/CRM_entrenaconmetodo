@@ -64,7 +64,22 @@ async function ppCargar(clientes, vids) {
   eventos = eventos.filter(e => ids.some(id => String(id) === String(e.cliente_id)));
   let registros = [];
   if (eventos.length) registros = (await leer(sb.from('evento_registros').select('evento_id, cliente_id, fecha, estado').in('evento_id', eventos.map(e => e.id)).gte('fecha', evtSumarDias(hoy, -PP_VENTANA - 1)))) || [];
-  _pp.crudo = { pedidos: pedidos || [], fotos: fotos || [], meds: meds || [], vids: vids || [], vigente, eventos, registros, uso, clientes };
+  // Los ejercicios de su ciclo vigente: un video pedido de un ejercicio que
+  // ya no está queda «en pausa» (la app no se lo pide; si vuelve, vuelve).
+  const cicloEjs = {};
+  const faseIds = Object.values(vigente).filter(Boolean).map(f => f.id);
+  if (faseIds.length) {
+    const ruts = ((await leer(sb.from('rutinas').select('id, fase_id, archivada').in('fase_id', faseIds))) || []).filter(r => r.archivada !== true);
+    const res = ruts.length ? ((await leer(sb.from('rutina_ejercicios').select('rutina_id, ejercicio_id').in('rutina_id', ruts.map(r => r.id)))) || null) : [];
+    if (res) {
+      const clienteDeFase = {};
+      Object.entries(vigente).forEach(([cid, f]) => { if (f) clienteDeFase[f.id] = cid; });
+      ruts.forEach(r => { const cid = clienteDeFase[r.fase_id]; if (cid && !cicloEjs[cid]) cicloEjs[cid] = new Set(); });
+      const faseDe = Object.fromEntries(ruts.map(r => [r.id, r.fase_id]));
+      res.forEach(x => { const cid = clienteDeFase[faseDe[x.rutina_id]]; if (cid && x.ejercicio_id) cicloEjs[cid].add(String(x.ejercicio_id)); });
+    }
+  }
+  _pp.crudo = { pedidos: pedidos || [], fotos: fotos || [], meds: meds || [], vids: vids || [], vigente, eventos, registros, uso, clientes, cicloEjs };
   _pp.cache = new Map();
 }
 
@@ -118,10 +133,14 @@ function ppDe(clienteId) {
   const manV = ppMax(pedsV.filter(p => p.entregado_en && !esEj(p) && p.detalle !== 'recordatorio').map(p => ppDia(p.entregado_en)));
   const manEj = {};
   pedsV.filter(p => p.entregado_en && esEj(p)).forEach(p => { const kk = String(p.detalle).slice(3); const f = ppDia(p.entregado_en); if (!manEj[kk] || f > manEj[kk]) manEj[kk] = f; });
-  const porLlegar = Object.entries(ultV)
+  const enCiclo = R.cicloEjs ? R.cicloEjs[k] : null;   // null: no se sabe (sin ciclo): nada queda en pausa
+  const fuera = (x) => !!(enCiclo && x.ejercicio_id && !enCiclo.has(String(x.ejercicio_id)));
+  const sinLlegar = Object.entries(ultV)
     .filter(([kk, x]) => x.estado === 'pedido' && !(manV && manV >= ppDia(x.pedido_en)) && !(manEj[kk] && manEj[kk] >= ppDia(x.pedido_en)))
-    .map(([kk, x]) => ({ clave: kk, nombre: x.ejercicio_nombre || 'Video', pedido: ppDia(x.pedido_en) }))
+    .map(([kk, x]) => ({ clave: kk, nombre: x.ejercicio_nombre || 'Video', pedido: ppDia(x.pedido_en), fuera: fuera(x) }))
     .sort((a, b) => a.pedido.localeCompare(b.pedido));
+  const porLlegar = sinLlegar.filter(v => !v.fuera);
+  const enPausa = sinLlegar.filter(v => v.fuera);
   const abiertoV = (filtro) => pedsV.filter(p => !p.entregado_en && filtro(p)).sort((a, b) => String(b.pedido_en).localeCompare(String(a.pedido_en)))[0] || null;
   const abV = abiertoV(p => p.detalle !== 'recordatorio' && !esEj(p));         // «Ya lo pedí» sin ejercicio
   const recV = abiertoV(p => p.detalle === 'recordatorio');                    // tu último «Recordar»
@@ -160,6 +179,12 @@ function ppDe(clienteId) {
     else if (!ultAlgo) items.push({ tipo: 'video', estado: 'toca', detalle: 'Nunca ha mandado video', resumen: { linea: 'No le has pedido', sub: 'nunca ha mandado video' } });
     else if (hace(ultAlgo) >= PP_DIAS.video) items.push({ tipo: 'video', estado: 'toca', detalle: `Último video hace ${Math.floor(hace(ultAlgo) / 7)} semanas`, resumen: { linea: 'Sin videos recientes', sub: `el último hace ${Math.floor(hace(ultAlgo) / 7)} semanas` } });
     else if (ultAlgo) items.push({ tipo: 'video', estado: 'aldia', detalle: 'Al día', resumen: { linea: 'Al día', sub: `el último ${cuando(ultAlgo)}` } });
+  }
+  if (enPausa.length) {
+    const it = items.find(x => x.tipo === 'video');
+    const nota = `${enPausa.length} en pausa (fuera de su ciclo)`;
+    if (it && it.resumen) it.resumen.sub = it.resumen.sub ? `${it.resumen.sub} · ${nota}` : nota;
+    else if (!it) items.push({ tipo: 'video', estado: 'aldia', detalle: nota, resumen: { linea: 'En pausa', sub: `${enPausa[0].nombre}${enPausa.length > 1 ? ` y ${enPausa.length - 1} más` : ''} ya no está en su ciclo` } });
   }
   // Fotos, peso y medidas: según sus recordatorios de la app.
   const evsC = R.eventos.filter(e => String(e.cliente_id) === k);
@@ -325,13 +350,16 @@ window.ppVideos = async (id) => {
   const peds = ((_pp.crudo && _pp.crudo.pedidos) || []).filter(p => String(p.cliente_id) === String(id) && p.tipo === 'video' && String(p.detalle || '').startsWith('ej:'));
   const marcado = (k, pedido) => peds.filter(p => p.detalle === `ej:${k}` && p.entregado_en && ppDia(p.entregado_en) >= ppDia(pedido)).sort((a, b) => String(b.entregado_en).localeCompare(String(a.entregado_en)))[0] || null;
   // Lo que le pediste: lo que falta (de cualquier fecha) y lo de los últimos 60 días.
-  const pedidos = Object.entries(ult).map(([k, x]) => ({ k, x, m: x.estado === 'pedido' ? marcado(k, x.pedido_en) : null }))
+  const enCicloM = _pp.crudo && _pp.crudo.cicloEjs ? _pp.crudo.cicloEjs[String(id)] : null;
+  const fueraM = (x) => !!(enCicloM && x.ejercicio_id && !enCicloM.has(String(x.ejercicio_id)));
+  const pedidos = Object.entries(ult).map(([k, x]) => ({ k, x, m: x.estado === 'pedido' ? marcado(k, x.pedido_en) : null, fuera: x.estado === 'pedido' && fueraM(x) }))
     .filter(o => o.x.estado === 'pedido' || o.x.estado === 'recibido' || dias(o.x.pedido_en) <= 60)
     .sort((a, b) => {
-      const peso = (o) => (o.x.estado === 'pedido' && !o.m ? 0 : o.x.estado === 'recibido' ? 1 : 2);
+      const peso = (o) => (o.x.estado === 'pedido' && !o.m && !o.fuera ? 0 : o.x.estado === 'recibido' ? 1 : o.fuera && !o.m ? 2 : 3);
       return peso(a) - peso(b) || String(b.x.pedido_en).localeCompare(String(a.x.pedido_en));
     });
-  const faltan = pedidos.filter(o => o.x.estado === 'pedido' && !o.m);
+  const faltan = pedidos.filter(o => o.x.estado === 'pedido' && !o.m && !o.fuera);
+  const pausados = pedidos.filter(o => o.x.estado === 'pedido' && !o.m && o.fuera);
   const entregados = pedidos.filter(o => o.m || o.x.estado !== 'pedido');
   const prev = (ejId, nombre) => {
     const h = ejId && typeof entMiniPreviewHTML === 'function' ? entMiniPreviewHTML({ id: ejId }) : '';
@@ -343,10 +371,11 @@ window.ppVideos = async (id) => {
     const { k, x, m } = o;
     let est, btn = '';
     if (x.estado === 'pedido' && m) { est = chip(`Entregado · marcado por ti ${hace(m.entregado_en)}`, 'entregado'); btn = b('Desmarcar', false, `data-ppv-desmarcar="${escapeHtml(k)}"`, `ppDesmarcar('${id}','${encodeURIComponent(k)}')`); }
+    else if (x.estado === 'pedido' && o.fuera) { est = chip('En pausa · ya no está en su ciclo (no se le pide)', 'falta'); btn = b('Ya lo entregó', false, `data-ppv-entrego="${escapeHtml(k)}"`, `ppEntrego('${id}','video','${encodeURIComponent(k)}')`); }
     else if (x.estado === 'pedido') { est = chip(`Por llegar · ${hace(x.pedido_en)}`, dias(x.pedido_en) >= PP_ESPERA ? 'tarde' : 'falta'); btn = b('Ya lo entregó', false, `data-ppv-entrego="${escapeHtml(k)}"`, `ppEntrego('${id}','video','${encodeURIComponent(k)}')`); }
     else if (x.estado === 'recibido') { est = chip('Llegó por la app · falta revisarlo', 'recibido'); btn = b('Revisar', true, 'data-ppv-revisar', `closeModal();vtAbrir('${id}')`); }
     else { const t = (typeof VT_ESTADO !== 'undefined' && VT_ESTADO[x.estado] ? VT_ESTADO[x.estado].txt : x.estado); est = chip(`Revisado · ${t}`, PPV_ESTADO[x.estado] ? x.estado : 'bien'); }
-    return `<div class="ppv-f" data-ppv-fila="${escapeHtml(k)}" data-ppv-estado="${x.estado === 'pedido' ? (m ? 'entregado' : 'falta') : x.estado}">${prev(x.ejercicio_id, x.ejercicio_nombre)}
+    return `<div class="ppv-f" data-ppv-fila="${escapeHtml(k)}" data-ppv-estado="${x.estado === 'pedido' ? (m ? 'entregado' : o.fuera ? 'pausa' : 'falta') : x.estado}"${o.fuera && !m ? ' style="opacity:.7"' : ''}>${prev(x.ejercicio_id, x.ejercicio_nombre)}
       <div style="flex:1;min-width:0"><div class="ppv-n">${escapeHtml(x.ejercicio_nombre || 'Video')}</div><div class="ppv-s">Pedido el ${fmt.fechaCorta(ppDia(x.pedido_en))} · ${hace(x.pedido_en)}</div>${est}</div>
       <div class="ppv-b">${btn}</div></div>`;
   };
@@ -371,7 +400,7 @@ window.ppVideos = async (id) => {
   const filaCiclo = (e) => `<label class="ppv-f" data-ppv-ciclo="${e.id}" style="cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400">
       <input type="checkbox" class="ppv-chk" value="${e.id}" data-nombre="${escapeHtml(e.nombre)}" style="width:18px;height:18px;flex:none">${prev(e.id, e.nombre)}
       <div style="flex:1;min-width:0"><div class="ppv-n">${escapeHtml(e.nombre)}</div><div class="ppv-s">${e.u ? `Último video: <b>${escapeHtml(typeof VT_ESTADO !== 'undefined' && VT_ESTADO[e.u.estado] ? VT_ESTADO[e.u.estado].txt : e.u.estado)}</b> · ${hace(e.u.pedido_en)}` : 'Nunca le pediste video'}</div></div></label>`;
-  const resumen = pedidos.length ? `${pedidos.length} pedido${pedidos.length === 1 ? '' : 's'} · <b style="color:#2F7F45">${entregados.length} entregado${entregados.length === 1 ? '' : 's'}</b>${faltan.length ? ` · <b style="color:#B4321F">${faltan.length} falta${faltan.length === 1 ? '' : 'n'}</b>` : ' · <b style="color:#2F7F45">todos enviados</b>'}` : 'Todavía no le has pedido videos.';
+  const resumen = pedidos.length ? `${pedidos.length} pedido${pedidos.length === 1 ? '' : 's'} · <b style="color:#2F7F45">${entregados.length} entregado${entregados.length === 1 ? '' : 's'}</b>${faltan.length ? ` · <b style="color:#B4321F">${faltan.length} falta${faltan.length === 1 ? '' : 'n'}</b>` : ' · <b style="color:#2F7F45">todos enviados</b>'}${pausados.length ? ` · ${pausados.length} en pausa (fuera de su ciclo)` : ''}` : 'Todavía no le has pedido videos.';
   openModal(modalShell(`Videos · ${escapeHtml((c && c.nombre) || '')}`, `<div data-pp-videos="${id}">
       <div class="ppv-res">${resumen}</div>
       ${pedidos.length ? `<div class="ppv-t">LO QUE LE PEDISTE</div>${pedidos.map(filaPedido).join('')}` : ''}
