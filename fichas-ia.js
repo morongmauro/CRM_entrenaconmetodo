@@ -22,23 +22,27 @@ const _fi = { filas: [], parar: false, corriendo: false };
 const FI_TANDA = 6;
 
 // Qué le falta a la ficha de un ejercicio.
+// El patrón solo en fuerza y potencia; los músculos, salvo en cardio y
+// calentamiento; las articulaciones, en movilidad y estiramientos.
 function fiFalta(e) {
   const f = [];
-  if (!e.patron) f.push('patron');
-  if (!(e.musculos_primarios || []).length) f.push('musculos');
+  const fam = entFamilia(e.tipo || 'fuerza');
+  if (!e.patron && entLlevaPatron(e.tipo)) f.push('patron');
+  if (!(e.musculos_primarios || []).length && fam !== 'resistencia' && e.tipo !== 'calentamiento') f.push('musculos');
+  if (fam === 'movilidad' && entTieneCol('articulaciones') && !(e.articulaciones || []).length) f.push('articulaciones');
   if (!(e.claves_tecnicas || []).filter(x => String(x || '').trim()).length) f.push('claves');
   if (entTieneErrores() && !(e.errores_tecnicos || []).filter(x => String(x || '').trim()).length) f.push('errores');
   return f;
 }
 window.fiIncompleta = (e) => !e.archivado && fiFalta(e).length > 0;
 
-const FI_NOMBRE = { patron: 'patrón', musculos: 'músculos', claves: 'cómo hacerlo bien', errores: 'errores comunes' };
+const FI_NOMBRE = { patron: 'patrón', musculos: 'músculos', articulaciones: 'articulaciones', claves: 'cómo hacerlo bien', errores: 'errores comunes' };
 
 // Arriba de la lista, con el nivel «Ficha incompleta».
 window.fiHtmlCabecera = (todos) => {
   const vivos = todos.filter(e => !e.archivado);
   const inc = vivos.filter(fiIncompleta);
-  const por = { patron: 0, musculos: 0, claves: 0, errores: 0 };
+  const por = { patron: 0, musculos: 0, articulaciones: 0, claves: 0, errores: 0 };
   inc.forEach(e => fiFalta(e).forEach(k => { por[k]++; }));
   const faltan = Object.entries(por).filter(([, n]) => n).map(([k, n]) => `${FI_NOMBRE[k]} a ${n}`).join(' · ');
   return `<div class="card mb-3" data-fi-cabecera>
@@ -66,13 +70,16 @@ async function fiPedirTanda(lista) {
   const cuerpo = {
     patrones: ENT_PATRONES,
     musculos,
+    articulaciones: ENT_ARTICULACIONES.map(([k]) => k),
+    cualidades: ENT_CUALIDADES.map(([k]) => k),
     ejercicios: lista.map(e => ({
-      id: e.id, nombre: e.nombre, nombre_en: e.alias || undefined, tipo: e.tipo || undefined,
+      id: e.id, nombre: e.nombre, nombre_en: e.alias || undefined, tipo: e.tipo || undefined, familia: entFamilia(e.tipo || 'fuerza'),
       segmento: e.segmento || undefined, equipo: e.equipo || undefined,
       patron: e.patron || undefined, primarios: (e.musculos_primarios || []).length ? e.musculos_primarios : undefined,
       secundarios: (e.musculos_secundarios || []).length ? e.musculos_secundarios : undefined,
       claves: (e.claves_tecnicas || []).length ? e.claves_tecnicas : undefined,
-      falta: fiFalta(e),
+      // «También mejora»: se pide de paso si está vacío (no cuenta como incompleta).
+      falta: [...fiFalta(e), ...(entTieneCol('cualidades') && !(e.cualidades || []).length ? ['tambien'] : [])],
     })),
   };
   const r = await fetch('/api/coach-ask', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -119,6 +126,9 @@ function fiLimpiar(e, p) {
     const sec = [...new Set(lista(p.secundarios, 3).filter(s => mus.has(s) && !prim.includes(s)))];
     if (prim.length) { o.musculos_primarios = prim; o.musculos_secundarios = (e.musculos_secundarios || []).length ? e.musculos_secundarios : sec; }
   }
+  if (falta.includes('articulaciones')) { const ok = new Set(ENT_ARTICULACIONES.map(([k]) => k)); const a = [...new Set(lista(p.articulaciones, 4).filter(x => ok.has(x)))]; if (a.length) o.articulaciones = a; }
+  // «También mejora»: hasta 2, nunca la misma familia que ya es.
+  if (entTieneCol('cualidades') && !(e.cualidades || []).length) { const ok = new Set(ENT_CUALIDADES.map(([k]) => k)); const fam = entFamilia(e.tipo || 'fuerza'); const t = [...new Set(lista(p.tambien, 2).filter(x => ok.has(x) && x !== fam))]; if (t.length) o.cualidades = t; }
   if (falta.includes('claves')) { const c = lista(p.claves, 3); if (c.length) o.claves_tecnicas = c; }
   if (falta.includes('errores')) { const c = lista(p.errores, 3); if (c.length) o.errores_tecnicos = c; }
   return o;
@@ -134,6 +144,11 @@ function fiHtmlFila(f, i) {
       <select data-fi-patron="${i}" class="mt-1">${ENT_PATRONES.map(([v, t]) => `<option value="${v}" ${v === o.patron ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('')}</select></label>`);
   if ('musculos_primarios' in o) partes.push(`<div class="text-xs text-slate-500 mt-2">Músculos
       <div class="flex flex-wrap gap-1 mt-1">${o.musculos_primarios.map(s => `<span class="tag tag-blue">${escapeHtml(fiNombreMusculo(s))}</span>`).join('')}${(o.musculos_secundarios || []).map(s => `<span class="tag tag-gray">${escapeHtml(fiNombreMusculo(s))}</span>`).join('')}</div></div>`);
+  const nomArt = (k) => (ENT_ARTICULACIONES.find(x => x[0] === k) || [k, k])[1], nomCual = (k) => (ENT_CUALIDADES.find(x => x[0] === k) || [k, k])[1];
+  if ('articulaciones' in o) partes.push(`<div class="text-xs text-slate-500 mt-2">Articulaciones que mueve
+      <div class="flex flex-wrap gap-1 mt-1">${o.articulaciones.map(a => `<span class="tag tag-blue">${escapeHtml(nomArt(a))}</span>`).join('')}</div></div>`);
+  if ('cualidades' in o) partes.push(`<div class="text-xs text-slate-500 mt-2">También mejora
+      <div class="flex flex-wrap gap-1 mt-1">${o.cualidades.map(a => `<span class="tag tag-green">${escapeHtml(nomCual(a))}</span>`).join('')}</div></div>`);
   if ('claves_tecnicas' in o) partes.push(`<label class="block text-xs text-slate-500 mt-2" style="text-transform:none;letter-spacing:0">Cómo hacerlo bien
       <textarea data-fi-claves="${i}" rows="3" class="mt-1 w-full text-sm">${escapeHtml(o.claves_tecnicas.join('\n'))}</textarea></label>`);
   if ('errores_tecnicos' in o) partes.push(`<label class="block text-xs text-slate-500 mt-2" style="text-transform:none;letter-spacing:0">Errores comunes
@@ -230,6 +245,8 @@ window.fiGuardar = async () => {
     if (falta.includes('claves') && cl && lineas(cl.value).length) o.claves_tecnicas = lineas(cl.value).slice(0, 5);
     const er = document.querySelector(`[data-fi-errores="${i}"]`);
     if (falta.includes('errores') && er && lineas(er.value).length) o.errores_tecnicos = lineas(er.value).slice(0, 5);
+    if (falta.includes('articulaciones') && f.propuesta.articulaciones) o.articulaciones = f.propuesta.articulaciones;
+    if (f.propuesta.cualidades && !(e.cualidades || []).length) o.cualidades = f.propuesta.cualidades;
     if (!Object.keys(o).length) continue;
     const { error } = await sb.from('ejercicios').update(o).eq('id', e.id);
     if (error) { mal++; continue; }

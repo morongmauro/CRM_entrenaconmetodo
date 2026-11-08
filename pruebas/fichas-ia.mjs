@@ -117,6 +117,14 @@ for (const [ancho, alto] of [[1440, 1000], [390, 844]]) {
   ok('nada se borró', t.length === 3);
   await p.waitForTimeout(600);
   ok('después de guardar ya no queda ninguna incompleta', !(await p.locator('[data-fi-completar]').count()) || /3 de 3/.test(await p.locator('[data-fi-cabecera]').innerText()));
+  // La ficha del CRM: qué dirá la ficha según el tipo, «También mejora» y articulaciones.
+  await p.evaluate(() => { (_ent.ejercicios || []).forEach(e => { e.cualidades = e.cualidades || []; e.articulaciones = e.articulaciones || []; }); entEditarEjercicio('e2'); });
+  await p.locator('[data-ej-familia]').waitFor({ timeout: 8000 });
+  const fam1 = await p.locator('[data-ej-familia]').innerText();
+  await p.selectOption('#ej-tipo', 'estiramiento_pasivo');
+  const fam2 = await p.locator('[data-ej-familia]').innerText();
+  ok('ficha del CRM: según el tipo dice qué verá el cliente; en estiramiento pide articulaciones', /Fuerza/.test(fam1) && /Movilidad y estiramientos/.test(fam2) && await p.locator('#ej-arts-caja').isVisible() && await p.locator('[data-ej-cualidades]').isVisible(), fam1 + ' | ' + fam2);
+  await p.evaluate(() => closeModal());
   ok('sin errores de JavaScript', !errores.length, errores.join(' | '));
   await ctx.close();
 }

@@ -715,8 +715,25 @@ Recibes un JSON con:
   "secundarios", "claves") y "falta": las partes que hay que completar
   ("patron", "musculos", "claves", "errores").
 
+Cada ejercicio trae su "familia" (sale de su tipo) y eso cambia qué se
+escribe:
+- fuerza: los músculos que trabaja (crecer y fortalecer).
+- potencia: explotar (saltar, lanzar, empujar rápido); los músculos que se
+  activan.
+- agilidad: cambiar de dirección, frenar y reaccionar; los músculos que se
+  activan.
+- resistencia: aguante; músculos solo si se piden.
+- movilidad: rango de movimiento y control de la articulación; si es un
+  estiramiento (tipo estiramiento_pasivo o estiramiento_activo), los
+  músculos son los que se ESTIRAN y las claves dicen cómo sostenerlo
+  (30 a 60 s, respirar, sin rebotar). Nunca le inventes un patrón.
+
 Para cada ejercicio devuelve SOLO lo que dice "falta":
 - "patron": UN slug de "patrones" (el movimiento principal).
+- "articulaciones": de 1 a 3 slugs de "articulaciones" (las que más se mueven).
+- "tambien": de 0 a 2 slugs de "cualidades" que ese ejercicio también mejora
+  además de su familia (p. ej. un Pallof press: "estabilidad"; una sentadilla
+  búlgara: "equilibrio"). Si no aplica ninguna, lista vacía.
 - "primarios": de 1 a 3 slugs de "musculos" (los que más trabajan).
 - "secundarios": de 0 a 3 slugs de "musculos" (los que ayudan). Nunca repitas
   uno de "primarios".
@@ -734,7 +751,7 @@ minúscula, sin emojis, sin tecnicismos innecesarios, sin diagnósticos ni dolor
 
 Responde SOLO con un objeto JSON, sin texto antes ni después, con el id de
 cada ejercicio como llave:
-{"<id>": {"patron": "…", "primarios": ["…"], "secundarios": ["…"], "claves": ["…","…","…"], "errores": ["…","…","…"]}}`;
+{"<id>": {"patron": "…", "primarios": ["…"], "secundarios": ["…"], "articulaciones": ["…"], "tambien": ["…"], "claves": ["…","…","…"], "errores": ["…","…","…"]}}`;
 
 const PERFILES = {
   tecnica: { tools: null, system: SYSTEM_TECNICA },

@@ -71,8 +71,31 @@ const ENT_TIPOS = [
   ['pliometrico', 'Pliométrico'], ['agilidad', 'Agilidad'], ['movilidad', 'Movilidad'],
   ['estiramiento_pasivo', 'Estiram. pasivo'], ['estiramiento_activo', 'Estiram. activo'],
   ['cardio', 'Cardio'], ['core', 'Core'], ['rehabilitacion', 'Rehabilitación'],
-  ['calentamiento', 'Calentamiento'],
+  ['calentamiento', 'Calentamiento'], ['velocidad', 'Velocidad'],
 ];
+// Las 5 familias (las mismas de la app, src/familias.js): el tipo decide en
+// qué estante sale en la galería del cliente y qué dice su ficha.
+function entFamilia(tipo) {
+  if (tipo === 'cardio') return 'resistencia';
+  if (['movilidad', 'calentamiento', 'estiramiento', 'estiramiento_pasivo', 'estiramiento_activo'].includes(tipo)) return 'movilidad';
+  if (['agilidad', 'velocidad'].includes(tipo)) return 'agilidad';
+  if (['potencia', 'pliometrico'].includes(tipo)) return 'potencia';
+  return 'fuerza';
+}
+const ENT_FAMILIA_TXT = {
+  fuerza: 'Fuerza · la ficha dice «Músculos que trabajas»',
+  potencia: 'Potencia · la ficha dice «Qué entrenas: explosividad» y los músculos «se activan»',
+  agilidad: 'Agilidad y velocidad · la ficha dice «Qué entrenas: cambiar de dirección, frenar y reaccionar»',
+  resistencia: 'Resistencia · la ficha dice «Qué entrenas: tu aguante y tu corazón»',
+  movilidad: 'Movilidad y estiramientos · movilidad: «Qué mejoras» y las articulaciones; estiramiento: «Lo que estiras» y cómo sostenerlo',
+};
+// «También mejora» (hasta 2) y las articulaciones que mueve (movilidad y
+// estiramientos). Columnas de migraciones/ejercicios-articulaciones.sql.
+const ENT_CUALIDADES = [['fuerza', 'Fuerza'], ['potencia', 'Potencia'], ['agilidad', 'Agilidad'], ['velocidad', 'Velocidad'], ['resistencia', 'Resistencia'], ['estabilidad', 'Estabilidad'], ['equilibrio', 'Equilibrio'], ['coordinacion', 'Coordinación'], ['movilidad', 'Movilidad'], ['flexibilidad', 'Flexibilidad']];
+const ENT_ARTICULACIONES = [['cadera', 'Cadera'], ['rodilla', 'Rodilla'], ['tobillo', 'Tobillo'], ['columna_toracica', 'Columna torácica'], ['columna_lumbar', 'Columna lumbar'], ['hombro', 'Hombro'], ['escapula', 'Escápula'], ['codo', 'Codo'], ['muneca', 'Muñeca'], ['cuello', 'Cuello']];
+const entTieneCol = (col) => { const una = (_ent.ejercicios || [])[0]; return !!una && Object.prototype.hasOwnProperty.call(una, col); };
+// ¿Lleva patrón? Solo fuerza y potencia: a un estiramiento no se le inventa uno.
+const entLlevaPatron = (tipo) => ['fuerza', 'potencia'].includes(entFamilia(tipo || 'fuerza'));
 const ENT_EQUIPO = [
   ['peso_corporal', 'Peso corporal'], ['barra', 'Barra'], ['mancuerna', 'Mancuernas'],
   ['kettlebell', 'Kettlebell'], ['polea', 'Polea'], ['maquina', 'Máquina'],
@@ -1486,11 +1509,20 @@ window.entEditarEjercicio = async (id) => {
 
     <div class="sec-title">Clasificación · son los filtros de la galería</div>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
-      <div><label>Tipo</label><select id="ej-tipo">${entOpciones(ENT_TIPOS, e.tipo || 'fuerza', '—')}</select></div>
+      <div><label>Tipo</label><select id="ej-tipo" onchange="entCambioTipo(this.value)">${entOpciones(ENT_TIPOS, e.tipo || 'fuerza', '—')}</select></div>
       <div><label>Segmento</label><select id="ej-segmento">${entOpciones(ENT_SEGMENTOS, e.segmento, '—')}</select></div>
       <div><label>Patrón</label><select id="ej-patron">${entOpciones(ENT_PATRONES, e.patron, '—')}</select></div>
       <div><label>Nivel</label><select id="ej-nivel">${entOpciones(ENT_NIVELES, e.nivel || 'intermedio', '—')}</select></div>
     </div>
+    <div class="text-xs text-slate-500 -mt-2 mb-3" id="ej-familia" data-ej-familia>${escapeHtml(ENT_FAMILIA_TXT[entFamilia(e.tipo || 'fuerza')])}</div>
+    ${entTieneCol('cualidades') ? `
+    <div class="sec-title">También mejora <span class="font-normal text-slate-400">· hasta 2</span></div>
+    <div class="flex flex-wrap gap-1 mb-3" data-ej-cualidades>${multiChips(ENT_CUALIDADES, 'cual', e.cualidades)}</div>` : ''}
+    ${entTieneCol('articulaciones') ? `
+    <div id="ej-arts-caja" class="${entFamilia(e.tipo || 'fuerza') === 'movilidad' || entFamilia(e.tipo || 'fuerza') === 'agilidad' ? '' : 'hidden'}">
+      <div class="sec-title">Articulaciones que mueve</div>
+      <div class="flex flex-wrap gap-1 mb-3" data-ej-articulaciones>${multiChips(ENT_ARTICULACIONES, 'art', e.articulaciones)}</div>
+    </div>` : ''}
 
     <div class="sec-title">Músculos que trabaja</div>
     <p class="text-xs text-slate-500 mb-2">Los <b>primarios</b> se pintan fuerte en el dibujo del cuerpo que ve el cliente; los secundarios, suave.</p>
@@ -1748,6 +1780,13 @@ function entCapturarFotograma(file) {
   });
 }
 
+// Al cambiar el tipo: qué dirá la ficha y si pide articulaciones.
+window.entCambioTipo = (tipo) => {
+  const f = entFamilia(tipo || 'fuerza');
+  const t = $('#ej-familia'); if (t) t.textContent = ENT_FAMILIA_TXT[f];
+  const a = $('#ej-arts-caja'); if (a) a.classList.toggle('hidden', !(f === 'movilidad' || f === 'agilidad'));
+};
+
 window.entGuardarEjercicio = async (id) => {
   const val = (sel) => { const el = $(sel); return el ? el.value.trim() : ''; };
   const marcados = (clase) => $$(`.${clase}:checked`).map(i => i.value);
@@ -1770,6 +1809,8 @@ window.entGuardarEjercicio = async (id) => {
     segmento: val('#ej-segmento') || null,
     patron: val('#ej-patron') || null,
     nivel: val('#ej-nivel') || null,
+    ...(entTieneCol('cualidades') && $('[data-ej-cualidades]') ? { cualidades: marcados('ej-cual').slice(0, 2) } : {}),
+    ...(entTieneCol('articulaciones') && $('[data-ej-articulaciones]') ? { articulaciones: marcados('ej-art') } : {}),
     musculos_primarios: marcados('ej-prim'),
     musculos_secundarios: marcados('ej-sec'),
     equipo: marcados('ej-equipo'),
