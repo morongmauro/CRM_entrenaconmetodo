@@ -63,6 +63,7 @@ const tablas = () => ({
     { id: 'x3', rutina_id: 'r3', ejercicio_id: 'a1', orden: 3, series: 2, reps: '12', descanso_seg: 45 },
     { id: 'x4', rutina_id: 'r3', ejercicio_id: 'e2', orden: 1, series: 3, reps: '8' },
     { id: 'x5', rutina_id: 'r4', ejercicio_id: 'a1', orden: 1, series: 3, reps: '10' },
+    { id: 'x6', rutina_id: 'r4', ejercicio_id: 'e2', orden: 2, series: 3, reps: '8' },
     { id: 'xb', rutina_id: 'rb', ejercicio_id: 'a1', orden: 1, series: 3, reps: '10' },
   ],
   ejercicios: [
@@ -108,6 +109,14 @@ for (const [ancho, alto] of [[1440, 900], [390, 844]]) {
   ok('no propone una que no se parece (Overhead Press)', (await p.locator('[data-aeu-op="e2"]').count()) === 0);
   const donde = (await p.locator('[data-aeu-ej="a1"] [data-aeu-donde]').innerText()).replace(/\s+/g, ' ');
   ok('dice dónde: cliente, ciclo (el de ahora / el que viene) y rutina; no el ciclo viejo', /Ana Pérez · Ciclo 2 \(el de ahora\) · Push/.test(donde) && /el que viene\) · Push próximo/.test(donde) && /Luis Gil · Ciclo 4 \(el de ahora\) · Hombro/.test(donde) && !/Hombro viejo/.test(donde), donde);
+  // «N clientes ahora» de una tarjeta: quién, ciclo, rutina y qué ciclo es.
+  await p.locator('[data-quien-usa="e2"]').first().click();
+  await p.locator('[data-quien-lista]').waitFor({ timeout: 8000 });
+  const quien = (await p.locator('[data-quien-lista]').innerText()).replace(/\s+/g, ' ');
+  ok('«1 cliente ahora» se toca: Luis · Ciclo 4 · Hombro «el que ve hoy» y Ciclo 3 · Hombro viejo «ciclo viejo marcado activa»', /Luis Gil · Ciclo 4 · Hombro el que ve hoy/.test(quien) && /Luis Gil · Ciclo 3 · Hombro viejo ciclo viejo marcado activa/.test(quien), quien);
+  if (FOTO) await p.locator('#modal-root, .modal').first().screenshot({ path: path.join(CAPTURAS, `quien-usa-${ancho}-${FOTO}.png`) }).catch(() => {});
+  await p.evaluate(() => closeModal());
+  await p.waitForTimeout(300);
   if (FOTO) await aviso.screenshot({ path: path.join(CAPTURAS, `archivados-en-uso-${ancho}-${FOTO}.png`) });
   await p.locator('[data-aeu-cambiar="a1"][data-aeu-a="e1"]').click();
   await p.waitForFunction(() => !document.querySelector('[data-aeu-aviso]'), null, { timeout: 15000 }).catch(() => {});

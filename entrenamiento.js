@@ -348,12 +348,13 @@ const entDb = {
     const { data: clis } = await sb.from('clientes').select('id, estado');
     const activos = new Set((clis || []).filter(c => String(c.estado || 'activo').toLowerCase() === 'activo').map(c => c.id));
     const { data: fases } = await sb.from('fases')
-      .select('id, cliente_id, estado, fecha_inicio, semanas, visible_cliente, orden, created_at');
+      .select('id, cliente_id, nombre, estado, fecha_inicio, semanas, visible_cliente, orden, created_at');
     const hoy = fmt.hoy();
     const porCli = new Map();
     (fases || []).filter(f => activos.has(f.cliente_id) && f.estado !== 'archivada')
       .forEach(f => { if (!porCli.has(f.cliente_id)) porCli.set(f.cliente_id, []); porCli.get(f.cliente_id).push(f); });
     const faseCli = new Map();
+    const faseInfo = new Map();
     porCli.forEach((lista, cli) => {
       const fin = (f) => f.fecha_inicio ? evtSumarDias(f.fecha_inicio, (Number(f.semanas) || 4) * 7 - 1) : null;
       let vigentes = lista.filter(f => f.estado === 'activa' || f.visible_cliente
@@ -363,15 +364,30 @@ const entDb = {
           || (b.orden || 0) - (a.orden || 0) || String(b.created_at || '').localeCompare(String(a.created_at || '')))[0]];
       }
       vigentes.forEach(f => faseCli.set(f.id, cli));
+      // Qué es cada uno de esos ciclos para el cliente (el «N clientes
+      // ahora» de cada tarjeta lo dice al tocarlo): el que ve hoy en la app
+      // (de los enviados —activa y visible— el que empezó más reciente),
+      // uno viejo que sigue marcado «activa», el que viene, o un borrador
+      // (los importados de Trainerize).
+      const dia = (f) => String(f.fecha_inicio || '').slice(0, 10);
+      const enviadas = lista.filter(f => f.estado === 'activa' && f.visible_cliente === true).sort((a, b) => (b.orden || 0) - (a.orden || 0));
+      const empezadas = enviadas.filter(f => dia(f) && dia(f) <= hoy).sort((a, b) => dia(b).localeCompare(dia(a)) || (b.orden || 0) - (a.orden || 0));
+      const ve = empezadas[0] || enviadas[0] || null;
+      vigentes.forEach(f => {
+        const tipo = ve && f.id === ve.id ? 'hoy' : dia(f) > hoy ? 'viene' : f.estado === 'borrador' ? 'borrador' : 'viejo';
+        faseInfo.set(f.id, { cli, nombre: f.nombre || 'Ciclo', tipo });
+      });
     });
     // Por tandas: cientos de ids en una sola URL revientan el largo máximo.
     const tandas = (ids, n = 80) => { const t = []; for (let i = 0; i < ids.length; i += n) t.push(ids.slice(i, i + n)); return t; };
     const rutCli = new Map();
+    const rutInfo = new Map();
     for (const ids of tandas([...faseCli.keys()])) {
-      const { data: ruts } = await sb.from('rutinas').select('id, fase_id, archivada').in('fase_id', ids);
-      (ruts || []).filter(r => !r.archivada).forEach(r => rutCli.set(r.id, faseCli.get(r.fase_id)));
+      const { data: ruts } = await sb.from('rutinas').select('id, fase_id, archivada, nombre').in('fase_id', ids);
+      (ruts || []).filter(r => !r.archivada).forEach(r => { rutCli.set(r.id, faseCli.get(r.fase_id)); rutInfo.set(r.id, { fase: r.fase_id, nombre: r.nombre || 'Rutina' }); });
     }
     const quien = new Map();
+    const donde = new Map();
     for (const ids of tandas([...rutCli.keys()])) {
       for (let desde = 0; ; desde += 1000) {
         const { data: res } = await sb.from('rutina_ejercicios').select('rutina_id, ejercicio_id')
@@ -379,6 +395,11 @@ const entDb = {
         (res || []).forEach(re => {
           if (!quien.has(re.ejercicio_id)) quien.set(re.ejercicio_id, new Set());
           quien.get(re.ejercicio_id).add(rutCli.get(re.rutina_id));
+          const ri = rutInfo.get(re.rutina_id), fi = ri && faseInfo.get(ri.fase);
+          if (fi) {
+            if (!donde.has(re.ejercicio_id)) donde.set(re.ejercicio_id, []);
+            donde.get(re.ejercicio_id).push({ cli: fi.cli, ciclo: fi.nombre, tipo: fi.tipo, rutina: ri.nombre });
+          }
         });
         if (!res || res.length < 1000) break;
       }
@@ -386,6 +407,7 @@ const entDb = {
     quien.forEach((set, id) => enUso.set(id, set.size));
     _ent.enUso = enUso;
     _ent.quienUsa = quien;   // ejercicio → clientes que lo tienen hoy (reporte «Sin video por cliente»)
+    _ent.dondeUsa = donde;   // ejercicio → [{ cli, ciclo, tipo, rutina }] (al tocar «N clientes ahora»)
     return enUso;
   },
 
@@ -795,7 +817,7 @@ function entTarjetaEjercicio(e, opts = {}) {
         <div class="min-w-0 flex-1">
           <div class="font-bold text-slate-900 text-sm truncate">${escapeHtml(entNombres(e).grande)}</div>
           ${entNombreChico(e)}
-          ${_ent.enUso && _ent.enUso.get(e.id) ? `<span class="tag tag-blue" title="Clientes con este ejercicio en su ciclo actual">👥 ${_ent.enUso.get(e.id)} ${_ent.enUso.get(e.id) === 1 ? 'cliente' : 'clientes'} ahora</span>`
+          ${_ent.enUso && _ent.enUso.get(e.id) ? `<button type="button" class="tag tag-blue" style="cursor:pointer" data-quien-usa="${e.id}" title="Ver quién lo tiene, en qué ciclo y en qué rutina" onclick="event.stopPropagation(); entQuienUsa('${e.id}')">👥 ${_ent.enUso.get(e.id)} ${_ent.enUso.get(e.id) === 1 ? 'cliente' : 'clientes'} ahora ›</button>`
             : _ent.usados && _ent.usados.has(e.id) ? '<span class="tag tag-gray" title="Lo usó algún cliente en un ciclo anterior; hoy nadie lo tiene">🕘 Usado antes</span>' : ''}
           <div class="text-xs text-slate-500 mb-1">
             ${entLabel(ENT_TIPOS, e.tipo)} · ${entLabel(ENT_SEGMENTOS, e.segmento)}
@@ -989,6 +1011,28 @@ function entNivelesResumen(compacto = false) {
       ${c.repetidos ? cajaRev('repetidos', 'Repetidos', `<b class="text-slate-900">${c.repetidos.n}</b> grupos · <b class="text-amber-700">elige cuál dejar</b>`) : ''}
     </div>` : ''}`;
 }
+
+// ---------- «N clientes ahora»: quién, en qué ciclo y en qué rutina ----------
+const ENT_TIPO_CICLO = {
+  hoy: ['el que ve hoy', '#E6F2E9', '#2F7F45'],
+  viejo: ['ciclo viejo marcado activa', '#FCEBDD', '#B4541D'],
+  borrador: ['borrador de Trainerize', '#EFEDE7', '#55565B'],
+  viene: ['el que viene', '#EAF1FB', '#1E4E8C'],
+};
+window.entQuienUsa = async (id) => {
+  const e = (_ent.ejercicios || []).find(x => x.id === id);
+  const lista = (_ent.dondeUsa && _ent.dondeUsa.get(id)) || [];
+  const { data: clis } = await sb.from('clientes').select('id, nombre');
+  const nombre = Object.fromEntries((clis || []).map(c => [c.id, c.nombre || 'Sin nombre']));
+  const filas = [...new Map(lista.map(x => [`${x.cli}|${x.ciclo}|${x.rutina}`, x])).values()]
+    .sort((a, b) => String(nombre[a.cli] || '').localeCompare(String(nombre[b.cli] || '')) || a.rutina.localeCompare(b.rutina));
+  const chip = (t) => { const [txt, bg, col] = ENT_TIPO_CICLO[t] || ENT_TIPO_CICLO.viejo; return `<span class="tag" style="background:${bg};color:${col}">${txt}</span>`; };
+  openModal(modalShell(`Quién tiene «${escapeHtml(e ? entNombres(e).grande : 'este ejercicio')}»`, `
+    <p class="text-sm text-slate-600 mb-3">«Ahora» cuenta el ciclo que cada cliente ve hoy en la app y también los ciclos que siguen marcados «activa» o en borrador. Aquí ves cuál es cuál.</p>
+    <div class="divide-y divide-slate-100" data-quien-lista>
+      ${filas.length ? filas.map(x => `<div class="py-2 flex flex-wrap items-center gap-2 text-sm" data-quien-fila="${x.tipo}"><b class="text-slate-900">${escapeHtml(nombre[x.cli] || '')}</b><span class="text-slate-500">· ${escapeHtml(x.ciclo)} · ${escapeHtml(x.rutina)}</span>${chip(x.tipo)}</div>`).join('') : '<div class="text-sm text-slate-500 py-2">No encontré en qué rutina está.</div>'}
+    </div>`));
+};
 
 // ---------- Reporte: ejercicios sin video, por cliente ----------
 // Con el ciclo vigente de cada cliente activo (el mismo que «Los usan ahora»):
