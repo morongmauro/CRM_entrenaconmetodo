@@ -672,6 +672,9 @@ body.modo-movil [data-seg-mesa-btn] { display: none !important; }
 .lis-tabla td { padding: 10px 12px; border-bottom: 1px solid #F3F1EC; vertical-align: top; min-width: 120px; }
 .lis-tabla tbody tr { cursor: pointer; }
 .lis-tabla tbody tr:hover td { background: #FBFAF7; }
+/* marca.css pinta el hover de toda fila con un color transparente (!important):
+   en la columna fija del nombre se veía lo que pasa por debajo al deslizar. */
+.lis-tabla tbody tr:hover td.lis-nom { background-color: #F9FAF6 !important; }
 .lis-tabla .lis-nom { position: sticky; left: 0; background: #fff; z-index: 1; min-width: 190px; }
 .lis-tabla th.lis-nom { background: #FBFAF7; z-index: 2; }
 /* La celda del nombre sigue siendo celda de tabla (con display:flex dejaba de

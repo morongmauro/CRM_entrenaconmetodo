@@ -127,6 +127,27 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   const msg = await p.evaluate(() => navigator.clipboard.readText().catch(() => ''));
   ok(`${tag} · y copia el mensaje para WhatsApp con los dos`, !msg || (msg.includes(nombres[0]) && msg.includes(nombres[1])), msg);
 
+  // Te equivocaste: al volver a «Pedir», los ya pedidos salen marcados y se pueden desmarcar.
+  await p.locator('[data-vt-pedir]').click();
+  await p.waitForSelector('.vt-ya', { timeout: 10000 });
+  ok(`${tag} · los ya pedidos salen marcados (no bloqueados)`, await p.locator('.vt-ya:checked:not([disabled])').count() === 2);
+  await p.locator('.vt-ya').first().uncheck();
+  ok(`${tag} · al desmarcar avisa que se quita y el botón dice «Quitar pedido»`, await p.locator('[data-vt-quita]:not([hidden])').count() === 1 && (await p.locator('[data-vt-confirmar]').innerText()).trim() === 'Quitar pedido');
+  if (tag === 'ancho') await p.locator('#modal-content').screenshot({ path: path.join(CAPTURAS, 'videos-quitar.png') }).catch(() => {});
+  await p.locator('[data-vt-confirmar]').click();
+  await p.waitForSelector('[data-vt-modal] [data-vt-panel]', { timeout: 10000 });
+  await p.waitForTimeout(300);
+  ok(`${tag} · quitar deja solo el otro pedido`, (await filas(p)).length === 1);
+  // Lo vuelve a pedir para seguir con la prueba.
+  await p.locator('[data-vt-pedir]').click();
+  await p.waitForSelector('.vt-ej', { timeout: 10000 });
+  await p.locator(`.vt-ej[data-nombre="${nombres[0]}"], .vt-ej[data-nombre="${nombres[1]}"]`).first().check();
+  await p.locator('#vt-copiar').uncheck().catch(() => {});
+  await p.locator('[data-vt-confirmar]').click();
+  await p.waitForSelector('[data-vt-modal] [data-vt-panel]', { timeout: 10000 });
+  await p.waitForTimeout(300);
+  f = await filas(p);
+
   // Uno bien, otro a mejorar con la nota y pedido de nuevo.
   const [x1, x2] = f;
   await p.locator(`[data-vt-fila="${x1.id}"] [data-vt-bien]`).click();

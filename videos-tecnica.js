@@ -268,13 +268,16 @@ window.vtPedir = async () => {
   }).filter(g => g.ejs.length);
   const prev = (e) => (typeof entMiniPreviewHTML === 'function' ? entMiniPreviewHTML(e) : '') || '<span class="ent-mini-prev vt-sin-video">Sin video</span>';
   openModal(modalShell('Pedir videos de técnica', `
-    <p class="text-sm text-slate-600 mb-3">Marca los ejercicios${fase ? ` de «${escapeHtml(fase.nombre)}»` : ''}. En cada uno ves su video, cuántos ciclos lleva haciéndolo y si ya le pediste video antes.</p>
+    <p class="text-sm text-slate-600 mb-3">Marca los ejercicios${fase ? ` de «${escapeHtml(fase.nombre)}»` : ''}. En cada uno ves su video, cuántos ciclos lleva haciéndolo y si ya le pediste video antes. Los que ya le pediste salen marcados: desmárcalos si te equivocaste o ya no los quieres.</p>
     <div class="max-h-[58vh] overflow-y-auto pr-1">
       ${grupos.length ? grupos.map(g => `
         <div class="vt-grupo">${escapeHtml(g.r.nombre)}</div>
         ${g.ejs.map(re => { const n = entNombres(re.ejercicios).grande, porLlegar = ult[re.ejercicio_id]?.estado === 'pedido'; return `
           <div class="vt-fila-pedir${porLlegar ? ' vt-por-llegar' : ''}" data-vt-ej-fila="${re.ejercicio_id}">
-            <input type="checkbox" class="vt-ej" id="vt-ej-${re.ejercicio_id}" style="width:auto;flex:none" value="${re.ejercicio_id}" data-nombre="${escapeHtml(n)}" ${porLlegar ? 'disabled' : ''}>
+            ${porLlegar
+              // Ya pedido: sale marcado. Desmarcarlo quita el pedido (te equivocaste o ya no lo quieres).
+              ? `<input type="checkbox" class="vt-ya" id="vt-ej-${re.ejercicio_id}" style="width:auto;flex:none" value="${re.ejercicio_id}" data-pedido="${ult[re.ejercicio_id].id}" data-nombre="${escapeHtml(n)}" checked onchange="vtYaCambio(this)" title="Ya se lo pediste. Desmárcalo para quitar el pedido">`
+              : `<input type="checkbox" class="vt-ej" id="vt-ej-${re.ejercicio_id}" style="width:auto;flex:none" value="${re.ejercicio_id}" data-nombre="${escapeHtml(n)}">`}
             <div class="vt-izq" data-vt-recorte>
               ${prev(re.ejercicios)}
               <span class="vt-nombre" onclick="vtMarcarEj('${re.ejercicio_id}')">${escapeHtml(n)}</span>
@@ -282,6 +285,7 @@ window.vtPedir = async () => {
             <div class="vt-der" onclick="vtMarcarEj('${re.ejercicio_id}')">
               <span class="vt-lineas">${historia(re.ejercicio_id)}</span>
               <span class="vt-lineas">${videos(re.ejercicio_id)}</span>
+              ${porLlegar ? '<span class="vt-h vt-quita" data-vt-quita hidden>Se quita el pedido: ya no le saldrá en su app</span>' : ''}
             </div>
           </div>`; }).join('')}`).join('') : '<p class="text-sm text-slate-500">Su ciclo no tiene ejercicios de fuerza todavía.</p>'}
     </div>
@@ -292,8 +296,18 @@ window.vtPedir = async () => {
       <button class="btn btn-primary" data-vt-confirmar onclick="vtConfirmarPedido()">Pedir</button>`), { wide: true });
 };
 
-// Tocar el nombre o los datos marca la casilla (si no está «Por llegar»).
-window.vtMarcarEj = (id) => { const c = document.getElementById(`vt-ej-${id}`); if (c && !c.disabled) c.checked = !c.checked; };
+// Tocar el nombre o los datos marca (o desmarca) la casilla.
+window.vtMarcarEj = (id) => { const c = document.getElementById(`vt-ej-${id}`); if (c && !c.disabled) { c.checked = !c.checked; if (c.classList.contains('vt-ya')) vtYaCambio(c); } };
+// Un pedido que ya estaba: desmarcado = se quita al guardar.
+window.vtYaCambio = (c) => {
+  const fila = c.closest('[data-vt-ej-fila]');
+  const nota = fila && fila.querySelector('[data-vt-quita]');
+  if (nota) nota.hidden = c.checked;
+  if (fila) fila.classList.toggle('vt-quitando', !c.checked);
+  const quitar = $$('.vt-ya:not(:checked)').length, nuevos = $$('.vt-ej:checked').length;
+  const b = document.querySelector('[data-vt-confirmar]');
+  if (b) b.textContent = quitar && !nuevos ? (quitar === 1 ? 'Quitar pedido' : 'Quitar pedidos') : quitar ? 'Guardar' : 'Pedir';
+};
 
 (function () {
   const s = document.createElement('style');
@@ -306,7 +320,8 @@ window.vtMarcarEj = (id) => { const c = document.getElementById(`vt-ej-${id}`); 
   .vt-nombre{font-size:14px;font-weight:650;color:#1F1F1F;line-height:1.3;cursor:pointer;min-width:0}
   .vt-sin-video{display:grid;place-items:center;font-size:11px;color:#9A9AA0}
   .vt-der{flex:1;min-width:0;cursor:pointer;border-left:1px solid #EFEBE3;padding-left:14px;align-self:stretch;display:flex;flex-direction:column;justify-content:center}
-  .vt-por-llegar .vt-der,.vt-por-llegar .vt-nombre{cursor:default}
+  .vt-h.vt-quita{color:#A3301B;font-weight:700;flex-basis:100%}
+  .vt-quitando .vt-izq{opacity:.55}
   .vt-lineas{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin:2px 0}
   .vt-h{font-size:12px;color:#1F1F1F}
   .vt-h.vt-gris{color:#7A7A7A}
@@ -321,16 +336,24 @@ window.vtConfirmarPedido = async () => {
   const marcados = $$('.vt-ej:checked').map(i => ({ ejercicio_id: i.value, ejercicio_nombre: i.dataset.nombre }));
   const otro = ($('#vt-otro')?.value || '').trim();
   if (otro) marcados.push({ ejercicio_id: null, ejercicio_nombre: otro });
-  if (!marcados.length) return toast('Marca al menos uno');
-  const copiar = $('#vt-copiar')?.checked;
+  const quitar = $$('.vt-ya:not(:checked)').map(i => ({ id: i.dataset.pedido, nombre: i.dataset.nombre }));
+  if (!marcados.length && !quitar.length) return toast('Marca al menos uno');
+  const copiar = $('#vt-copiar')?.checked && marcados.length > 0;
   const ult = vtUltimos(_vt.filas);
   const filas = marcados.map(m => {
     const antes = ult[m.ejercicio_id || `n:${m.ejercicio_nombre.toLowerCase()}`];
     return { cliente_id: _vt.clienteId, ...m, estado: 'pedido', pedido_en: vtHoy(), pedido_de: antes ? antes.id : null };
   });
-  if (!(await vtDb.crear(filas))) return;
+  // Lo desmarcado (te retractaste) se quita: deja de salirle en su app.
+  if (quitar.length) {
+    if (!confirm(`¿Quitar ${quitar.length === 1 ? 'el pedido de' : 'los pedidos de'} ${quitar.map(q => q.nombre).join(', ')}? Ya no le saldrá en su app.`)) return;
+    let ok = 0;
+    for (const q of quitar) { if (await vtDb.borrar(q.id)) { ok++; _vt.filas = _vt.filas.filter(f => f.id !== q.id); } }
+    if (ok) toast(`${ok} pedido${ok === 1 ? '' : 's'} quitado${ok === 1 ? '' : 's'}`);
+  }
+  if (filas.length && !(await vtDb.crear(filas))) return;
   closeModal();
-  toast(`${filas.length} video${filas.length === 1 ? '' : 's'} pedido${filas.length === 1 ? '' : 's'}`);
+  if (filas.length) toast(`${filas.length} video${filas.length === 1 ? '' : 's'} pedido${filas.length === 1 ? '' : 's'}`);
   await vtPanel(_vt.caja, _vt.clienteId);
   if (copiar) await vtCopiarMensaje(filas.map(f => f.ejercicio_nombre));
 };
