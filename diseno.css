@@ -674,7 +674,13 @@ body.modo-movil [data-seg-mesa-btn] { display: none !important; }
 .lis-tabla tbody tr:hover td { background: #FBFAF7; }
 .lis-tabla .lis-nom { position: sticky; left: 0; background: #fff; z-index: 1; min-width: 190px; }
 .lis-tabla th.lis-nom { background: #FBFAF7; z-index: 2; }
-.lis-tabla td.lis-nom { display: flex; align-items: center; gap: 10px; }
+/* La celda del nombre sigue siendo celda de tabla (con display:flex dejaba de
+   estirarse al alto de la fila: quedaba un cuadro blanco debajo del nombre y,
+   al deslizar hacia el lado, lo de las otras columnas se veía por debajo). */
+.lis-tabla td.lis-nom { display: table-cell; vertical-align: middle; white-space: nowrap; box-shadow: 1px 0 0 #F3F1EC; }
+.lis-tabla td.lis-nom > * { display: inline-block; vertical-align: middle; white-space: normal; }
+.lis-tabla td.lis-nom > :first-child:not(:last-child) { margin-right: 10px; }
+.lis-tabla td.lis-nom > div { max-width: 106px; }
 .lis-tabla td.lis-nom b { font-size: 14px; font-weight: 700; color: #1F1F1F; }
 .lis-tabla .lis-foco { background: #F6F4EE; }
 .lis-tabla th.lis-foco { color: #1F1F1F; }
