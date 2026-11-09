@@ -753,8 +753,34 @@ Responde SOLO con un objeto JSON, sin texto antes ni después, con el id de
 cada ejercicio como llave:
 {"<id>": {"patron": "…", "primarios": ["…"], "secundarios": ["…"], "articulaciones": ["…"], "tambien": ["…"], "claves": ["…","…","…"], "errores": ["…","…","…"]}}`;
 
+// «Crear ejercicio nuevo» (CRM → Galería o el constructor de rutinas): busca
+// en YouTube videos que muestren ese ejercicio. El coach elige uno; nada se
+// guarda sin que él lo valide.
+const SYSTEM_VIDEO = `Eres un preparador físico que arma la galería de ejercicios de una app de
+entrenamiento. Recibes el nombre de un ejercicio (en español o en inglés) y,
+a veces, su tipo. Busca en YouTube videos que lo MUESTREN bien para que un
+cliente lo copie.
+
+Prefiere:
+- demostraciones cortas (idealmente menos de 2 minutos) con el ejercicio
+  completo y bien visto (de lado o de frente, cuerpo entero);
+- canales de entrenamiento serios (fisioterapia, entrenadores, gimnasios);
+- en inglés o en español.
+Evita: compilados, rutinas largas, retos, música sin demostración, videos de
+más de 10 minutos, y cualquier cosa que no sea ESE ejercicio.
+
+Usa la búsqueda y devuelve SOLO enlaces que hayas visto en los resultados
+(youtube.com/watch?v=… o youtube.com/shorts/…). No inventes enlaces.
+
+Responde al final SOLO con un objeto JSON, sin texto antes ni después:
+{"nombre_es": "nombre en español, claro y corto",
+ "nombre_en": "nombre en inglés como se conoce en el gimnasio",
+ "videos": [{"url": "…", "titulo": "…", "canal": "…", "por_que": "una línea"}]}
+Hasta 4 videos, el mejor primero. Si no encuentras ninguno bueno, "videos": [].`;
+
 const PERFILES = {
   tecnica: { tools: null, system: SYSTEM_TECNICA },
+  video: { tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 4, allowed_domains: ['youtube.com'] }], system: SYSTEM_VIDEO },
   ficha: { tools: null, system: SYSTEM_FICHA },
   general: { tools: HERRAMIENTAS_GENERAL, system: SYSTEM_GENERAL },
   rutinas: { tools: HERRAMIENTAS_RUTINAS, system: SYSTEM_RUTINAS },

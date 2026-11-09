@@ -1360,7 +1360,8 @@ async function entVistaEjercicios() {
         <button class="btn btn-secondary btn-sm" onclick="entReporteSinHistorial()" data-reporte-sin-historial title="Qué ejercicios de hoy le salen al cliente sin «última vez», y por qué">📈 Sin historial por cliente</button>
         <button class="btn btn-secondary btn-sm" onclick="entRevisarVideos()" title="Recorre los ejercicios filtrados, uno a uno, con sus propuestas de video">🎬 Revisar videos uno a uno</button>
         <button class="btn btn-secondary btn-sm" onclick="entYtAbrir()" data-revisar-youtube title="Encuentra los videos que YouTube no deja ver fuera de YouTube (tampoco se ven en la app)">Revisar YouTube</button>
-        <button class="btn btn-primary btn-sm" onclick="entEditarEjercicio()">+ Nuevo ejercicio</button>
+        <button class="btn btn-secondary btn-sm" onclick="entEditarEjercicio()">+ Nuevo ejercicio (a mano)</button>
+        <button class="btn btn-primary btn-sm" data-crear-ejercicio onclick="enAbrir('galeria')" title="Buscas su video en YouTube, la IA llena la ficha y tú la revisas antes de crearlo">+ Crear ejercicio con IA</button>
       </div>
     </div>
     ${window.aeuCajaHTML ? aeuCajaHTML() : ''}
@@ -2035,7 +2036,10 @@ async function entPintarConstructor() {
 
     <div class="ent-mesa-grid ${r.cliente_id ? '' : 'ent-mesa-sin-asi'} grid lg:grid-cols-2 ${r.cliente_id ? 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_360px]' : ''} gap-4 items-start">
       <div class="order-2 lg:order-1 ent-col" id="cons-col-gal">
-        <div class="text-sm font-bold text-slate-700 mb-2">Galería · arrástralo a la rutina o toca “+ Añadir”</div>
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <div class="text-sm font-bold text-slate-700">Galería · arrástralo a la rutina o toca “+ Añadir”</div>
+          <button class="btn btn-ghost btn-sm whitespace-nowrap flex-none" data-crear-ejercicio-rutina onclick="enAbrir('rutina')" title="¿No está en la galería? Créalo: video, ficha con IA y queda añadido a esta rutina">+ Crear ejercicio</button>
+        </div>
         <div id="cons-destino">${entDestinoHTML(r)}</div>
         <div id="cons-filtros">${entBarraFiltros('cons')}</div>
         <div id="cons-gal-lista" class="grid grid-cols-2 gap-2 max-h-[70vh] overflow-y-auto pr-1 lg:max-h-none lg:overflow-visible lg:pr-0"></div>
