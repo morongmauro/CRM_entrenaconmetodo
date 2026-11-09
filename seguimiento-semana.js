@@ -339,6 +339,8 @@ function esCalcular(D, lunes, hoy) {
   const subir = [];
   const vistos = new Set();
   sesSem.slice().sort((a, b) => dia10(b.fecha).localeCompare(dia10(a.fecha))).forEach(se => {
+    // Solo si llegó cómodo: con esfuerzo de 9 o 10 todavía no se sube.
+    if (Number(se.rpe) >= 9) return;
     const porEjS = {};
     D.series.filter(x => x.sesion_id === se.id && x.completada !== false && Number(x.reps) > 0 && Number(x.peso) > 0)
       .forEach(x => (porEjS[x.ejercicio_id] ||= []).push(x));
@@ -391,14 +393,20 @@ function esSobrecarga(D, sesFecha, lunes, domingo) {
     if (f >= lunes && f <= domingo) e.sem = mejor(e.sem, { ...x, f });
     else if (f < lunes) e.antes[f] = mejor(e.antes[f], { ...x, f });
   });
-  const orden = { peso: 0, reps: 1, igual: 2, baja: 3, primera: 4 };
+  const orden = { peso: 0, reps: 1, ajuste: 2, igual: 3, baja: 4, primera: 5 };
+  // La fuerza estimada (peso y reps juntos), para comparar cuando bajó el peso.
+  const e1rm = (x) => kg(x) * (1 + Math.min(Number(x.reps) || 1, 20) / 30);
   return Object.values(porEj).filter(e => e.sem).map(e => {
     const fAnt = Object.keys(e.antes).sort().pop();
     const a = fAnt ? e.antes[fAnt] : null, s = e.sem;
     let tipo = 'primera';
     if (a) {
       const dk = kg(s) - kg(a), dr = Number(s.reps) - Number(a.reps);
-      if (Math.abs(dk) >= 0.01) tipo = dk > 0 ? 'peso' : 'baja';
+      // Subió el peso (aunque bajen las reps): subió. Mismo peso (o sin peso):
+      // manda las reps. Bajó el peso: solo es «bajó» si su fuerza estimada
+      // cae; si compensó con reps es un ajuste, no una bajada.
+      if (dk >= 0.01) tipo = 'peso';
+      else if (dk <= -0.01) tipo = e1rm(s) >= e1rm(a) * 0.95 ? 'ajuste' : 'baja';
       else tipo = dr > 0 ? 'reps' : dr < 0 ? 'baja' : 'igual';
     }
     const nombre = typeof entNombres === 'function' ? entNombres(e.ej || {}).grande : ((e.ej && e.ej.nombre) || 'Ejercicio');
@@ -906,6 +914,7 @@ function esMarcaAviso(m) {
 const ES_SOBRE = {
   peso: ['Subió de peso', 'es-sb-sube'], reps: ['Más reps', 'es-sb-sube'], igual: ['Igual', 'es-sb-igual'],
   baja: ['Bajó', 'es-sb-baja'], primera: ['Primera vez', 'es-sb-igual'],
+  ajuste: ['Menos peso, más reps', 'es-sb-igual'],
 };
 function esSerieTxt(s) {
   if (!s) return '—';

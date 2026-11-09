@@ -65,7 +65,7 @@ async function asiDatos(clienteId, force = false) {
   }
 
   const { data: ses } = await sb.from('sesiones')
-    .select('id, fecha, estado, rutina_id, fase_id, origen')
+    .select('id, fecha, estado, rutina_id, fase_id, origen, rpe')
     .eq('cliente_id', clienteId).order('fecha', { ascending: false }).limit(1000);
   const sesiones = ses || [];
   const series = await entDb.seriesDeSesiones(sesiones.filter(s => s.estado === 'completada').map(s => s.id));
@@ -159,7 +159,7 @@ function asiAnalizar(datos, { faseId, ejercicios }) {
     if (!s || s.estado !== 'completada') continue;
     const e = porEj.get(l.ejercicio_id) || { dias: new Map(), sesionesCon: new Set() };
     e.sesionesCon.add(l.sesion_id);
-    const d = e.dias.get(s.fecha) || { fecha: s.fecha, lineas: [], origen: s.origen };
+    const d = e.dias.get(s.fecha) || { fecha: s.fecha, lineas: [], origen: s.origen, rpe: Number(s.rpe) || null };
     d.lineas.push(l);
     e.dias.set(s.fecha, d);
     porEj.set(l.ejercicio_id, e);
@@ -204,7 +204,7 @@ function asiAnalizar(datos, { faseId, ejercicios }) {
         : d.lineas.reduce((m, l) => ((Number(l.reps) || 0) > (Number(m.reps) || 0) ? l : m));
       const kg = asiKg(mejor);
       return { fecha: d.fecha, kg, reps: Number(mejor.reps) || 0, valor: kg ? entE1rm(kg, mejor.reps) : (Number(mejor.reps) || 0),
-               lineas: d.lineas.sort((a, b) => (a.serie_num || 0) - (b.serie_num || 0)), origen: d.origen };
+               lineas: d.lineas.sort((a, b) => (a.serie_num || 0) - (b.serie_num || 0)), origen: d.origen, rpe: d.rpe };
     }) : [];
     const tzx = tzDe(ej);
 
@@ -246,7 +246,7 @@ function asiAnalizar(datos, { faseId, ejercicios }) {
       ciclos: set ? set.size : 0, seguidos: seguidos(set),
       enFaseActual: !!(set && set.has(hastaIdx)),
       presc: prescDe.get(id) || null,
-      ultimo: ult ? { fecha: ult.fecha, txt: asiResumenSeries(ult.lineas), kgTop: Math.max(0, ...ult.lineas.map(asiKg)), lineas: ult.lineas, origen: ult.origen } : null,
+      ultimo: ult ? { fecha: ult.fecha, txt: asiResumenSeries(ult.lineas), kgTop: Math.max(0, ...ult.lineas.map(asiKg)), lineas: ult.lineas, origen: ult.origen, rpe: ult.rpe || null } : null,
       tz: tzx || null,
     });
   }
@@ -270,6 +270,9 @@ function asiSugerencia(a, prescActual) {
   const seriesPresc = Number(a.presc?.series ?? prescActual?.series) || 0;
   if (u && rango && u.kgTop > 0 && seriesPresc >= 2) {
     const reps = u.lineas.map(l => Number(l.reps) || 0).filter(n => n > 0);
+    if (reps.length && reps.every(r => r >= rango[1]) && u.rpe >= 9) {
+      return { tono: 'idea', txt: `Llegó al tope del rango (${rango[1]} reps en todas las series con ${Math.round(u.kgTop * 10) / 10} kg) pero con esfuerzo ${u.rpe} de 10: mantén la carga una sesión más.` };
+    }
     if (reps.length && reps.every(r => r >= rango[1])) {
       return { tono: 'bien', txt: `Llegó al tope del rango (${rango[1]} reps en todas las series con ${Math.round(u.kgTop * 10) / 10} kg): sube carga, prueba ${asiSiguienteCarga(u.kgTop)} kg.` };
     }

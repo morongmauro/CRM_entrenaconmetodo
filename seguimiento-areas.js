@@ -242,6 +242,11 @@ function saPintarHoy(S) {
 // 4. Fuerza: los estancados (la misma mejor serie en sus últimas 3 sesiones).
 function saEstancados(D) {
   const fecha = Object.fromEntries((D.sesiones || []).filter(s => s.estado === 'completada').map(s => [s.id, String(s.fecha).slice(0, 10)]));
+  const sesDe = Object.fromEntries((D.sesiones || []).map(s => [s.id, s]));
+  // El rango recetado (8-12 → 8 y 12), de la rutina donde lo hizo.
+  const rango = (txt) => { const m = String(txt || '').trim().match(/^(\d+)(?:\s*[-–a]\s*(\d+))?$/); return m ? [Number(m[1]), Number(m[2] || m[1])] : null; };
+  const presc = {};
+  (D.prescritos || []).forEach(r => { const g = rango(r.reps); if (g) presc[`${r.rutina_id}|${r.ejercicio_id}`] = g; });
   const kg = (s) => (s.unidad === 'lb' ? Number(s.peso) * 0.4536 : Number(s.peso)) || 0;
   const por = {};
   (D.series || []).forEach(x => {
@@ -258,7 +263,9 @@ function saEstancados(D) {
     const igual = ult.every(s => Math.abs(kg(s) - kg(ult[0])) < 0.01 && Number(s.reps) === Number(ult[0].reps));
     if (!igual || !(kg(ult[0]) > 0)) return null;
     const nombre = typeof entNombres === 'function' ? entNombres(e.ej || {}).grande : ((e.ej && e.ej.nombre) || 'Ejercicio');
-    return { id, nombre, serie: ult[2], desde: fs[0] };
+    const ses = sesDe[ult[2].sesion_id] || {};
+    const r = presc[`${ses.rutina_id}|${id}`] || null;
+    return { id, nombre, serie: ult[2], desde: fs[0], rango: r, rpe: Number(ses.rpe) || null };
   }).filter(Boolean);
 }
 function saPintarFuerza(S, D) {

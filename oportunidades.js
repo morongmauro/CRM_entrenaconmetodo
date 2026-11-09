@@ -80,6 +80,26 @@ function opEntreno(S, D, n) {
     const u = x.serie.unidad || 'kg';
     const paso = u === 'lb' ? 5 : kgde(x.serie) >= 20 ? 2.5 : 1;
     const nuevo = Number(x.serie.peso) + paso;
+    const reps = Number(x.serie.reps), tope = x.rango ? x.rango[1] : null;
+    const base = { cat: 'entreno', nivel: est.length >= 3 ? 'actuar' : 'revisar', titulo: `Estancado en ${x.nombre}`, dato: `3 sesiones seguidas con ${saNum(x.serie.peso)} ${u} × ${reps}${tope ? ` (su rango es ${x.rango[0]}-${tope})` : ''}.` };
+    // Reps primero: por debajo del tope del rango, se suman reps con el mismo peso.
+    if (tope && reps < tope) {
+      out.push({ ...base,
+        rec: `mantener ${saNum(x.serie.peso)} ${u} y sumar 1 o 2 repeticiones por serie hasta llegar a ${tope}. Ahí se sube el peso.`,
+        msg: `${n}, en ${x.nombre} llevas 3 sesiones con ${saNum(x.serie.peso)} ${u} × ${reps}. Mantén el peso y busca 1 o 2 repeticiones más por serie hasta llegar a ${tope}; cuando llegues, subimos el peso.`,
+        ped: { tipo: 'entreno', texto: `${x.nombre}: llegar a ${tope} reps con ${saNum(x.serie.peso)} ${u}`, objetivo: { ejercicio: x.nombre } },
+      });
+      return;
+    }
+    // En el tope pero lo sintió muy duro: todavía no.
+    if (x.rpe && x.rpe >= 9) {
+      out.push({ ...base,
+        rec: `mantener ${saNum(x.serie.peso)} ${u} una sesión más: llegó al tope pero con esfuerzo ${x.rpe} de 10. Cuando le salga más cómodo, se sube.`,
+        msg: `${n}, en ${x.nombre} ya llegas a ${reps} con ${saNum(x.serie.peso)} ${u}, pero lo sentiste muy duro. Mantén ese peso una sesión más y, cuando te salga más cómodo, subimos.`,
+        ped: null,
+      });
+      return;
+    }
     out.push({
       cat: 'entreno', nivel: est.length >= 3 ? 'actuar' : 'revisar',
       titulo: `Estancado en ${x.nombre}`,

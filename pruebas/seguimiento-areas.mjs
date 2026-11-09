@@ -175,7 +175,8 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
   const cats = await p.locator('[data-op-cat]').evaluateAll(els => els.map(e => e.dataset.opCat));
   ok(`${tag} · oportunidades: 4 categorías en orden (${cats})`, JSON.stringify(cats) === '["entreno","actividad","comida","cuerpo"]');
   const opE = (await p.locator('[data-op-cat="entreno"]').innerText()).replace(/\s+/g, ' ');
-  ok(`${tag} · oportunidades · entreno: faltó al entreno y estancado en elevación lateral con el peso siguiente`, /Faltó a 1 entreno/.test(opE) && /Estancado en/.test(opE) && /13,5 kg/.test(opE), opE);
+  // Estancado en 12,5 × 10 con rango 10-12: reps primero (no sube peso todavía).
+  ok(`${tag} · oportunidades · entreno: faltó al entreno y estancado en elevación lateral: suma reps hasta 12 antes de subir peso`, /Faltó a 1 entreno/.test(opE) && /Estancado en/.test(opE) && /su rango es 10-12/.test(opE) && /hasta llegar a 12/.test(opE) && !/13,5 kg/.test(opE), opE);
   const opC = (await p.locator('[data-op-cat="comida"]').innerText()).replace(/\s+/g, ' ');
   ok(`${tag} · oportunidades · comida: le faltan 40 g de proteína, con equivalencia en comida real`, /No llega a su meta/.test(opC) && /−40 g/.test(opC) && /pechuga de pollo/.test(opC), opC);
   const opP = (await p.locator('[data-op-cat="cuerpo"]').innerText()).replace(/\s+/g, ' ');
