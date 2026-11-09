@@ -62,7 +62,8 @@ function tablas() {
   const fases = [{ ...f18, id: 'f17', nombre: 'Ciclo 17', fecha_inicio: '2026-08-03', estado: 'finalizada' }, ...fixture.fases];
   const rutinas = [...fixture.rutinas, { ...r19, id: 'r17', fase_id: 'f17', nombre: 'Full body' }];
   const re17 = [comun, soloViejo].filter(Boolean).map((id, k) => ({ id: 're17-' + k, rutina_id: 'r17', ejercicio_id: id, orden: k, series: 3, reps: '10', ejercicios: ej.get(id) }));
-  globalThis.__casos = { comun, soloViejo, otro: otro && otro.id, r19: r19.id };
+  const solo19 = de19.find(id => !en18.has(id) && id !== soloViejo);
+  globalThis.__casos = { comun, soloViejo, otro: otro && otro.id, r19: r19.id, solo19 };
   return {
     clientes: [cliente], seguimientos, pagos: [], pendientes: [], mediciones_corporales: [],
     settings: [{ user_id: 'coach-1', usd_cop_rate: 4000, nombre_coach: 'Mauro' }],
@@ -153,6 +154,28 @@ for (const [tag, ancho, alto] of [['ancho', 1600, 900], ['telefono', 390, 844]])
   if (process.env.FOTO) {
     await p.locator('#cons-col-rutina').scrollIntoViewIfNeeded();
     await p.locator('#cons-col-rutina').screenshot({ path: path.join(CAPTURAS, `ciclos-${tag}-${process.env.FOTO}.png`) });
+  }
+  // Un ciclo copiado del 19 que quedó con la MISMA fecha de inicio (o antes):
+  // el 19 igual cuenta como el anterior, no sale «Nuevo para este cliente».
+  {
+    // Un ejercicio que SOLO estuvo en el 19 (el de origen): en la copia no es nuevo.
+    await p.evaluate(({ r19, otro }) => {
+      const T = TABLAS_FALSAS, r = T.rutinas.find(x => x.id === r19), f = T.fases.find(x => x.id === r.fase_id);
+      const ej = T.ejercicios.find(x => x.id === otro);
+      if (!T.rutina_ejercicios.some(x => x.rutina_id === r19 && x.ejercicio_id === otro)) T.rutina_ejercicios.push({ id: 're19-solo', rutina_id: r19, ejercicio_id: otro, orden: 98, series: 3, reps: '10', ejercicios: ej });
+      T.fases.push({ ...f, id: 'f20', nombre: 'Ciclo 20 (copia)', estado: 'borrador', orden: (f.orden || 0) - 1 });
+      T.rutinas.push({ ...r, id: 'r20', fase_id: 'f20', origen_rutina_id: r.id });
+      const de = T.rutina_ejercicios.filter(x => x.rutina_id === r.id);
+      // Como en Supabase: cada fila trae su ejercicio completo (con su id).
+      de.forEach((x, k) => T.rutina_ejercicios.push({ ...x, id: 're20-' + k, rutina_id: 'r20', ejercicios: T.ejercicios.find(e => e.id === x.ejercicio_id) || x.ejercicios }));
+      if (typeof invalidarCache === 'function') invalidarCache();
+    }, { r19: C.r19, otro: C.otro });
+    const id19 = C.otro;
+    await p.evaluate(() => entAbrirConstructor('r20'));
+    await p.waitForFunction(() => _ent.rutina && _ent.rutina.id === 'r20' && document.querySelector('#cons-col-rutina .ent-fila'), null, { timeout: 15000 });
+    await p.waitForTimeout(600);
+    const t20 = await p.evaluate((id) => { const re = _ent.rutina.ejercicios.find(x => x.ejercicio_id === id); return re ? (document.querySelector(`[data-re="${re.id}"] [data-tag-ciclos]`)?.textContent.trim() || '') : 'sin fila'; }, id19);
+    ok(`${tag} · ciclo copiado con la misma fecha: lo del ciclo de origen dice «Lo usó en el ciclo anterior», no «Nuevo»`, /ciclo anterior|últimos/.test(t20) && !/Nuevo/.test(t20), t20);
   }
   ok(`${tag} · sin errores de página`, errores.length === 0, errores.join(' | '));
   await ctx.close();

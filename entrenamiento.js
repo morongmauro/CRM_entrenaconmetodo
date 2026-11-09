@@ -2483,10 +2483,25 @@ async function entHistorialCiclos(r) {
   const lista = (fases || []).filter(f => f.estado !== 'archivada')
     .sort((a, b) => String(a.fecha_inicio || '').localeCompare(String(b.fecha_inicio || '')) || (a.orden ?? 0) - (b.orden ?? 0));
   const i = lista.findIndex(f => f.id === r.fase_id);
-  if (i <= 0) return { porId: new Map(), porNombre: new Map(), nombres: {} };
-  const antes = lista.slice(0, i);
-  const atrasDe = Object.fromEntries(antes.map((f, j) => [f.id, i - j]));   // 1 = el ciclo anterior
-  const nombres = Object.fromEntries(antes.map((f, j) => [i - j, f.nombre || `Ciclo ${j + 1}`]));
+  // El ciclo del que se COPIÓ este (al duplicar) siempre es el anterior, aunque
+  // por fecha quede después: si el nuevo quedó con la misma fecha de inicio o
+  // sin fecha, todo salía «Nuevo para este cliente» siendo la misma copia.
+  let origen = [];
+  try {
+    const { data: mias } = await sb.from('rutinas').select('origen_rutina_id').eq('fase_id', r.fase_id);
+    const ids = [...new Set((mias || []).map(x => x.origen_rutina_id).filter(Boolean))];
+    if (ids.length) {
+      const { data: src } = await sb.from('rutinas').select('fase_id').in('id', ids);
+      origen = [...new Set((src || []).map(x => x.fase_id).filter(id => id && id !== r.fase_id))];
+    }
+  } catch (e) { origen = []; }
+  let antes = i > 0 ? lista.slice(0, i) : [];
+  const fuera = origen.map(id => lista.find(f => f.id === id)).filter(f => f && !antes.includes(f));
+  antes = [...antes, ...fuera];   // al final = el más cercano (atrás 1)
+  if (!antes.length) return { porId: new Map(), porNombre: new Map(), nombres: {} };
+  const n = antes.length;
+  const atrasDe = Object.fromEntries(antes.map((f, j) => [f.id, n - j]));   // 1 = el ciclo anterior
+  const nombres = Object.fromEntries(antes.map((f, j) => [n - j, f.nombre || `Ciclo ${j + 1}`]));
   const { data: rutinas } = await sb.from('rutinas').select('id, fase_id').in('fase_id', antes.map(f => f.id));
   const faseDe = Object.fromEntries((rutinas || []).map(x => [x.id, x.fase_id]));
   const ids = Object.keys(faseDe);
