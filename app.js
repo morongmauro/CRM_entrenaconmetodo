@@ -3009,9 +3009,17 @@ const db = {
   clientes: {
     async list() {
       if (_clientesCache) return _clientesCache;
-      const { data } = await sb.from('clientes').select('*').order('nombre');
-      _clientesCache = data || [];
-      return _clientesCache;
+      // Si la lectura falla (red del celular, sesión que apenas despierta) NO se
+      // guarda la lista vacía: antes quedaba «0 clientes» en todo el CRM hasta
+      // recargar. Se reintenta una vez; una lista vacía tampoco se guarda (la
+      // próxima pantalla vuelve a preguntar).
+      const leer = async () => { try { return await sb.from('clientes').select('*').order('nombre'); } catch (e) { return { data: null, error: e }; } };
+      let r = await leer();
+      if (r.error || !(r.data || []).length) { await new Promise(ok => setTimeout(ok, 700)); r = await leer(); }
+      window._clientesFallo = r.error ? (r.error.message || 'sin conexión') : null;
+      if (r.error) return [];
+      if ((r.data || []).length) _clientesCache = r.data;
+      return r.data || [];
     },
     async refresh() { invalidarCache('clientes'); return db.clientes.list(); },
     async get(id) {

@@ -181,8 +181,9 @@ async function cpDatos(forzar = false) {
     }));
     const orden = { intervenir: 0, observar: 1, pausa: 2, normal: 3 };
     filas.sort((a, b) => orden[a.estado] - orden[b.estado] || b.senales.length - a.senales.length || String(a.c.nombre).localeCompare(String(b.c.nombre)));
-    _cpr.datos = { hoy, filas, conApp: !!(eng && eng.conApp) };
-    _cpr.leido = Date.now();
+    _cpr.datos = { hoy, filas, conApp: !!(eng && eng.conApp), fallo: window._clientesFallo || null };
+    // Sin clientes (lectura fallida): que la próxima vez vuelva a leer.
+    _cpr.leido = filas.length ? Date.now() : 0;
     return _cpr.datos;
   })();
   try { return await _cpr.cargando; } finally { _cpr.cargando = null; }
@@ -399,8 +400,12 @@ function cpBanda() { return ''; }
 routes.hoy = async () => {
   cargando('Revisando a todos tus clientes…');
   let D;
-  try { D = await cpDatos(); } catch (e) { D = { filas: [] }; console.warn('hoy', e); }
+  try { D = await cpDatos(); } catch (e) { D = { filas: [], fallo: (e && e.message) || 'error' }; console.warn('hoy', e); }
   finCargando();
+  if (D.fallo && !D.filas.length && _currentView === 'hoy') {
+    view.innerHTML = `<div class="mb-3"><h2 class="text-2xl font-bold text-slate-900">Hoy</h2></div><div class="card">${cpFalloHTML()}</div>`;
+    return;
+  }
   const I = D.filas.filter(f => f.estado === 'intervenir'), O = D.filas.filter(f => f.estado === 'observar'), N = D.filas.filter(f => f.estado === 'normal');
   const PA = D.filas.filter(f => f.estado === 'pausa');
   const AV = D.filas.flatMap(f => (f.avisos || []).map(a => ({ f, a })));
@@ -447,7 +452,7 @@ function cpBarras(sem) {
 routes.cartera = async () => {
   cargando('Armando tu cartera…');
   let D;
-  try { D = await cpDatos(); } catch (e) { D = { filas: [] }; }
+  try { D = await cpDatos(); } catch (e) { D = { filas: [], fallo: (e && e.message) || 'error' }; console.warn('equipo', e); }
   finCargando();
   const filtro = CP_FILTROS.find(x => x[0] === _cpr.filtro) || CP_FILTROS[0];
   const filas = D.filas.filter(filtro[2]);
@@ -471,8 +476,20 @@ routes.cartera = async () => {
         <td><span style="font-weight:600;font-size:13px">${escapeHtml(f.proxima)}</span></td>
         <td>${f.ciclo ? `${escapeHtml(f.ciclo.nombre)}<div style="font-size:12px;color:#737373">${f.ciclo.queda} días</div>` : '—'}</td>
         <td>${f.pago === undefined ? '—' : typeof pagoPunto === 'function' ? pagoPunto(!!(f.pago && f.pago.due), f.pago && f.pago.due ? 'vencido' : '') : (f.pago && f.pago.due ? 'Vencido' : 'Al día')}</td></tr>`; }).join('')}</tbody></table>
-      ${filas.length ? '' : '<p class="text-sm text-slate-500" style="padding:0 16px 16px">Nadie en este filtro.</p>'}
+      ${filas.length ? '' : D.fallo && !D.filas.length ? cpFalloHTML() : '<p class="text-sm text-slate-500" style="padding:0 16px 16px">Nadie en este filtro.</p>'}
     </div>`;
+};
+// No se pudieron leer los clientes: se dice, con un botón para volver a intentar
+// (antes salía «Nadie en este filtro», como si no hubiera clientes).
+function cpFalloHTML() {
+  return `<div data-cp-fallo style="padding:4px 16px 18px"><p class="text-sm" style="color:#1F1F1F;font-weight:700">No pude cargar tus clientes.</p>
+    <p class="text-sm text-slate-500" style="margin:2px 0 10px">Suele ser la conexión. Tus datos están bien.</p>
+    <button type="button" class="cp-btn" onclick="cpReintentar()">Volver a intentar</button></div>`;
+}
+window.cpReintentar = async () => {
+  if (typeof invalidarCache === 'function') invalidarCache('clientes');
+  _cpr.datos = null; _cpr.leido = 0;
+  if (typeof navigate === 'function') navigate(_currentView); else if (routes[_currentView]) routes[_currentView]();
 };
 window.cpFiltro = (k) => { _cpr.filtro = k; routes.cartera(); };
 

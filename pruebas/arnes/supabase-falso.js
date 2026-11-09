@@ -41,6 +41,9 @@
       catch(mal) { return q.then(null, mal); },
     };
     function ejecutar() {
+      // window.FALLAR_TABLA = { clientes: 2 } → las 2 próximas lecturas de esa tabla fallan (como sin red).
+      const F = window.FALLAR_TABLA;
+      if (F && F[nombre] > 0 && accion === 'select') { F[nombre]--; return { data: null, error: { message: 'Load failed' }, count: null, status: 0 }; }
       const t = tabla(nombre);
       const pasa = (r) => filtros.every(f => f(r));
       let data;
