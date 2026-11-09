@@ -2008,6 +2008,8 @@ async function entPintarConstructor() {
   // En qué ciclos anteriores del cliente estuvo cada ejercicio (la etiqueta
   // de cada fila). Si falla, la rutina se abre igual, sin etiqueta.
   _ent.histCiclos = r.fase_id && r.cliente_id ? await entHistorialCiclos(r).catch(() => null) : null;
+  // A qué ciclo pertenece y si ya hay uno más nuevo (para no editar el viejo creyendo que es el nuevo).
+  _ent.cicloInfo = r.fase_id && r.cliente_id ? await entInfoCiclo(r).catch(() => null) : null;
   // Los videos que le pediste y aún no llegan (etiqueta en la fila y aviso
   // antes de quitarlo o cambiarlo).
   _ent.vidPedidos = r.cliente_id ? await entVideosPedidos(r.cliente_id).catch(() => null) : null;
@@ -2203,6 +2205,7 @@ function entCabConstructorHTML(r) {
         <div class="min-w-0">
           <button class="btn btn-ghost btn-sm mb-1" data-volver onclick="entCerrarConstructor()">← ${_ent.volver && _ent.volver.tab === 'clientes' ? 'Volver al cliente' : 'Volver'}</button>
           <div class="font-bold text-lg text-slate-900">${escapeHtml(r.nombre)}</div>
+          ${entCicloCabHTML(_ent.cicloInfo)}
           <div class="text-xs text-slate-500">${_ent.consContexto || ''} · ${r.ejercicios.length} ejercicio${r.ejercicios.length === 1 ? '' : 's'}</div>
           ${entTiempoCabHTML(r)}
           ${sinTexto.length ? `
@@ -2520,6 +2523,61 @@ async function entHistorialCiclos(r) {
   });
   return { porId, porNombre, nombres };
 }
+// ── En qué ciclo estás editando ───────────────────────────────────────
+// El estado de un ciclo en palabras: «Nuevo · empieza mañana», «termina hoy»,
+// «en curso · semana 2 de 4», «terminado el 8 nov» o «sin fecha de inicio».
+function entEstadoCiclo(f, hoy = fmt.hoy()) {
+  if (!f) return { txt: '', tono: 'gris' };
+  const ini = String(f.fecha_inicio || '').slice(0, 10);
+  if (!ini) return { txt: 'sin fecha de inicio', tono: 'ambar', nuevo: true };
+  const fin = f.semanas ? evtSumarDias(ini, f.semanas * 7 - 1) : null;
+  const dias = Math.round((Date.parse(ini + 'T12:00:00Z') - Date.parse(hoy + 'T12:00:00Z')) / 86400000);
+  if (dias > 0) return { txt: `Nuevo · empieza ${dias === 1 ? 'mañana' : `el ${fmt.fechaCorta(ini)}`}`, tono: 'azul', nuevo: true };
+  if (fin && fin < hoy) return { txt: `terminado el ${fmt.fechaCorta(fin)}`, tono: 'gris', viejo: true };
+  if (fin && fin === hoy) return { txt: 'termina hoy', tono: 'ambar', viejo: true };
+  const sem = Math.floor((Date.parse(hoy + 'T12:00:00Z') - Date.parse(ini + 'T12:00:00Z')) / 604800000) + 1;
+  return { txt: `en curso${f.semanas ? ` · semana ${sem} de ${f.semanas}` : ''}`, tono: 'verde' };
+}
+async function entInfoCiclo(r) {
+  const fases = (await entDb.fases(r.cliente_id)).filter(f => f.estado !== 'archivada');
+  const f = fases.find(x => x.id === r.fase_id);
+  if (!f) return null;
+  const est = entEstadoCiclo(f);
+  // Más nuevo: empieza después, o con la misma fecha pero creado después (una copia).
+  const clave = (x) => `${String(x.fecha_inicio || '9999').slice(0, 10)}|${x.created_at || ''}`;
+  const nuevo = est.viejo ? fases.filter(x => x.id !== f.id && clave(x) > clave(f)).sort((a, b) => clave(a).localeCompare(clave(b)))[0] || null : null;
+  // La misma rutina en el ciclo nuevo (la copia de esta), para abrirla directo.
+  let rutinaNueva = null;
+  if (nuevo) {
+    try { const { data } = await sb.from('rutinas').select('id').eq('fase_id', nuevo.id).eq('origen_rutina_id', r.id).limit(1); rutinaNueva = data && data[0] ? data[0].id : null; } catch (e) { rutinaNueva = null; }
+  }
+  return { fase: f, est, nuevo, estNuevo: nuevo ? entEstadoCiclo(nuevo) : null, rutinaNueva };
+}
+const ENT_TONO_CICLO = { azul: ['#EAF1FB', '#1E4E8C'], verde: ['#E4F1E7', '#2F7F45'], ambar: ['#FDEFD9', '#9A5B12'], gris: ['#F1EEE8', '#5A5A5F'] };
+function entCicloCabHTML(c) {
+  if (!c) return '';
+  const [bg, col] = ENT_TONO_CICLO[c.est.tono] || ENT_TONO_CICLO.gris;
+  const chip = `<div class="text-xs mt-1" data-ciclo-cab><span class="text-slate-500">${escapeHtml(c.fase.nombre || 'Ciclo')}</span> <span class="tag" data-ciclo-estado="${c.est.tono}" style="background:${bg};color:${col}">${escapeHtml(c.est.txt)}</span>${c.fase.visible_cliente === false || c.fase.estado === 'borrador' ? ' <span class="tag tag-gray">borrador: el cliente aún no lo ve</span>' : ''}</div>`;
+  if (!c.nuevo) return chip;
+  return `${chip}
+    <div class="ent-aviso-ciclo" data-aviso-ciclo-viejo>
+      <div>Estás editando <b>«${escapeHtml(c.fase.nombre || 'este ciclo')}»</b>, que ${c.est.txt === 'termina hoy' ? 'termina hoy' : `ya ${escapeHtml(c.est.txt)}`}. El nuevo es <b>«${escapeHtml(c.nuevo.nombre || 'Ciclo nuevo')}»</b> (${escapeHtml(c.estNuevo.txt.replace(/^Nuevo · /, ''))}).</div>
+      <button class="btn btn-primary btn-sm" data-ir-ciclo-nuevo onclick="entIrCicloNuevo('${c.nuevo.id}', '${c.rutinaNueva || ''}')">Ir al ciclo nuevo</button>
+    </div>`;
+}
+window.entIrCicloNuevo = (faseId, rutinaId) => {
+  _ent.faseId = faseId;
+  if (rutinaId) return entAbrirConstructor(rutinaId);
+  entCerrarConstructor();
+};
+(function () {
+  if (document.getElementById('ent-ciclo-css')) return;
+  const s = document.createElement('style');
+  s.id = 'ent-ciclo-css';
+  s.textContent = '.ent-aviso-ciclo{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:8px;padding:9px 12px;border-radius:12px;background:#FDF6EA;border:1px solid #F3DDB3;font-size:13px;color:#5A4A2A}';
+  document.head.appendChild(s);
+})();
+
 // Los ciclos atrás (1, 2, 3…) en los que estuvo, de menor a mayor.
 function entCiclosDeEjercicio(e) {
   const h = _ent.histCiclos;
@@ -3877,7 +3935,7 @@ function entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina, sesio
     <div class="card mb-3">
       <div class="flex flex-wrap items-start justify-between gap-2">
         <div class="min-w-0">
-          <div class="font-bold text-slate-900">${escapeHtml(fase.nombre)}</div>
+          <div class="font-bold text-slate-900">${escapeHtml(fase.nombre)} ${(e => { const [bg, col] = ENT_TONO_CICLO[e.tono] || ENT_TONO_CICLO.gris; return e.txt ? `<span class="tag" data-fase-estado="${e.tono}" style="background:${bg};color:${col};font-weight:700">${escapeHtml(e.txt)}</span>` : ''; })(entEstadoCiclo(fase))}</div>
           <div class="text-xs text-slate-500 mt-0.5">
             ${fase.semanas || '?'} semana${fase.semanas === 1 ? '' : 's'}
             ${fase.fecha_inicio
