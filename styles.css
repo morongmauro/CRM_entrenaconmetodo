@@ -665,6 +665,15 @@ summary.list-none { list-style: none; }
 }
 .rut-abrir:hover { border-color: var(--brand-olive); color: var(--brand-olive); }
 .rut-caja { border: 1px solid #e2e8f0; }
+/* Cerrado: parece un cuadro de texto (un toque y se escribe). */
+.rut-escribir {
+  display: flex; align-items: center; gap: .6rem; border-style: solid; border-color: #e2e8f0;
+  padding: .55rem .55rem .55rem .9rem; font-weight: 500; color: #64748b; box-shadow: 0 1px 2px rgba(15,23,42,.04);
+}
+.rut-escribir:hover { border-color: #cbd5e1; color: #475569; }
+.rut-escribir-ic { flex: none; color: #94a3b8; }
+.rut-escribir-txt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rut-escribir-btn { flex: none; border-radius: 999px; background: #1F1F1F; color: #fff; font-size: .78rem; font-weight: 700; padding: .4rem .9rem; }
 .rut-propuestas {
   background: #fffbeb; border: 1px solid #fde68a;
   border-radius: 0.85rem; padding: 0.75rem; margin-bottom: 0.75rem;
@@ -816,6 +825,44 @@ summary.list-none { list-style: none; }
   .ent-mesa #asi-panel { order: 3; grid-column: auto !important; }
   .ent-mesa #cons-gal-lista { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)) !important; max-height: none; overflow: visible; }
 }
+/* MESA EN 4 COLUMNAS (entreno-mesa4.js): galería · rutina · historial y
+   notas · alternativas. Las dos últimas siguen el desplazamiento de la rutina. */
+@media (min-width: 1280px) {
+  .ent-mesa4 .ent-mesa-grid { grid-template-columns: minmax(0, .9fr) minmax(0, 1fr) minmax(280px, .72fr) minmax(320px, .85fr) !important; gap: 14px !important; }
+  .ent-mesa4 #cons-gal-lista { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)) !important; }
+  .ent-mesa4 #asi-panel, .ent-mesa4 #cons-col-alt { overflow: hidden !important; position: relative; scrollbar-gutter: auto; padding-right: 0; }
+  .ent-mesa4 #cons-col-alt { order: 4; }
+  .ent-mesa4 #asi-panel > :not(#m4-hist) { display: none !important; }
+  .ent-mesa4 > #rut-panel { margin: 0 0 10px; }
+  .ent-mesa4 > #rut-panel .rut-caja { position: fixed; right: 16px; top: 72px; bottom: 16px; width: 460px; z-index: 60; overflow-y: auto; margin: 0;
+    box-shadow: 0 2px 6px rgba(15,23,42,.08), 0 24px 60px rgba(15,23,42,.22); }
+  .ent-mesa4 > #rut-panel .rut-caja .asis-hilo { max-height: none !important; }
+}
+.m4-lienzo { position: relative; }
+.m4-titulo { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  font-size: .875rem; font-weight: 700; color: #334155; }
+.m4-titulo-s { font-size: .72rem; font-weight: 500; color: #64748b; white-space: nowrap; }
+.m4-caja { position: absolute; left: 0; right: 0; box-sizing: border-box; overflow-y: auto; scrollbar-width: thin;
+  background: #fff; border-radius: 16px; padding: 8px 12px; box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 18px rgba(30,40,60,.06); }
+.m4-caja > div[style*="border-bottom"] { border-bottom: 0 !important; }
+.m4-caja-alt { padding: 8px 0 6px 10px; overflow: hidden; display: flex; flex-direction: column; }
+.m4-vacio { font-size: 12px; color: #94a3b8; padding: 6px 10px 6px 0; }
+.m4-nota { margin-top: 6px; border-radius: 10px; background: #FBF5E2; padding: 6px 8px; font-size: 11.5px; color: #5c4a12; line-height: 1.35; }
+.m4-cab { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; margin: 0 10px 6px 0; }
+.m4-cab-t { font-size: 11px; font-weight: 700; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.m4-todas { border: 0; background: none; padding: 0; font: inherit; font-size: 11px; font-weight: 700; color: #3C7BD6; cursor: pointer; white-space: nowrap; flex: none; }
+.m4-carrusel { display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; padding-right: 10px; flex: 1; min-height: 0; scrollbar-width: thin; }
+.m4-alt { flex: 0 0 168px; scroll-snap-align: start; display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+.m4-alt-video { position: relative; flex: 1 1 auto; min-height: 56px; max-height: 96px; border: 0; padding: 0; border-radius: 10px; overflow: hidden; background: #5F6670; cursor: pointer; }
+.m4-alt-video img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.m4-alt-fig { display: grid; place-items: center; height: 100%; background: #F1EFE9; }
+.m4-alt-play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 28px; height: 28px; border-radius: 99px; background: rgba(255,255,255,.92);
+  display: grid; place-items: center; font-size: 11px; color: #1F1F1F; }
+.m4-alt-nombre { font-weight: 700; font-size: 12px; color: #1F1F1F; line-height: 1.2; max-height: 29px; overflow: hidden; }
+.m4-alt-pie { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.m4-alt-por { font-size: 10.5px; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.m4-usar { flex: none; padding: 3px 10px !important; font-size: 11.5px !important; }
+.m4-ocultas { font-size: 10.5px; color: #B4533F; font-weight: 700; margin-top: 4px; }
 @media (max-width: 1023px) {
   .ent-mesa { overflow-y: auto; }
   .ent-mesa .ent-col, .ent-mesa .ent-col-xl { height: auto; overflow: visible; }
@@ -831,3 +878,8 @@ summary.list-none { list-style: none; }
 .dar-dias-n { font-size: 18px; font-weight: 800; color: #1F1F1F; letter-spacing: -0.01em; }
 .dar-dias-f { font-size: 12px; color: #5B6472; }
 .dar-dias-quitar { margin-top: 14px; border: none; background: transparent; color: #8A3A2C; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; padding: 6px 0; }
+
+/* «No le sirve» en la fila de la rutina: el porqué y la fecha, bajo el nombre. */
+.ns-fila-tag { margin: 3px 0 2px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ns-fila-tag .ns-tag { white-space: normal; }
+.ns-fila-cambiar { border: 0; background: none; padding: 0; font: inherit; font-size: .72rem; font-weight: 700; color: #3C7BD6; cursor: pointer; }

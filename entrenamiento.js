@@ -1973,6 +1973,7 @@ window.entMesa = (on = !_ent.mesa) => {
   document.body.classList.toggle('ent-mesa-on', _ent.mesa);
   const cab = $('#cons-cab');
   if (cab && _ent.rutina) cab.innerHTML = entCabConstructorHTML(_ent.rutina);
+  if (typeof m4Revisar === 'function') m4Revisar();   // 4 columnas (entreno-mesa4.js)
 };
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && _ent.mesa && $('#cons-wrap') && $('#modal')?.classList.contains('hidden')) entMesa(false);
@@ -2065,6 +2066,7 @@ async function entPintarConstructor() {
   entLeerTiempoReal(r);
   if (r.cliente_id && typeof rutMontarPanel === 'function') rutMontarPanel();
   if (r.cliente_id && typeof asiMontarConstructor === 'function') asiMontarConstructor(r);
+  if (typeof m4Revisar === 'function') m4Revisar();   // con la mesa puesta: 4 columnas
   // Los números de los niveles (ahora / antes) se cargan detrás: no frenan
   // la apertura de la rutina.
   entDb.niveles().then(() => {
@@ -3645,6 +3647,9 @@ async function entVistaClientes() {
   ];
 
   body.innerHTML = cabecera + (window.nsListaClienteHTML ? nsListaClienteHTML(_ent.clienteId) : '') + avisoCiclo + selectorFase + `
+    <!-- El agente de rutinas, ARRIBA (antes iba al final y no se encontraba).
+         Se monta aquí si asistente-rutinas.js está cargado; si no, queda vacío. -->
+    <div id="rut-panel" class="mb-4"></div>
     <div class="bg-slate-100 rounded-xl p-1 flex gap-1 mb-4 overflow-x-auto">
       ${subtabs.map(([id, lab]) => `
         <button class="px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap ${_ent.subtab === id ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}"
@@ -3657,9 +3662,6 @@ async function entVistaClientes() {
       : _ent.subtab === 'mezcla' ? '<div id="ent-mezcla"></div>'
       : fases.map(f => entTarjetaFase(f, rutinasPorFase[f.id] || [])).join('')}
 
-    <!-- El agente de rutinas se monta aquí si asistente-rutinas.js está
-         cargado. Si no lo está, este hueco se queda vacío y no pasa nada. -->
-    <div id="rut-panel" class="mt-4"></div>
   `;
 
   if (typeof rutMontarPanel === 'function') rutMontarPanel();

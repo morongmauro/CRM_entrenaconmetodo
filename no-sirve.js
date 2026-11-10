@@ -87,6 +87,22 @@ function nsPintarFilas() {
     b.classList.toggle('ns-on', !!f);
     b.title = f ? `No le sirve · ${nsMotivoTexto(f)} · ${nsFecha(f.creado_en)}. Toca para cambiarlo o quitar el tag.` : 'No le sirve: apuntar que este ejercicio no va con este cliente, para no volver a ponérselo';
     const txt = b.querySelector('.txt'); if (txt) txt.textContent = f ? `No le sirve · ${NS_CORTO[f.motivo] || f.motivo}` : 'No le sirve';
+    // En la fila, bajo el nombre: el porqué completo y la fecha. Si lo pones
+    // en una rutina sabiendo que se descartó, se ve sin tocar nada.
+    const fila = b.closest('.ent-fila');
+    if (!fila) return;
+    let tag = fila.querySelector('[data-ns-fila-tag]');
+    if (!f) { if (tag) tag.remove(); return; }
+    if (!tag) {
+      const nombre = fila.querySelector('.font-bold');
+      if (!nombre) return;
+      tag = document.createElement('div');
+      tag.setAttribute('data-ns-fila-tag', '');
+      tag.className = 'ns-fila-tag';
+      nombre.insertAdjacentElement('afterend', tag);
+    }
+    tag.innerHTML = `<span class="ns-tag">No le sirve · ${escapeHtml(nsMotivoTexto(f))} · ${escapeHtml(nsFecha(f.creado_en))}</span>`
+      + ` <button type="button" class="ns-fila-cambiar" onclick="entAlternativas('${escapeHtml(b.dataset.nsBtn)}')">Cambiarlo ›</button>`;
   });
 }
 let _nsT = null;

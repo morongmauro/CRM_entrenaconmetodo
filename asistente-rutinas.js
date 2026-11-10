@@ -1324,13 +1324,17 @@ function rutPanelHTML() {
   const ch = _rut.chat;
   const pendientes = _rut.propuestas.length;
   if (!_rut.abierto) {
+    // Cerrado se ve como un cuadro de texto: un toque y ya estás escribiendo
+    // (se abre la conversación con el cursor puesto).
+    const ejemplo = rutAbierta() ? 'Escríbele al agente sobre esta rutina: «cambia la sentadilla por prensa», «¿le falta algún patrón?»'
+      : _ent?.subtab === 'calendario' ? 'Escríbele al agente: «pon el Upper lunes, miércoles y viernes»'
+      : 'Escríbele al agente: «arma un Push parecido al de Camilo, lunes y jueves»';
     return `
-      <button class="rut-abrir" data-rut-abrir onclick="rutToggle()">
-        ${rutAbierta() ? '💬 Agente de rutinas · pregúntale sobre esta rutina'
-          : _ent?.subtab === 'calendario'
-          ? '💬 Cuadrar la semana escribiéndole al agente'
-          : '💬 Preguntarle al agente sobre este plan'}
-        ${pendientes ? `<span class="tag tag-yellow ml-1">${pendientes} sin aplicar</span>` : ''}
+      <button class="rut-abrir rut-escribir" data-rut-abrir onclick="rutToggle()" aria-label="Escribirle al agente de rutinas">
+        <svg class="rut-escribir-ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>
+        <span class="rut-escribir-txt">${escapeHtml(ejemplo)}</span>
+        ${pendientes ? `<span class="tag tag-yellow">${pendientes} sin aplicar</span>` : ''}
+        <span class="rut-escribir-btn">Escribir</span>
       </button>`;
   }
   return `
