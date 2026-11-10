@@ -175,6 +175,20 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
     await p.waitForTimeout(900);
     const r = await p.evaluate((id) => TABLAS_FALSAS.rutinas.find(x => x.id === id), pull);
     ok(`${tag} · al guardarla como bloque queda marcada y con sus días (L, X)`, r.complementaria === true && JSON.stringify(r.dias_semana) === '["L","X"]', JSON.stringify(r));
+    ok(`${tag} · sin la columna «opcional» (SQL sin correr) no hay casilla y no se manda`, !('opcional' in r));
+    // Con la columna: la casilla «Opcional» (no cuenta como pendiente).
+    await p.evaluate((id) => { TABLAS_FALSAS.rutinas.find(x => x.id === id).opcional = false; }, pull);
+    await p.evaluate((id) => entAbrirConstructor(id), pull);
+    await p.waitForTimeout(1200);
+    await p.evaluate(() => entEditarDatosRutina());
+    await p.waitForSelector('#rt2-bloque-opcional', { timeout: 5000 }).catch(() => {});
+    ok(`${tag} · con la columna, «Datos de la rutina» trae la casilla «Opcional»`, await p.locator('#rt2-bloque-opcional').count() === 1 && !(await p.locator('#rt2-bloque-opcional').isChecked()));
+    await p.locator('#rt2-bloque-opcional').check();
+    await p.locator('#modal-content').screenshot({ path: path.join(CAPTURAS, 'bloques-editor-opcional.png') }).catch(() => {});
+    await p.evaluate(() => entGuardarDatosRutina());
+    await p.waitForTimeout(900);
+    const r2 = await p.evaluate((id) => TABLAS_FALSAS.rutinas.find(x => x.id === id), pull);
+    ok(`${tag} · al guardarla queda opcional (y sigue como bloque con sus días)`, r2.opcional === true && r2.complementaria === true && JSON.stringify(r2.dias_semana) === '["L","X"]', JSON.stringify(r2));
   }
   ok(`${tag} · sin errores en la página`, errores.length === 0, errores.join(' | '));
   await ctx.close();

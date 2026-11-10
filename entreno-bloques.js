@@ -39,8 +39,8 @@ function bqChipsCelda(fecha, { fase, rutinas, sesionesPorFecha, hoy }) {
     return `
       <div class="ent-chip ent-chip-bloque" data-bloque="${b.id}"
            onclick="event.stopPropagation(); entAbrirRutinaDesdeCalendario('${b.id}')"
-           title="${escapeHtml(b.nombre)} · bloque complementario (va con la fuerza de ese día)${hecho ? ' · lo marcó como hecho' : ''}">
-        <span class="ent-chip-bloque-ic">${hecho ? '✓' : '+'}</span><span class="ent-chip-txt">${escapeHtml(b.nombre)}</span>
+           title="${escapeHtml(b.nombre)} · ${b.opcional ? 'bloque opcional (si le da el tiempo; no cuenta)' : 'bloque complementario (va con la fuerza de ese día)'}${hecho ? ' · lo marcó como hecho' : ''}">
+        <span class="ent-chip-bloque-ic">${hecho ? '✓' : '+'}</span><span class="ent-chip-txt">${escapeHtml(b.nombre)}${b.opcional ? ' · opcional' : ''}</span>
       </div>`;
   }).join('');
 }
@@ -144,6 +144,12 @@ function bqEditorHtml(r) {
             <label class="chip" style="cursor:pointer"><input type="checkbox" class="rt2-bloque-dia" value="${d}" ${dias.includes(d) ? 'checked' : ''}> ${escapeHtml(lab)}</label>`).join('')}
           <button type="button" class="btn btn-ghost btn-sm" onclick="document.querySelectorAll('.rt2-bloque-dia').forEach(i => { i.checked = true; })">Todos</button>
         </div>
+        ${Object.prototype.hasOwnProperty.call(r, 'opcional') ? `
+        <label class="flex items-start gap-2 cursor-pointer mt-3" style="font-weight:600">
+          <input type="checkbox" id="rt2-bloque-opcional" ${r.opcional ? 'checked' : ''} style="margin-top:3px">
+          <span>Opcional
+            <span class="block text-xs font-normal text-slate-500">Lo hace si le da el tiempo: le sale en «Hoy» pero no cuenta como pendiente ni en su cumplimiento. Escribe en la descripción de la rutina cuándo hacerlo (por ejemplo «antes de la fuerza»).</span></span>
+        </label>` : `<div class="mt-2 text-xs text-slate-500">Para marcarlo como <b>opcional</b> (no cuenta como pendiente) falta correr <code>migraciones/bloque-opcional.sql</code>.</div>`}
       </div>
     </div>`;
 }
@@ -155,7 +161,8 @@ function bqLeerEditor(r) {
   const caja = document.getElementById('rt2-bloque');
   if (!caja || !r) return {};
   const on = !!caja.checked;
-  if (on) return { complementaria: true, dias_semana: [...document.querySelectorAll('.rt2-bloque-dia:checked')].map(i => i.value), dia_semana: null };
-  if (entEsBloque(r)) return { complementaria: false, dias_semana: [], dia_semana: null };
+  const opc = document.getElementById('rt2-bloque-opcional');
+  if (on) return { complementaria: true, dias_semana: [...document.querySelectorAll('.rt2-bloque-dia:checked')].map(i => i.value), dia_semana: null, ...(opc ? { opcional: !!opc.checked } : {}) };
+  if (entEsBloque(r)) return { complementaria: false, dias_semana: [], dia_semana: null, ...(opc ? { opcional: false } : {}) };
   return {};
 }
