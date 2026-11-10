@@ -3488,6 +3488,23 @@ window.inicioEquipo = async (idCaja) => {
   } catch (e) { caja.innerHTML = ''; }
 };
 
+// Buscar en la lista de clientes de Entrenamiento: sin tildes ni mayúsculas,
+// por cualquier parte del nombre («sinis» encuentra a Juan Sinisterra).
+function entNormBuscar(t) { return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(); }
+window.entFiltrarClientes = (texto) => {
+  _ent.buscar = texto || '';
+  const q = entNormBuscar(texto).split(/\s+/).filter(Boolean);
+  let vistos = 0;
+  document.querySelectorAll('#ent-body [data-cliente-ent]').forEach(el => {
+    const n = el.getAttribute('data-nombre-buscar') || '';
+    const si = q.every(p => n.includes(p));
+    el.style.display = si ? '' : 'none';
+    if (si) vistos++;
+  });
+  const nada = document.querySelector('#ent-body [data-ent-sin-resultados]');
+  if (nada) nada.style.display = vistos ? 'none' : '';
+};
+
 async function entVistaClientes() {
   const body = $('#ent-body');
   if (!body) return;
@@ -3507,12 +3524,17 @@ async function entVistaClientes() {
     const lista = clientes.slice().sort((a, b) => peso(a) - peso(b) || String(a.nombre).localeCompare(String(b.nombre)));
     body.innerHTML = `
       <div class="text-sm text-slate-600 mb-3">Cómo va cada cliente con su ciclo. Toca uno para armar su calendario, sus rutinas y sus ciclos. Arriba, los que necesitan algo.</div>
+      ${clientes.length ? `<div class="mb-3" style="max-width:420px">
+        <input type="search" data-ent-buscar placeholder="Buscar cliente por nombre…" autocomplete="off" value="${escapeHtml(_ent.buscar || '')}"
+          oninput="entFiltrarClientes(this.value)" class="w-full" style="height:40px;border-radius:12px;padding:0 14px;font-size:14px">
+      </div>
+      <div class="card text-center text-slate-500 py-6 mb-3" data-ent-sin-resultados style="display:none">Nadie con ese nombre.</div>` : ''}
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         ${lista.map(c => {
           const e = estado[c.id];
           const t = e && typeof CIC_TONO !== 'undefined' ? CIC_TONO[e.tono] : null;
           return `
-          <div class="card card-hover cursor-pointer" data-cliente-ent="${c.id}" onclick="entVerCliente('${c.id}')">
+          <div class="card card-hover cursor-pointer" data-cliente-ent="${c.id}" data-nombre-buscar="${escapeHtml(entNormBuscar(c.nombre))}" onclick="entVerCliente('${c.id}')">
             <div class="flex items-center gap-3">
               ${entAvatar(c.nombre)}
               <div class="min-w-0 flex-1">
@@ -3532,6 +3554,8 @@ async function entVistaClientes() {
       </div>
       ${clientes.length === 0 ? '<div class="card text-center text-slate-500 py-8">No hay clientes activos.</div>' : ''}
     `;
+    // Si ya había escrito algo (volvió de un cliente), se respeta el filtro.
+    if (_ent.buscar) entFiltrarClientes(_ent.buscar);
     // Los videos de técnica de todos se revisan en Toques («con videos por revisar»).
     return;
   }
@@ -3617,11 +3641,15 @@ async function entVistaClientes() {
   } catch (err) { avisoCiclo = ''; }
 
   if (fases.length === 0) {
+    // Sin ciclos también va el agente: desde aquí se le pide el primer ciclo
+    // y sus rutinas («crea el Ciclo 1…»).
     body.innerHTML = cabecera + `
+      <div id="rut-panel" class="mb-4"></div>
       <div class="card text-center text-slate-500 py-8">
-        Este cliente no tiene fases todavía. Crea una, o importa una fase que ya
-        armaste para otro cliente.
+        Este cliente no tiene ciclos todavía. Pídeselo al agente de arriba, crea
+        uno con «+ Nueva fase», o trae uno que armaste para otro cliente.
       </div>`;
+    if (typeof rutMontarPanel === 'function') rutMontarPanel();
     return;
   }
 

@@ -1065,12 +1065,14 @@ const RUT_HERRAMIENTAS = {
     }
     const reg = { clienteId: c.id, nombre: String(nombre_ciclo).trim(), faseId: null };
     _rut.ciclosPendientes.push(reg);
-    const diasTxt = dias ? dias.map(d => entLabel(ENT_DIAS, d)).join(', ') : (fases.length ? 'los mismos días' : 'sin días');
+    // Primer ciclo sin días dichos: los de su ficha («Su ficha dice que entrena…»).
+    const diasFicha = !fases.length && Array.isArray(c.dias_entreno) && c.dias_entreno.length ? c.dias_entreno : null;
+    const diasTxt = dias ? dias.map(d => entLabel(ENT_DIAS, d)).join(', ') : (fases.length ? 'los mismos días' : diasFicha ? `los de su ficha: ${diasFicha.map(d => entLabel(ENT_DIAS, d)).join(', ')}` : 'sin días');
     return rutProponer(
       `Crear el ciclo "${reg.nombre}" para ${c.nombre}`,
       `${n} semana${n === 1 ? '' : 's'} · empieza el ${inicio} · ${diasTxt}${objetivo ? ` · ${objetivo}` : ''}${copiar.length ? `\nCopia las rutinas de ${origen.nombre}: ${copiar.map(r => r.nombre).join(', ')}` : ''}`,
       async () => {
-        const dDias = dias || (fases.length ? (fases[fases.length - 1].dias_semana || []) : []);
+        const dDias = dias || (fases.length ? (fases[fases.length - 1].dias_semana || []) : (diasFicha || []));
         const f = await entDb.crearFase({ nombre: reg.nombre, semanas: n, fecha_inicio: inicio, dias_semana: dDias, objetivo: objetivo || null,
           estado: 'borrador', cliente_id: c.id, orden: fases.length + 1, updated_at: new Date().toISOString() });
         if (!f) throw new Error('El ciclo no se creó');
@@ -1458,6 +1460,11 @@ function rutPintar() {
   if (hilo) hilo.scrollTop = hilo.scrollHeight;
 }
 
+// El cliente abierto aún no tiene ciclos (la pantalla de «no tiene ciclos todavía»).
+function rutSinCiclos() {
+  try { return !!(_ent && _ent.clienteId && !_ent.faseId && !rutAbierta()); } catch (e) { return false; }
+}
+
 function rutPanelHTML() {
   const ch = _rut.chat;
   const pendientes = _rut.propuestas.length;
@@ -1465,6 +1472,7 @@ function rutPanelHTML() {
     // Cerrado se ve como un cuadro de texto: un toque y ya estás escribiendo
     // (se abre la conversación con el cursor puesto).
     const ejemplo = rutAbierta() ? 'Escríbele al agente sobre esta rutina: «cambia la sentadilla por prensa», «¿le falta algún patrón?»'
+      : rutSinCiclos() ? 'Escríbele al agente: «crea el Ciclo 1 de 4 semanas, lunes, miércoles y viernes, con un Upper y un Lower»'
       : _ent?.subtab === 'calendario' ? 'Escríbele al agente: «pon el Upper lunes, miércoles y viernes»'
       : 'Escríbele al agente: «arma un Push parecido al de Camilo, lunes y jueves»';
     return `

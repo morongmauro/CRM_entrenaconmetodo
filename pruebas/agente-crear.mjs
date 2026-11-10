@@ -46,7 +46,7 @@ function tablas() {
     id: 's' + k, user_id: 'coach-1', cliente_id: 'c0', semana, fecha: '2026-09-1' + k, fuerza_planeados: 5, fuerza_ejecutados: [4, 3, 5, 4][k], estado: 'hecho',
   }));
   return {
-    clientes: [cliente], seguimientos, pagos: [], pendientes: [], mediciones_corporales: [],
+    clientes: [cliente, { ...cliente, id: 'c1', nombre: 'Camilo Castro', dias_entreno: ['L', 'M', 'X', 'J', 'S'] }], seguimientos, pagos: [], pendientes: [], mediciones_corporales: [],
     settings: [{ user_id: 'coach-1', usd_cop_rate: 4000, nombre_coach: 'Mauro' }],
     metas_historial: [], nutricion_insights: [], ia_uso: [], push_pago_log: [],
     fases: fixture.fases, rutinas: fixture.rutinas, rutina_ejercicios: re, rutina_bloques: fixture.rutina_bloques,
@@ -144,7 +144,31 @@ const ciclo = await p.evaluate(() => { const T = window.TABLAS_FALSAS; const f =
 ok('al aplicar: el ciclo existe con sus días y la rutina quedó dentro', !!ciclo && ciclo.semanas === 5 && JSON.stringify(ciclo.dias) === '["L","X","V"]' && ciclo.rutinas.join() === 'Full body A' && ciclo.ejs === 1, JSON.stringify(ciclo));
 r = await p.evaluate(() => RUT_HERRAMIENTAS.crear_ciclo({ nombre: 'Ana', nombre_ciclo: 'Ciclo 20' }));
 ok('no deja crear dos ciclos con el mismo nombre', !!r.error && /ya tiene un ciclo/.test(r.error), JSON.stringify(r));
-ok('sin errores', a.errores.length === 0, a.errores.join(' | '));
+// Cliente sin ciclos: el agente también está (ahí se le pide el primero).
+const sc = await abrir(1600, 1000);
+await sc.p.locator('nav, aside, body').getByText('Entrenamiento', { exact: true }).first().click();
+await sc.p.waitForTimeout(1000);
+// Buscar por nombre en la lista (sin tildes ni mayúsculas).
+await sc.p.locator('[data-ent-buscar]').fill('camilo');
+ok('Entrenamiento: buscar por nombre deja solo a quien coincide', await sc.p.locator('[data-cliente-ent="c1"]').isVisible() && !(await sc.p.locator('[data-cliente-ent="c0"]').isVisible()));
+if (process.env.FOTO) await sc.p.screenshot({ path: process.env.FOTO.replace('.png', '-buscar.png') });
+await sc.p.locator('[data-ent-buscar]').fill('zzz');
+ok('…y si nadie coincide, lo dice', await sc.p.locator('[data-ent-sin-resultados]').isVisible());
+await sc.p.locator('[data-ent-buscar]').fill('');
+await sc.p.locator('[data-cliente-ent="c1"]').first().click();
+await sc.p.waitForTimeout(1200);
+ok('cliente sin ciclos: el cuadro del agente sale arriba, con un ejemplo para crear el primer ciclo', (await sc.p.locator('#rut-panel [data-rut-abrir]').count()) === 1
+  && /crea el Ciclo 1/.test(await sc.p.locator('#rut-panel').innerText()) && /no tiene ciclos todavía/.test(await sc.p.locator('#ent-body, body').first().innerText()),
+  await sc.p.locator('#rut-panel').innerText().catch(() => 'sin panel'));
+if (process.env.FOTO) await sc.p.screenshot({ path: process.env.FOTO });
+r = await sc.p.evaluate(() => RUT_HERRAMIENTAS.crear_ciclo({ nombre: 'Camilo', nombre_ciclo: 'Ciclo 1', semanas: 4 }));
+ok('cliente sin ciclos: crear_ciclo propone el primero con los días de su ficha', /PROPUESTO/.test(r.estado || '') && /Lun.*Mar.*Mié.*Jue.*Sáb/.test(await sc.p.evaluate(() => _rut.propuestas.map(x => x.detalle).join(' '))),
+  await sc.p.evaluate(() => _rut.propuestas.map(x => x.detalle).join(' | ')));
+await sc.p.evaluate(async () => { await rutAplicar(); });
+await sc.p.waitForTimeout(800);
+const c1 = await sc.p.evaluate(() => window.TABLAS_FALSAS.fases.filter(f => f.cliente_id === 'c1').map(f => ({ n: f.nombre, d: f.dias_semana, s: f.semanas })));
+ok('…y al aplicar el ciclo queda creado', c1.length === 1 && c1[0].n === 'Ciclo 1' && c1[0].s === 4 && c1[0].d.join() === 'L,M,X,J,S', JSON.stringify(c1));
+ok('sin errores', a.errores.length === 0 && sc.errores.length === 0, [...a.errores, ...sc.errores].join(' | '));
 await b.close(); servidor.close();
 console.log(mal ? `\n${mal} MAL` : '\nTodo bien');
 process.exit(mal ? 1 : 0);
