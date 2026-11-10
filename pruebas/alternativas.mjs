@@ -140,6 +140,19 @@ for (const [tag, ancho, alto] of [['ancho', 1600, 900], ['telefono', 390, 844]])
   ok(`${tag} · y conserva series, reps, peso, descanso, RIR, tempo, notas, orden y bloque`, igual, JSON.stringify({ antes, despues }).slice(0, 300));
   const pant = await p.evaluate((id) => ({ cerrado: document.getElementById('modal').classList.contains('hidden'), fila: document.querySelector(`#cons-rutina .ent-fila[data-re="${id}"]`)?.innerText || '', nombre: entNombres(_ent.rutina.ejercicios.find(x => x.id === id).ejercicios).grande, sigue: document.getElementById('cons-col-rutina')?.dataset.marca === 'sigo' }), re.id);
   ok(`${tag} · se cierra, la fila muestra el nuevo y no se recarga la página`, pant.cerrado && pant.fila.includes(pant.nombre) && pant.nombre !== re.nombre && pant.sigue, JSON.stringify(pant).slice(0, 200));
+  // Movilidad, estiramientos y calentamiento también traen propuestas: si no
+  // hay del mismo movimiento, de su misma familia y zona, con músculos en común.
+  const mov = await p.evaluate(() => {
+    const todos = _ent.ejercicios || [];
+    const no = ['movilidad', 'estiramiento_pasivo', 'estiramiento_activo', 'calentamiento'];
+    const lista = todos.filter(e => no.includes(e.tipo) && !e.archivado && !e.duplicado_de);
+    const pocos = lista.filter(e => altCandidatos(e, todos).length < 1).map(e => e.nombre);
+    const cadera = todos.find(e => e.nombre === 'Cambio de cadera 90-90');
+    const alts = cadera ? altCandidatos(cadera, todos) : [];
+    return { n: lista.length, pocos, cadera: alts.map(x => [x.e.segmento, x.porque.join(' · ')]) };
+  });
+  ok(`${tag} · movilidad y estiramientos: ninguno se queda sin propuestas (${mov.n})`, mov.n > 0 && mov.pocos.length === 0, mov.pocos.join(', '));
+  ok(`${tag} · cadera 90-90: las propuestas son de tren inferior (o cuerpo completo) y dicen por qué`, mov.cadera.length >= 3 && mov.cadera.every(([sg, por]) => (sg === 'tren_inferior' || sg === 'full_body') && por.length > 0), JSON.stringify(mov.cadera));
   ok(`${tag} · sin errores`, a.errores.length === 0, a.errores.join(' | '));
   await a.ctx.close();
 }

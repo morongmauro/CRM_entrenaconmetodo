@@ -165,8 +165,40 @@ function altCandidatos(src, lista) {
     const d = altDificultad(c);
     out.push({ e: c, puntos, porque, dif: d - dSrc });
   }
-  return out.sort((a, b) => b.puntos - a.puntos || entNombres(a.e).grande.localeCompare(entNombres(b.e).grande, 'es'));
+  out.sort((a, b) => b.puntos - a.puntos || entNombres(a.e).grande.localeCompare(entNombres(b.e).grande, 'es'));
+  // Movilidad, estiramientos, calentamiento, core, potencia, cardio: casi
+  // nunca tienen «el mismo movimiento» ni músculos idénticos en la galería, y
+  // salían sin propuestas. Si quedan menos de ALT_MIN, se completa con los de
+  // su misma clase y la misma zona del cuerpo, ordenados por músculos en
+  // común y por tipo. Van DESPUÉS de los parecidos de verdad.
+  if (out.length < ALT_MIN) {
+    const ya = new Set(out.map(x => x.e.id));
+    const musSrc = [...altArr(src.musculos_primarios), ...altArr(src.musculos_secundarios)];
+    const extra = [];
+    for (const c of lista || []) {
+      if (!c || c.id === src.id || ya.has(c.id) || c.archivado || c.duplicado_de) continue;
+      if ((ALT_CLASE[c.tipo] || 'fuerza') !== clase) continue;
+      if (clase === 'fuerza' && ALT_NO_FUERZA.test(' ' + altNorm(`${c.nombre || ''} ${c.alias || ''}`) + ' ')) continue;
+      const clave = altNorm(entNombres(c).grande);
+      if (nombresSrc.has(altNorm(c.nombre)) || nombresSrc.has(altNorm(c.alias)) || vistos.has(clave)) continue;
+      const mismaZona = !src.segmento || !c.segmento || c.segmento === src.segmento || c.segmento === 'full_body' || src.segmento === 'full_body';
+      if (!mismaZona) continue;
+      const jac = altJaccard(musSrc, [...altArr(c.musculos_primarios), ...altArr(c.musculos_secundarios)]);
+      const mismoTipo = !!src.tipo && c.tipo === src.tipo;
+      // Sin músculos en común no es alternativa (un estiramiento de cadera no
+      // reemplaza uno de hombro). Solo si la ficha no dice músculos, basta el tipo.
+      if (jac === 0 && (musSrc.length || !mismoTipo)) continue;
+      const porque = [mismoTipo ? `Mismo tipo` : 'Misma familia', jac >= 0.34 ? 'Músculos parecidos' : 'Misma zona'];
+      extra.push({ e: c, puntos: jac * 30 + (mismoTipo ? 8 : 0) + (c.segmento === src.segmento ? 4 : 0) + (c.video_fuente && c.video_fuente !== 'ninguno' ? 3 : 0), porque, dif: altDificultad(c) - dSrc, relleno: true });
+      vistos.add(clave);
+    }
+    extra.sort((a, b) => b.puntos - a.puntos || entNombres(a.e).grande.localeCompare(entNombres(b.e).grande, 'es'));
+    out.push(...extra.slice(0, ALT_MIN * 2 - out.length));
+  }
+  return out;
 }
+// Mínimo de propuestas antes de completar con «misma familia y zona».
+const ALT_MIN = 5;
 function altPasaFiltros(x) {
   const f = _alt.filtros, e = x.e;
   if (f.carga === 'sin_peso' && altConCarga(e)) return false;
