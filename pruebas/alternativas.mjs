@@ -116,7 +116,20 @@ for (const [tag, ancho, alto] of [['ancho', 1600, 900], ['telefono', 390, 844]])
   const cp = await p.evaluate(() => ({ on: [...document.querySelectorAll('.alt-filtro.on')].map(b => b.dataset.f), eq: [...document.querySelectorAll('#alt-lista .alt-item')].map(x => (_ent.ejercicios.find(e => e.id === x.dataset.alt) || {}).equipo || []) }));
   ok(`${tag} · «Con peso» reemplaza a «Sin peso» y todas llevan carga`, cp.on.join() === 'con_peso' && cp.eq.length > 0 && cp.eq.every(eq => eq.some(x => ['barra', 'mancuerna', 'kettlebell', 'polea', 'maquina', 'smith', 'lastre', 'balon'].includes(x))), JSON.stringify(cp.on));
   await p.locator('.alt-filtro[data-f="con_peso"]').click(); await p.waitForTimeout(150);
-  // Sustituir: el primero de la lista.
+  // «Toda la galería»: cualquier ejercicio, con los filtros de la galería.
+  const nPar = await p.evaluate(() => document.getElementById('alt-cuenta').textContent);
+  await p.locator('[data-alt-modo="todos"]').click(); await p.waitForTimeout(250);
+  const g = await p.evaluate((ej) => ({ cuenta: document.getElementById('alt-cuenta').textContent, total: _ent.ejercicios.filter(e => e.id !== ej && !e.archivado && !e.duplicado_de).length,
+    seg: document.querySelectorAll('.alt-filtro[data-g="segmento"]').length, pat: document.querySelectorAll('.alt-filtro[data-g="patron"]').length, nivel: document.querySelectorAll('.alt-filtro[data-g="nivel"]').length,
+    ancho: document.querySelector('.alt-modal').scrollWidth <= document.querySelector('.alt-modal').clientWidth + 1 }), re.ej);
+  ok(`${tag} · «Toda la galería»: salen todos menos el que se cambia (${g.cuenta}; parecidos: ${nPar})`, g.cuenta === `${g.total} de ${g.total}` && g.total > parseInt(nPar, 10), JSON.stringify(g));
+  ok(`${tag} · con los filtros de la galería (segmento, patrón, tipo) y sin «más fácil / más difícil»`, g.seg === 4 && g.pat === 7 && g.nivel === 0 && g.ancho && await p.locator('#alt-filtros select').count() === 1, JSON.stringify(g));
+  await p.locator('.alt-filtro[data-f="tren_inferior"]').click(); await p.waitForTimeout(200);
+  const ti = await p.evaluate(() => [...document.querySelectorAll('#alt-lista .alt-item')].map(x => (_ent.ejercicios.find(e => e.id === x.dataset.alt) || {}).segmento));
+  ok(`${tag} · «Tren inferior» deja solo los de tren inferior (${ti.length})`, ti.length > 0 && ti.every(s => s === 'tren_inferior'), JSON.stringify(ti.slice(0, 6)));
+  await p.mouse.move(4, 4); await p.waitForTimeout(120);
+  if (tag === 'ancho' || tag === 'telefono') await p.screenshot({ path: path.join(CAPTURAS, `alternativas-galeria-${tag}.png`) });
+  // Sustituir (desde toda la galería): el primero de la lista.
   const antes = await p.evaluate((id) => ({ ...TABLAS_FALSAS.rutina_ejercicios.find(x => x.id === id) }), re.id);
   const nuevo = await p.locator('#alt-lista .alt-item').first().getAttribute('data-alt');
   await p.locator('#alt-lista .alt-item').first().locator('.alt-sust').click();

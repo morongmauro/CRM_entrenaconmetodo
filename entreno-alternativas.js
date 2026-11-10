@@ -65,7 +65,29 @@ const ALT_FILTROS = [
   ['casa', 'Casa', 'lugar'], ['gym', 'Gimnasio', 'lugar'],
 ];
 
-const _alt = { reId: null, filtros: {}, q: '', hechos: {}, cargando: null };
+// «Toda la galería»: además de los parecidos, se puede cambiar por CUALQUIER
+// ejercicio de la galería sin perder el renglón (antes había que borrarlo y
+// añadir el nuevo, que caía al final y cambiaba el orden en la app del
+// cliente). Lleva los filtros de la galería: segmento, patrón y tipo.
+const _alt = { reId: null, filtros: {}, q: '', hechos: {}, cargando: null, modo: 'parecidos' };
+// Todos los de la galería menos el que se cambia (sin archivados ni copias), por nombre.
+function altTodos(src, lista) {
+  return (lista || []).filter(c => c && c.id !== src.id && !c.archivado && !c.duplicado_de)
+    .map(e => ({ e, porque: [], dif: 0 }))
+    .sort((a, b) => entNombres(a.e).grande.localeCompare(entNombres(b.e).grande, 'es'));
+}
+function altFiltrosHTML() {
+  const chip = ([k, t], g) => `<button type="button" class="alt-filtro${_alt.filtros[g] === k ? ' on' : ''}" data-f="${k}" data-g="${g}" onclick="altFiltro('${g}', '${k}')">${t}</button>`;
+  const comunes = ALT_FILTROS.filter(([, , g]) => _alt.modo === 'parecidos' || g !== 'nivel').map(([k, t, g]) => chip([k, t], g)).join('');
+  const deGaleria = _alt.modo === 'todos'
+    ? `<div class="alt-filtros" data-alt-galeria style="flex-basis:100%">${ENT_SEGMENTOS.map(x => chip(x, 'segmento')).join('')}</div>
+       <div class="alt-filtros" data-alt-galeria style="flex-basis:100%">${ENT_PATRONES.map(x => chip(x, 'patron')).join('')}
+         <select class="alt-q" style="flex:0 1 170px" aria-label="Tipo" onchange="altFiltroTipo(this.value)"><option value="">Todos los tipos</option>${ENT_TIPOS.map(([k, t]) => `<option value="${k}"${_alt.filtros.tipo === k ? ' selected' : ''}>${t}</option>`).join('')}</select></div>`
+    : '';
+  return `${deGaleria}${comunes}
+    <input id="alt-q" class="alt-q" placeholder="Buscar por nombre" value="${escapeHtml(_alt.q || '')}" oninput="altBuscar(this.value)">
+    <span id="alt-cuenta" class="alt-cuenta"></span>`;
+}
 
 const altArr = (v) => (Array.isArray(v) ? v : []);
 const altNorm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
@@ -152,6 +174,11 @@ function altPasaFiltros(x) {
   if (f.nivel === 'facil' && !(x.dif < 0)) return false;
   if (f.nivel === 'dificil' && !(x.dif > 0)) return false;
   if (f.lugar && !altArr(e.lugar).includes(f.lugar)) return false;
+  if (_alt.modo === 'todos') {
+    if (f.segmento && e.segmento !== f.segmento) return false;
+    if (f.patron && e.patron !== f.patron) return false;
+    if (f.tipo && e.tipo !== f.tipo) return false;
+  }
   if (_alt.q) {
     const q = altNorm(_alt.q);
     if (!altNorm(`${e.nombre || ''} ${e.alias || ''}`).includes(q)) return false;
@@ -209,7 +236,7 @@ function altPintarLista() {
   const re = altRE();
   if (!caja || !re) return;
   const src = re.ejercicios || {};
-  const todos = altCandidatos(src, _ent.ejercicios || []);
+  const todos = _alt.modo === 'todos' ? altTodos(src, _ent.ejercicios || []) : altCandidatos(src, _ent.ejercicios || []);
   // Los «No le sirve» de este cliente: con etiqueta y al final.
   const cidNs = _ent.rutina?.cliente_id;
   if (cidNs && window.nsTiene) { todos.forEach(x => { x.noSirve = nsTiene(cidNs, x.e.id); }); todos.sort((x, y) => (x.noSirve ? 1 : 0) - (y.noSirve ? 1 : 0)); }
@@ -221,11 +248,12 @@ function altPintarLista() {
   caja.innerHTML = lista.length
     ? lista.slice(0, 40).map(x => altTarjeta(x, enRutina, hechos)).join('')
       + (lista.length > 40 ? `<div class="alt-vacio">Y ${lista.length - 40} más: usa un filtro o busca por nombre.</div>` : '')
-    : `<div class="alt-vacio">${todos.length ? 'Con estos filtros no queda ninguna. Quita alguno.' : 'No encontré ejercicios parecidos en la galería.'}</div>`;
+    : `<div class="alt-vacio">${todos.length ? 'Con estos filtros no queda ninguna. Quita alguno.' : _alt.modo === 'todos' ? 'La galería está vacía.' : 'No encontré ejercicios parecidos en la galería. Mira en «Toda la galería».'}</div>`;
 }
 
 window.entAlternativas = async (reId) => {
-  _alt.reId = reId; _alt.q = '';
+  _alt.reId = reId; _alt.q = ''; _alt.modo = 'parecidos';
+  delete _alt.filtros.segmento; delete _alt.filtros.patron; delete _alt.filtros.tipo;
   const re = altRE();
   if (!re) return;
   await entDb.ejercicios();
@@ -241,15 +269,15 @@ window.entAlternativas = async (reId) => {
         </div>
         <button class="btn btn-ghost btn-sm" onclick="closeModal()" aria-label="Cerrar">✕</button>
       </div>
-      <p class="alt-ayuda">El mismo movimiento y los mismos músculos, con otro equipo o variante. Al sustituir se quedan su lugar, sus series, reps, descanso y RIR, y su bloque o circuito.</p>
+      <div class="alt-modos" role="tablist" data-alt-modos>
+        <button type="button" class="alt-modo on" data-alt-modo="parecidos" onclick="altModo('parecidos')">Parecidos</button>
+        <button type="button" class="alt-modo" data-alt-modo="todos" onclick="altModo('todos')">Toda la galería</button>
+      </div>
+      <p class="alt-ayuda" id="alt-ayuda">El mismo movimiento y los mismos músculos, con otro equipo o variante. Al sustituir se quedan su lugar, sus series, reps, descanso y RIR, y su bloque o circuito.</p>
       ${document.getElementById('rut-panel') && typeof rutPedirAlternativas === 'function'
         ? `<button type="button" class="alt-ia" data-alt-ia onclick="closeModal();rutPedirAlternativas('${reId}')">✨ Que el asistente elija 3 a 5 y te diga por qué</button>` : ''}
       ${flojo ? `<p class="alt-aviso">A esta ficha le falta ${!altArr(src.musculos_primarios).length ? 'músculos' : 'patrón'}: las alternativas salen mejor si la completas. <button class="alt-link" onclick="closeModal();entEditarEjercicio('${src.id}')">Completarla</button></p>` : ''}
-      <div class="alt-filtros">
-        ${ALT_FILTROS.map(([k, t, g]) => `<button type="button" class="alt-filtro${_alt.filtros[g] === k ? ' on' : ''}" data-f="${k}" data-g="${g}" onclick="altFiltro('${g}', '${k}')">${t}</button>`).join('')}
-        <input id="alt-q" class="alt-q" placeholder="Buscar por nombre" oninput="altBuscar(this.value)">
-        <span id="alt-cuenta" class="alt-cuenta"></span>
-      </div>
+      <div class="alt-filtros" id="alt-filtros">${altFiltrosHTML()}</div>
       <div id="alt-lista" class="alt-lista"></div>
     </div>`, { wide: true });
   altPintarLista();
@@ -261,7 +289,22 @@ window.entAlternativas = async (reId) => {
 
 window.altFiltro = (grupo, k) => {
   _alt.filtros[grupo] = _alt.filtros[grupo] === k ? null : k;
-  document.querySelectorAll('.alt-filtro').forEach(b => b.classList.toggle('on', _alt.filtros[b.dataset.g] === b.dataset.f));
+  document.querySelectorAll('.alt-filtro[data-g]').forEach(b => b.classList.toggle('on', _alt.filtros[b.dataset.g] === b.dataset.f));
+  altPintarLista();
+};
+window.altFiltroTipo = (v) => { _alt.filtros.tipo = v || null; altPintarLista(); };
+// Parecidos ↔ toda la galería. Los filtros de galería solo valen en «toda».
+window.altModo = (modo) => {
+  _alt.modo = modo === 'todos' ? 'todos' : 'parecidos';
+  if (_alt.modo === 'parecidos') { delete _alt.filtros.segmento; delete _alt.filtros.patron; delete _alt.filtros.tipo; }
+  else { delete _alt.filtros.nivel; }
+  document.querySelectorAll('[data-alt-modo]').forEach(b => b.classList.toggle('on', b.dataset.altModo === _alt.modo));
+  const ay = document.getElementById('alt-ayuda');
+  if (ay) ay.textContent = _alt.modo === 'todos'
+    ? 'Cualquier ejercicio de la galería. Al sustituir entra en el mismo renglón: se quedan su lugar en la rutina, sus series, reps, descanso y RIR, y su bloque o circuito.'
+    : 'El mismo movimiento y los mismos músculos, con otro equipo o variante. Al sustituir se quedan su lugar, sus series, reps, descanso y RIR, y su bloque o circuito.';
+  const caja = document.getElementById('alt-filtros');
+  if (caja) caja.innerHTML = altFiltrosHTML();
   altPintarLista();
 };
 window.altBuscar = (v) => { _alt.q = v; altPintarLista(); };

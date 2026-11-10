@@ -100,6 +100,10 @@
 .alt-filtro.on { background: var(--d-gris); border-color: var(--d-gris); color: #fff; }
 .alt-q { flex: 1 1 160px; min-width: 0; border: 1px solid #DCDDE0; border-radius: 999px; padding: 6px 12px; font-size: 13.5px; }
 .alt-cuenta { font-size: 12.5px; color: var(--d-gris3); white-space: nowrap; }
+/* Parecidos | Toda la galería: dos pestañas, como las de Equipo. */
+.alt-modos { display: inline-flex; justify-self: start; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(31,31,31,0.07); }
+.alt-modo { border: 0; background: transparent; color: var(--d-gris); border-radius: 999px; padding: 7px 16px; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+.alt-modo.on { background: #fff; color: #1F1F1F; box-shadow: 0 1px 3px rgba(31,31,31,0.14); }
 .alt-lista { display: grid; gap: 8px; max-height: 62vh; overflow-y: auto; padding-right: 2px; }
 .alt-item { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 12px; align-items: center; background: #fff; border: 1px solid #ECEDEF; border-radius: 14px; padding: 10px 12px; }
 .alt-foto { width: 64px; height: 48px; object-fit: cover; border-radius: 9px; background: #F1F2F4; }
