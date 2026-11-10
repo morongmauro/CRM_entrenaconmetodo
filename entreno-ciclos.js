@@ -347,7 +347,7 @@ window.entDcGuardar = async () => {
   }
   const n = Object.keys(_dc.aplicadas).length;
   closeModal();
-  toast(`✓ «${nombre}» creado en borrador${nEv ? ` · ${nEv} de cardio y eventos copiado${nEv === 1 ? '' : 's'}` : ''}${n ? ` · ${n} ajuste${n === 1 ? '' : 's'} del cliente aplicado${n === 1 ? '' : 's'}` : ''}. Estás en el ciclo nuevo.`);
+  toast(`✓ «${nombre}» creado${nEv ? ` · ${nEv} de cardio y eventos copiado${nEv === 1 ? '' : 's'}` : ''}${n ? ` · ${n} ajuste${n === 1 ? '' : 's'} del cliente aplicado${n === 1 ? '' : 's'}` : ''}. Estás en el ciclo nuevo.`);
   // Te deja en el ciclo NUEVO: seguir editando el viejo creyendo que es el nuevo era fácil.
   _ent.faseId = nueva;
   entVistaClientes();

@@ -76,7 +76,17 @@
   function createClient() {
     return {
       from: consulta,
-      rpc: async () => ({ data: null, error: null }),
+      rpc: async (nombre, args) => {
+        if (nombre === 'publicar_fase') {
+          const f = tabla('fases').find(x => x.id === args.p_fase_id);
+          if (!f) return { data: null, error: { message: 'No existe la fase' } };
+          f.visible_cliente = !!args.p_visible;
+          if (args.p_visible && !f.publicada_en) f.publicada_en = new Date().toISOString();
+          if (args.p_visible && f.estado === 'borrador') f.estado = 'activa';
+          return { data: tabla('rutinas').filter(r => r.fase_id === f.id && !r.archivada).length, error: null };
+        }
+        return { data: null, error: null };
+      },
       channel: () => ({ on() { return this; }, subscribe() { return this; } }),
       removeChannel() {},
       storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: '' } }), list: async () => ({ data: [], error: null }), upload: async () => ({ data: null, error: null }), createSignedUrl: async (ruta) => ({ data: { signedUrl: 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="300" height="400" fill="#8A8F86"/><text x="20" y="200" fill="#fff" font-size="22">${ruta}</text></svg>`) }, error: null }) }) },

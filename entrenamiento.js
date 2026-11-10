@@ -472,7 +472,7 @@ const entDb = {
   async fases(clienteId) {
     const q = sb.from('fases').select('*').order('orden');
     const { data } = clienteId ? await q.eq('cliente_id', clienteId) : await q.is('cliente_id', null);
-    return clienteId ? entCerrarCiclosPasados(data || []) : (data || []);
+    return clienteId ? entCerrarCiclosPasados(await entAutoEnviarNuevos(data || [])) : (data || []);
   },
   async crearFase(row) {
     const { data, error } = await sb.from('fases').insert(row).select().single();
@@ -4759,6 +4759,44 @@ function entEtiquetaCiclo(f, fases, hoy = fmt.hoy()) {
   if (dia && f.estado !== 'borrador') return 'terminado';
   return '';
 }
+// ── Los ciclos nuevos se envían solos (10 nov) ──────────────────────────
+// Antes, después de crear un ciclo había que darle a «Enviar al cliente», y
+// si se pasaba, el cliente no lo veía. Ahora un ciclo creado desde esta
+// fecha queda enviado en cuanto tiene al menos una rutina: sin botón.
+//   · Vacío no se envía (un ciclo sin rutinas que ya arrancó dejaría al
+//     cliente sin nada que ver); se envía al añadirle la primera rutina.
+//   · Si arranca más adelante, la app del cliente no lo muestra antes de su
+//     fecha (esa regla no cambia): sigue viendo el ciclo de hoy.
+//   · El que retiraste a mano («Retirar») no se vuelve a enviar solo.
+//   · Los ciclos de antes de esta fecha que estaban sin enviar no se tocan:
+//     siguen con su botón.
+const ENT_AUTO_ENVIO_DESDE = '2026-11-10';
+function entEsCicloAuto(f) {
+  return !!(f && f.cliente_id && f.visible_cliente !== true && !f.publicada_en
+    && f.estado !== 'archivada' && f.estado !== 'finalizada' && String(f.created_at || '') >= ENT_AUTO_ENVIO_DESDE);
+}
+let _entAutoEnviando = false;
+async function entAutoEnviarNuevos(fases) {
+  if (_entAutoEnviando) return fases;
+  const cand = (fases || []).filter(entEsCicloAuto);
+  if (!cand.length) return fases;
+  _entAutoEnviando = true;
+  try {
+    const { data: rs, error } = await sb.from('rutinas').select('id, fase_id, archivada').in('fase_id', cand.map(f => f.id));
+    if (error) return fases;
+    for (const f of cand) {
+      if (!(rs || []).some(r => r.fase_id === f.id && !r.archivada)) continue;
+      const n = await entDb.publicarFase(f.id, true);
+      if (n == null) continue;
+      f.visible_cliente = true; f.publicada_en = new Date().toISOString();
+      if (f.estado === 'borrador') f.estado = 'activa';
+      const hoy = fmt.hoy(), dia = String(f.fecha_inicio || '').slice(0, 10);
+      toast(`«${f.nombre}» quedó enviado: ${dia && dia > hoy ? `tu cliente lo verá desde el ${fmt.fecha ? fmt.fecha(dia) : dia}` : 'tu cliente ya lo ve'}`);
+    }
+  } catch (e) { /* si falla, queda como estaba (con su botón) */ }
+  finally { _entAutoEnviando = false; }
+  return fases;
+}
 // Cuando el ciclo nuevo (enviado) ya arrancó, el anterior que seguía en
 // «activa» pasa solo a «finalizada». Solo cambia ese estado: no se borra ni
 // se toca nada más, y el historial de sesiones queda igual.
@@ -4793,7 +4831,9 @@ function entTarjetaFase(f, rutinas) {
   const enviada = f.visible_cliente === true;
   const chipEnvio = enviada
     ? `<span class="tag tag-green" title="${f.publicada_en ? 'Enviada el ' + String(f.publicada_en).slice(0, 10) : 'Enviada'}">📲 la ve el cliente</span>`
-    : '<span class="tag" style="background:#f1f5f9;color:#64748b" title="Solo tú la ves. Está cargada y la puedes editar, pero no aparece en la app del cliente.">🔒 solo tú</span>';
+    : entEsCicloAuto(f)
+      ? '<span class="tag" data-ciclo-auto style="background:#EEF4FC;color:#1F4E8C" title="No hay que enviarlo: en cuanto tenga una rutina, tu cliente lo ve.">se envía solo al añadir una rutina</span>'
+      : '<span class="tag" style="background:#f1f5f9;color:#64748b" title="Solo tú la ves. Está cargada y la puedes editar, pero no aparece en la app del cliente.">🔒 solo tú</span>';
   return `
     <div class="card mb-3">
       <div class="flex justify-between items-start gap-2 flex-wrap mb-2">
@@ -4814,6 +4854,7 @@ function entTarjetaFase(f, rutinas) {
         <div class="flex gap-1 flex-wrap max-w-full">
           ${enviada
             ? `<button class="btn btn-secondary btn-sm" onclick="entRetirarFase('${f.id}')" title="Deja de mostrársela en su app. No se borra nada.">↩ Retirar</button>`
+            : entEsCicloAuto(f) ? ''
             : `<button class="btn btn-primary btn-sm" onclick="entEnviarFase('${f.id}')" ${rutinas.length ? '' : 'disabled title="Añade al menos una rutina antes de enviarla"'}>📤 Enviar al cliente</button>`}
           <button class="btn btn-ghost btn-sm" onclick="entEditarFase('${f.id}')">Editar</button>
           ${f.cliente_id ? `<button class="btn btn-secondary btn-sm" onclick="entDuplicarCiclo('${f.id}')" title="Crea el ciclo siguiente con las mismas rutinas y tus días; lo que movió el cliente te lo pregunta">⧉ Duplicar ciclo</button>` : ''}
