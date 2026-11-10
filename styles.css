@@ -828,7 +828,8 @@ summary.list-none { list-style: none; }
 /* MESA EN 4 COLUMNAS (entreno-mesa4.js): galería · rutina · historial y
    notas · alternativas. Las dos últimas siguen el desplazamiento de la rutina. */
 @media (min-width: 1280px) {
-  .ent-mesa4 .ent-mesa-grid { grid-template-columns: minmax(0, .9fr) minmax(0, 1fr) minmax(280px, .72fr) minmax(320px, .85fr) !important; gap: 14px !important; }
+  /* La rutina más angosta (3 campos por ejercicio) y las alternativas más anchas: caben 2 tarjetas enteras para deslizar. */
+  .ent-mesa4 .ent-mesa-grid { grid-template-columns: minmax(0, .9fr) minmax(0, .8fr) minmax(280px, .72fr) minmax(340px, 1.05fr) !important; gap: 14px !important; }
   .ent-mesa4 #cons-gal-lista { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)) !important; }
   .ent-mesa4 #asi-panel, .ent-mesa4 #cons-col-alt { overflow: hidden !important; position: relative; scrollbar-gutter: auto; padding-right: 0; }
   .ent-mesa4 #cons-col-alt { order: 4; }

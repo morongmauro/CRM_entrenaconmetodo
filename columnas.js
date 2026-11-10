@@ -24,7 +24,7 @@ const COL_VISTAS = [
   { sel: '[data-seg-grid]', clave: 'seguimiento' },
   { sel: '#seg-semana .es-grid', clave: 'semana', min: 560 },
   { sel: '.split', clave: 'doble' },
-  { sel: '.ent-mesa4 .ent-mesa-grid', clave: 'mesa4' },
+  { sel: '.ent-mesa4 .ent-mesa-grid', clave: 'mesa4b' },
   { sel: '.ent-mesa .ent-mesa-grid', clave: 'mesa' },
   { sel: '#cons-wrap:not(.ent-mesa) .ent-mesa-grid', clave: 'constructor' },
 ];

@@ -2664,21 +2664,24 @@ function entFilaRutina(re, i, total, bloques) {
         </div>
       </div>
       ${entCambioDeFila(re)}
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+      <!-- Series · Reps · Descanso a la vista. El peso objetivo va en «Más»: la
+           app ya le pone a cada serie, en gris, el peso de la última vez. Si
+           un ejercicio ya lo trae escrito, «Más» lo dice para que no se pierda. -->
+      <div class="grid gap-2" data-campos-re style="grid-template-columns:repeat(3,minmax(0,1fr))">
         <div><label class="text-[0.65rem]">Series</label>
           <input type="number" min="1" value="${re.series ?? 3}" onchange="entGuardarRE('${re.id}', 'series', this.value)"></div>
         <div><label class="text-[0.65rem]">Reps</label>
           <input value="${escapeHtml(re.reps || '')}" placeholder="8-10 / AMRAP / 30s"
                  onchange="entGuardarRE('${re.id}', 'reps', this.value)"></div>
-        <div><label class="text-[0.65rem]">Peso</label>
-          <input value="${escapeHtml(re.peso_objetivo || '')}" placeholder="60 kg / 70%"
-                 onchange="entGuardarRE('${re.id}', 'peso_objetivo', this.value)"></div>
         <div><label class="text-[0.65rem]">Descanso (s)</label>
           <input type="number" min="0" value="${re.descanso_seg ?? 90}" onchange="entGuardarRE('${re.id}', 'descanso_seg', this.value)"></div>
       </div>
-      <details class="mt-2">
-        <summary class="text-xs text-slate-500 cursor-pointer">Más: RIR, tempo, notas</summary>
-        <div class="grid grid-cols-2 gap-2 mt-2">
+      <details class="mt-2" data-mas-re>
+        <summary class="text-xs text-slate-500 cursor-pointer">Más: peso${re.peso_objetivo ? ` (${escapeHtml(re.peso_objetivo)})` : ''}, RIR, tempo, notas</summary>
+        <div class="grid gap-2 mt-2" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+          <div><label class="text-[0.65rem]">Peso</label>
+            <input value="${escapeHtml(re.peso_objetivo || '')}" placeholder="60 kg / 70%" data-peso-objetivo
+                   onchange="entGuardarRE('${re.id}', 'peso_objetivo', this.value)"></div>
           <div><label class="text-[0.65rem]">RIR</label>
             <input type="number" min="0" max="5" value="${re.rir ?? ''}" onchange="entGuardarRE('${re.id}', 'rir', this.value)"></div>
           <div><label class="text-[0.65rem]">Tempo</label>
