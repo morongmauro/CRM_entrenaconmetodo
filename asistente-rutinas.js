@@ -21,6 +21,7 @@
 const _rut = {
   chat: null,          // estado de la conversación (asisEstadoNuevo)
   propuestas: [],      // cambios pendientes de que el coach los apruebe
+  ciclosPendientes: [], // ciclos propuestos (para poder ponerles rutinas antes de aplicar)
   seq: 0,
   abierto: false,      // el panel está desplegado
   aplicando: false,
@@ -32,6 +33,7 @@ const RUT_MAX_PROPUESTAS = 25;
 // y revisar una rutina son dos trabajos distintos, y ofrecerle "¿qué pesos ha
 // movido?" a quien está cuadrando la semana no le ahorra nada.
 const RUT_EJEMPLOS_CALENDARIO = [
+  'Créale una rutina de Lower para el martes, con calentamiento y core',
   'Quítale el martes al Lower',
   'Pon el Upper lunes, miércoles y viernes',
   'Pasa el Push del martes al viernes',
@@ -42,6 +44,8 @@ const RUT_EJEMPLOS_CALENDARIO = [
 ];
 
 const RUT_EJEMPLOS_PLAN = [
+  'Arma un Push parecido al de Camilo, lunes y jueves, con calentamiento',
+  'Créale el ciclo siguiente con las mismas rutinas',
   '¿Qué ejercicios de empuje NO le he puesto?',
   '¿Qué pesos ha venido moviendo en press banca?',
   'Agrégale fondos en paralelas al Push, 3×10',
@@ -236,6 +240,7 @@ window.rutAplicar = async () => {
     catch (e) { fallos.push(`${p.descripcion}: ${e?.message || e}`); }
   }
   _rut.propuestas = [];
+  _rut.ciclosPendientes = [];
   _rut.aplicando = false;
   _ent.ejercicios = null;                 // la galería puede haber cambiado
   toast(fallos.length
@@ -251,6 +256,7 @@ window.rutAplicar = async () => {
 
 window.rutDescartar = () => {
   _rut.propuestas = [];
+  _rut.ciclosPendientes = [];
   rutPintar();
   toast('Cambios descartados');
 };
@@ -945,6 +951,135 @@ const RUT_HERRAMIENTAS = {
     );
   },
 
+  // ---- Crear: una rutina entera y un ciclo nuevo ----
+  // Todo se valida ANTES de proponer: cada ejercicio tiene que estar en la
+  // galería (si uno no está, no se propone nada y se dice cuál), los días se
+  // entienden o se pregunta, y lo que «No le sirve» a este cliente se frena.
+  // La tarjeta muestra la rutina completa para revisarla antes de aplicar.
+  async crear_rutina({ nombre, fase, nombre_rutina, dias_semana, tipo_sesion = 'fuerza', notas_coach, partes = [], usar_aunque_no_le_sirva = false } = {}) {
+    const c = await rutCliente(nombre);
+    if (!c) return rutSinCliente(nombre);
+    if (!nombre_rutina || !String(nombre_rutina).trim()) return { error: 'Falta el nombre de la rutina.' };
+    if (!Array.isArray(partes) || !partes.length) return { error: 'Faltan los ejercicios: manda las partes (calentamiento, fuerza…) con sus ejercicios.' };
+    // El ciclo: uno que ya existe, o uno que propusiste crear en esta misma conversación.
+    const pendiente = fase ? _rut.ciclosPendientes.find(x => x.clienteId === c.id && normalizeName(x.nombre) === normalizeName(fase)) : null;
+    let faseReal = null, rutinas = [];
+    if (!pendiente) {
+      const ctx = await rutContexto(c, fase);
+      if (!ctx.fase) return { error: `${c.nombre} no tiene ciclos. Créalo primero con crear_ciclo.` };
+      if (fase && normalizeName(ctx.fase.nombre).indexOf(normalizeName(fase)) < 0) return { error: `No encontré el ciclo "${fase}" de ${c.nombre}.`, ciclos: ctx.fases.map(f => f.nombre) };
+      faseReal = ctx.fase; rutinas = ctx.rutinas;
+    }
+    if (rutinas.some(r => normalizeName(r.nombre) === normalizeName(nombre_rutina))) return { error: `Ya hay una rutina "${nombre_rutina}" en "${faseReal.nombre}". Usa otro nombre o edita esa.` };
+    let dias = [];
+    if (dias_semana !== undefined && dias_semana !== null && dias_semana !== '') {
+      const ds = rutDias(dias_semana);
+      if (!ds.ok) return { error: ds.error };
+      dias = ds.dias;
+    }
+    // Cada ejercicio, contra la galería.
+    const faltan = [], noSirven = [], filas = [];
+    const vistos = new Set();
+    for (const [i, parte] of partes.entries()) {
+      const lista = Array.isArray(parte?.ejercicios) ? parte.ejercicios : [];
+      if (!lista.length) return { error: `La parte ${i + 1}${parte?.titulo ? ` («${parte.titulo}»)` : ''} no tiene ejercicios.` };
+      for (const x of lista) {
+        const e = await rutBuscarEjercicio(x?.ejercicio);
+        if (!e) { faltan.push(String(x?.ejercicio || '(sin nombre)')); continue; }
+        if (vistos.has(e.id)) return { error: `${e.nombre} está dos veces. Quita uno.` };
+        vistos.add(e.id);
+        if (!usar_aunque_no_le_sirva && window.nsTiene && nsTiene(c.id, e.id)) noSirven.push(e.nombre);
+        filas.push({ parte: i, e, series: Number(x.series) || 3, reps: String(x.reps ?? '10'), descanso_seg: x.descanso_seg != null ? Number(x.descanso_seg) : 90, peso_objetivo: x.peso_objetivo || null, rir: x.rir != null ? Number(x.rir) : null, notas: x.notas || null });
+      }
+    }
+    if (faltan.length) return { error: `Estos no están en la galería: ${faltan.join(', ')}. No propuse nada. Búscalos con buscar_ejercicios y usa los que sí existen.` };
+    if (noSirven.length) return { error: `A ${c.nombre} no le sirven: ${noSirven.join(', ')} (lo marcó el coach). Cámbialos, o pregúntale al coach y vuelve a llamar con usar_aunque_no_le_sirva: true.` };
+    if (filas.length > 25) return { error: 'Son más de 25 ejercicios. Una rutina tan larga casi nunca tiene sentido: revísala.' };
+
+    const diasTxt = dias.length ? dias.map(d => entLabel(ENT_DIAS, d)).join(', ') : 'sin día fijo';
+    const lineas = partes.map((parte, i) => {
+      const bl = parte.bloque && ['superserie', 'circuito'].includes(parte.bloque.tipo) ? ` (${parte.bloque.tipo}${parte.bloque.vueltas ? `, ${parte.bloque.vueltas} vueltas` : ''})` : '';
+      const ejs = filas.filter(f => f.parte === i).map(f => `${entNombres(f.e).grande} ${f.series}×${f.reps}${f.peso_objetivo ? ` · ${f.peso_objetivo}` : ''}`).join(' · ');
+      return `${parte.titulo || `Parte ${i + 1}`}${bl}: ${ejs}`;
+    });
+    const destino = pendiente ? `${pendiente.nombre} (ciclo nuevo)` : faseReal.nombre;
+    return rutProponer(
+      `Crear la rutina "${nombre_rutina}" para ${c.nombre} · ${destino} · ${diasTxt}`,
+      lineas.join('\n'),
+      async () => {
+        const fid = pendiente ? (pendiente.faseId || (await entDb.fases(c.id)).find(f => normalizeName(f.nombre) === normalizeName(pendiente.nombre))?.id) : faseReal.id;
+        if (!fid) throw new Error(`No encontré el ciclo "${destino}": aplica primero su creación.`);
+        const hermanas = await entDb.rutinasDeFase(fid);
+        const r = await entDb.crearRutina({
+          nombre: String(nombre_rutina).trim(), fase_id: fid, cliente_id: c.id, dia_orden: hermanas.length + 1,
+          tipo_sesion: tipo_sesion || 'fuerza', notas_coach: notas_coach || null, dias_semana: dias, dia_semana: null,
+        });
+        if (!r) throw new Error('La rutina no se creó');
+        let orden = 0, ordenBloque = 0;
+        for (const [i, parte] of partes.entries()) {
+          let bloqueId = null;
+          if (parte.bloque && ['superserie', 'circuito'].includes(parte.bloque.tipo)) {
+            const b = await entDb.crearBloque({ rutina_id: r.id, tipo: parte.bloque.tipo, nombre: parte.titulo || null, orden: ++ordenBloque,
+              vueltas: Number(parte.bloque.vueltas) || 1, descanso_seg: parte.bloque.descanso_seg != null ? Number(parte.bloque.descanso_seg) : null });
+            bloqueId = b?.id || null;
+          }
+          for (const f of filas.filter(x => x.parte === i)) {
+            const ok = await entDb.agregarEjercicio({ rutina_id: r.id, ejercicio_id: f.e.id, orden: ++orden, bloque_id: bloqueId,
+              series: f.series, reps: f.reps, descanso_seg: f.descanso_seg, peso_objetivo: f.peso_objetivo, rir: f.rir, notas: f.notas });
+            if (!ok) throw new Error(`No se pudo añadir ${f.e.nombre}`);
+          }
+        }
+      },
+    );
+  },
+
+  async crear_ciclo({ nombre, nombre_ciclo, semanas = 4, fecha_inicio, dias_semana, objetivo, copiar_rutinas_de } = {}) {
+    const c = await rutCliente(nombre);
+    if (!c) return rutSinCliente(nombre);
+    if (!nombre_ciclo || !String(nombre_ciclo).trim()) return { error: 'Falta el nombre del ciclo (por ejemplo «Ciclo 20»).' };
+    const n = Number(semanas);
+    if (!Number.isInteger(n) || n < 1 || n > 16) return { error: 'Las semanas van de 1 a 16.' };
+    const fases = await entDb.fases(c.id);
+    if (fases.some(f => normalizeName(f.nombre) === normalizeName(nombre_ciclo))) return { error: `${c.nombre} ya tiene un ciclo "${nombre_ciclo}".` };
+    // Sin fecha: el día después de que termina el último ciclo (o el próximo lunes).
+    let inicio = fecha_inicio ? String(fecha_inicio).slice(0, 10) : null;
+    if (inicio && !/^\d{4}-\d{2}-\d{2}$/.test(inicio)) return { error: 'La fecha de inicio va como AAAA-MM-DD.' };
+    if (!inicio) {
+      const fins = fases.map(f => (typeof entFechaFin === 'function' ? entFechaFin(f) : null)).filter(Boolean).sort();
+      const base = fins.length ? new Date(`${fins[fins.length - 1]}T12:00:00`) : new Date();
+      base.setDate(base.getDate() + 1);
+      if (!fins.length) while (base.getDay() !== 1) base.setDate(base.getDate() + 1);
+      inicio = base.toISOString().slice(0, 10);
+    }
+    let dias = null;
+    if (dias_semana !== undefined && dias_semana !== null && dias_semana !== '') {
+      const ds = rutDias(dias_semana);
+      if (!ds.ok) return { error: ds.error };
+      dias = ds.dias;
+    }
+    let origen = null, copiar = [];
+    if (copiar_rutinas_de) {
+      const ctx = await rutContexto(c, copiar_rutinas_de);
+      if (!ctx.fase || normalizeName(ctx.fase.nombre).indexOf(normalizeName(copiar_rutinas_de)) < 0) return { error: `No encontré el ciclo "${copiar_rutinas_de}" para copiar sus rutinas.`, ciclos: fases.map(f => f.nombre) };
+      origen = ctx.fase; copiar = ctx.rutinas.filter(r => !r.archivada);
+    }
+    const reg = { clienteId: c.id, nombre: String(nombre_ciclo).trim(), faseId: null };
+    _rut.ciclosPendientes.push(reg);
+    const diasTxt = dias ? dias.map(d => entLabel(ENT_DIAS, d)).join(', ') : (fases.length ? 'los mismos días' : 'sin días');
+    return rutProponer(
+      `Crear el ciclo "${reg.nombre}" para ${c.nombre}`,
+      `${n} semana${n === 1 ? '' : 's'} · empieza el ${inicio} · ${diasTxt}${objetivo ? ` · ${objetivo}` : ''}${copiar.length ? `\nCopia las rutinas de ${origen.nombre}: ${copiar.map(r => r.nombre).join(', ')}` : ''}`,
+      async () => {
+        const dDias = dias || (fases.length ? (fases[fases.length - 1].dias_semana || []) : []);
+        const f = await entDb.crearFase({ nombre: reg.nombre, semanas: n, fecha_inicio: inicio, dias_semana: dDias, objetivo: objetivo || null,
+          estado: 'borrador', cliente_id: c.id, orden: fases.length + 1, updated_at: new Date().toISOString() });
+        if (!f) throw new Error('El ciclo no se creó');
+        reg.faseId = f.id;
+        for (const r of copiar) await entDb.copiarRutina(r.id, f.id, null);
+      },
+    );
+  },
+
   // ---- Alternativas y variantes ----
   async alternativas_de_ejercicio({ nombre, rutina, ejercicio, filtro, fase } = {}) {
     const x = await rutResolverRutina({ nombre, rutina, fase });
@@ -1163,6 +1298,8 @@ const RUT_ETIQUETAS = {
   editar_rutina: 'Preparando un cambio de rutina',
   editar_dias_de_fase: 'Preparando los días de la fase',
   duplicar_rutina: 'Preparando una copia',
+  crear_rutina: 'Armando la rutina',
+  crear_ciclo: 'Preparando el ciclo nuevo',
   alternativas_de_ejercicio: 'Buscando alternativas en la galería',
   mostrar_opciones_de_sustitucion: 'Preparando las opciones',
   sustituir_ejercicio: 'Preparando el cambio',
@@ -1214,6 +1351,7 @@ window.rutPreguntar = async (textoDirecto) => {
 window.rutLimpiar = () => {
   _rut.chat = asisEstadoNuevo('rutinas');
   _rut.propuestas = [];
+  _rut.ciclosPendientes = [];
   rutPintar();
 };
 
@@ -1256,7 +1394,7 @@ function rutPropuestasHTML() {
           <div class="rut-propuesta">
             <div class="min-w-0">
               <div class="text-sm font-medium text-slate-800">${escapeHtml(p.descripcion)}</div>
-              ${p.detalle ? `<div class="text-xs text-slate-500">${escapeHtml(p.detalle)}</div>` : ''}
+              ${p.detalle ? `<div class="text-xs text-slate-500" style="white-space:pre-line">${escapeHtml(p.detalle)}</div>` : ''}
             </div>
             <button class="btn btn-ghost btn-sm flex-shrink-0" onclick="rutQuitarPropuesta(${p.id})" title="Quitar de la lista">✕</button>
           </div>`).join('')}
@@ -1372,7 +1510,8 @@ function rutPanelHTML() {
       </div>
       <div class="mt-3">
         ${selectorNivelHTML('rutinas', ch?.nivel || nivelIaGuardado('rutinas'), 'rutNivel')}
-        <div class="text-[11px] text-slate-400 mt-1.5 text-right">${ch ? asisGastoHTML(ch) : ''}</div>
+        <div class="text-[11px] text-slate-400 mt-1.5" data-rut-estimado>Crear una rutina completa cuesta más o menos: <b>Rápido</b> menos de 50 COP · <b>Profundo</b> unos ${Math.round(0.3 * (Number(_settings.usd_cop_rate) || 4000)).toLocaleString('es-CO')} COP (US$0,30). Para crear rutinas conviene Profundo.</div>
+        <div class="text-[11px] text-slate-400 mt-1 text-right">${ch ? asisGastoHTML(ch) : ''}</div>
       </div>
     </div>`;
 }

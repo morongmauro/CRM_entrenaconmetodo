@@ -427,6 +427,78 @@ const HERRAMIENTAS_RUTINAS = [
 
   // ---- Eventos del calendario ----
   {
+    name: 'crear_rutina',
+    description:
+      'PROPONE crear una rutina NUEVA y completa para un cliente: nombre, días y sus ejercicios en ' +
+      'partes (por ejemplo «Calentamiento», «Fuerza», «Core»), cada parte en orden y opcionalmente como ' +
+      'superserie o circuito. Solo con ejercicios que YA están en la galería (búscalos antes con ' +
+      'buscar_ejercicios). Si el coach dice «parecida a la de X», mira primero esa rutina con ' +
+      'ver_rutina (nombre: X) y adáptala a ESTE cliente (su lugar de entreno, equipo, lesiones y lo ' +
+      'que no le sirve). Si un ejercicio no existe o no le sirve, no propone nada y te dice cuál.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nombre: { type: 'string', description: 'El cliente (vacío = el abierto).' },
+        fase: { type: 'string', description: 'El ciclo donde va (vacío = el actual). Puede ser uno que propusiste con crear_ciclo en esta conversación.' },
+        nombre_rutina: { type: 'string' },
+        dias_semana: { type: 'string', description: 'Días separados por comas: "lunes, jueves". Vacío = sin día fijo.' },
+        tipo_sesion: { type: 'string', description: 'fuerza (por defecto), cardio, movilidad…' },
+        notas_coach: { type: 'string' },
+        partes: {
+          type: 'array',
+          description: 'Las partes de la rutina, en orden.',
+          items: {
+            type: 'object',
+            properties: {
+              titulo: { type: 'string', description: 'Calentamiento, Fuerza, Core, Finisher…' },
+              bloque: {
+                type: 'object',
+                description: 'Solo si la parte es una superserie o un circuito.',
+                properties: { tipo: { type: 'string', enum: ['superserie', 'circuito'] }, vueltas: { type: 'integer' }, descanso_seg: { type: 'integer' } },
+              },
+              ejercicios: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    ejercicio: { type: 'string', description: 'El nombre tal como está en la galería.' },
+                    series: { type: 'integer' }, reps: { type: 'string', description: '"8-12", "10", "30 s", "5 por lado"' },
+                    descanso_seg: { type: 'integer' }, peso_objetivo: { type: 'string' }, rir: { type: 'integer' }, notas: { type: 'string' },
+                  },
+                  required: ['ejercicio'],
+                },
+              },
+            },
+            required: ['ejercicios'],
+          },
+        },
+        usar_aunque_no_le_sirva: { type: 'boolean', description: 'Solo si el coach lo pidió explícitamente.' },
+      },
+      required: ['nombre_rutina', 'partes'],
+    },
+  },
+  {
+    name: 'crear_ciclo',
+    description:
+      'PROPONE crear un ciclo (fase) nuevo para un cliente: nombre, semanas, fecha de inicio y días. ' +
+      'Puede copiar las rutinas de otro ciclo suyo (copiar_rutinas_de). Sin fecha, empieza el día ' +
+      'después de que termina su último ciclo. Después puedes ponerle rutinas nuevas con crear_rutina ' +
+      'usando fase: el nombre de este ciclo, en la misma conversación.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nombre: { type: 'string', description: 'El cliente (vacío = el abierto).' },
+        nombre_ciclo: { type: 'string', description: 'Por ejemplo «Ciclo 20».' },
+        semanas: { type: 'integer', description: '1 a 16. Por defecto 4.' },
+        fecha_inicio: { type: 'string', description: 'AAAA-MM-DD' },
+        dias_semana: { type: 'string', description: 'Días separados por comas. Vacío = los del ciclo anterior.' },
+        objetivo: { type: 'string' },
+        copiar_rutinas_de: { type: 'string', description: 'Nombre de otro ciclo de este cliente para copiar sus rutinas tal cual.' },
+      },
+      required: ['nombre_ciclo'],
+    },
+  },
+  {
     name: 'alternativas_de_ejercicio',
     description:
       'Las alternativas que hay EN LA GALERÍA para un ejercicio de una rutina: mismo movimiento y ' +
@@ -616,6 +688,19 @@ CÓMO TRABAJAS
    —natación, una medición de peso, una cita, "esa semana está de viaje"— es agregar_evento.
    "Agrégale natación los lunes" NO es crear una rutina de natación: llenaría su historial de
    entrenos no hechos y le arruinaría la adherencia.
+
+CREAR RUTINAS Y CICLOS
+- "Créale una rutina…", "arma un Push para…", "ponle una rutina parecida a la de X": usa crear_rutina con
+  la rutina COMPLETA (calentamiento, fuerza y lo que pida), en el orden en que se hace. Antes:
+  plan_del_cliente (días, lugar, lesiones), ver_rutina si es parecida a la de otro cliente, y
+  buscar_ejercicios para tener los nombres exactos de la galería. Sigue la lógica de prescripción del
+  coach (mira sus otras rutinas). Si algo choca con una lesión o con lo que no le sirve, dilo.
+- "Créale el ciclo siguiente": crear_ciclo. Si pide que tenga rutinas nuevas, propón el ciclo y luego
+  cada rutina con crear_rutina (fase: el nombre del ciclo nuevo). Si pide las mismas del ciclo
+  anterior, usa copiar_rutinas_de.
+- Nunca borras rutinas ni ciclos: no tienes cómo. Si te lo piden, dile que eso lo hace él desde la
+  pantalla (archivar), para no perder el historial del cliente.
+- Al terminar, resume en 2-3 líneas lo que dejaste propuesto y recuérdale revisarlo y aplicarlo.
 
 ALTERNATIVAS Y VARIANTES
 - "Dame alternativas para X" / "¿con qué lo cambio?": llama alternativas_de_ejercicio, elige de 3 a
