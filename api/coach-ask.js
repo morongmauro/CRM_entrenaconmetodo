@@ -372,7 +372,8 @@ const HERRAMIENTAS_RUTINAS = [
   {
     name: 'editar_rutina',
     description:
-      'PROPONE cambiarle a una rutina el nombre, los días de la semana o la duración. Una rutina ' +
+      'PROPONE cambiarle a una rutina el nombre, los días de la semana, la duración, la descripción que ' +
+      'lee el cliente, o pasarla a BLOQUE COMPLEMENTARIO u OPCIONAL (bloque_complementario / opcional). Una rutina ' +
       'puede caer en VARIOS días. Para los días hay dos formas, y NO se mezclan: ' +
       '(a) `dias_semana` deja la rutina EXACTAMENTE en esos días, borrando los demás — úsalo ' +
       'cuando el coach da la lista completa ("esta va lunes y jueves"); ' +
@@ -390,6 +391,9 @@ const HERRAMIENTAS_RUTINAS = [
         agregar_dias: { type: 'string', description: 'Días a AÑADIR, conservando los que ya tiene. No combinar con dias_semana.' },
         quitar_dias: { type: 'string', description: 'Días a QUITAR, conservando los demás. No combinar con dias_semana.' },
         duracion_min: { type: 'integer' },
+        descripcion: { type: 'string', description: 'El texto que LEE EL CLIENTE en la rutina (por ejemplo «antes de la fuerza»). Cadena vacía para quitarlo.' },
+        bloque_complementario: { type: 'boolean', description: 'true = bloque aparte que va el MISMO día que la fuerza, debajo de ella, sin ocupar el día (recovery, movilidad, handstand).' },
+        opcional: { type: 'boolean', description: 'true = lo hace si le da el tiempo: le sale en su Hoy pero NO cuenta como pendiente ni en su cumplimiento. Solo para bloques complementarios (manda también bloque_complementario: true si aún no lo es).' },
         fase: { type: 'string' },
       },
       required: ['rutina'],
@@ -443,7 +447,10 @@ const HERRAMIENTAS_RUTINAS = [
         nombre_rutina: { type: 'string' },
         dias_semana: { type: 'string', description: 'Días separados por comas: "lunes, jueves". Vacío = sin día fijo.' },
         tipo_sesion: { type: 'string', description: 'fuerza (por defecto), cardio, movilidad…' },
-        notas_coach: { type: 'string' },
+        notas_coach: { type: 'string', description: 'Solo las ve el coach; al cliente NUNCA le llegan.' },
+        descripcion: { type: 'string', description: 'El texto que LEE EL CLIENTE (cuándo hacerla, qué cuidar). En un bloque opcional di cuándo va: «antes de la fuerza».' },
+        bloque_complementario: { type: 'boolean', description: 'true = bloque aparte que va el MISMO día que la fuerza, debajo de ella, sin ocupar el día. Puede ir todos los días.' },
+        opcional: { type: 'boolean', description: 'true = bloque OPCIONAL: lo hace si le da el tiempo; le sale en su Hoy pero no cuenta como pendiente ni en su cumplimiento (implica bloque_complementario).' },
         partes: {
           type: 'array',
           description: 'Las partes de la rutina, en orden.',
@@ -695,6 +702,14 @@ CREAR RUTINAS Y CICLOS
   plan_del_cliente (días, lugar, lesiones), ver_rutina si es parecida a la de otro cliente, y
   buscar_ejercicios para tener los nombres exactos de la galería. Sigue la lógica de prescripción del
   coach (mira sus otras rutinas). Si algo choca con una lesión o con lo que no le sirve, dilo.
+- BLOQUES Y OPCIONALES. Algo que acompaña a la fuerza del día (recovery, movilidad, un handstand, un
+  core extra) NO es una rutina de fuerza más: créalo con crear_rutina y bloque_complementario: true; va
+  el mismo día que la fuerza, debajo, y puede ir todos los días. Si el coach dice «opcional», «si le da
+  el tiempo», «que no le cuente» o «que no le dañe la adherencia», manda además opcional: true: le sale
+  cada día en su Hoy, pero si no lo hace no queda pendiente ni baja su cumplimiento, y el día que lo
+  hace queda marcado en su calendario. Escribe en descripcion cuándo hacerlo («antes de la fuerza»).
+  Una rutina que ya existe se pasa a bloque u opcional con editar_rutina. SÍ puedes marcar una rutina
+  como opcional: nunca digas que no, ni propongas dejarla «sin día fijo» para no ensuciar los números.
 - "Créale el ciclo siguiente": crear_ciclo. Si pide que tenga rutinas nuevas, propón el ciclo y luego
   cada rutina con crear_rutina (fase: el nombre del ciclo nuevo). Si pide las mismas del ciclo
   anterior, usa copiar_rutinas_de.

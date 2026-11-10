@@ -203,6 +203,46 @@ if (process.env.FOTO) await tr.p.screenshot({ path: process.env.FOTO.replace('.p
 await tr.p.locator('[data-guia-cliente="c2"]').click();
 await tr.p.waitForTimeout(600);
 ok('al tocar un cliente de la guía queda elegido, con su ciclo en curso listo para traer', await tr.p.locator('#if-cliente').inputValue() === 'c2' && /Ciclo 6/.test(await tr.p.locator('#if-fase').innerText()), await tr.p.locator('#if-fase').innerText());
+// ── Bloques opcionales: el agente sí puede (antes decía que no) ──
+const op = await abrir(1500, 950);
+await op.p.evaluate(() => { if (typeof invalidarCache === 'function') invalidarCache(); });
+const ejOp = await op.p.evaluate(async () => (await entDb.ejercicios()).slice(0, 2).map(e => e.nombre));
+let ro = await op.p.evaluate(async ({ ejOp }) => RUT_HERRAMIENTAS.crear_rutina({ nombre: 'Ana', nombre_rutina: 'Handstand', dias_semana: 'lunes, martes', opcional: true,
+  partes: [{ ejercicios: [{ ejercicio: ejOp[0] }] }] }), { ejOp });
+ok('opcional sin la columna instalada: no propone y dice qué SQL correr', /migracion-bloques-complementarios\.sql|bloque-opcional\.sql/.test(ro.error || ''), JSON.stringify(ro));
+await op.p.evaluate(() => { window.TABLAS_FALSAS.rutinas.forEach(r => { r.complementaria = false; r.opcional = false; r.descripcion = r.descripcion || null; }); });
+ro = await op.p.evaluate(async ({ ejOp }) => RUT_HERRAMIENTAS.crear_rutina({ nombre: 'Ana', nombre_rutina: 'Handstand', dias_semana: 'lunes, martes, miércoles, jueves, viernes, sábado', opcional: true,
+  descripcion: 'Antes de la fuerza', partes: [{ titulo: 'Práctica', ejercicios: [{ ejercicio: ejOp[0], series: 5, reps: '20 s' }, { ejercicio: ejOp[1], series: 2, reps: '10' }] }] }), { ejOp });
+const tOp = await op.p.evaluate(() => _rut.propuestas.map(x => [x.descripcion, x.detalle]));
+ok('el agente propone un bloque OPCIONAL de lunes a sábado (aunque esos días ya tengan fuerza)', /PROPUESTO/.test(ro.estado || '') && /Crear el bloque OPCIONAL "Handstand"/.test(tOp[0][0])
+  && /no queda pendiente ni baja su cumplimiento/.test(tOp[0][1]) && /Antes de la fuerza/.test(tOp[0][1]), JSON.stringify({ ro, tOp }));
+await op.p.evaluate(() => rutAplicar()); await op.p.waitForTimeout(1500);
+const hs = await op.p.evaluate(() => window.TABLAS_FALSAS.rutinas.find(x => x.nombre === 'Handstand') || null);
+ok('al aplicar queda como bloque complementario, opcional, con sus días y su descripción', !!hs && hs.complementaria === true && hs.opcional === true
+  && JSON.stringify(hs.dias_semana) === '["L","M","X","J","V","S"]' && hs.descripcion === 'Antes de la fuerza', JSON.stringify(hs));
+// Una rutina que ya existe: se pasa a bloque opcional con editar_rutina.
+const otraOp = await op.p.evaluate(() => { const T = window.TABLAS_FALSAS; const f = T.fases.find(x => x.cliente_id === 'c0' && T.rutinas.some(r => r.fase_id === x.id && r.nombre === 'Handstand')); return T.rutinas.find(r => r.fase_id === f.id && r.nombre !== 'Handstand').nombre; });
+await op.p.evaluate(() => { _rut.propuestas = []; });
+ro = await op.p.evaluate(async ({ otraOp }) => RUT_HERRAMIENTAS.editar_rutina({ nombre: 'Ana', rutina: otraOp, bloque_complementario: true, opcional: true, descripcion: 'Si te da el tiempo' }), { otraOp });
+ok('editar_rutina: pasa una rutina que ya existe a bloque opcional', /PROPUESTO/.test(ro.estado || '') && /OPCIONAL/.test((await op.p.evaluate(() => _rut.propuestas.map(x => x.detalle).join(' ')))), JSON.stringify(ro));
+ro = await op.p.evaluate(async ({ otraOp }) => RUT_HERRAMIENTAS.editar_rutina({ nombre: 'Ana', rutina: otraOp, opcional: true, bloque_complementario: false }), { otraOp });
+ok('…y no deja marcar opcional algo que no es bloque', /Solo un bloque complementario puede ser opcional/.test(ro.error || ''), JSON.stringify(ro));
+// (la base de prueba no pone el valor por defecto de «archivada» al insertar)
+await op.p.evaluate(() => { window.TABLAS_FALSAS.rutinas.forEach(r => { if (r.archivada === undefined) r.archivada = false; }); });
+const planOp = await op.p.evaluate(async () => RUT_HERRAMIENTAS.plan_del_cliente({ nombre: 'Ana' }));
+ok('plan_del_cliente le cuenta al agente cuáles son bloques y cuáles opcionales', JSON.stringify(planOp).includes('"bloque_complementario":true') && JSON.stringify(planOp).includes('"opcional":true'), JSON.stringify(planOp).replace(/.*"rutinas":/, '').slice(0, 600));
+// ── «Crear ejercicio» visible en el constructor ──
+const rutOp = await op.p.evaluate(() => { const T = window.TABLAS_FALSAS; return T.rutinas.find(r => r.cliente_id === 'c0' && T.rutina_ejercicios.some(x => x.rutina_id === r.id)).id; });
+await op.p.evaluate((id) => entAbrirConstructor(id), rutOp);
+await op.p.waitForSelector('#cons-gal-lista', { timeout: 15000 }); await op.p.waitForTimeout(900);
+ok('constructor: «+ Crear ejercicio» es un botón negro a la vista', await op.p.locator('[data-crear-ejercicio-rutina]').evaluate(el => el.classList.contains('btn-primary')));
+ok('sin buscar nada no sale la tarjeta de crear', (await op.p.locator('[data-crear-desde-busqueda]').count()) === 0);
+await op.p.locator('#cons-q').fill('wrist rocks'); await op.p.waitForTimeout(1200);
+ok('al buscar, al final de los resultados sale «¿No está aquí? Crear «wrist rocks»»', /¿No está aquí\? Crear «wrist rocks»/.test(await op.p.locator('[data-crear-desde-busqueda]').innerText().catch(() => '')));
+await op.p.locator('[data-crear-desde-busqueda]').click(); await op.p.waitForTimeout(500);
+ok('…y abre «Crear ejercicio nuevo» con ese nombre ya escrito', (await op.p.locator('#en-nombre').inputValue().catch(() => '')) === 'wrist rocks');
+if (process.env.FOTO) await op.p.screenshot({ path: process.env.FOTO.replace('.png', '-crear-ejercicio.png') });
+ok('sin errores (bloques opcionales y crear ejercicio)', op.errores.length === 0, op.errores.join(' | '));
 ok('sin errores', a.errores.length === 0 && sc.errores.length === 0 && tr.errores.length === 0, [...a.errores, ...sc.errores, ...tr.errores].join(' | '));
 await b.close(); servidor.close();
 console.log(mal ? `\n${mal} MAL` : '\nTodo bien');

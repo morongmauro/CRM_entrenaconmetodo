@@ -2039,7 +2039,7 @@ async function entPintarConstructor() {
       <div class="order-2 lg:order-1 ent-col" id="cons-col-gal">
         <div class="flex items-center justify-between gap-2 mb-2">
           <div class="text-sm font-bold text-slate-700">Galería · arrástralo a la rutina o toca “+ Añadir”</div>
-          <button class="btn btn-ghost btn-sm whitespace-nowrap flex-none" data-crear-ejercicio-rutina onclick="enAbrir('rutina')" title="¿No está en la galería? Créalo: video, ficha con IA y queda añadido a esta rutina">+ Crear ejercicio</button>
+          <button class="btn btn-primary btn-sm whitespace-nowrap flex-none" data-crear-ejercicio-rutina onclick="enAbrir('rutina')" title="¿No está en la galería? Créalo: video, ficha con IA y queda añadido a esta rutina">+ Crear ejercicio</button>
         </div>
         <div id="cons-destino">${entDestinoHTML(r)}</div>
         <div id="cons-filtros">${entBarraFiltros('cons')}</div>
@@ -2253,9 +2253,19 @@ async function entPintarGaleriaCons() {
   await entDb.firmarPosters(galeria.map(e => e.poster_path).filter(Boolean));
   const caja = $('#cons-gal-lista');
   if (!caja || seq !== _ent.seqGal) return;
-  caja.innerHTML = galeria.length === 0
+  // Si buscó por nombre y no está lo que quiere, que se vea que puede crearlo:
+  // al final de los resultados, con ese nombre ya escrito en la ventana.
+  const buscado = String(($('#cons-q') || {}).value || '').trim();
+  const crear = buscado ? `
+    <button type="button" data-crear-desde-busqueda onclick="enAbrir('rutina', document.getElementById('cons-q').value)"
+      style="grid-column:1/-1;border:1.5px dashed #b9b5aa;border-radius:16px;background:#fff;padding:14px 16px;text-align:left;font-family:inherit;cursor:pointer;display:flex;align-items:center;gap:12px">
+      <span style="width:36px;height:36px;border-radius:999px;background:#1F1F1F;color:#fff;display:grid;place-items:center;font-size:20px;flex:none">+</span>
+      <span><b style="display:block;font-size:14px;color:#1F1F1F">¿No está aquí? Crear «${escapeHtml(buscado)}»</b>
+        <span style="display:block;font-size:12.5px;color:#6b6a65;margin-top:2px">Pegas el link de YouTube y la IA llena la ficha. Tú la revisas antes de crear.</span></span>
+    </button>` : '';
+  caja.innerHTML = (galeria.length === 0
     ? '<div class="card col-span-2 text-center text-slate-500 py-6 text-sm">Ningún ejercicio con esos filtros.</div>'
-    : galeria.map(e => entTarjetaCons(e)).join('');
+    : galeria.map(e => entTarjetaCons(e)).join('')) + crear;
   const c = $('#cons-count');
   if (c) c.textContent = `${galeria.length} de ${todos.length}`;
   const n = $('#cons-niveles');

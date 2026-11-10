@@ -112,6 +112,16 @@ function rutSinCliente(nombre) {
 }
 
 // Fases + rutinas de un cliente, que es lo que casi toda herramienta necesita.
+// Las rutinas se leen con select('*'): si la muestra no trae la columna, falta
+// correr su SQL. Sin muestra (cliente sin rutinas) no se puede saber: se deja pasar.
+function rutFaltaColumnaBloque(muestra, { bloque, opcional }) {
+  if (!muestra) return null;
+  const tiene = (k) => Object.prototype.hasOwnProperty.call(muestra, k);
+  if ((bloque || opcional) && !tiene('complementaria')) return 'Falta instalar los bloques complementarios: el coach debe correr carga/migracion-bloques-complementarios.sql en Supabase. Díselo; no propongas nada más.';
+  if (opcional && !tiene('opcional')) return 'Falta instalar el bloque opcional: el coach debe correr migraciones/bloque-opcional.sql en Supabase (solo agrega una columna). Díselo; mientras tanto puedes crearlo como bloque complementario sin «opcional».';
+  return null;
+}
+
 async function rutContexto(cliente, nombreFase) {
   const fases = await entDb.fases(cliente.id);
   if (!fases.length) return { fases: [], fase: null, rutinas: [] };
@@ -516,6 +526,7 @@ const RUT_HERRAMIENTAS = {
           dias_semana: rutDiasDe(r),
           ejercicios: (ejs[r.id] || []).length,
           duracion_min: r.duracion_estimada_min || null,
+          ...(r.complementaria === true ? { bloque_complementario: true, opcional: r.opcional === true } : {}),
         })),
         rutinas_sin_dia: sinDia.map(r => r.nombre),
       });
@@ -817,7 +828,8 @@ const RUT_HERRAMIENTAS = {
   },
 
   async editar_rutina({ nombre, rutina, nuevo_nombre, dia_semana, dias_semana,
-                        agregar_dias, quitar_dias, duracion_min, fase } = {}) {
+                        agregar_dias, quitar_dias, duracion_min, fase,
+                        bloque_complementario, opcional, descripcion } = {}) {
     const c = await rutCliente(nombre);
     if (!c) return rutSinCliente(nombre);
     const { fase: f, rutinas } = await rutContexto(c, fase);
@@ -828,6 +840,27 @@ const RUT_HERRAMIENTAS = {
     const row = {};
     const cambios = [];
     if (nuevo_nombre) { row.nombre = String(nuevo_nombre); cambios.push(`nombre "${r.nombre}" → "${row.nombre}"`); }
+    // Bloque complementario (va el mismo día que la fuerza, debajo) y opcional
+    // (lo hace si le da el tiempo: no cuenta como pendiente ni en el cumplimiento).
+    const faltaSql = rutFaltaColumnaBloque(r, { bloque: bloque_complementario !== undefined, opcional: opcional !== undefined });
+    if (faltaSql) return { error: faltaSql };
+    const seraBloque = bloque_complementario !== undefined ? !!bloque_complementario : r.complementaria === true;
+    if (opcional === true && !seraBloque) return { error: 'Solo un bloque complementario puede ser opcional. Manda también bloque_complementario: true.' };
+    if (bloque_complementario !== undefined && !!bloque_complementario !== (r.complementaria === true)) {
+      row.complementaria = !!bloque_complementario; row.dia_semana = null;
+      cambios.push(row.complementaria ? 'pasa a bloque complementario (va el mismo día que la fuerza, debajo de ella)' : 'deja de ser bloque complementario');
+      if (!row.complementaria && r.opcional === true && opcional === undefined) { row.opcional = false; cambios.push('deja de ser opcional'); }
+    }
+    if (opcional !== undefined && !!opcional !== (r.opcional === true)) {
+      row.opcional = !!opcional;
+      cambios.push(row.opcional ? 'queda OPCIONAL (si le da el tiempo; no cuenta como pendiente ni en su cumplimiento)' : 'deja de ser opcional (vuelve a contar)');
+    }
+    if (descripcion !== undefined && String(descripcion || '') !== String(r.descripcion || '')) {
+      row.descripcion = String(descripcion || '').trim() || null;
+      cambios.push(row.descripcion ? `descripción (la lee el cliente): «${row.descripcion}»` : 'sin descripción');
+    }
+    // Un bloque comparte el día con la fuerza: ni ocupa el día ni choca con quien lo ocupa.
+    const ocupa = (d) => (seraBloque ? null : rutinas.find(x => x.id !== r.id && x.complementaria !== true && rutDiasDe(x).includes(d)));
 
     // `dias_semana` es lo que manda; `dia_semana` se acepta como sinónimo
     // porque es como se llamaba antes y como lo dice mucha gente ("ponla el
@@ -841,7 +874,7 @@ const RUT_HERRAMIENTAS = {
         const ds = rutDias(pedido);
         if (!ds.ok) return { error: ds.error };
         const choque = ds.dias
-          .map(d => ({ d, otra: rutinas.find(x => x.id !== r.id && rutDiasDe(x).includes(d)) }))
+          .map(d => ({ d, otra: ocupa(d) }))
           .find(x => x.otra);
         if (choque) {
           return { error: `El ${entLabel(ENT_DIAS, choque.d)} ya lo ocupa "${choque.otra.nombre}". Quítaselo a esa primero, o elige otro día.` };
@@ -877,7 +910,7 @@ const RUT_HERRAMIENTAS = {
         const g = rutDias(agregar_dias);
         if (!g.ok) return { error: g.error };
         const choque = g.dias
-          .map(d => ({ d, otra: rutinas.find(x => x.id !== r.id && rutDiasDe(x).includes(d)) }))
+          .map(d => ({ d, otra: ocupa(d) }))
           .find(x => x.otra);
         if (choque) {
           return { error: `El ${entLabel(ENT_DIAS, choque.d)} ya lo ocupa "${choque.otra.nombre}". Quítaselo a esa primero, o elige otro día.` };
@@ -956,7 +989,8 @@ const RUT_HERRAMIENTAS = {
   // galería (si uno no está, no se propone nada y se dice cuál), los días se
   // entienden o se pregunta, y lo que «No le sirve» a este cliente se frena.
   // La tarjeta muestra la rutina completa para revisarla antes de aplicar.
-  async crear_rutina({ nombre, fase, nombre_rutina, dias_semana, tipo_sesion = 'fuerza', notas_coach, partes = [], usar_aunque_no_le_sirva = false } = {}) {
+  async crear_rutina({ nombre, fase, nombre_rutina, dias_semana, tipo_sesion = 'fuerza', notas_coach, partes = [], usar_aunque_no_le_sirva = false,
+                       bloque_complementario = false, opcional = false, descripcion } = {}) {
     const c = await rutCliente(nombre);
     if (!c) return rutSinCliente(nombre);
     if (!nombre_rutina || !String(nombre_rutina).trim()) return { error: 'Falta el nombre de la rutina.' };
@@ -971,6 +1005,10 @@ const RUT_HERRAMIENTAS = {
       faseReal = ctx.fase; rutinas = ctx.rutinas;
     }
     if (rutinas.some(r => normalizeName(r.nombre) === normalizeName(nombre_rutina))) return { error: `Ya hay una rutina "${nombre_rutina}" en "${faseReal.nombre}". Usa otro nombre o edita esa.` };
+    // Opcional = bloque complementario que no cuenta: va con la fuerza del día, debajo.
+    const esBloque = !!bloque_complementario || !!opcional;
+    const faltaSql = rutFaltaColumnaBloque(rutinas[0] || (_ent.rutinasCache || [])[0], { bloque: esBloque, opcional: !!opcional });
+    if (faltaSql) return { error: faltaSql };
     let dias = [];
     if (dias_semana !== undefined && dias_semana !== null && dias_semana !== '') {
       const ds = rutDias(dias_semana);
@@ -1003,9 +1041,14 @@ const RUT_HERRAMIENTAS = {
       return `${parte.titulo || `Parte ${i + 1}`}${bl}: ${ejs}`;
     });
     const destino = pendiente ? `${pendiente.nombre} (ciclo nuevo)` : faseReal.nombre;
+    const queEs = opcional ? 'el bloque OPCIONAL' : esBloque ? 'el bloque complementario' : 'la rutina';
+    const pie = [
+      opcional ? 'Opcional: le sale cada día debajo de su fuerza; si no lo hace, no queda pendiente ni baja su cumplimiento.' : esBloque ? 'Bloque complementario: va el mismo día que la fuerza, debajo de ella.' : null,
+      descripcion ? `Lo que lee el cliente: «${String(descripcion).trim()}»` : null,
+    ].filter(Boolean);
     return rutProponer(
-      `Crear la rutina "${nombre_rutina}" para ${c.nombre} · ${destino} · ${diasTxt}`,
-      lineas.join('\n'),
+      `Crear ${queEs} "${nombre_rutina}" para ${c.nombre} · ${destino} · ${diasTxt}`,
+      [...lineas, ...pie].join('\n'),
       async () => {
         const fid = pendiente ? (pendiente.faseId || (await entDb.fases(c.id)).find(f => normalizeName(f.nombre) === normalizeName(pendiente.nombre))?.id) : faseReal.id;
         if (!fid) throw new Error(`No encontré el ciclo "${destino}": aplica primero su creación.`);
@@ -1013,6 +1056,8 @@ const RUT_HERRAMIENTAS = {
         const r = await entDb.crearRutina({
           nombre: String(nombre_rutina).trim(), fase_id: fid, cliente_id: c.id, dia_orden: hermanas.length + 1,
           tipo_sesion: tipo_sesion || 'fuerza', notas_coach: notas_coach || null, dias_semana: dias, dia_semana: null,
+          ...(descripcion ? { descripcion: String(descripcion).trim() } : {}),
+          ...(esBloque ? { complementaria: true } : {}), ...(opcional ? { opcional: true } : {}),
         });
         if (!r) throw new Error('La rutina no se creó');
         let orden = 0, ordenBloque = 0;

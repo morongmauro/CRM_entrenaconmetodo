@@ -15,7 +15,7 @@
 
 const _en = { desde: null, videos: [], elegido: null, ficha: null, nombres: null, buscando: false };
 
-window.enAbrir = (desde = 'galeria') => {
+window.enAbrir = (desde = 'galeria', nombreInicial = '') => {
   _en.desde = desde; _en.videos = []; _en.elegido = null; _en.ficha = null; _en.nombres = null;
   const tipos = (typeof ENT_TIPOS !== 'undefined' ? ENT_TIPOS : [['fuerza', 'Fuerza']]);
   openModal(modalShell('Crear ejercicio nuevo', `
@@ -40,7 +40,9 @@ window.enAbrir = (desde = 'galeria') => {
     </div>`,
     `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
      <button class="btn btn-primary" data-en-crear onclick="enCrear()" disabled>Crear ejercicio${desde === 'rutina' ? ' y añadirlo' : ''}</button>`), { wide: true });
-  setTimeout(() => document.getElementById('en-nombre')?.focus(), 50);
+  // Desde una búsqueda del constructor: el nombre ya viene escrito.
+  if (nombreInicial) { const i = document.getElementById('en-nombre'); if (i) i.value = String(nombreInicial).trim(); }
+  setTimeout(() => document.getElementById(nombreInicial ? 'en-link' : 'en-nombre')?.focus(), 50);
 };
 
 const enNombre = () => (document.getElementById('en-nombre')?.value || '').trim();
