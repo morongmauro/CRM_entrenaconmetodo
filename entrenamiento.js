@@ -1952,6 +1952,40 @@ window.entCrearRutina = async (faseId, clienteId) => {
   entAbrirConstructor(r.id);
 };
 
+// ¿El cliente está entrenando ESTA rutina ahora mismo? Si la editas, lo que
+// cambies lo verá al volver a abrirla: su pantalla sigue con la versión que
+// abrió y lo que ya marcó queda guardado. Se mira al abrir y cada minuto
+// mientras la rutina siga abierta en el constructor.
+async function entEnCurso(r) {
+  if (!r || !r.cliente_id) return null;
+  const hoy = fmt.hoy();
+  const { data: ses, error } = await sb.from('sesiones').select('id, fecha, estado')
+    .eq('rutina_id', r.id).eq('cliente_id', r.cliente_id).eq('estado', 'en_curso').eq('fecha', hoy).limit(1);
+  if (error || !ses || !ses.length) return null;
+  // Una sesión que quedó abierta y no se cerró no cuenta: tiene que haber
+  // marcado una serie en las últimas 3 horas.
+  const { data: ult } = await sb.from('series_log').select('created_at').eq('sesion_id', ses[0].id)
+    .order('created_at', { ascending: false }).limit(1);
+  const t = ult && ult[0] ? new Date(ult[0].created_at).getTime() : NaN;
+  if (!Number.isFinite(t) || Date.now() - t > 3 * 3600e3) return null;
+  return { hace: Math.max(0, Math.round((Date.now() - t) / 60000)) };
+}
+async function entAvisoEnCurso(r) {
+  const caja = $('#cons-en-curso');
+  if (!caja || !r || !r.cliente_id) return;
+  const ahora = await entEnCurso(r).catch(() => null);
+  if (!$('#cons-en-curso') || _ent.rutinaId !== r.id) return;   // ya se fue de esta rutina
+  let nombre = 'Tu cliente';
+  try { const c = (await db.clientes.list()).find(x => x.id === r.cliente_id); if (c && c.nombre) nombre = String(c.nombre).split(' ')[0]; } catch (e) { /* sin nombre */ }
+  caja.innerHTML = ahora ? `
+    <div data-en-curso role="status" style="display:flex;align-items:flex-start;gap:10px;margin:0 0 12px;padding:11px 14px;border-radius:14px;background:#FBEFCF;color:#1F1F1F;font-size:14px;line-height:1.4">
+      <span aria-hidden="true" style="flex:none;width:9px;height:9px;margin-top:6px;border-radius:99px;background:#46965A;box-shadow:0 0 0 4px rgba(70,150,90,.18)"></span>
+      <span><b>${escapeHtml(nombre)} está entrenando esta rutina ahora</b> (última serie ${ahora.hace <= 1 ? 'hace un momento' : `hace ${ahora.hace} min`}). Verá los cambios al volver a abrirla; lo que ya marcó queda guardado.</span>
+    </div>` : '';
+  clearTimeout(_ent.relojEnCurso);
+  _ent.relojEnCurso = setTimeout(() => { if ($('#cons-en-curso') && _ent.rutinaId === r.id) entAvisoEnCurso(r); }, 60000);
+}
+
 window.entAbrirConstructor = async (id) => {
   // Desde un cliente, «Volver» regresa a ese cliente (a la misma subpestaña).
   if (!_ent.rutinaId) _ent.volver = _ent.tab === 'clientes' && _ent.clienteId ? { tab: 'clientes', subtab: _ent.subtab } : null;
@@ -2034,6 +2068,7 @@ async function entPintarConstructor() {
   body.innerHTML = `
     <div id="cons-wrap" class="${_ent.mesa ? 'ent-mesa' : ''}">
     <div id="cons-cab">${entCabConstructorHTML(r)}</div>
+    <div id="cons-en-curso"></div>
 
     <div class="ent-mesa-grid ${r.cliente_id ? '' : 'ent-mesa-sin-asi'} grid lg:grid-cols-2 ${r.cliente_id ? 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_360px]' : ''} gap-4 items-start">
       <div class="order-2 lg:order-1 ent-col" id="cons-col-gal">
@@ -2064,6 +2099,7 @@ async function entPintarConstructor() {
   `;
   await entPintarGaleriaCons();
   entLeerTiempoReal(r);
+  entAvisoEnCurso(r);
   if (r.cliente_id && typeof rutMontarPanel === 'function') rutMontarPanel();
   if (r.cliente_id && typeof asiMontarConstructor === 'function') asiMontarConstructor(r);
   if (typeof m4Revisar === 'function') m4Revisar();   // con la mesa puesta: 4 columnas
