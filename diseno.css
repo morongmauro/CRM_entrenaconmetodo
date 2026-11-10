@@ -228,10 +228,11 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):focus, select:foc
   box-shadow: 0 0 0 3px rgba(31,31,31,0.10) !important; outline: none;
 }
 /* Botones y píldoras blancos: sin borde necesitan un fondo que se vea. */
-.btn-secondary, .chip:not(.active), .alt-filtro, .rut-var-btn {
+/* El filtro elegido (.on) conserva su fondo oscuro: antes quedaba letra blanca sobre gris claro. */
+.btn-secondary, .chip:not(.active), .alt-filtro:not(.on), .rut-var-btn {
   background-color: rgba(31,31,31,0.06) !important; box-shadow: none !important;
 }
-.btn-secondary:hover, .chip:not(.active):hover, .alt-filtro:hover, .rut-var-btn:hover { background-color: rgba(31,31,31,0.10) !important; }
+.btn-secondary:hover, .chip:not(.active):hover, .alt-filtro:not(.on):hover, .rut-var-btn:hover { background-color: rgba(31,31,31,0.10) !important; }
 /* Tarjetas interiores (blancas sobre blanco): un gris muy suave. */
 .alt-item, .rut-op, .rut-var-lista li { background: #F6F5F1 !important; }
 /* Lo elegido se marca con fondo, no con borde. */
