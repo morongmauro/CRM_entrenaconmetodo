@@ -423,6 +423,15 @@ span.seg-check-ok { cursor: default; }
 .ent-chip-rutina { background: #F1F0EC; color: #6B6B70; font-weight: 800; border: 0; }
 .ent-chip-rutina.ent-chip-hecha, .ent-chip-suelta.ent-chip-hecha { background: #1F1F1F; color: #fff; font-style: normal; font-weight: 800; }
 .ent-chip-rutina.ent-chip-falto { background: #fff; color: #A3301B; box-shadow: inset 0 0 0 1.5px #F0B6A8; }
+/* La hizo OTRO día de esa semana: no es falta. Tenue, punteada, con «→ vie».
+   Donde la hizo dice de qué día venía («· del mar»); si ya la tenía hecha esa
+   semana, va con borde y «· otra vez». */
+.ent-chip-rutina.ent-chip-paso, .ent-chip-rutina.ent-chip-paso.ent-chip-sugerida { background: transparent; color: #9A9790; font-weight: 600; box-shadow: none; outline: 1px dashed #D6D2C8; outline-offset: -1px; }
+.ent-chip-del, .ent-chip-a { flex: none; white-space: nowrap; }
+.ent-chip-del { color: #F2C94C; font-weight: 700; }
+.ent-chip-a { color: #8A8780; font-weight: 700; }
+.ent-chip-suelta.ent-chip-hecha.ent-chip-repe { background: #fff; color: #1F1F1F; box-shadow: inset 0 0 0 1.5px #1F1F1F; }
+.ent-chip-repe .ent-chip-del { color: #8A6A12; }
 .ent-chip-rutina.ent-chip-sugerida { background: #fff; outline: 1.5px dashed #C9C7C0; outline-offset: -1.5px; }
 .ent-chip-un-dia { box-shadow: none; outline: 1.5px dashed #1F1F1F; outline-offset: -1.5px; }
 .ent-chip-rutina.ent-chip-falto.ent-chip-un-dia { box-shadow: inset 0 0 0 1.5px #F0B6A8; }

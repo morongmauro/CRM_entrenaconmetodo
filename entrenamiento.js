@@ -4023,6 +4023,46 @@ function entCalendarioArmazon(cliente, fase, rutinas, ejerciciosPorRutina, sesio
     ${entCalendarioPie(fase, sinDia, rutinas, faltaTabla)}`;
 }
 
+// LO ENTRENADO EN OTRO DÍA DE LA SEMANA. La gente mueve los días: el Upper
+// del lunes hecho el domingo SÍ se hizo. Como la app (asignarSesiones): cada
+// día se queda primero con la sesión de SU rutina en SU fecha; las que
+// sobran se reparten, por rutina, en el primer día de esa rutina que siga
+// libre esa semana. Solo cambia cómo se pinta; no toca ni mueve ningún dato.
+//   paso[fecha]           → la rutina de ese día se hizo otro día (cuál)
+//   vino[fecha|rutina]    → esa sesión era la rutina de otro día (cuál)
+//   repe[fecha|rutina]    → esa rutina ya estaba hecha esa semana: otra vez
+const ENT_DIA_CORTO = { L: 'lun', M: 'mar', X: 'mié', J: 'jue', V: 'vie', S: 'sáb', D: 'dom' };
+function entParesSemana(f, ctx) {
+  const lunes = evtSumarDias(f, -evtOffsetDia(f));
+  ctx._pares = ctx._pares || {};
+  if (ctx._pares[lunes]) return ctx._pares[lunes];
+  const out = { paso: {}, vino: {}, repe: {} };
+  ctx._pares[lunes] = out;
+  const { fase, finFase, porDia, sesionesPorFecha, rutinaDe } = ctx;
+  if (!sesionesPorFecha || !fase?.fecha_inicio) return out;
+  const esBloque = new Set((_ent.rutinasCache || []).filter(r => r.complementaria === true).map(r => r.id));
+  const dias = Array.from({ length: 7 }, (_, i) => evtSumarDias(lunes, i));
+  const huecos = dias.map(d => {
+    const dentro = d >= fase.fecha_inicio && (!finFase || d <= finFase);
+    const r = !dentro ? null : rutinaDe ? rutinaDe(d) : (porDia[evtCodigoDe(d)]?.r || null);
+    return { fecha: d, rid: r ? r.id : null, ses: null };
+  });
+  const hechas = dias.flatMap(d => (sesionesPorFecha[d] || []).filter(x => x.estado === 'completada' && x.rutina_id && !esBloque.has(x.rutina_id)).map(x => ({ ...x, fecha: d })));
+  const usadas = new Set();
+  huecos.forEach(h => {
+    if (!h.rid) return;
+    const s = hechas.find(x => !usadas.has(x) && x.rutina_id === h.rid && x.fecha === h.fecha);
+    if (s) { h.ses = s; usadas.add(s); }
+  });
+  hechas.forEach(s => {
+    if (usadas.has(s)) return;
+    const h = huecos.find(x => !x.ses && x.rid === s.rutina_id);
+    if (h) { h.ses = s; usadas.add(s); out.paso[h.fecha] = s.fecha; out.vino[`${s.fecha}|${s.rutina_id}`] = h.fecha; }
+    else if (huecos.some(x => x.rid === s.rutina_id)) out.repe[`${s.fecha}|${s.rutina_id}`] = true;
+  });
+  return out;
+}
+
 // Una casilla del mes.
 function entCeldaDia(f, ctx) {
   const { fase, finFase, hoy, mesNum, porDia, ejerciciosPorRutina,
@@ -4083,16 +4123,18 @@ function entCeldaDia(f, ctx) {
     const ses = sesionesPorFecha ? (sesionesPorFecha[f] || []).find(x => x.rutina_id === r.id) : null;
     // Como en la app: negra = hecha, gris = por hacer, borde rojo = le
     // tocaba y no la hizo. El ✓ del día va junto al número.
-    const estado = ses ? (ses.estado === 'completada' ? 'hecha' : ses.estado === 'saltada' ? 'falto' : '')
+    // La hizo OTRO día de esa semana: no es una falta (va tenue, con «→ vie»).
+    const hechaEl = !ses && dentroFase ? (entParesSemana(f, ctx).paso[f] || null) : null;
+    const estado = hechaEl ? 'paso' : ses ? (ses.estado === 'completada' ? 'hecha' : ses.estado === 'saltada' ? 'falto' : '')
       : dentroFase && f < hoy ? 'falto' : 'porhacer';
-    const marca = ses && ses.estado === 'completada' ? '' : entMarcaSesion(ses, f, hoy, dentroFase).replace(/<span class="ent-marca ent-marca-vacia"[^>]*>·<\/span>/, '');
+    const marca = hechaEl || (ses && ses.estado === 'completada') ? '' : entMarcaSesion(ses, f, hoy, dentroFase).replace(/<span class="ent-marca ent-marca-vacia"[^>]*>·<\/span>/, '');
     trozos.push(`
       <div class="ent-chip ent-chip-rutina ${estado ? 'ent-chip-' + estado : ''} ${slot.fijada ? '' : 'ent-chip-sugerida'} ${quien ? 'ent-chip-un-dia' : ''}"
-           draggable="true" data-rutina="${r.id}" data-dia="${codigo}" ${quien ? `data-cambio="${quien}"` : ''}
+           draggable="true" data-rutina="${r.id}" data-dia="${codigo}" ${quien ? `data-cambio="${quien}"` : ''} ${hechaEl ? `data-hecha-el="${hechaEl}"` : ''}
            ondragstart="entCalDragStart(event)" ondragend="entCalDragEnd(event)"
            onclick="event.stopPropagation(); entAbrirRutinaDesdeCalendario('${r.id}')"
-           title="${escapeHtml(r.nombre)} · ${n} ejercicio${n === 1 ? '' : 's'}${slot.fijada ? '' : ' · día sugerido, no fijado'}${quien === 'coach' ? ' · solo este día (lo cambiaste tú)' : quien === 'cliente' ? ' · la movió o añadió tu cliente' : ''}&#10;Arrástrala a otro día para moverla">
-        ${marca}<span class="ent-chip-txt">${quien === 'cliente' ? '<span class="ent-chip-quien" title="La movió o añadió tu cliente">↔</span> ' : ''}${escapeHtml(r.nombre)}</span>
+           title="${escapeHtml(r.nombre)} · ${n} ejercicio${n === 1 ? '' : 's'}${hechaEl ? ` · la hizo el ${ENT_DIA_CORTO[evtCodigoDe(hechaEl)]} (otro día de esa semana)` : ''}${slot.fijada ? '' : ' · día sugerido, no fijado'}${quien === 'coach' ? ' · solo este día (lo cambiaste tú)' : quien === 'cliente' ? ' · la movió o añadió tu cliente' : ''}&#10;Arrástrala a otro día para moverla">
+        ${marca}<span class="ent-chip-txt">${quien === 'cliente' ? '<span class="ent-chip-quien" title="La movió o añadió tu cliente">↔</span> ' : ''}${escapeHtml(r.nombre)}</span>${hechaEl ? `<span class="ent-chip-a">→ ${ENT_DIA_CORTO[evtCodigoDe(hechaEl)]}</span>` : ''}
         <button type="button" class="ent-chip-quitar" data-quitar-rutina="${r.id}" title="Quitar (este día o todos los ${ENT_DIA_PLURAL[codigo] || codigo})"
                 onclick="event.stopPropagation(); typeof fzQuitarRutina === 'function' ? fzQuitarRutina('${r.id}', '${f}') : entQuitarRutinaDia('${r.id}', '${codigo}')">✕</button>
       </div>`);
@@ -4145,10 +4187,19 @@ function entCeldaDia(f, ctx) {
   // tendría dónde pintarse y se perdería. Se muestra igual.
   if (sesionesPorFecha) {
     (sesionesPorFecha[f] || []).filter(x => (!x.rutina_id || !slot || x.rutina_id !== slot.r.id) && !(rOtra && x.rutina_id === rOtra.id) && !bloques.some(b => b.id === x.rutina_id))
-      .forEach(x => trozos.push(`
-        <div class="ent-chip ent-chip-suelta ${x.estado === 'completada' ? 'ent-chip-hecha' : ''}" title="Sesión registrada sin rutina del plan">
-          ${x.estado === 'completada' ? '' : entMarcaSesion(x, f, hoy, true)}<span class="ent-chip-txt">${escapeHtml(x.rutinas?.nombre || 'Entrenó')}</span>
-        </div>`));
+      .forEach(x => {
+        // Era la rutina de otro día de esa semana («· del mar»), o una que ya
+        // tenía hecha esa semana («· otra vez»).
+        const pares = dentroFase && x.rutina_id ? entParesSemana(f, ctx) : null;
+        const de = pares ? pares.vino[`${f}|${x.rutina_id}`] : null;
+        const repe = !!(pares && pares.repe[`${f}|${x.rutina_id}`]);
+        const nota = de ? `<span class="ent-chip-del">· del ${ENT_DIA_CORTO[evtCodigoDe(de)]}</span>` : repe ? '<span class="ent-chip-del">· otra vez</span>' : '';
+        trozos.push(`
+        <div class="ent-chip ent-chip-suelta ${x.estado === 'completada' ? 'ent-chip-hecha' : ''} ${repe ? 'ent-chip-repe' : ''}" ${de ? `data-vino-de="${de}"` : ''} ${repe ? 'data-otra-vez' : ''}
+             title="${de ? `Es la rutina del ${ENT_DIA_CORTO[evtCodigoDe(de)]}, hecha este día` : repe ? 'Ya la había hecho esa semana: la repitió' : 'Sesión registrada sin rutina del plan'}">
+          ${x.estado === 'completada' ? '' : entMarcaSesion(x, f, hoy, true)}<span class="ent-chip-txt">${escapeHtml(x.rutinas?.nombre || 'Entrenó')}</span>${nota}
+        </div>`);
+      });
   }
 
   return `
