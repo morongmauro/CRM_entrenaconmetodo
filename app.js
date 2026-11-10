@@ -287,6 +287,11 @@ async function saveRemindersMT(mtId, list) {
   return false;
 }
 
+// Notas en su app: solo las que manda el CRM solo (respuestas «resp-», pedir
+// la medición «med-»). Las notas sueltas escritas a mano ya no existen: la app
+// no las muestra y aquí no se pueden escribir.
+const notaAppVisible = (r) => /^(resp|med)-/.test(String((r && r.id) || ''));
+
 function renderRemindersMT() {
   // Badges de dispositivo: ¿tiene la app en homescreen? ¿activó los push?
   // (las marcas las manda la propia app del cliente al sincronizar)
@@ -331,11 +336,9 @@ function renderRemindersMT() {
     el.innerHTML = '<div class="text-xs text-slate-400">Este cliente no está vinculado al Mealtracker.</div>';
     return;
   }
-  if (!_mtRem.list.length) {
-    el.innerHTML = '<div class="text-xs text-slate-400">Sin recordatorios en su app. Agrega uno abajo 👇</div>';
-    return;
-  }
-  el.innerHTML = _mtRem.list.map(r => `
+  const visibles = _mtRem.list.filter(notaAppVisible);
+  if (!visibles.length) { el.innerHTML = ''; return; }
+  el.innerHTML = visibles.map(r => `
     <div class="flex items-center gap-2 text-xs ${r.done_at ? 'opacity-60' : ''}">
       <input type="checkbox" class="rounded flex-shrink-0" ${r.done_at ? 'checked' : ''} onchange="toggleReminderMT('${r.id}')" title="${r.done_at ? 'Desmarcar' : 'Marcar cumplido'}">
       <span class="flex-1 min-w-0 ${r.done_at ? 'line-through text-slate-400' : 'text-slate-700'}">${escapeHtml(r.text)}</span>
@@ -5350,12 +5353,11 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
               </div>
             </div>
             <div class="bg-sky-50 border border-sky-200 rounded-lg p-2">
-              <div class="text-xs font-bold text-sky-800 mb-1 flex items-center gap-1 flex-wrap" title="El cliente los ve en su app (Herramientas → Mis recordatorios) con anuncio en su chat. Cuando lo marque cumplido, aquí aparece el ✓.">📲 Recordatorios en su app <span id="sg-mt-device" class="font-normal"></span></div>
+              <div class="text-xs font-bold text-sky-800 mb-1 flex items-center gap-1 flex-wrap" title="Cómo usa su app: instalada, notificaciones, vista y errores.">📲 Su app <span id="sg-mt-device" class="font-normal"></span></div>
+              <!-- Las notas sueltas «Recordatorios en su app» se quitaron: el cliente ya no
+                   las ve. Lo del coach le llega por la Bandeja (respuestas), los cambios de
+                   rutina y los pedidos. Las notas viejas siguen guardadas, sin tocar. -->
               <div id="sg-mt-rem-list" class="space-y-1 mb-1"></div>
-              <div class="flex gap-1">
-                <input id="sg-mt-rem-nuevo" class="text-xs" placeholder="Ej: usar el mealtracker a diario…" onkeydown="if(event.key==='Enter'){event.preventDefault();agregarReminderMT();}">
-                <button type="button" class="btn btn-secondary btn-sm flex-shrink-0" onclick="agregarReminderMT()">+</button>
-              </div>
             </div>
             <div>
               <label class="text-xs">Notas</label>
