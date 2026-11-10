@@ -168,7 +168,42 @@ await sc.p.evaluate(async () => { await rutAplicar(); });
 await sc.p.waitForTimeout(800);
 const c1 = await sc.p.evaluate(() => window.TABLAS_FALSAS.fases.filter(f => f.cliente_id === 'c1').map(f => ({ n: f.nombre, d: f.dias_semana, s: f.semanas })));
 ok('…y al aplicar el ciclo queda creado', c1.length === 1 && c1[0].n === 'Ciclo 1' && c1[0].s === 4 && c1[0].d.join() === 'L,M,X,J,S', JSON.stringify(c1));
-ok('sin errores', a.errores.length === 0 && sc.errores.length === 0, [...a.errores, ...sc.errores].join(' | '));
+
+// «Traer de otro cliente»: la guía dice qué entrena cada uno (división, días y ciclo).
+const tr = await abrir(1600, 1000);
+await tr.p.evaluate(() => {
+  const T = window.TABLAS_FALSAS, hoy = new Date();
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const ini = new Date(hoy); ini.setDate(ini.getDate() - 9);   // ciclos en curso, en su semana 2
+  const base = T.clientes[0];
+  const cli = (id, nombre) => T.clientes.push({ ...base, id, nombre });
+  const fase = (id, cliente_id, nombre) => T.fases.push({ id, user_id: 'coach-1', cliente_id, nombre, semanas: 5, fecha_inicio: iso(ini), dias_semana: [], orden: 1, estado: 'activa', visible_cliente: true });
+  const rut = (id, fase_id, cliente_id, nombre, dias, extra = {}) => T.rutinas.push({ id, user_id: 'coach-1', fase_id, cliente_id, nombre, dias_semana: dias, dia_orden: T.rutinas.length, archivada: false, ...extra });
+  // Ana: Upper / Lower, 4 días (su ciclo en curso).
+  T.fases.filter(f => f.cliente_id === 'c0').forEach(f => { f.fecha_inicio = '2026-01-05'; f.semanas = 2; });
+  fase('fa', 'c0', 'Ciclo 20'); rut('ra1', 'fa', 'c0', 'Upper Body Training', ['L', 'J']); rut('ra2', 'fa', 'c0', 'Lower Body + Core Training', ['M', 'V']);
+  rut('ra3', 'fa', 'c0', 'Recovery', ['D'], { complementaria: true });
+  cli('c2', 'Juan Sinisterra'); fase('fj', 'c2', 'Ciclo 6'); rut('rj1', 'fj', 'c2', 'Push Training', ['L']); rut('rj2', 'fj', 'c2', 'Pull Training', ['X']); rut('rj3', 'fj', 'c2', 'Legs', ['V']);
+  cli('c3', 'Alejandra Borbon'); fase('fb', 'c3', 'Ciclo 4'); rut('rb1', 'fb', 'c3', 'Full Body (Home)', ['L', 'X', 'S']);
+  cli('c4', 'Julio Dieguez'); fase('fd', 'c4', 'Ciclo 13'); rut('rd1', 'fd', 'c4', 'Lower Body + Core', ['J']); rut('rd2', 'fd', 'c4', 'Upper Body', ['M']); rut('rd3', 'fd', 'c4', 'Full Body', ['S']);
+  if (typeof invalidarCache === 'function') invalidarCache();   // la lista de clientes ya estaba leída
+});
+await tr.p.locator('nav, aside, body').getByText('Entrenamiento', { exact: true }).first().click();
+await tr.p.waitForTimeout(1000);
+await tr.p.locator('[data-cliente-ent="c1"]').first().click();
+await tr.p.waitForTimeout(1200);
+await tr.p.locator('[data-traer-btn]').click();
+await tr.p.waitForSelector('[data-guia-cliente]', { timeout: 8000 }).catch(() => {});
+await tr.p.waitForTimeout(400);
+const guia = await tr.p.evaluate(() => Object.fromEntries([...document.querySelectorAll('[data-guia-cliente]')].map(el => [el.dataset.guiaCliente, `${el.dataset.guiaTipo} · ${el.dataset.guiaDias}`])));
+ok('traer de otro cliente: la guía dice la división y los días de cada uno (sin contar bloques complementarios)',
+  guia.c0 === 'Upper / Lower · 4' && guia.c2 === 'Push · Pull · Legs · 3' && guia.c3 === 'Full body · 3' && guia.c4 === 'Upper/Lower + Full body · 3', JSON.stringify(guia));
+ok('…y en qué ciclo y semana va («Ciclo 20 · semana 2 de 5»); el cliente abierto no sale en la lista', /Ciclo 20 · semana 2 de 5/.test(await tr.p.locator('[data-guia-cliente="c0"]').innerText()) && !guia.c1, await tr.p.locator('[data-guia-cliente="c0"]').innerText().catch(() => ''));
+if (process.env.FOTO) await tr.p.screenshot({ path: process.env.FOTO.replace('.png', '-traer.png') });
+await tr.p.locator('[data-guia-cliente="c2"]').click();
+await tr.p.waitForTimeout(600);
+ok('al tocar un cliente de la guía queda elegido, con su ciclo en curso listo para traer', await tr.p.locator('#if-cliente').inputValue() === 'c2' && /Ciclo 6/.test(await tr.p.locator('#if-fase').innerText()), await tr.p.locator('#if-fase').innerText());
+ok('sin errores', a.errores.length === 0 && sc.errores.length === 0 && tr.errores.length === 0, [...a.errores, ...sc.errores, ...tr.errores].join(' | '));
 await b.close(); servidor.close();
 console.log(mal ? `\n${mal} MAL` : '\nTodo bien');
 process.exit(mal ? 1 : 0);

@@ -5184,6 +5184,71 @@ window.entConfirmarCopiarFase = async (faseId) => {
 // TRAER DE OTRO CLIENTE hacia este: el ciclo completo (con su calendario) o
 // una sola rutina de fuerza a uno de sus ciclos. Es como se piensa al armar
 // el proceso de alguien: «a Bruno le sirve el Push de Ana».
+// Qué tipo de división es un ciclo, por los nombres de sus rutinas de fuerza
+// (sin los bloques complementarios): Upper/Lower, Push·Pull·Legs, Full body…
+// Sirve para elegir de quién traer («¿quién tiene un Upper/Lower de 4 días?»).
+function entTipoDivision(rutinas) {
+  const n = (rutinas || []).filter(r => !r.complementaria && !r.archivada).map(r => normalizeName(r.nombre || ''));
+  if (!n.length) return 'Sin rutinas';
+  const hay = (re) => n.some(x => re.test(x));
+  const todas = (re) => n.every(x => re.test(x));
+  const FULL = /full ?body|cuerpo completo/;
+  const upper = hay(/\bupper\b|tren superior/), lower = hay(/\blower\b|tren inferior/);
+  const push = hay(/\bpush\b|empuje/), pull = hay(/\bpull\b|jalon|tiron/), legs = hay(/\blegs?\b|pierna/);
+  const full = hay(FULL);
+  if (todas(FULL)) return 'Full body';
+  if (push && pull && (legs || lower) && !upper) return 'Push · Pull · Legs';
+  if (push && pull && upper && lower) return 'Upper/Lower + Push/Pull';
+  if (push && pull && upper) return 'Upper + Push/Pull';
+  if (push && pull) return 'Push / Pull';
+  if (upper && lower && full) return 'Upper/Lower + Full body';
+  if (upper && lower) return 'Upper / Lower';
+  if (full) return 'Full body + otras';
+  return 'Mixta';
+}
+// La guía para elegir: cada cliente con su división, sus días y su ciclo de hoy.
+async function entGuiaTraer(clientes) {
+  const caja = $('#if-guia');
+  if (!caja) return;
+  try {
+    const estado = typeof cicDatos === 'function' ? Object.fromEntries((await cicDatos()).map(x => [x.cliente.id, x])) : {};
+    const res = await entResumenCiclos(estado);
+    const ORDEN = 'LMXJVSD';
+    const filas = clientes.map(c => {
+      const r = res[c.id];
+      if (!r) return { c, sin: true };
+      const fuerza = r.rutinas.filter(x => !x.complementaria);
+      const dias = [...new Set(fuerza.flatMap(x => x.dias_semana || []))].sort((x, y) => ORDEN.indexOf(x) - ORDEN.indexOf(y));
+      return { c, r, tipo: entTipoDivision(r.rutinas), dias, fuerza, sem: entSemanaActual(r.fase) };
+    });
+    const con = filas.filter(x => !x.sin).sort((a, b) => a.tipo.localeCompare(b.tipo) || a.dias.length - b.dias.length || String(a.c.nombre).localeCompare(String(b.c.nombre)));
+    const sin = filas.filter(x => x.sin);
+    if (!$('#if-guia')) return;
+    caja.innerHTML = con.length ? `
+      <div class="text-xs font-bold text-slate-500 mb-1.5" style="letter-spacing:.02em">Para elegir: qué entrena cada cliente hoy</div>
+      <div class="rounded-xl border border-slate-200 overflow-hidden" style="max-height:264px;overflow-y:auto">
+        ${con.map((x, i) => `
+          <div class="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-slate-50" data-guia-cliente="${x.c.id}" data-guia-tipo="${escapeHtml(x.tipo)}" data-guia-dias="${x.dias.length}"
+               style="${i ? 'border-top:1px solid #F1EFEA' : ''}" onclick="entGuiaElegir('${x.c.id}')" title="Traer de ${escapeHtml(x.c.nombre)}">
+            <div class="min-w-0" style="width:150px;flex:none"><div class="font-semibold text-slate-900 text-sm truncate">${escapeHtml(x.c.nombre)}</div>
+              <div class="text-[11px] text-slate-500 truncate">${escapeHtml(x.r.fase.nombre || 'Ciclo')}${x.sem ? ` · semana ${x.sem} de ${x.r.fase.semanas || '?'}` : ''}</div></div>
+            <div style="width:176px;flex:none"><div class="text-sm font-bold text-slate-900">${escapeHtml(x.tipo)}</div>
+              <div class="text-[11px] text-slate-500">${x.dias.length} ${x.dias.length === 1 ? 'día' : 'días'}${x.dias.length ? ' · ' + x.dias.join(' ') : ''}</div></div>
+            <div class="flex-1 min-w-0 flex flex-wrap gap-1">${x.fuerza.map(ru => `<span class="text-[11px] font-semibold rounded-lg px-2 py-0.5" style="background:#F6F5F2;color:#1D1D1F">${escapeHtml(ru.nombre)}${(ru.dias_semana || []).length ? ` <span style="color:#8E8E93;font-weight:500">${ru.dias_semana.join(' ')}</span>` : ''}</span>`).join('')}</div>
+            <span class="text-xs font-bold" style="color:#2F6CC4;flex:none">Elegir ›</span>
+          </div>`).join('')}
+      </div>
+      ${sin.length ? `<div class="text-[11px] text-slate-400 mt-1.5">Sin ciclo en curso: ${sin.map(x => escapeHtml(x.c.nombre)).join(', ')}.</div>` : ''}` : '';
+  } catch (e) { caja.innerHTML = ''; }
+}
+window.entGuiaElegir = (clienteId) => {
+  const sel = $('#if-cliente');
+  if (!sel) return;
+  sel.value = clienteId;
+  $$('[data-guia-cliente]').forEach(el => { el.style.background = el.dataset.guiaCliente === clienteId ? '#FBF3D9' : ''; });
+  entCargarFasesOrigen(clienteId);
+};
+
 const _imp = { modo: 'ciclo' };
 window.entImportarFase = async (modo = 'ciclo') => {
   const clientes = (await db.clientes.list()).filter(c => c.id !== _ent.clienteId);
@@ -5195,8 +5260,9 @@ window.entImportarFase = async (modo = 'ciclo') => {
         <button type="button" class="chip ${modo === 'ciclo' ? 'active' : ''}" data-if-modo="ciclo" onclick="entImpModo('ciclo')">🗓️ El ciclo completo</button>
         <button type="button" class="chip ${modo === 'rutina' ? 'active' : ''}" data-if-modo="rutina" onclick="entImpModo('rutina')">🏋️ Una rutina de fuerza</button>
       </div>
+      <div id="if-guia" class="mb-3"></div>
       <div class="mb-3"><label>Traer de</label>
-        <select id="if-cliente" onchange="entCargarFasesOrigen(this.value)">
+        <select id="if-cliente" onchange="entGuiaElegir(this.value)">
           <option value="">— Plantillas de fase —</option>
           ${clientes.map(c => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join('')}
         </select></div>
@@ -5227,6 +5293,8 @@ window.entImportarFase = async (modo = 'ciclo') => {
   `, `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-primary" id="if-ok" onclick="entConfirmarImportar()">Traer</button>`), { wide: true });
   entCargarFasesOrigen('');
+  // La guía se llena aparte (no frena la ventana): solo clientes activos.
+  entGuiaTraer(clientes.filter(c => String(c.estado || 'activo').toLowerCase() === 'activo'));
 };
 
 window.entImpModo = (m) => {
