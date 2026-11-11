@@ -8828,6 +8828,8 @@ routes.negocio = async () => {
   setTimeout(() => {
     if (typeof inicioEquipo === 'function') inicioEquipo('inicio-equipo');
     if (typeof encPintarInicio === 'function') encPintarInicio(activos, clientes);
+    // La página de venta: visitas, hasta dónde bajan y cuántos tocan «Escríbeme».
+    if (typeof landingPintar === 'function') { if (typeof landingRefrescar === 'function') landingRefrescar(); landingPintar('negocio-landing'); }
   }, 0);
   view.innerHTML = `
     <div class="mb-5">
@@ -8843,6 +8845,10 @@ routes.negocio = async () => {
         <h3 class="em-h3" style="margin-bottom:4px">Encuesta de la app</h3>
         <div id="inicio-encuesta" class="text-sm text-slate-500">Calculando…</div>
       </div>
+    </div>
+    <div class="card mb-4" data-negocio-landing>
+      <h3 class="em-h3" style="margin-bottom:2px">Tu página de venta</h3>
+      <div id="negocio-landing" class="text-sm text-slate-500">Calculando…</div>
     </div>
 
     <div class="em-par-kpis">
