@@ -342,12 +342,20 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   // «Debe mejorar · pedir de nuevo»: ese queda «A mejorar», se crea un pedido nuevo y se abre su WhatsApp.
   const antes = await p.evaluate(() => window.TABLAS_FALSAS.videos_tecnica.length);
   await ventM.locator('[data-ppv-mejorar="x9"]').click();
-  await p.waitForTimeout(1500);
+  await p.locator('[data-ppm-modal]').waitFor();
+  await p.fill('#ppm-nota', 'Cadera más alta al subir');
+  await p.locator('[data-ppm-confirmar]').click();
+  await p.waitForTimeout(1800);
+  await ventM.waitFor({ timeout: 8000 });
   const vt = await p.evaluate(() => window.TABLAS_FALSAS.videos_tecnica.filter(v => v.cliente_id === 'c4' && v.ejercicio_id === 'x9'));
-  ok('«Debe mejorar»: el anterior queda «A mejorar» y hay un pedido nuevo de hoy', vt.some(v => v.estado === 'mejorar' && v.revisado_en) && vt.some(v => v.estado === 'pedido') && (await p.evaluate(() => window.TABLAS_FALSAS.videos_tecnica.length)) === antes + 1, JSON.stringify(vt));
-  ok('…se abre su WhatsApp pidiéndolo de nuevo', (await p.evaluate(() => window.ABIERTOS)).some(u => /wa\.me\//.test(u) && /gr%C3%A1balo%20de%20nuevo|grábalo de nuevo/.test(u + decodeURIComponent(u))));
+  ok('«Debe mejorar»: el anterior queda «A mejorar» con lo que debe corregir, y hay un pedido nuevo de hoy enlazado al anterior (así su app le dice que es otra vez)', vt.some(v => v.estado === 'mejorar' && v.revisado_en && v.nota === 'Cadera más alta al subir') && vt.some(v => v.estado === 'pedido' && v.pedido_de === 'v4p') && (await p.evaluate(() => window.TABLAS_FALSAS.videos_tecnica.length)) === antes + 1, JSON.stringify(vt));
+  const filaX9 = (await ventM.locator('[data-ppv-fila="x9"]').innerText()).replace(/\s+/g, ' ');
+  ok(`…la fila cambia de etiqueta: «Pedido de nuevo · debe mejorar» (naranja) y «Qué corregir» (${filaX9})`, /Pedido de nuevo · debe mejorar/.test(filaX9) && /Qué corregir: Cadera más alta al subir/.test(filaX9), filaX9);
+  const retroX9 = await p.evaluate(async () => { await tqCrudo(true); const f = tqCalcular(_tq.crudo, fmt.hoy()).filas.find(x => x.c.id === 'c4'); return f && f.tipos.map(t => t[0]); });
+  ok(`…y suma toque (retro y pedir video) hoy (${retroX9})`, retroX9 && retroX9.includes('retro') && retroX9.includes('video'), JSON.stringify(retroX9));
+  ok('…se abre su WhatsApp pidiéndolo de nuevo, con lo que debe corregir', (await p.evaluate(() => window.ABIERTOS)).some(u => /wa\.me\//.test(u) && /grábalo de nuevo/.test(decodeURIComponent(u)) && /Cadera más alta/.test(decodeURIComponent(u))));
   if (process.env.FOTO) await ventM.screenshot({ path: path.join(CAPTURAS, 'toques-videos-mejorar.png') });
-  ok('…y la fila dice «pedido de nuevo: el anterior debía mejorar»', await ventM.locator('[data-ppv-fila="x9"] [data-ppv-de-nuevo]').count() === 1);
+  ok('…con la marca de pedido de nuevo', await ventM.locator('[data-ppv-fila="x9"] [data-ppv-de-nuevo]').count() === 1);
   // «Quitar (me equivoqué)»: se quita ese pedido (con confirmación).
   p.once('dialog', d => d.accept());
   await ventM.locator('[data-ppv-quitar="x9"]').click();

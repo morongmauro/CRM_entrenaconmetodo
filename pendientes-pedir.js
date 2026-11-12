@@ -420,6 +420,8 @@ window.ppVideos = async (id) => {
   };
   const chip = (t, k) => `<span class="ppv-e" style="background:${PPV_ESTADO[k][0]};color:${PPV_ESTADO[k][1]}">${t}</span>`;
   const b = (t, osc, attr, fn) => `<button type="button" class="pp-b${osc ? ' o' : ''}" ${attr} onclick="${fn}">${t}</button>`;
+  // El pedido anterior de ese ejercicio, si quedó «A mejorar» o «Nada bien»: este es un pedido de nuevo.
+  const antesMal = (o) => { const x = o.x; const a = (x.pedido_de && filas.find(y => y.id === x.pedido_de)) || filas.filter(y => y !== x && clave(y) === o.k && String(y.pedido_en) <= String(x.pedido_en)).sort((p, q) => String(q.pedido_en).localeCompare(String(p.pedido_en)) || String(q.created_at).localeCompare(String(p.created_at)))[0]; return a && (a.estado === 'mejorar' || a.estado === 'mal') ? a : null; };
   const filaPedido = (o) => {
     const { k, x, m } = o;
     let est, btn = '';
@@ -428,12 +430,13 @@ window.ppVideos = async (id) => {
     const opciones = b('Entregado y bien', false, `data-ppv-entrego="${escapeHtml(k)}"`, `ppEntrego('${id}','video','${encodeURIComponent(k)}')`)
       + (x.id ? b('Debe mejorar · pedir de nuevo', false, `data-ppv-mejorar="${escapeHtml(k)}"`, `ppMejorar('${id}','${x.id}')`) : '') + quitar;
     if (x.estado === 'pedido' && m) { est = chip(`Entregado y bien · marcado por ti ${hace(m.entregado_en)}`, 'entregado'); btn = b('Desmarcar', false, `data-ppv-desmarcar="${escapeHtml(k)}"`, `ppDesmarcar('${id}','${encodeURIComponent(k)}')`); }
-    else if (x.estado === 'pedido' && o.fuera) { est = chip('En pausa · ya no está en su ciclo (no se le pide)', 'falta'); btn = opciones; }
+    else if (x.estado === 'pedido' && o.fuera) { est = antesMal(o) ? `<span data-ppv-de-nuevo>${chip('Pedido de nuevo · debe mejorar · en pausa (ya no está en su ciclo)', 'mejorar')}</span>` : chip('En pausa · ya no está en su ciclo (no se le pide)', 'falta'); btn = opciones; }
+    else if (x.estado === 'pedido' && antesMal(o)) { est = `<span data-ppv-de-nuevo>${chip(`Pedido de nuevo · debe mejorar · ${hace(x.pedido_en)}`, 'mejorar')}</span>`; btn = opciones; }
     else if (x.estado === 'pedido') { est = chip(`Por llegar · ${hace(x.pedido_en)}`, dias(x.pedido_en) >= PP_ESPERA ? 'tarde' : 'falta'); btn = opciones; }
     else if (x.estado === 'recibido') { est = chip('Llegó por la app · falta revisarlo', 'recibido'); btn = b('Revisar', true, 'data-ppv-revisar', `closeModal();vtAbrir('${id}')`); }
     else { const t = (typeof VT_ESTADO !== 'undefined' && VT_ESTADO[x.estado] ? VT_ESTADO[x.estado].txt : x.estado); est = chip(`Revisado · ${t}`, PPV_ESTADO[x.estado] ? x.estado : 'bien'); }
     return `<div class="ppv-f" data-ppv-fila="${escapeHtml(k)}" data-ppv-estado="${x.estado === 'pedido' ? (m ? 'entregado' : o.fuera ? 'pausa' : 'falta') : x.estado}"${o.fuera && !m ? ' style="opacity:.7"' : ''}>${prev(x.ejercicio_id, x.ejercicio_nombre)}
-      <div style="flex:1;min-width:0"><div class="ppv-n">${escapeHtml(x.ejercicio_nombre || 'Video')}</div><div class="ppv-s">Pedido el ${fmt.fechaCorta(ppDia(x.pedido_en))} · ${hace(x.pedido_en)}${x.estado === 'pedido' && filas.some(y => y !== x && clave(y) === k && y.estado === 'mejorar') ? ' · <b data-ppv-de-nuevo>pedido de nuevo: el anterior debía mejorar</b>' : ''}</div>${est}</div>
+      <div style="flex:1;min-width:0"><div class="ppv-n">${escapeHtml(x.ejercicio_nombre || 'Video')}</div><div class="ppv-s">Pedido el ${fmt.fechaCorta(ppDia(x.pedido_en))} · ${hace(x.pedido_en)}</div>${x.estado === 'pedido' && antesMal(o) && antesMal(o).nota ? `<div class="ppv-s" data-ppv-corregir style="color:#B4541D">Qué corregir: ${escapeHtml(antesMal(o).nota)}</div>` : ''}${est}</div>
       <div class="ppv-b">${btn}</div></div>`;
   };
   // De su ciclo, sin pedir (lo que no está esperando ni por revisar).
@@ -481,22 +484,36 @@ window.ppVerCarga = async (id, tipo) => {
   _comp.tab = tipo === 'fotos' ? 'fotos' : 'corporal';
   await compCargar(id);
 };
-// Debe mejorar: ese video queda «A mejorar» y se le pide de nuevo (su WhatsApp con el mensaje).
+// Debe mejorar: ese video queda «A mejorar» (con lo que debe corregir, que le
+// sale en su app) y se le pide de nuevo, enlazado al anterior: su app le dice
+// que es otra vez y qué corregir. Se abre su WhatsApp con el mensaje.
 window.ppMejorar = async (id, filaId) => {
   if (typeof vtDb === 'undefined') return;
   let v = null;
   try { const { data } = await sb.from('videos_tecnica').select('*').eq('id', filaId); v = (data || [])[0] || null; } catch (e) { v = null; }
   if (!v) { toast('No encontré ese pedido'); return; }
-  if (!(await vtDb.actualizar(filaId, { estado: 'mejorar', revisado_en: fmt.hoy() }))) return;
-  if (!(await vtDb.crear([{ cliente_id: id, ejercicio_id: v.ejercicio_id || null, ejercicio_nombre: v.ejercicio_nombre || null, estado: 'pedido', pedido_en: fmt.hoy() }]))) return;
+  openModal(modalShell(`Pedir de nuevo · ${escapeHtml(v.ejercicio_nombre || 'video')}`, `<div data-ppm-modal="${filaId}">
+    <label class="block text-sm font-semibold text-slate-700 mb-1">Qué debe corregir (le sale en su app)</label>
+    <textarea id="ppm-nota" class="input w-full" rows="3" placeholder="Ej.: Rodillas hacia afuera al subir; bajar más controlado">${escapeHtml(v.nota || '')}</textarea>
+    <p class="text-xs text-slate-500 mt-2">Queda «Pedido de nuevo · debe mejorar» y en su app le sale que debe grabarlo otra vez, con esto que escribas.</p>
+  </div>`, `<button class="btn btn-secondary" onclick="ppVideos('${id}')">Volver</button><button class="btn btn-primary" data-ppm-confirmar onclick="ppMejorarConfirmar('${id}','${filaId}')">Pedir de nuevo</button>`));
+};
+window.ppMejorarConfirmar = async (id, filaId) => {
+  const nota = (document.getElementById('ppm-nota')?.value || '').trim();
+  let v = null;
+  try { const { data } = await sb.from('videos_tecnica').select('*').eq('id', filaId); v = (data || [])[0] || null; } catch (e) { v = null; }
+  if (!v) { toast('No encontré ese pedido'); return; }
+  if (!(await vtDb.actualizar(filaId, { estado: 'mejorar', revisado_en: fmt.hoy(), nota: nota || null }))) return;
+  if (!(await vtDb.crear([{ cliente_id: id, ejercicio_id: v.ejercicio_id || null, ejercicio_nombre: v.ejercicio_nombre || null, estado: 'pedido', pedido_en: fmt.hoy(), pedido_de: v.id }]))) return;
   const c = (_tq.datos && (_tq.datos.filas.find(x => String(x.c.id) === String(id)) || {}).c) || await db.clientes.get(id);
   const nombre = String((c && c.nombre) || '').trim().split(/\s+/)[0] || '';
   const ej = v.ejercicio_nombre || 'ese ejercicio';
-  const texto = `Hola${nombre ? ' ' + nombre : ''}, revisé tu video de ${ej}. Hay detalles de técnica por mejorar: cuando puedas, grábalo de nuevo y me lo envías por la app para revisarlo otra vez.`;
+  const texto = `Hola${nombre ? ' ' + nombre : ''}, revisé tu video de ${ej}. Hay detalles de técnica por mejorar${nota ? `: ${nota}` : ''}. Cuando puedas, grábalo de nuevo y me lo envías para revisarlo otra vez.`;
   const tel = String((c && c.telefono) || '').replace(/\D/g, '');
   if (tel) window.open(`https://wa.me/${tel}?text=${encodeURIComponent(texto)}`, '_blank', 'noopener');
   else { try { await navigator.clipboard.writeText(texto); toast('Mensaje copiado: pégalo en WhatsApp'); } catch (e) { /* nada */ } }
-  toast(`${ej}: a mejorar · pedido de nuevo`);
+  toast(`${ej}: pedido de nuevo · debe mejorar`);
+  await ppVideos(id);
   await ppRefrescarVideos(id);
 };
 window.ppQuitarVideo = async (id, filaId, nombreEnc) => {
