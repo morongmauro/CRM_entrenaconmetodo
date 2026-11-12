@@ -44,7 +44,7 @@ async function capCargar(clientes) {
   try {
     const { data, error } = await sb.from('capsulas_pedidas').select('*').gte('enviada_en', desde);
     if (error) { _capt.sinTabla = /capsulas_pedidas|relation|schema cache|42P01|PGRST20/i.test(String(error.message || error.code || '')); _capt.pedidos = []; }
-    else { _capt.sinTabla = false; _capt.pedidos = data || []; }
+    else { _capt.sinTabla = false; _capt.pedidos = (data || []).filter(x => !x.retirado_en); }
   } catch (e) { _capt.pedidos = []; }
   try { _capt.lecturas = typeof cargarLecturasCentro === 'function' ? await cargarLecturasCentro() : null; } catch (e) { _capt.lecturas = null; }
   _capt.nombres = new Map((clientes || []).map(c => [String(c.id), [c.nombre, ...(c.nombres_alternos || [])].map(capNorm).filter(Boolean)]));

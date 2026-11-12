@@ -107,11 +107,12 @@ async function tqCrudo(forzar = false) {
   _tq.semCargadas = semanas;
   const leer = async (q) => { try { const { data, error } = await q; return error ? null : (data || []); } catch (e) { return null; } };
   const [msj, vids, notas, ses, resp, com, toq, nhf, anot] = await Promise.all([
-    leer(sb.from('seguimiento_mensajes').select('cliente_id, fecha, origen, created_at').gte('fecha', desde)),
+    // Con «retirado_en» (lo que deshiciste en Mensajes enviados); sin esa columna todavía, como antes.
+    (async () => (await leer(sb.from('seguimiento_mensajes').select('cliente_id, fecha, origen, created_at, retirado_en').gte('fecha', desde))) || leer(sb.from('seguimiento_mensajes').select('cliente_id, fecha, origen, created_at').gte('fecha', desde)))(),
     leer(sb.from('videos_tecnica').select('cliente_id, ejercicio_id, ejercicio_nombre, pedido_en, estado, revisado_en, created_at').gte('pedido_en', evtSumarDias(hoy, -160))),
     leer(sb.from('notas_entreno').select('id, cliente_id, fecha, created_at, leida_en').gte('fecha', desde)),
     leer(sb.from('sesiones').select('id, cliente_id, fecha, estado, notas_cliente').gte('fecha', desde)),
-    leer(sb.from('respuestas_coach').select('cliente_id, created_at').gte('created_at', desde)),
+    (async () => (await leer(sb.from('respuestas_coach').select('cliente_id, created_at, retirado_en').gte('created_at', desde))) || leer(sb.from('respuestas_coach').select('cliente_id, created_at').gte('created_at', desde)))(),
     leer(sb.from('comentarios_coach').select('cliente_id, creado_en').gte('creado_en', desde)),
     leer(sb.from('toques_cliente').select('cliente_id, fecha, tipo, created_at').gte('fecha', desde)),
     leer(sb.from('toques_semana').select('cliente_id, lunes, motivo').gte('lunes', desde)),
@@ -143,7 +144,8 @@ async function tqCrudo(forzar = false) {
   // contacto ese día. No cuenta lo que marcaste entregado sin haberlo pedido.
   const yaPedi = peds.filter(p => p.tipo !== 'video' && p.pedido_en && !(p.entregado_en && p.entregado_en === p.pedido_en));
   const cps = (typeof _capt !== 'undefined' && _capt.pedidos) || [];
-  _tq.crudo = { msj, vids, notas, ses, resp, com, toq, nhf, anot, eng, clientes, vEnt, yaPedi, cps };
+  const vivo = (l) => (l ? l.filter(x => !x.retirado_en) : l);
+  _tq.crudo = { msj: vivo(msj), vids, notas, ses, resp: vivo(resp), com, toq, nhf, anot, eng, clientes, vEnt, yaPedi, cps };
   _tq.leido = Date.now();
   return _tq.crudo;
 }

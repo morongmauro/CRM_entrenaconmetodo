@@ -517,6 +517,7 @@ window.ppMejorarConfirmar = async (id, filaId) => {
   const tel = String((c && c.telefono) || '').replace(/\D/g, '');
   if (tel) window.open(`https://wa.me/${tel}?text=${encodeURIComponent(texto)}`, '_blank', 'noopener');
   else { try { await navigator.clipboard.writeText(texto); toast('Mensaje copiado: pégalo en WhatsApp'); } catch (e) { /* nada */ } }
+  if (typeof segRegistrar === 'function') segRegistrar(id, { origen: 'videos', titulo: 'Pedir video de nuevo', texto }).catch(() => {});
   toast(`${ej}: pedido de nuevo · debe mejorar`);
   await ppVideos(id);
   await ppRefrescarVideos(id);
