@@ -124,6 +124,15 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   const est = await p.locator('tr[data-tq-cliente]').evaluateAll(els => els.map(e => `${e.dataset.tqCliente}:${e.dataset.tqEstado}`));
   ok(`${tag} · en orden alfabético, cada uno con su semáforo (${est})`, JSON.stringify(est) === JSON.stringify(['c0:bien', 'c1:debe', 'c2:frio', 'c4:enfria', 'c5:mucho']), JSON.stringify(est));
   ok(`${tag} · sin el inactivo`, !/Pedro/.test(await p.locator('[data-tq-tabla]').innerText()));
+  // Buscar por nombre: sin tildes ni mayúsculas, filtra al escribir y se borra con la ×.
+  await p.locator('[data-tq-buscar]').fill('lucia');
+  const vis = () => p.locator('tr[data-tq-cliente]').evaluateAll(els => els.filter(e => e.style.display !== 'none').map(e => e.dataset.tqCliente));
+  if (process.env.FOTO && tag === 'ancho') await p.screenshot({ path: path.join(CAPTURAS, 'toques-buscar.png') });
+  ok(`${tag} · buscar «lucia» deja solo a Lucía`, JSON.stringify(await vis()) === '["c2"]', JSON.stringify(await vis()));
+  await p.locator('[data-tq-buscar]').fill('zzz');
+  ok(`${tag} · sin coincidencias lo dice`, (await vis()).length === 0 && await p.locator('[data-tq-sin-coincidencia]').isVisible());
+  await p.locator('[data-tq-buscar-borrar]').click();
+  ok(`${tag} · la × borra la búsqueda y vuelven todos`, (await vis()).length > 3 && (await p.locator('[data-tq-buscar]').inputValue()) === '');
   const celda = async (c, k) => (await p.locator(`tr[data-tq-cliente="${c}"] [data-tq="${k}"]`).innerText()).trim();
   ok(`${tag} · Sofía: seguimiento semanal hecho`, /^Hecho/.test(await celda('c5', 'seguimiento')));
   ok(`${tag} · Marta: le falta el seguimiento semanal`, /^Falta/.test(await celda('c4', 'seguimiento')));

@@ -24,7 +24,16 @@
 // Va DESPUÉS de crm-prueba.js (usa cpSeguimiento) y de videos-tecnica.js.
 // =====================================================
 
-const _tq = { tel: null, hoyYa: new Set(), sinTabla: false, filtro: 'todos', datos: null, atras: 0, orden: 'alfa', inicio: null, semCargadas: 0 };
+const _tq = { tel: null, hoyYa: new Set(), sinTabla: false, filtro: 'todos', datos: null, atras: 0, orden: 'alfa', inicio: null, semCargadas: 0, buscar: '' };
+// Buscar por nombre: filtra las filas de la tabla al escribir (sin recargar, sin perder el foco).
+const tqNorm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+window.tqBuscar = (texto) => {
+  _tq.buscar = String(texto || '');
+  const q = tqNorm(_tq.buscar), filas = document.querySelectorAll('[data-tq-tabla] tr[data-tq-nombre]');
+  let n = 0; filas.forEach(tr => { const si = !q || tr.dataset.tqNombre.includes(q); tr.style.display = si ? '' : 'none'; if (si) n++; });
+  const aviso = document.querySelector('[data-tq-sin-coincidencia]'); if (aviso) aviso.hidden = !(q && filas.length && !n);
+  const x = document.querySelector('[data-tq-buscar-borrar]'); if (x) x.hidden = !q;
+};
 try { const o = localStorage.getItem('crm:tqOrden'); if (o) _tq.orden = o; } catch (e) { /* sin almacenamiento */ }
 // Semáforo: rojo (le debes respuesta, o frío: 15 días o más sin un toque
 // tuyo), amarillo (8 a 14 días sin toque, o 4 días o más con toque en los
@@ -446,7 +455,7 @@ routes.toques = async () => {
     if (!x) return `<div class="tq-hw${S.actual ? ' act' : ''}"><div class="tq-hw-t"><span>${S.actual ? 'Esta semana' : tqRango(S.lunes)}</span></div><span class="tq-cero">—</span></div>`;
     return `<div class="tq-hw${S.actual ? ' act' : ''}${k === 2 && !S.actual ? ' sel' : ''}" data-tq-hist-semana="${S.lunes}"><div class="tq-hw-t"><span>${S.actual ? 'Esta semana' : tqRango(S.lunes)}</span><b>${x.diasToque} día${x.diasToque === 1 ? '' : 's'}</b></div>${tqEtiquetas(x, S.actual)}</div>`;
   }).join('')}</div>`;
-  const fila = (f) => `<tr data-tq-cliente="${f.c.id}" data-tq-estado="${f.estado}" data-tq-color="${color(f)}">
+  const fila = (f) => `<tr data-tq-cliente="${f.c.id}" data-tq-estado="${f.estado}" data-tq-color="${color(f)}" data-tq-nombre="${escapeHtml(tqNorm(f.c.nombre))}">
       <td class="lis-nom tq-nom-cel" onclick="tqHistorial('${f.c.id}')" title="Ver su historial de 6 semanas">${typeof entAvatar === 'function' ? entAvatar(f.c.nombre) : ''}<div><b>${escapeHtml(f.c.nombre)}</b><div class="tq-sub" data-tq-ultimo>Tu último toque: ${tqCuando(f.ultTuyo, D.hoy)}</div></div></td>
       <td>${semaforo(f)}</td>
       <td data-tq="dicho">${D.actual && typeof qtCeldaToques === 'function' ? qtCeldaToques(f) : '<span class="tq-cero">—</span>'}</td>
@@ -484,6 +493,7 @@ routes.toques = async () => {
       ${tarjeta('revisar', D.filas.filter(TQ_FALTA.revisar).length, 'con videos por revisar', 'te llegaron y falta revisarlos')}
       ${D.actual && typeof ppDe === 'function' ? (() => { const its = activos.flatMap(f => ppDe(f.c.id)); const rec = its.filter(x => x.estado === 'recordar').length; return tarjeta('pendientes', its.filter(x => x.estado === 'toca' || x.estado === 'recordar').length, 'pendientes por pedir', `${its.filter(x => x.estado === 'pedido' || x.estado === 'recordar').length} pedidos sin llegar${rec ? ` · ${rec} por recordar` : ''}`); })() : ''}
     </div>
+    <div class="tq-buscar" data-tq-buscar-caja><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" data-tq-buscar placeholder="Buscar cliente por nombre" aria-label="Buscar cliente por nombre" value="${escapeHtml(_tq.buscar)}" oninput="tqBuscar(this.value)" autocomplete="off"><button type="button" data-tq-buscar-borrar aria-label="Borrar búsqueda" ${_tq.buscar ? '' : 'hidden'} onclick="const i=this.previousElementSibling; i.value=''; tqBuscar(''); i.focus()">×</button></div>
     <div class="tq-filtros" data-tq-chips>
       <div class="tq-chips">${[['todos', 'Todos'], ...TQ_ESTADOS.map(([k, t]) => [`est:${k}`, t])].map(([k, t]) => { const est = k.startsWith('est:') ? k.slice(4) : null; const n = est ? D.filas.filter(f => f.estado === est).length : D.filas.length; return `<button type="button" class="chip ${filtro === k ? 'active' : ''}" data-tq-filtro="${k}" onclick="tqFiltro('${k}')">${est ? `<i class="tq-punto" style="background:${TQ_COLOR[TQ_TONO[est][0]][0]}"></i>` : ''}${t} · ${n}</button>`; }).join('')}</div>
       <div class="tq-chips" data-tq-rapidos>${[['sinSeg', D.actual ? 'Falta seguimiento' : 'Sin seguimiento'], ...(typeof ppDe === 'function' ? [['pedirVideo', 'Por pedir video']] : [])].map(([k, t]) => `<button type="button" class="chip ${filtro === k ? 'active' : ''}" data-tq-rapido="${k}" onclick="tqFiltro('${filtro === k ? 'todos' : k}')">${t} · ${D.filas.filter(TQ_FALTA[k]).length}</button>`).join('')}</div>
@@ -493,6 +503,7 @@ routes.toques = async () => {
       <table class="lis-tabla tq-tabla"><thead><tr><th class="lis-nom">Cliente</th><th>Semáforo</th><th>Lo que le has dicho</th><th>Últimas 3 semanas</th><th>Tus toques ${deSemana}</th><th>Seguimiento<br>semanal</th><th>Ciclo</th><th>Pendientes<br>por pedir</th><th>Videos</th><th>Te escribió<br>en la app</th><th>Te escribió<br>por WhatsApp</th><th>Su semana</th><th></th></tr></thead>
       <tbody>${lista.map(fila).join('')}</tbody></table>
       ${lista.length ? '' : '<p class="text-sm text-slate-500" style="padding:0 16px 16px">Nadie en este filtro.</p>'}
+      <p class="text-sm text-slate-500" style="padding:0 16px 16px" data-tq-sin-coincidencia hidden>Nadie con ese nombre en este filtro.</p>
     </div>
     <details class="tq-que mt-3" data-tq-leyenda open><summary>Qué cuenta en cada columna</summary>
       <div class="tq-que-g">
@@ -506,6 +517,7 @@ routes.toques = async () => {
         <div><b>Semáforo</b><b class="tq-r">Rojo</b>: le debes respuesta, o 15 días o más sin un toque tuyo. <b class="tq-a">Amarillo</b>: 8 a 14 días sin toque, o 4 días o más con toque en los últimos 7 (mejor esperar). <b class="tq-v">Verde</b>: bien.</div>
       </div>
     </details>`;
+  if (_tq.buscar) tqBuscar(_tq.buscar);
 };
 
 (function () {
@@ -549,6 +561,11 @@ routes.toques = async () => {
   .tq-semnav .tq-semsel-b{padding:5px 11px}
   .tq-semnav .tq-semsel-b:disabled{opacity:.35;cursor:default}
   .tq-semnav select{border:0;background:transparent;font:inherit;font-size:13.5px;font-weight:700;color:#1F1F1F;padding:4px 6px;width:auto;cursor:pointer}
+  .tq-buscar{position:relative;display:flex;align-items:center;max-width:420px;margin:2px 0 10px}
+  .tq-buscar svg{position:absolute;left:13px;width:18px;height:18px;color:#8C8A84;pointer-events:none}
+  .tq-buscar input{width:100%;height:42px;padding:0 38px 0 40px;border:1px solid #E2DED5;border-radius:999px;background:#fff;font:inherit;font-size:15px;color:#1F1F1F;outline:none}
+  .tq-buscar input:focus{border-color:#1F1F1F;box-shadow:0 0 0 3px rgba(31,31,31,.08)} .tq-buscar input::-webkit-search-cancel-button{display:none}
+  .tq-buscar button{position:absolute;right:8px;width:28px;height:28px;border:0;border-radius:99px;background:#F1EEE8;color:#5A5A5F;font-size:18px;line-height:1;cursor:pointer}
   .tq-filtros{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px}
   .tq-chips{display:flex;gap:5px;flex-wrap:wrap}
   .tq-orden{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:#8A8780;text-transform:none;letter-spacing:0;margin:0}

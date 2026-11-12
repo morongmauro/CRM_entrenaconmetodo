@@ -283,6 +283,8 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   ok('«Recordar los que faltan» → su WhatsApp con el recordatorio de los videos', ab2.some(u => /wa\.me\/573000000002\?text=/.test(u) && /recuerdo los videos de Press banca, Remo con barra/.test(decodeURIComponent(u))));
   x = await item(p, 'c1', 'video');
   ok('…y la fila vuelve a «Pedido» (se lo recordaste hoy)', x && x.estado === 'pedido' && /se lo recordaste hoy/.test(x.texto), JSON.stringify(x));
+  // Las tres opciones de un video pedido.
+  ok('cada video pedido tiene «Entregado y bien», «Debe mejorar · pedir de nuevo» y «Me equivoqué»', /Entregado y bien/.test(await vent.locator('[data-ppv-fila="x1"]').innerText()) && await vent.locator('[data-ppv-mejorar="x1"]').count() === 1 && /Me equivoqué/.test(await vent.locator('[data-ppv-fila="x1"]').innerText()));
   // «Ya lo entregó» es por ejercicio: Press banca sí, Remo sigue pendiente.
   await vent.locator('[data-ppv-entrego="x1"]').click();
   await p.waitForTimeout(1500);
@@ -306,11 +308,21 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   const ventM = p.locator('[data-pp-videos="c4"]');
   await ventM.waitFor({ timeout: 8000 });
   ok('el detalle muestra Hip thrust «En pausa · ya no está en su ciclo» y la historia del de Sentadilla', await ventM.locator('[data-ppv-fila="x9"]').getAttribute('data-ppv-estado') === 'pausa' && /ya no está en su ciclo/.test(await ventM.innerText()) && await ventM.locator('[data-ppv-fila="x2"]').count() === 1);
+  // «Debe mejorar · pedir de nuevo»: ese queda «A mejorar», se crea un pedido nuevo y se abre su WhatsApp.
+  const antes = await p.evaluate(() => window.TABLAS_FALSAS.videos_tecnica.length);
+  await ventM.locator('[data-ppv-mejorar="x9"]').click();
+  await p.waitForTimeout(1500);
+  const vt = await p.evaluate(() => window.TABLAS_FALSAS.videos_tecnica.filter(v => v.cliente_id === 'c4' && v.ejercicio_id === 'x9'));
+  ok('«Debe mejorar»: el anterior queda «A mejorar» y hay un pedido nuevo de hoy', vt.some(v => v.estado === 'mejorar' && v.revisado_en) && vt.some(v => v.estado === 'pedido') && (await p.evaluate(() => window.TABLAS_FALSAS.videos_tecnica.length)) === antes + 1, JSON.stringify(vt));
+  ok('…se abre su WhatsApp pidiéndolo de nuevo', (await p.evaluate(() => window.ABIERTOS)).some(u => /wa\.me\//.test(u) && /gr%C3%A1balo%20de%20nuevo|grábalo de nuevo/.test(u + decodeURIComponent(u))));
+  if (process.env.FOTO) await ventM.screenshot({ path: path.join(CAPTURAS, 'toques-videos-mejorar.png') });
+  ok('…y la fila dice «pedido de nuevo: el anterior debía mejorar»', await ventM.locator('[data-ppv-fila="x9"] [data-ppv-de-nuevo]').count() === 1);
   // «Quitar (me equivoqué)»: se quita ese pedido (con confirmación).
   p.once('dialog', d => d.accept());
   await ventM.locator('[data-ppv-quitar="x9"]').click();
   await p.waitForTimeout(1500);
-  ok('«Quitar (me equivoqué)» quita ese pedido y deja la historia del otro', await ventM.locator('[data-ppv-fila="x9"]').count() === 0 && await ventM.locator('[data-ppv-fila="x2"]').count() === 1 && await p.evaluate(() => !window.TABLAS_FALSAS.videos_tecnica.some(v => v.id === 'v4p')));
+  // Aquí se quita el pedido nuevo de Hip thrust: queda su historia («A mejorar») y el de Sentadilla sigue.
+  ok('«Me equivoqué» quita ese pedido y deja la historia', await ventM.locator('[data-ppv-fila="x9"]').getAttribute('data-ppv-estado') === 'mejorar' && await ventM.locator('[data-ppv-fila="x2"]').count() === 1 && await p.evaluate(() => !window.TABLAS_FALSAS.videos_tecnica.some(v => v.cliente_id === 'c4' && v.ejercicio_id === 'x9' && v.estado === 'pedido')));
   await p.evaluate(() => closeModal());
   // El filtro de la tarjeta deja solo a quienes tienen algo por pedir o sin llegar.
   await p.locator('[data-tq-filtro="pendientes"]').first().click();
