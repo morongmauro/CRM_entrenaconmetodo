@@ -133,8 +133,12 @@ async function tqCrudo(forzar = false) {
   try { if (typeof qtCargar === 'function') await qtCargar(null, forzar); } catch (e) { console.warn('qué tocar', e); }
   // Videos que marcaste «Entregado y bien» (pendientes-pedir.js): cuenta como
   // toque, porque al recibirlo le diste la retro.
-  const vEnt = (typeof _pp !== 'undefined' && _pp.crudo && _pp.crudo.pedidos || []).filter(p => p.tipo === 'video' && p.entregado_en && p.entregado_por === 'coach');
-  _tq.crudo = { msj, vids, notas, ses, resp, com, toq, nhf, anot, eng, clientes, vEnt };
+  const peds = (typeof _pp !== 'undefined' && _pp.crudo && _pp.crudo.pedidos) || [];
+  const vEnt = peds.filter(p => p.tipo === 'video' && p.entregado_en && p.entregado_por === 'coach');
+  // Fotos, peso o medidas pedidos («Pedir», «Ya lo pedí», «Recordar»): hubo
+  // contacto ese día. No cuenta lo que marcaste entregado sin haberlo pedido.
+  const yaPedi = peds.filter(p => p.tipo !== 'video' && p.pedido_en && !(p.entregado_en && p.entregado_en === p.pedido_en));
+  _tq.crudo = { msj, vids, notas, ses, resp, com, toq, nhf, anot, eng, clientes, vEnt, yaPedi };
   _tq.leido = Date.now();
   return _tq.crudo;
 }
@@ -148,7 +152,7 @@ function tqCalcular(R, ref) {
   const hasta = (l, fn) => (l || []).filter(x => { const f = fn(x); return !!f && f <= hoy; });
   const msj = hasta(R.msj, x => x.fecha), notas = hasta(R.notas, x => x.fecha || tqDia(x.created_at)), ses = hasta(R.ses, x => x.fecha);
   const resp = hasta(R.resp, x => tqDia(x.created_at)), com = hasta(R.com, x => tqDia(x.creado_en)), toq = hasta(R.toq, x => x.fecha);
-  const vEnt = hasta(R.vEnt, x => tqDia(x.entregado_en));
+  const vEnt = hasta(R.vEnt, x => tqDia(x.entregado_en)), yaPedi = hasta(R.yaPedi, x => tqDia(x.pedido_en));
   // Los videos como estaban ese día: lo revisado después seguía pendiente.
   const vids = hasta(R.vids, x => x.pedido_en).map(x => (x.revisado_en && tqDia(x.revisado_en) > hoy ? { ...x, estado: 'pedido', revisado_en: null } : x));
   const de = (l, id) => (l || []).filter(x => String(x.cliente_id) === String(id));
@@ -172,6 +176,7 @@ function tqCalcular(R, ref) {
       // Retro de video: lo revisaste (bien / a mejorar) o lo marcaste «Entregado y bien».
       ...v.filter(x => x.revisado_en).map(x => ['video', tqDia(x.revisado_en), mom(tqDia(x.revisado_en))]),
       ...de(vEnt, c.id).map(x => ['video', tqDia(x.entregado_en), mom(0, x.entregado_en)]),
+      ...de(yaPedi, c.id).map(x => ['whatsapp', tqDia(x.pedido_en), mom(0, x.pedido_en)]),
       ...r.map(x => ['respuesta', tqDia(x.created_at), mom(0, x.created_at)]),
       ...cm.map(x => ['respuesta', tqDia(x.creado_en), mom(0, x.creado_en)]),
       ...notaM.map(x => ['respuesta', x.fecha, mom(x.fecha, x.created_at)]),
@@ -392,7 +397,10 @@ window.tqHistorial = async (id) => {
   de(R.toq).forEach(x => ev.push([x.fecha, x.tipo === 'me_escribio' ? 'Te escribió por WhatsApp' : 'Abriste su WhatsApp', x.tipo !== 'me_escribio']));
   de(R.notas).forEach(x => ev.push([x.fecha || tqDia(x.created_at), 'Te escribió en la app', false]));
   const AN_NOM = { viaje: 'viaje', salud: 'salud', pendiente: 'pendiente', fijo: 'dato fijo', conversacion: 'conversación' };
-  de(R.anot).forEach(x => ev.push([x.fecha, `Anotaste (${AN_NOM[x.tipo] || 'nota'}): «${escapeHtml(corto(x.texto))}»`, true]));
+  // Lo anotado sale, pero no suma «día con toque» (igual que en la tabla).
+  de(R.anot).forEach(x => ev.push([x.fecha, `Anotaste (${AN_NOM[x.tipo] || 'nota'}): «${escapeHtml(corto(x.texto))}»`, null]));
+  const PED_NOM = { fotos: 'fotos', peso: 'su peso', medidas: 'medidas' };
+  de(R.yaPedi).forEach(x => ev.push([tqDia(x.pedido_en), `${x.detalle === 'recordatorio' ? 'Le recordaste' : 'Le pediste'} ${PED_NOM[x.tipo] || x.tipo}`, true]));
   de(R.ses).filter(x => String(x.notas_cliente || '').trim()).forEach(x => ev.push([x.fecha, `Te dejó una nota al terminar: «${escapeHtml(corto(x.notas_cliente))}»`, false]));
   const QT_V = { felicita: 'Lo felicitaste', pide: 'Le pediste', corrige: 'Le corregiste' };
   if (typeof qtDe === 'function') qtDe(id).marcas.forEach(x => ev.push([String(x.fecha).slice(0, 10), `${QT_V[x.accion] || 'Le dijiste'} (${x.modo === 'texto' ? 'con el texto sugerido' : 'con tus palabras'}): «${escapeHtml(corto(x.texto))}»`, true]));
@@ -409,11 +417,11 @@ window.tqHistorial = async (id) => {
     const etq = pausa ? tqEt('gr', 'En pausa') : nhf ? tqEt('am', 'Esta semana no') : (!dias && k ? tqEt('ro', 'Sin toque') : '');
     return `<div class="tq-hi-sem${k ? '' : ' act'}" data-tq-hist-sem="${l}">
       <div class="tq-hi-h">${k ? '' : 'Esta semana · '}${tqRango(l)} · ${dias} día${dias === 1 ? '' : 's'} con toque${entrenos ? ` · ${entrenos} entreno${entrenos === 1 ? '' : 's'}` : ''} ${etq}</div>
-      ${lista.length ? lista.map(x => { const t = new Date(x[0] + 'T12:00:00Z'); return `<div class="tq-hi-ev${x[2] ? '' : ' suyo'}"><span>${TQ_DSEM[t.getUTCDay()]} ${t.getUTCDate()}</span>${x[1]}</div>`; }).join('') : '<div class="tq-hi-ev"><span></span><i>Nada registrado</i></div>'}
+      ${lista.length ? lista.map(x => { const t = new Date(x[0] + 'T12:00:00Z'); return `<div class="tq-hi-ev${x[2] === null ? ' neutro' : x[2] ? '' : ' suyo'}"><span>${TQ_DSEM[t.getUTCDay()]} ${t.getUTCDate()}</span>${x[1]}</div>`; }).join('') : '<div class="tq-hi-ev"><span></span><i>Nada registrado</i></div>'}
     </div>`;
   }).join('');
   const temas = typeof qtTablaHTML === 'function' && typeof qtDe === 'function' ? `<div data-tq-hist-temas style="border:1px solid #EFEDE7;border-radius:12px;padding:10px 12px;margin-bottom:14px"><div style="font-size:13px;font-weight:800;color:#1F1F1F">Lo que le has dicho, por tema</div>${qtTablaHTML(qtResumen(qtEventos(qtDe(id)), hoy), { titulo: false })}</div>` : '';
-  openModal(modalShell(`Historial · ${escapeHtml(c.nombre)}`, `<div data-tq-historial><p class="text-sm text-slate-500" style="margin:0 0 12px">Seis semanas, de la más reciente a la más antigua. En negro lo que hiciste tú; en azul lo que hizo o te escribió.</p>${temas}${semanas}</div>`,
+  openModal(modalShell(`Historial · ${escapeHtml(c.nombre)}`, `<div data-tq-historial><p class="text-sm text-slate-500" style="margin:0 0 12px">Seis semanas, de la más reciente a la más antigua. En negro lo que hiciste tú; en azul lo que hizo o te escribió; en gris lo que anotaste (no suma toque).</p>${temas}${semanas}</div>`,
     `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>`));
 };
 
@@ -616,6 +624,7 @@ routes.toques = async () => {
   .tq-hi-h{font-size:13px;font-weight:800;color:#1F1F1F;margin-bottom:4px}
   .tq-hi-ev{font-size:13px;color:#1F1F1F;line-height:1.55}
   .tq-hi-ev.suyo{color:#2F5FA6}
+  .tq-hi-ev.neutro{color:#8A8780}
   .tq-hi-ev span{display:inline-block;width:56px;color:#8A8A8A}
   .tq-hi-ev i{color:#9A978F}
   @media (max-width:760px){.tq-faltas,.tq-faltas.cuatro{grid-template-columns:1fr}.tq-que-g{grid-template-columns:1fr}}`;

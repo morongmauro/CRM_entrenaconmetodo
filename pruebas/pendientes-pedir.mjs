@@ -252,6 +252,25 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   await p.waitForTimeout(1200);
   x = await item(p, 'c0', 'fotos');
   ok('«Ya lo pedí» → queda «Pedido» (guardado)', x && x.estado === 'pedido' && /Se lo pediste hoy/.test(x.texto) && await p.evaluate(() => window.TABLAS_FALSAS.pedidos_cliente.some(r => r.cliente_id === 'c0' && r.tipo === 'fotos' && !r.entregado_en)), JSON.stringify(x));
+  const toqueYaPedi = await p.evaluate(async () => {
+    await tqCrudo(true);
+    const hoy = fmt.hoy(), solo = (yaPedi) => ({ ..._tq.crudo, vids: [], msj: [], resp: [], com: [], toq: [], anot: [], vEnt: [], yaPedi });
+    const dia = (R) => { const f = tqCalcular(R, hoy).filas.find(x => x.c.id === 'c0'); return f && f.semana.find(d => d.d === hoy).tuyo; };
+    return { con: dia(solo(_tq.crudo.yaPedi)), sin: dia(solo([])) };
+  });
+  ok('«Ya lo pedí» cuenta como toque de hoy (y sin eso, no)', toqueYaPedi.con === true && toqueYaPedi.sin === false, JSON.stringify(toqueYaPedi));
+  // Lo anotado sale en el historial en gris y no suma «día con toque».
+  const anotNeutro = await p.evaluate(async () => {
+    const hoy = fmt.hoy(), R = _tq.crudo, antes = R.anot;
+    R.anot = [{ cliente_id: 'c0', fecha: hoy, texto: 'Se va de viaje', tipo: 'viaje' }];
+    const yp = R.yaPedi; R.yaPedi = []; const otros = ['msj', 'vids', 'resp', 'com', 'toq', 'vEnt'].map(k => [k, R[k]]); otros.forEach(([k]) => { R[k] = []; });
+    await tqHistorial('c0');
+    const el = document.querySelector('[data-tq-historial]');
+    const r = { gris: !!el.querySelector('.tq-hi-ev.neutro'), cabecera: el.querySelector('.tq-hi-sem.act .tq-hi-h').textContent };
+    closeModal(); R.anot = antes; R.yaPedi = yp; otros.forEach(([k, v]) => { R[k] = v; });
+    return r;
+  });
+  ok('una anotación sale en gris en el historial y no suma día con toque', anotNeutro.gris && /0 días con toque/.test(anotNeutro.cabecera), JSON.stringify(anotNeutro));
   // «Pedir» (medidas de Carlos) → abre su WhatsApp con el mensaje y queda pedido.
   await celda(p, 'c1').locator('[data-pp="medidas"] [data-pp-pedir]').click();
   await p.waitForTimeout(1200);
@@ -306,7 +325,7 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   // «Entregado y bien» cuenta como toque (le diste la retro), y sale en su historial.
   const toqueRetro = await p.evaluate(async () => {
     await tqCrudo(true);
-    const hoy = fmt.hoy(), solo = (vEnt) => ({ ..._tq.crudo, vids: [], msj: [], resp: [], com: [], toq: [], anot: [], vEnt });
+    const hoy = fmt.hoy(), solo = (vEnt) => ({ ..._tq.crudo, vids: [], msj: [], resp: [], com: [], toq: [], anot: [], yaPedi: [], vEnt });
     const dia = (R) => { const f = tqCalcular(R, hoy).filas.find(x => x.c.id === 'c1'); return f && f.semana.find(d => d.d === hoy).tuyo; };
     return { con: dia(solo(_tq.crudo.vEnt)), sin: dia(solo([])) };
   });
