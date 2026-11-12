@@ -131,6 +131,8 @@ async function tqCrudo(forzar = false) {
   const clientes = (await db.clientes.list()).filter(c => String(c.estado || 'activo').toLowerCase() === 'activo');
   // Pendientes por pedir (pendientes-pedir.js): fotos, medidas, peso y videos.
   try { if (typeof ppCargar === 'function') await ppCargar(clientes, vids); } catch (e) { console.warn('pendientes', e); }
+  // Las cápsulas que le pediste leer (capsulas-toques.js).
+  try { if (typeof capCargar === 'function') await capCargar(clientes); } catch (e) { console.warn('cápsulas', e); }
   // Lo que le has dicho por tema y lo marcado en «Qué tocar» (que-tocar.js).
   try { if (typeof qtCargar === 'function') await qtCargar(null, forzar); } catch (e) { console.warn('qué tocar', e); }
   // Videos que marcaste «Entregado y bien» (pendientes-pedir.js): cuenta como
@@ -140,7 +142,8 @@ async function tqCrudo(forzar = false) {
   // Fotos, peso o medidas pedidos («Pedir», «Ya lo pedí», «Recordar»): hubo
   // contacto ese día. No cuenta lo que marcaste entregado sin haberlo pedido.
   const yaPedi = peds.filter(p => p.tipo !== 'video' && p.pedido_en && !(p.entregado_en && p.entregado_en === p.pedido_en));
-  _tq.crudo = { msj, vids, notas, ses, resp, com, toq, nhf, anot, eng, clientes, vEnt, yaPedi };
+  const cps = (typeof _capt !== 'undefined' && _capt.pedidos) || [];
+  _tq.crudo = { msj, vids, notas, ses, resp, com, toq, nhf, anot, eng, clientes, vEnt, yaPedi, cps };
   _tq.leido = Date.now();
   return _tq.crudo;
 }
@@ -155,6 +158,8 @@ function tqCalcular(R, ref) {
   const msj = hasta(R.msj, x => x.fecha), notas = hasta(R.notas, x => x.fecha || tqDia(x.created_at)), ses = hasta(R.ses, x => x.fecha);
   const resp = hasta(R.resp, x => tqDia(x.created_at)), com = hasta(R.com, x => tqDia(x.creado_en)), toq = hasta(R.toq, x => x.fecha);
   const vEnt = hasta(R.vEnt, x => tqDia(x.entregado_en)), yaPedi = hasta(R.yaPedi, x => tqDia(x.pedido_en));
+  // Cápsulas: enviarla, recordarla y su respuesta (cada momento, hasta ese día).
+  const cps = (R.cps || []).flatMap(x => [x.enviada_en, x.recordada_en, x.respondio_en].filter(t => t && tqDia(t) <= hoy).map(t => ({ cliente_id: x.cliente_id, t })));
   // Los videos como estaban ese día: lo revisado después seguía pendiente.
   const vids = hasta(R.vids, x => x.pedido_en).map(x => (x.revisado_en && tqDia(x.revisado_en) > hoy ? { ...x, estado: 'pedido', revisado_en: null } : x));
   const de = (l, id) => (l || []).filter(x => String(x.cliente_id) === String(id));
@@ -179,6 +184,7 @@ function tqCalcular(R, ref) {
       ...v.filter(x => x.revisado_en).map(x => ['retro', tqDia(x.revisado_en), mom(tqDia(x.revisado_en))]),
       ...de(vEnt, c.id).map(x => ['retro', tqDia(x.entregado_en), mom(0, x.entregado_en)]),
       ...de(yaPedi, c.id).map(x => ['pedido', tqDia(x.pedido_en), mom(0, x.pedido_en)]),
+      ...de(cps, c.id).map(x => ['capsula', tqDia(x.t), mom(0, x.t)]),
       ...r.map(x => ['respuesta', tqDia(x.created_at), mom(0, x.created_at)]),
       ...cm.map(x => ['respuesta', tqDia(x.creado_en), mom(0, x.creado_en)]),
       ...notaM.map(x => ['respuesta', x.fecha, mom(x.fecha, x.created_at)]),
@@ -328,7 +334,7 @@ const TQ_FALTA = {
   // Filtros rápidos: a quién le toca pedir (o recordar) video, y a quién le falta el seguimiento.
   pedirVideo: (f) => f.estado !== 'pausa' && typeof ppDe === 'function' && ppDe(f.c.id).some(x => x.tipo === 'video' && (x.estado === 'toca' || x.estado === 'recordar')),
 };
-const TQ_TIPO = { seguimiento: 'Seguimiento', mensaje: 'Mensaje', respuesta: 'Respuesta', whatsapp: 'WhatsApp', video: 'Pedir video', retro: 'Retro de video', pedido: 'Pedir fotos o medidas', dicho: 'Qué tocar' };
+const TQ_TIPO = { seguimiento: 'Seguimiento', mensaje: 'Mensaje', respuesta: 'Respuesta', whatsapp: 'WhatsApp', video: 'Pedir video', retro: 'Retro de video', pedido: 'Pedir fotos o medidas', capsula: 'Cápsula', dicho: 'Qué tocar' };
 
 // Semana corta: «3–9 nov» o «27 oct–2 nov».
 const TQ_MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -405,6 +411,12 @@ window.tqHistorial = async (id) => {
   de(R.anot).forEach(x => ev.push([x.fecha, `Anotaste (${AN_NOM[x.tipo] || 'nota'}): «${escapeHtml(corto(x.texto))}»`, null]));
   const PED_NOM = { fotos: 'fotos', peso: 'su peso', medidas: 'medidas' };
   de(R.yaPedi).forEach(x => ev.push([tqDia(x.pedido_en), `${x.detalle === 'recordatorio' ? 'Le recordaste' : 'Le pediste'} ${PED_NOM[x.tipo] || x.tipo}`, true]));
+  de(R.cps).forEach(x => {
+    const t = escapeHtml(x.capsula_titulo || x.capsula_id);
+    ev.push([tqDia(x.enviada_en), `Le enviaste la cápsula «${t}»`, true]);
+    if (x.recordada_en) ev.push([tqDia(x.recordada_en), `Le recordaste la cápsula «${t}»`, true]);
+    if (x.respondio_en) ev.push([tqDia(x.respondio_en), `Te respondió sobre «${t}»${x.respuesta ? `: «${escapeHtml(corto(x.respuesta))}»` : ''}`, true]);
+  });
   de(R.ses).filter(x => String(x.notas_cliente || '').trim()).forEach(x => ev.push([x.fecha, `Te dejó una nota al terminar: «${escapeHtml(corto(x.notas_cliente))}»`, false]));
   const QT_V = { felicita: 'Lo felicitaste', pide: 'Le pediste', corrige: 'Le corregiste' };
   if (typeof qtDe === 'function') qtDe(id).marcas.forEach(x => ev.push([String(x.fecha).slice(0, 10), `${QT_V[x.accion] || 'Le dijiste'} (${x.modo === 'texto' ? 'con el texto sugerido' : 'con tus palabras'}): «${escapeHtml(corto(x.texto))}»`, true]));
@@ -484,6 +496,7 @@ routes.toques = async () => {
       <td data-tq="seguimiento">${celdaSeg(f)}</td>
       <td data-tq="ciclo" style="min-width:150px">${D.actual && typeof ppCiclo === 'function' ? ppCiclo(f.c) : '<span class="tq-cero">—</span>'}</td>
       <td data-tq="pendientes">${D.actual && typeof ppCelda === 'function' ? ppCelda(f) : '<span class="tq-cero">—</span>'}</td>
+      <td data-tq="capsulas">${D.actual && typeof capCelda === 'function' ? capCelda(f) : '<span class="tq-cero">—</span>'}</td>
       <td data-tq="videos" class="tq-vid-cel" onclick="vtAbrir('${f.c.id}')" title="Toca para revisar sus videos">${celdaVid(f)}<div class="tq-sub tq-wa-mas">revisar</div></td>
       <td data-tq="escribio-app">${celdaCanal(f.escApp)}</td>
       ${D.actual ? `<td data-tq="escribio-wa" class="tq-wa-cel" onclick="tqWaCelda('${f.c.id}')" title="Toca para registrar que te escribió por WhatsApp">${celdaCanal(f.escWa, true)}<div class="tq-sub tq-wa-mas">+ registrar</div></td>` : `<td data-tq="escribio-wa">${celdaCanal(f.escWa, true)}</td>`}
@@ -520,7 +533,7 @@ routes.toques = async () => {
       <label class="tq-orden">Ordenar <select data-tq-orden onchange="tqOrden(this.value)">${TQ_ORDENES.map(([k, t]) => `<option value="${k}" ${_tq.orden === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
     </div>
     <div class="card lis-tabla-caja" data-tq-tabla>
-      <table class="lis-tabla tq-tabla"><thead><tr><th class="lis-nom">Cliente</th><th>Semáforo</th><th>Lo que le has dicho</th><th>Últimas 3 semanas</th><th>Tus toques ${deSemana}</th><th>Seguimiento<br>semanal</th><th>Ciclo</th><th>Pendientes<br>por pedir</th><th>Videos</th><th>Te escribió<br>en la app</th><th>Te escribió<br>por WhatsApp</th><th>Su semana</th><th></th></tr></thead>
+      <table class="lis-tabla tq-tabla"><thead><tr><th class="lis-nom">Cliente</th><th>Semáforo</th><th>Lo que le has dicho</th><th>Últimas 3 semanas</th><th>Tus toques ${deSemana}</th><th>Seguimiento<br>semanal</th><th>Ciclo</th><th>Pendientes<br>por pedir</th><th>Cápsulas</th><th>Videos</th><th>Te escribió<br>en la app</th><th>Te escribió<br>por WhatsApp</th><th>Su semana</th><th></th></tr></thead>
       <tbody>${lista.map(fila).join('')}</tbody></table>
       ${lista.length ? '' : '<p class="text-sm text-slate-500" style="padding:0 16px 16px">Nadie en este filtro.</p>'}
       <p class="text-sm text-slate-500" style="padding:0 16px 16px" data-tq-sin-coincidencia hidden>Nadie con ese nombre en este filtro.</p>
