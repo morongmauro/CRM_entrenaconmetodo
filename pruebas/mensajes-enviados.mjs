@@ -132,7 +132,8 @@ const ok = (nombre, c, extra = '') => { if (!c) mal++; console.log(`  ${c ? 'ok 
   // Retirar.
   await fila('rc1').locator('[data-me-retirar]').click();
   await p.waitForTimeout(1200);
-  ok('Retirar: queda marcado y tachado como «Retirado»', !!(await p.evaluate(() => window.TABLAS_FALSAS.respuestas_coach[0].retirado_en)) && /Retirado/.test(await txt('rc1')) && await fila('rc1').locator('del').count() === 1);
+  ok('Retirar: queda marcado y tachado como «Retirado», y su registro no reaparece', !!(await p.evaluate(() => window.TABLAS_FALSAS.respuestas_coach[0].retirado_en)) && /Retirado/.test(await txt('rc1')) && await fila('rc1').locator('del').count() === 1 && await fila('sg1').count() === 0);
+  ok('…su registro también queda retirado (no cuenta como toque)', !!(await p.evaluate(() => window.TABLAS_FALSAS.seguimiento_mensajes.find(x => x.id === 'sg1').retirado_en)));
   // Deshacer registro (el seguimiento de hoy de Ana) → deja de contar en Toques.
   const antes = await p.evaluate(async () => { await tqCrudo(true); return tqCalcular(_tq.crudo, fmt.hoy()).filas.find(x => x.c.id === 'c0').tipos.map(x => x[0]); });
   await fila('m3').locator('[data-me-deshacer]').click();

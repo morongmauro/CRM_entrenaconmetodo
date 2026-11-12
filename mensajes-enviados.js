@@ -36,7 +36,12 @@ async function meCargar() {
   // Su app (Bandeja → «A su app»).
   (rc || []).forEach(r => items.push({ fuente: 'rc', id: r.id, cliente: porId.get(String(r.cliente_id)), cliente_id: r.cliente_id, t: r.created_at, canal: 'app', tipo: r.contexto ? `Respuesta · ${r.contexto}` : 'Respuesta a su nota', texto: r.texto, visto: r.visto_en, retirado: r.retirado_en }));
   // Lo registrado. La respuesta a su app de la Bandeja ya está arriba (no se repite).
-  const yaApp = (s) => (rc || []).some(r => String(r.cliente_id) === String(s.cliente_id) && String(r.created_at || '').slice(0, 10) === s.fecha && String(s.texto || '').endsWith(String(r.texto || '').trim()));
+  // Se emparejan por cliente y momento (se registran en el mismo segundo), no por texto: así sigue igual aunque la edites.
+  const cerca = (a, b) => Math.abs(Date.parse(a) - Date.parse(b)) < 180000;
+  const parDe = (s) => (rc || []).find(r => String(r.cliente_id) === String(s.cliente_id) && s.created_at && r.created_at && cerca(s.created_at, r.created_at));
+  const yaApp = (s) => !!parDe(s);
+  const segDe = new Map();
+  (seg || []).forEach(s => { if (/en su app/i.test(String(s.titulo || ''))) { const r = parDe(s); if (r) segDe.set(String(r.id), [...(segDe.get(String(r.id)) || []), s.id]); } });
   (seg || []).forEach(s => {
     const titulo = String(s.titulo || '');
     const app = /en su app/i.test(titulo);
@@ -46,7 +51,7 @@ async function meCargar() {
   });
   (caps || []).forEach(k => items.push({ fuente: 'cap', id: k.id, cliente: porId.get(String(k.cliente_id)), cliente_id: k.cliente_id, t: k.enviada_en, canal: 'whatsapp', tipo: 'Cápsula con pregunta', texto: `«${k.capsula_titulo || k.capsula_id}»${k.pregunta ? ` · Cuando la leas, cuéntame: ${k.pregunta}` : ''}`, retirado: k.retirado_en, extra: k.recordada_en ? `recordada ${meCuando(k.recordada_en)}` : '' }));
   items.sort((a, b) => String(b.t).localeCompare(String(a.t)));
-  _me.datos = { items, sinRc: rc === null };
+  _me.datos = { items, sinRc: rc === null, segDe };
   return _me.datos;
 }
 function meTipo(s) {
@@ -146,6 +151,8 @@ window.meRetirar = async (fuente, id) => {
     }
   }
   if (!(await meMarcar(fuente, id))) return;
+  // Su registro (el que cuenta como toque) también queda retirado.
+  if (fuente === 'rc') for (const sid of (_me.datos.segDe && _me.datos.segDe.get(String(id))) || []) await meMarcar('seg', sid);
   toast('Retirado de su app');
   meRefrescar();
 };
