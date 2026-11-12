@@ -85,6 +85,12 @@ function tablas() {
     ...T.seguimiento_mensajes,
     { id: 'sg1', user_id: 'coach-1', cliente_id: 'c0', fecha: HOY, created_at: HOY + 'T12:00:01Z', origen: 'nota', titulo: 'Respuesta en su app', texto: 'Sobre tu Tren superior: Bien hecho, la próxima sube 2 kg' },
   ];
+  // Laura (c2): comentario en un ejercicio de su rutina. Marta (c4): video «A mejorar» con qué corregir.
+  T.ejercicios = [{ id: 'x1', user_id: 'coach-1', nombre: 'Press banca', archivado: false }];
+  T.comentarios_coach = [{ id: 'cc1', user_id: 'coach-1', cliente_id: 'c2', ejercicio_id: 'x1', tipo: 'puntual', texto: 'Hoy baja a 55 kg y acorta el recorrido', creado_en: mas(HOY, -1) + 'T15:00:00Z', leido_en: null, quitado_en: null }];
+  T.videos_tecnica = [{ id: 'vt1', user_id: 'coach-1', cliente_id: 'c4', ejercicio_id: 'x1', ejercicio_nombre: 'Press banca', estado: 'mejorar', nota: 'Codos a 45 grados', pedido_en: mas(HOY, -3), revisado_en: mas(HOY, -1), created_at: mas(HOY, -3) + 'T10:00:00Z' }];
+  // «Listo» en la Bandeja: no es un mensaje enviado por WhatsApp.
+  T.seguimiento_mensajes.push({ id: 'sgA', user_id: 'coach-1', cliente_id: 'c1', fecha: HOY, created_at: HOY + 'T09:58:00Z', origen: 'nota', titulo: 'Bandeja: mensaje atendido', texto: 'Atendiste su mensaje: «Me duele la rodilla»' });
   T.capsulas_pedidas = [{ id: 'k1', user_id: 'coach-1', cliente_id: 'c1', capsula_id: 'ent-04-subir-peso', capsula_titulo: 'Cuándo subir el peso', pregunta: '¿en qué ejercicio?', enviada_en: mas(HOY, -1) + 'T10:00:00Z' }];
   return T;
 }
@@ -123,7 +129,21 @@ const ok = (nombre, c, extra = '') => { if (!c) mal++; console.log(`  ${c ? 'ok 
   ok(`seguimiento de Ana por WhatsApp: «Abrir su chat» y «Deshacer registro» (${t})`, /WhatsApp/.test(t) && /Abrir su chat/.test(t) && /Deshacer registro/.test(t), t);
   t = await txt('k1');
   ok(`la cápsula enviada a Carlos sale con su pregunta (${t})`, /Cápsula con pregunta/.test(t) && /Cuándo subir el peso/.test(t), t);
+  t = await txt('cc1');
+  ok(`comentario en un ejercicio (Laura): sale con el ejercicio, «Aún no lo ve», Retirar y Editar (${t})`, /Comentario en ejercicio · Press banca/.test(t) && /Hoy baja a 55 kg/.test(t) && /Su app/.test(t) && /Aún no lo ve/.test(t) && /Retirar de su app/.test(t) && /Editar/.test(t), t);
+  t = await txt('vt1');
+  ok(`video a mejorar (Marta): sale con «Qué corregir», Retirar y Editar (${t})`, /Video a mejorar · Press banca/.test(t) && /Qué corregir: Codos a 45 grados/.test(t) && /Retirar de su app/.test(t) && /Editar/.test(t), t);
+  t = await txt('sgA');
+  ok(`«Atendiste su mensaje» ya no dice WhatsApp: «Mensaje atendido (sin respuesta) · Marcado a mano» (${t})`, /Mensaje atendido \(sin respuesta\)/.test(t) && /Marcado a mano/.test(t) && !/WhatsApp/.test(t), t);
   if (process.env.FOTO) await p.locator('[data-me]').screenshot({ path: path.join(CAPTURAS, 'mensajes-enviados.png') });
+  // Retirar el comentario del ejercicio (queda con quitado_en: su app ya no lo muestra) y el «Qué corregir» del video.
+  await fila('cc1').locator('[data-me-retirar]').click(); await p.waitForTimeout(1200);
+  ok('Retirar comentario de ejercicio: queda quitado (su app deja de mostrarlo)', !!(await p.evaluate(() => window.TABLAS_FALSAS.comentarios_coach[0].quitado_en)) && /Retirado/.test(await txt('cc1')));
+  await fila('vt1').locator('[data-me-editar]').click(); await p.locator('[data-me-editar-modal]').waitFor();
+  await p.fill('#me-texto', 'Codos a 45 grados y baja en 2 segundos'); await p.locator('[data-me-guardar]').click(); await p.waitForTimeout(1200);
+  ok('Editar «Qué corregir» del video: queda corregido', await p.evaluate(() => window.TABLAS_FALSAS.videos_tecnica[0].nota) === 'Codos a 45 grados y baja en 2 segundos');
+  await fila('vt1').locator('[data-me-retirar]').click(); await p.waitForTimeout(1200);
+  ok('Retirar «Qué corregir» del video: queda marcado sin borrar la nota', !!(await p.evaluate(() => window.TABLAS_FALSAS.videos_tecnica[0].nota_retirada_en)) && !!(await p.evaluate(() => window.TABLAS_FALSAS.videos_tecnica[0].nota)));
   // Editar.
   await fila('rc1').locator('[data-me-editar]').click();
   await p.locator('[data-me-editar-modal]').waitFor();

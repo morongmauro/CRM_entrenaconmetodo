@@ -25,12 +25,18 @@ const meNorm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').t
 async function meCargar() {
   const desde = new Date(Date.now() - 90 * 86400000).toISOString();
   const leer = async (q) => { try { const { data, error } = await q; return error ? null : (data || []); } catch (e) { return null; } };
-  const [clientes, rc, seg, caps] = await Promise.all([
+  const [clientes, rc, seg, caps, coms, vids, ejs] = await Promise.all([
     db.clientes.list().catch(() => []),
     leer(sb.from('respuestas_coach').select('*').gte('created_at', desde)),
     leer(sb.from('seguimiento_mensajes').select('*').gte('fecha', desde.slice(0, 10))),
     leer(sb.from('capsulas_pedidas').select('*').gte('enviada_en', desde)),
+    // Lo que le escribes sobre un ejercicio de su rutina (le sale en su app).
+    leer(sb.from('comentarios_coach').select('*').gte('creado_en', desde)),
+    // Los videos que revisaste «A mejorar» / «Nada bien»: el «Qué corregir» que ve en su app.
+    leer(sb.from('videos_tecnica').select('*').in('estado', ['mejorar', 'mal']).gte('pedido_en', desde.slice(0, 10))),
+    (typeof entDb !== 'undefined' && entDb.ejercicios ? entDb.ejercicios().catch(() => []) : Promise.resolve([])),
   ]);
+  const ejNom = new Map((ejs || []).map(e => [String(e.id), (typeof entNombres === 'function' ? entNombres(e).grande : null) || e.nombre || 'Ejercicio']));
   const porId = new Map((clientes || []).map(c => [String(c.id), c]));
   const items = [];
   // Su app (Bandeja → «A su app»).
@@ -46,16 +52,24 @@ async function meCargar() {
     const titulo = String(s.titulo || '');
     const app = /en su app/i.test(titulo);
     if (app && yaApp(s)) return;
-    const canal = app ? 'app' : /solo guardado/i.test(titulo) ? 'guardado' : s.origen === 'manual' ? 'marcado' : 'whatsapp';
+    const atendido = /mensaje atendido/i.test(titulo);   // «Listo» en la Bandeja: no le enviaste nada
+    const canal = app ? 'app' : /solo guardado/i.test(titulo) ? 'guardado' : (s.origen === 'manual' || atendido) ? 'marcado' : 'whatsapp';
     items.push({ fuente: 'seg', id: s.id, cliente: porId.get(String(s.cliente_id)), cliente_id: s.cliente_id, t: s.created_at || `${s.fecha}T12:00:00Z`, canal, tipo: meTipo(s), texto: s.texto, retirado: s.retirado_en, appNota: app });
   });
   (caps || []).forEach(k => items.push({ fuente: 'cap', id: k.id, cliente: porId.get(String(k.cliente_id)), cliente_id: k.cliente_id, t: k.enviada_en, canal: 'whatsapp', tipo: 'Cápsula con pregunta', texto: `«${k.capsula_titulo || k.capsula_id}»${k.pregunta ? ` · Cuando la leas, cuéntame: ${k.pregunta}` : ''}`, retirado: k.retirado_en, extra: k.recordada_en ? `recordada ${meCuando(k.recordada_en)}` : '' }));
+  (coms || []).forEach(k => items.push({ fuente: 'com', id: k.id, cliente: porId.get(String(k.cliente_id)), cliente_id: k.cliente_id, t: k.creado_en, canal: 'app',
+    tipo: `Comentario en ejercicio · ${ejNom.get(String(k.ejercicio_id)) || 'ejercicio'}`, texto: k.texto, visto: k.leido_en, retirado: k.quitado_en,
+    extra: k.tipo === 'siempre' ? 'Siempre presente (fijo en la tarjeta del ejercicio)' : 'Para la próxima vez' }));
+  (vids || []).forEach(v => items.push({ fuente: 'vid', id: v.id, cliente: porId.get(String(v.cliente_id)), cliente_id: v.cliente_id, t: (v.revisado_en && String(v.revisado_en).length > 10 ? v.revisado_en : `${String(v.revisado_en || v.pedido_en).slice(0, 10)}T12:00:00`), canal: 'app',
+    tipo: `Video a mejorar · ${v.ejercicio_nombre || ejNom.get(String(v.ejercicio_id)) || 'ejercicio'}`, texto: v.nota ? `Qué corregir: ${v.nota}` : 'Debe mejorar (sin nota de qué corregir)', retirado: v.nota_retirada_en, sinNota: !v.nota,
+    extra: 'Le sale en la hoja «Grabar video» de ese ejercicio' }));
   items.sort((a, b) => String(b.t).localeCompare(String(a.t)));
   _me.datos = { items, sinRc: rc === null, segDe };
   return _me.datos;
 }
 function meTipo(s) {
   const t = String(s.titulo || ''), o = s.origen || '';
+  if (/mensaje atendido/i.test(t)) return 'Mensaje atendido (sin respuesta)';
   if (o === 'nota') return /WhatsApp/i.test(t) ? 'Respuesta por WhatsApp' : 'Respuesta en su app';
   if (o === 'videos') return t || 'Pedir video';
   if (o === 'manual') return 'Seguimiento marcado hecho';
@@ -89,8 +103,9 @@ routes.mensajes = async () => {
     const b = (t, osc, attr, fn) => `<button type="button" class="pp-b${osc ? ' o' : ''}" ${attr} onclick="${fn}">${t}</button>`;
     if (x.retirado) estado = et(x.canal === 'app' ? `Retirado ${meCuando(x.retirado)}` : `Registro deshecho ${meCuando(x.retirado)}`, '#FBE3E1', '#B3392F');
     else if (x.canal === 'app') {
-      estado = x.fuente === 'rc' ? (x.visto ? et(`Lo vio ${meCuando(x.visto)}`, '#E3EDFB', '#2F5FA6') : et('Aún no lo ve', '#F1EFE9', '#555')) : et('En su app', '#E3EDFB', '#2F5FA6');
-      acc = b('Retirar de su app', true, `data-me-retirar="${x.id}"`, `meRetirar('${x.fuente}','${x.id}')`) + (x.fuente === 'rc' ? b('Editar', false, `data-me-editar="${x.id}"`, `meEditar('${x.id}')`) : '');
+      estado = (x.fuente === 'rc' || x.fuente === 'com') ? (x.visto ? et(`Lo vio ${meCuando(x.visto)}`, '#E3EDFB', '#2F5FA6') : et('Aún no lo ve', '#F1EFE9', '#555')) : et('En su app', '#E3EDFB', '#2F5FA6');
+      const editable = x.fuente === 'rc' || x.fuente === 'com' || x.fuente === 'vid';
+      acc = (x.fuente === 'vid' && x.sinNota ? '' : b('Retirar de su app', true, `data-me-retirar="${x.id}"`, `meRetirar('${x.fuente}','${x.id}')`)) + (editable ? b(x.sinNota ? 'Agregar qué corregir' : 'Editar', false, `data-me-editar="${x.id}"`, `meEditar('${x.fuente}','${x.id}')`) : '');
     } else {
       estado = et(x.canal === 'whatsapp' ? 'Enviado por WhatsApp' : cn, '#F1EFE9', '#555');
       const tel = String((x.cliente && x.cliente.telefono) || '').replace(/\D/g, '');
@@ -127,11 +142,14 @@ window.meFiltro = (k, v) => { _me[k] = v; rerenderView(); };
 let _meT = null;
 window.meBuscar = (v) => { _me.q = v; clearTimeout(_meT); _meT = setTimeout(async () => { await rerenderView(); const i = document.querySelector('[data-me-q]'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 350); };
 
-const meTabla = { rc: 'respuestas_coach', seg: 'seguimiento_mensajes', cap: 'capsulas_pedidas' };
+const meTabla = { rc: 'respuestas_coach', seg: 'seguimiento_mensajes', cap: 'capsulas_pedidas', com: 'comentarios_coach', vid: 'videos_tecnica' };
+// La columna que marca «retirado» en cada tabla (los comentarios ya traían la suya).
+const meColRet = { com: 'quitado_en', vid: 'nota_retirada_en' };
+const meColTxt = { rc: 'texto', com: 'texto', vid: 'nota' };
 async function meMarcar(fuente, id) {
   try {
-    const { error } = await sb.from(meTabla[fuente]).update({ retirado_en: new Date().toISOString() }).eq('id', id);
-    if (error) { toast(/retirado_en|column|schema cache/i.test(error.message || '') ? `Falta correr ${ME_SQL} en Supabase` : 'No pude guardarlo'); return false; }
+    const { error } = await sb.from(meTabla[fuente]).update({ [meColRet[fuente] || 'retirado_en']: new Date().toISOString() }).eq('id', id);
+    if (error) { toast(/retirad[oa]_en|column|schema cache/i.test(error.message || '') ? `Falta correr ${ME_SQL} en Supabase` : 'No pude guardarlo'); return false; }
     return true;
   } catch (e) { toast('No pude guardarlo'); return false; }
 }
@@ -163,19 +181,20 @@ window.meDeshacer = async (fuente, id) => {
   toast('Registro deshecho');
   meRefrescar();
 };
-window.meEditar = async (id) => {
-  const x = _me.datos && _me.datos.items.find(i => i.fuente === 'rc' && String(i.id) === String(id));
+window.meEditar = async (fuente, id) => {
+  const x = _me.datos && _me.datos.items.find(i => i.fuente === fuente && String(i.id) === String(id));
   if (!x) return;
+  const actual = fuente === 'vid' ? String(x.texto || '').replace(/^Qué corregir: /, '').replace(/^Debe mejorar \(sin nota de qué corregir\)$/, '') : (x.texto || '');
   openModal(modalShell(`Editar mensaje · ${escapeHtml((x.cliente && x.cliente.nombre) || '')}`, `<div data-me-editar-modal>
     <p class="text-xs text-slate-500 mb-2">Le sale corregido en su app la próxima vez que la abra.</p>
-    <textarea id="me-texto" class="input w-full" rows="4">${escapeHtml(x.texto || '')}</textarea>
-  </div>`, `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" data-me-guardar onclick="meGuardarEdicion('${id}')">Guardar</button>`));
+    <textarea id="me-texto" class="input w-full" rows="4">${escapeHtml(actual)}</textarea>
+  </div>`, `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" data-me-guardar onclick="meGuardarEdicion('${fuente}','${id}')">Guardar</button>`));
 };
-window.meGuardarEdicion = async (id) => {
+window.meGuardarEdicion = async (fuente, id) => {
   const t = (document.getElementById('me-texto')?.value || '').trim();
   if (!t) return toast('Escribe el mensaje');
   try {
-    const { error } = await sb.from('respuestas_coach').update({ texto: t }).eq('id', id);
+    const { error } = await sb.from(meTabla[fuente]).update({ [meColTxt[fuente]]: t }).eq('id', id);
     if (error) { toast('No pude guardarlo'); return; }
   } catch (e) { toast('No pude guardarlo'); return; }
   closeModal();
