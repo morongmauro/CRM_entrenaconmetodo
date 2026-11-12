@@ -362,6 +362,13 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   await p.waitForTimeout(1500);
   // Aquí se quita el pedido nuevo de Hip thrust: queda su historia («A mejorar») y el de Sentadilla sigue.
   ok('«Me equivoqué» quita ese pedido y deja la historia', await ventM.locator('[data-ppv-fila="x9"]').getAttribute('data-ppv-estado') === 'mejorar' && await ventM.locator('[data-ppv-fila="x2"]').count() === 1 && await p.evaluate(() => !window.TABLAS_FALSAS.videos_tecnica.some(v => v.cliente_id === 'c4' && v.ejercicio_id === 'x9' && v.estado === 'pedido')));
+  // Ya revisado «A mejorar» (sin pedido nuevo): se puede pedir de nuevo desde ahí, o deshacer.
+  ok('un video revisado «A mejorar» trae «Pedir de nuevo» y «Deshacer»', await ventM.locator('[data-ppv-otra="x9"]').count() === 1 && await ventM.locator('[data-ppv-deshacer="x9"]').count() === 1);
+  await ventM.locator('[data-ppv-otra="x9"]').click();
+  await p.locator('[data-ppm-modal]').waitFor();
+  await p.locator('[data-ppm-confirmar]').click();
+  await p.waitForTimeout(1800);
+  ok('…«Pedir de nuevo» crea el pedido enlazado y la fila vuelve a «Pedido de nuevo · debe mejorar»', await p.evaluate(() => window.TABLAS_FALSAS.videos_tecnica.filter(v => v.cliente_id === 'c4' && v.ejercicio_id === 'x9' && v.estado === 'pedido' && v.pedido_de === 'v4p').length === 1) && /Pedido de nuevo · debe mejorar/.test(await p.locator('[data-ppv-fila="x9"]').innerText()));
   await p.evaluate(() => closeModal());
   // El filtro de la tarjeta deja solo a quienes tienen algo por pedir o sin llegar.
   await p.locator('[data-tq-filtro="pendientes"]').first().click();

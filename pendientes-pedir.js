@@ -434,7 +434,12 @@ window.ppVideos = async (id) => {
     else if (x.estado === 'pedido' && antesMal(o)) { est = `<span data-ppv-de-nuevo>${chip(`Pedido de nuevo · debe mejorar · ${hace(x.pedido_en)}`, 'mejorar')}</span>`; btn = opciones; }
     else if (x.estado === 'pedido') { est = chip(`Por llegar · ${hace(x.pedido_en)}`, dias(x.pedido_en) >= PP_ESPERA ? 'tarde' : 'falta'); btn = opciones; }
     else if (x.estado === 'recibido') { est = chip('Llegó por la app · falta revisarlo', 'recibido'); btn = b('Revisar', true, 'data-ppv-revisar', `closeModal();vtAbrir('${id}')`); }
-    else { const t = (typeof VT_ESTADO !== 'undefined' && VT_ESTADO[x.estado] ? VT_ESTADO[x.estado].txt : x.estado); est = chip(`Revisado · ${t}`, PPV_ESTADO[x.estado] ? x.estado : 'bien'); }
+    else {
+      const t = (typeof VT_ESTADO !== 'undefined' && VT_ESTADO[x.estado] ? VT_ESTADO[x.estado].txt : x.estado); est = chip(`Revisado · ${t}`, PPV_ESTADO[x.estado] ? x.estado : 'bien');
+      // Revisado: si debe mejorar, pedirlo de nuevo desde aquí; y «Deshacer» si lo marcaste por error.
+      if (x.id && (x.estado === 'mejorar' || x.estado === 'mal')) btn = b('Pedir de nuevo', true, `data-ppv-otra="${escapeHtml(k)}"`, `ppMejorar('${id}','${x.id}')`);
+      if (x.id) btn += b('Deshacer', false, `data-ppv-deshacer="${escapeHtml(k)}"`, `ppDeshacerRevision('${id}','${x.id}')`);
+    }
     return `<div class="ppv-f" data-ppv-fila="${escapeHtml(k)}" data-ppv-estado="${x.estado === 'pedido' ? (m ? 'entregado' : o.fuera ? 'pausa' : 'falta') : x.estado}"${o.fuera && !m ? ' style="opacity:.7"' : ''}>${prev(x.ejercicio_id, x.ejercicio_nombre)}
       <div style="flex:1;min-width:0"><div class="ppv-n">${escapeHtml(x.ejercicio_nombre || 'Video')}</div><div class="ppv-s">Pedido el ${fmt.fechaCorta(ppDia(x.pedido_en))} · ${hace(x.pedido_en)}</div>${x.estado === 'pedido' && antesMal(o) && antesMal(o).nota ? `<div class="ppv-s" data-ppv-corregir style="color:#B4541D">Qué corregir: ${escapeHtml(antesMal(o).nota)}</div>` : ''}${est}</div>
       <div class="ppv-b">${btn}</div></div>`;
@@ -503,7 +508,7 @@ window.ppMejorarConfirmar = async (id, filaId) => {
   let v = null;
   try { const { data } = await sb.from('videos_tecnica').select('*').eq('id', filaId); v = (data || [])[0] || null; } catch (e) { v = null; }
   if (!v) { toast('No encontré ese pedido'); return; }
-  if (!(await vtDb.actualizar(filaId, { estado: 'mejorar', revisado_en: fmt.hoy(), nota: nota || null }))) return;
+  if (!(await vtDb.actualizar(filaId, { estado: v.estado === 'mal' ? 'mal' : 'mejorar', revisado_en: v.revisado_en || fmt.hoy(), nota: nota || null }))) return;
   if (!(await vtDb.crear([{ cliente_id: id, ejercicio_id: v.ejercicio_id || null, ejercicio_nombre: v.ejercicio_nombre || null, estado: 'pedido', pedido_en: fmt.hoy(), pedido_de: v.id }]))) return;
   const c = (_tq.datos && (_tq.datos.filas.find(x => String(x.c.id) === String(id)) || {}).c) || await db.clientes.get(id);
   const nombre = String((c && c.nombre) || '').trim().split(/\s+/)[0] || '';
@@ -514,6 +519,13 @@ window.ppMejorarConfirmar = async (id, filaId) => {
   else { try { await navigator.clipboard.writeText(texto); toast('Mensaje copiado: pégalo en WhatsApp'); } catch (e) { /* nada */ } }
   toast(`${ej}: pedido de nuevo · debe mejorar`);
   await ppVideos(id);
+  await ppRefrescarVideos(id);
+};
+// Lo marcaste revisado por error: vuelve a «Por llegar» (sin la revisión ni su toque).
+window.ppDeshacerRevision = async (id, filaId) => {
+  if (typeof vtDb === 'undefined') return;
+  if (!(await vtDb.actualizar(filaId, { estado: 'pedido', revisado_en: null }))) return;
+  toast('Deshecho: vuelve a «Por llegar»');
   await ppRefrescarVideos(id);
 };
 window.ppQuitarVideo = async (id, filaId, nombreEnc) => {
