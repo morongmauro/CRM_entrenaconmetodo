@@ -105,7 +105,8 @@ routes.mensajes = async () => {
     </div>`;
   };
   view.innerHTML = `
-    <div class="mb-3"><h2 class="text-2xl font-bold text-slate-900">Mensajes enviados</h2>
+    <button type="button" class="me-volver" data-me-volver onclick="navigate('bandeja')">‹ Volver a Bandeja</button>
+    <div class="mb-3"><h2 class="text-2xl font-bold text-slate-900">Historial de mensajes enviados</h2>
       <p class="text-sm text-slate-500">Todo lo que le mandaste a cada cliente. Lo de su app se puede retirar; lo de WhatsApp se borra en WhatsApp.</p></div>
     <div class="me-caja" data-me>
       <div class="me-fils">
@@ -182,21 +183,11 @@ window.meGuardarEdicion = async (id) => {
   rerenderView();
 };
 
-// El botón «Mensajes» en la barra, después de «Toques».
+// Se entra desde Bandeja → «Historial de mensajes enviados».
 (function () {
-  const poner = () => {
-    const nav = document.getElementById('main-nav');
-    if (!nav || nav.querySelector('.nav-item[data-view="mensajes"]')) return !!nav;
-    const b = document.createElement('button');
-    b.className = 'nav-item'; b.dataset.view = 'mensajes'; b.textContent = 'Mensajes';
-    b.addEventListener('click', () => navigate('mensajes'));
-    const toques = nav.querySelector('.nav-item[data-view="toques"]');
-    if (toques && toques.nextSibling) nav.insertBefore(b, toques.nextSibling); else nav.appendChild(b);
-    return true;
-  };
-  let n = 0; const t = setInterval(() => { if ((poner() && document.querySelector('.nav-item[data-view="toques"]')) || ++n > 40) clearInterval(t); }, 250);
   const s = document.createElement('style');
   s.textContent = `
+  .me-volver{border:0;background:#F1EFE9;border-radius:999px;padding:6px 14px;font:inherit;font-size:13px;font-weight:700;margin-bottom:12px;cursor:pointer}
   .me-caja{background:#fff;border-radius:18px;padding:16px 18px;border:1px solid #EFEDE7}
   .me-fils{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
   .me-f{border:0;border-radius:999px;padding:6px 12px;background:#F1EFE9;font:inherit;font-size:13px;font-weight:700;cursor:pointer}

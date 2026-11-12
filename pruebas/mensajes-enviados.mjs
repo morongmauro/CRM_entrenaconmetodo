@@ -109,8 +109,10 @@ const ok = (nombre, c, extra = '') => { if (!c) mal++; console.log(`  ${c ? 'ok 
   await p.goto(BASE + '/');
   await p.locator('#app-screen').waitFor({ state: 'visible', timeout: 20000 });
   await p.waitForTimeout(1500);
-  ok('la barra trae «Mensajes»', await p.locator('.nav-item[data-view="mensajes"]').count() === 1);
-  await p.evaluate(() => navigate('mensajes'));
+  await p.evaluate(() => navigate('bandeja'));
+  await p.locator('[data-bdj-historial]').waitFor({ timeout: 15000 });
+  if (process.env.FOTO) await p.screenshot({ path: path.join(CAPTURAS, 'bandeja-historial-boton.png'), clip: { x: 0, y: 0, width: 1500, height: 260 } });
+  await p.locator('[data-bdj-historial]').click();
   await p.locator('[data-me]').waitFor({ timeout: 15000 });
   const fila = (id) => p.locator(`[data-me-fila="${id}"]`);
   const txt = async (id) => (await fila(id).innerText()).replace(/\s+/g, ' ');

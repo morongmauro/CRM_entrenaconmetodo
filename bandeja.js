@@ -566,7 +566,10 @@ routes.bandeja = async () => {
         <h2 class="text-xl font-bold text-slate-900">Bandeja</h2>
         <p class="text-sm text-slate-500">Lo que tus clientes hicieron en la app, ordenado. Toca a un cliente para abrir su ficha.</p>
       </div>
-      <button class="btn btn-secondary btn-sm" onclick="bdjRecargar()">↻ Actualizar</button>
+      <div class="flex gap-2 flex-wrap justify-end">
+        <button class="btn btn-secondary btn-sm" data-bdj-historial onclick="navigate('mensajes')">Historial de mensajes enviados</button>
+        <button class="btn btn-secondary btn-sm" onclick="bdjRecargar()">↻ Actualizar</button>
+      </div>
     </div>
 
     <div class="flex gap-2 mb-5 overflow-x-auto pb-1">
