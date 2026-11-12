@@ -131,7 +131,10 @@ async function tqCrudo(forzar = false) {
   try { if (typeof ppCargar === 'function') await ppCargar(clientes, vids); } catch (e) { console.warn('pendientes', e); }
   // Lo que le has dicho por tema y lo marcado en «Qué tocar» (que-tocar.js).
   try { if (typeof qtCargar === 'function') await qtCargar(null, forzar); } catch (e) { console.warn('qué tocar', e); }
-  _tq.crudo = { msj, vids, notas, ses, resp, com, toq, nhf, anot, eng, clientes };
+  // Videos que marcaste «Entregado y bien» (pendientes-pedir.js): cuenta como
+  // toque, porque al recibirlo le diste la retro.
+  const vEnt = (typeof _pp !== 'undefined' && _pp.crudo && _pp.crudo.pedidos || []).filter(p => p.tipo === 'video' && p.entregado_en && p.entregado_por === 'coach');
+  _tq.crudo = { msj, vids, notas, ses, resp, com, toq, nhf, anot, eng, clientes, vEnt };
   _tq.leido = Date.now();
   return _tq.crudo;
 }
@@ -145,6 +148,7 @@ function tqCalcular(R, ref) {
   const hasta = (l, fn) => (l || []).filter(x => { const f = fn(x); return !!f && f <= hoy; });
   const msj = hasta(R.msj, x => x.fecha), notas = hasta(R.notas, x => x.fecha || tqDia(x.created_at)), ses = hasta(R.ses, x => x.fecha);
   const resp = hasta(R.resp, x => tqDia(x.created_at)), com = hasta(R.com, x => tqDia(x.creado_en)), toq = hasta(R.toq, x => x.fecha);
+  const vEnt = hasta(R.vEnt, x => tqDia(x.entregado_en));
   // Los videos como estaban ese día: lo revisado después seguía pendiente.
   const vids = hasta(R.vids, x => x.pedido_en).map(x => (x.revisado_en && tqDia(x.revisado_en) > hoy ? { ...x, estado: 'pedido', revisado_en: null } : x));
   const de = (l, id) => (l || []).filter(x => String(x.cliente_id) === String(id));
@@ -165,6 +169,9 @@ function tqCalcular(R, ref) {
     const tuyos = [
       ...seg.map(x => ['seguimiento', x.fecha, mom(x.fecha, x.created_at)]),
       ...v.map(x => ['video', x.pedido_en, mom(x.pedido_en, x.created_at)]),
+      // Retro de video: lo revisaste (bien / a mejorar) o lo marcaste «Entregado y bien».
+      ...v.filter(x => x.revisado_en).map(x => ['video', tqDia(x.revisado_en), mom(tqDia(x.revisado_en))]),
+      ...de(vEnt, c.id).map(x => ['video', tqDia(x.entregado_en), mom(0, x.entregado_en)]),
       ...r.map(x => ['respuesta', tqDia(x.created_at), mom(0, x.created_at)]),
       ...cm.map(x => ['respuesta', tqDia(x.creado_en), mom(0, x.creado_en)]),
       ...notaM.map(x => ['respuesta', x.fecha, mom(x.fecha, x.created_at)]),
@@ -378,7 +385,8 @@ window.tqHistorial = async (id) => {
   vs.forEach(x => { (pedidos[x.pedido_en] = pedidos[x.pedido_en] || []).push(x.ejercicio_nombre || 'ejercicio'); });
   Object.entries(pedidos).forEach(([f, l]) => ev.push([f, `Pediste video${l.length === 1 ? '' : 's'}: ${l.join(', ')}`, true]));
   const EST = { bien: 'bien', mejorar: 'a mejorar', mal: 'nada bien' };
-  vs.filter(x => x.revisado_en && EST[x.estado]).forEach(x => ev.push([tqDia(x.revisado_en), `Revisaste su video de ${x.ejercicio_nombre || 'ejercicio'}: ${EST[x.estado]}`, false]));
+  vs.filter(x => x.revisado_en && EST[x.estado]).forEach(x => ev.push([tqDia(x.revisado_en), `Revisaste su video de ${x.ejercicio_nombre || 'ejercicio'} y le diste retro: ${EST[x.estado]}`, true]));
+  de(R.vEnt).forEach(x => { const k = String(x.detalle || '').replace(/^ej:/, ''); const n = (vs.find(v => (v.ejercicio_id && String(v.ejercicio_id) === k) || String(v.ejercicio_nombre || '').toLowerCase() === k.replace(/^n:/, '')) || {}).ejercicio_nombre; ev.push([tqDia(x.entregado_en), `Entregó video${n ? ` de ${escapeHtml(n)}` : ''} y le diste retro`, true]); });
   de(R.resp).forEach(x => ev.push([tqDia(x.created_at), 'Le respondiste en la app', true]));
   de(R.com).forEach(x => ev.push([tqDia(x.creado_en), 'Le comentaste en la app', true]));
   de(R.toq).forEach(x => ev.push([x.fecha, x.tipo === 'me_escribio' ? 'Te escribió por WhatsApp' : 'Abriste su WhatsApp', x.tipo !== 'me_escribio']));

@@ -303,6 +303,18 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   x = await item(p, 'c1', 'video');
   ok('…y la fila «Todos enviados · Todos entregados»', x && x.estado === 'entregado' && /Todos enviados/.test(x.texto) && /Todos entregados/.test(x.texto), JSON.stringify(x));
   await p.evaluate(() => closeModal());
+  // «Entregado y bien» cuenta como toque (le diste la retro), y sale en su historial.
+  const toqueRetro = await p.evaluate(async () => {
+    await tqCrudo(true);
+    const hoy = fmt.hoy(), solo = (vEnt) => ({ ..._tq.crudo, vids: [], msj: [], resp: [], com: [], toq: [], anot: [], vEnt });
+    const dia = (R) => { const f = tqCalcular(R, hoy).filas.find(x => x.c.id === 'c1'); return f && f.semana.find(d => d.d === hoy).tuyo; };
+    return { con: dia(solo(_tq.crudo.vEnt)), sin: dia(solo([])) };
+  });
+  ok('«Entregado y bien» cuenta como toque de hoy (y sin eso, no)', toqueRetro.con === true && toqueRetro.sin === false, JSON.stringify(toqueRetro));
+  await p.evaluate(() => tqHistorial('c1'));
+  await p.locator('[data-tq-historial]').waitFor({ timeout: 8000 });
+  ok('su historial dice «Entregó video de Press banca y le diste retro»', /Entregó video de Press banca y le diste retro/.test(await p.locator('[data-tq-historial]').innerText()));
+  await p.evaluate(() => closeModal());
   // En el detalle de Marta: Hip thrust «En pausa · ya no está en su ciclo».
   await celda(p, 'c4').locator('[data-pp="video"] [data-pp-ver]').click();
   const ventM = p.locator('[data-pp-videos="c4"]');
