@@ -49,6 +49,8 @@ const TQ_TONO = {
 const TQ_COLOR = { rojo: ['#D9483B', '#FBE3DE', '#B2402B'], amarillo: ['#F2C94C', '#FDF3D6', '#8A6410'], verde: ['#46965A', '#E4F1E7', '#2F7F45'], gris: ['#B9B6AF', '#EEF0F3', '#5A5A5F'] };
 const TQ_ORDEN = { debe: 0, frio: 1, enfria: 2, mucho: 3, bien: 4, pausa: 5 };
 const TQ_FRIO = 15, TQ_ENFRIA = 8;
+// Lo que cuenta como «Seguimiento» (lo demás escrito desde el CRM es «Mensaje»).
+const TQ_SEG_ORIGEN = new Set(['seguimiento', 'manual', 'esta-semana', null, undefined]);
 const tqLunes = (f) => { const t = new Date(f + 'T12:00:00Z'); t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7)); return t.toISOString().slice(0, 10); };
 const tqEntre = (a, b) => Math.round((Date.parse(b + 'T12:00:00Z') - Date.parse(a + 'T12:00:00Z')) / 86400000);
 const tqDia = (v) => String(v || '').slice(0, 10);
@@ -171,12 +173,12 @@ function tqCalcular(R, ref) {
     // momento exacto cuando lo hay (para saber quién escribió último).
     const mom = (f, ts) => (ts ? new Date(ts).toISOString() : `${f}T00:00:00.000Z`);
     const tuyos = [
-      ...seg.map(x => ['seguimiento', x.fecha, mom(x.fecha, x.created_at)]),
+      ...seg.map(x => [TQ_SEG_ORIGEN.has(x.origen) ? 'seguimiento' : 'mensaje', x.fecha, mom(x.fecha, x.created_at)]),
       ...v.map(x => ['video', x.pedido_en, mom(x.pedido_en, x.created_at)]),
       // Retro de video: lo revisaste (bien / a mejorar) o lo marcaste «Entregado y bien».
-      ...v.filter(x => x.revisado_en).map(x => ['video', tqDia(x.revisado_en), mom(tqDia(x.revisado_en))]),
-      ...de(vEnt, c.id).map(x => ['video', tqDia(x.entregado_en), mom(0, x.entregado_en)]),
-      ...de(yaPedi, c.id).map(x => ['whatsapp', tqDia(x.pedido_en), mom(0, x.pedido_en)]),
+      ...v.filter(x => x.revisado_en).map(x => ['retro', tqDia(x.revisado_en), mom(tqDia(x.revisado_en))]),
+      ...de(vEnt, c.id).map(x => ['retro', tqDia(x.entregado_en), mom(0, x.entregado_en)]),
+      ...de(yaPedi, c.id).map(x => ['pedido', tqDia(x.pedido_en), mom(0, x.pedido_en)]),
       ...r.map(x => ['respuesta', tqDia(x.created_at), mom(0, x.created_at)]),
       ...cm.map(x => ['respuesta', tqDia(x.creado_en), mom(0, x.creado_en)]),
       ...notaM.map(x => ['respuesta', x.fecha, mom(x.fecha, x.created_at)]),
@@ -203,7 +205,9 @@ function tqCalcular(R, ref) {
     // La semana, día por día: en qué días lo tocaste y en cuáles te escribió.
     const diasTuyos = new Set(tuyos.filter(x => semana(x[1])).map(x => x[1]));
     const diasSuyos = new Set(suyos.filter(x => semana(x[1])).map(x => x[1]));
-    const tipos = ['seguimiento', 'video', 'respuesta', 'whatsapp', 'dicho'].filter(k => tuyos.some(x => x[0] === k && semana(x[1])));
+    // Los tipos de toque de la semana y cuántas veces cada uno (lo repetido
+    // en el mismo momento cuenta una vez).
+    const tipos = Object.keys(TQ_TIPO).map(k => [k, new Set(tuyos.filter(x => x[0] === k && semana(x[1])).map(x => x[2])).size]).filter(x => x[1]);
     const segSemana = seg.filter(x => semana(x.fecha)).map(x => x.fecha).sort();
     // Videos: el último de cada ejercicio manda (pedido = por llegar,
     // recibido = por revisar, que es tarea tuya).
@@ -324,7 +328,7 @@ const TQ_FALTA = {
   // Filtros rápidos: a quién le toca pedir (o recordar) video, y a quién le falta el seguimiento.
   pedirVideo: (f) => f.estado !== 'pausa' && typeof ppDe === 'function' && ppDe(f.c.id).some(x => x.tipo === 'video' && (x.estado === 'toca' || x.estado === 'recordar')),
 };
-const TQ_TIPO = { seguimiento: 'Seguimiento', video: 'Video', respuesta: 'Respuesta', whatsapp: 'WhatsApp', dicho: 'Le dijiste' };
+const TQ_TIPO = { seguimiento: 'Seguimiento', mensaje: 'Mensaje', respuesta: 'Respuesta', whatsapp: 'WhatsApp', video: 'Pedir video', retro: 'Retro de video', pedido: 'Pedir fotos o medidas', dicho: 'Qué tocar' };
 
 // Semana corta: «3–9 nov» o «27 oct–2 nov».
 const TQ_MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -469,14 +473,14 @@ routes.toques = async () => {
   const histCel = (f) => `<div class="tq-hs">${porCliente.map((M, k) => {
     const x = M.get(String(f.c.id)), S = sems[k];
     if (!x) return `<div class="tq-hw${S.actual ? ' act' : ''}"><div class="tq-hw-t"><span>${S.actual ? 'Esta semana' : tqRango(S.lunes)}</span></div><span class="tq-cero">—</span></div>`;
-    return `<div class="tq-hw${S.actual ? ' act' : ''}${k === 2 && !S.actual ? ' sel' : ''}" data-tq-hist-semana="${S.lunes}"><div class="tq-hw-t"><span>${S.actual ? 'Esta semana' : tqRango(S.lunes)}</span><b>${x.diasToque} día${x.diasToque === 1 ? '' : 's'}</b></div>${tqEtiquetas(x, S.actual)}</div>`;
+    return `<div class="tq-hw${S.actual ? ' act' : ''}${k === 2 && !S.actual ? ' sel' : ''}" data-tq-hist-semana="${S.lunes}"><div class="tq-hw-t"><span>${S.actual ? 'Esta semana' : tqRango(S.lunes)}</span><b>${x.diasToque} día${x.diasToque === 1 ? '' : 's'}</b></div>${x.tipos.length ? `<div class="tq-hw-n" data-tq-hw-tipos>${x.tipos.length} tipo${x.tipos.length === 1 ? '' : 's'}: ${x.tipos.map(([k]) => TQ_TIPO[k].toLowerCase()).join(', ')}</div>` : ''}${tqEtiquetas(x, S.actual)}</div>`;
   }).join('')}</div>`;
   const fila = (f) => `<tr data-tq-cliente="${f.c.id}" data-tq-estado="${f.estado}" data-tq-color="${color(f)}" data-tq-nombre="${escapeHtml(tqNorm(f.c.nombre))}">
       <td class="lis-nom tq-nom-cel" onclick="tqHistorial('${f.c.id}')" title="Ver su historial de 6 semanas">${typeof entAvatar === 'function' ? entAvatar(f.c.nombre) : ''}<div><b>${escapeHtml(f.c.nombre)}</b><div class="tq-sub" data-tq-ultimo>Tu último toque: ${tqCuando(f.ultTuyo, D.hoy)}</div></div></td>
       <td>${semaforo(f)}</td>
       <td data-tq="dicho">${D.actual && typeof qtCeldaToques === 'function' ? qtCeldaToques(f) : '<span class="tq-cero">—</span>'}</td>
       <td data-tq="historial" class="tq-hist-cel" onclick="tqHistorial('${f.c.id}')" title="Toca para ver su historial de 6 semanas">${histCel(f)}</td>
-      <td data-tq="semana">${tira(f)}<div class="tq-sub" data-tq-dias>${f.diasToque ? `<b>${f.diasToque}</b> de 7 días` : `Sin tocarlo ${deSemana}`}</div>${f.tipos.length ? `<div>${f.tipos.map(k => `<span class="tq-ch">${TQ_TIPO[k]}</span>`).join('')}</div>` : ''}</td>
+      <td data-tq="semana">${tira(f)}<div class="tq-sub" data-tq-dias>${f.diasToque ? `<b>${f.diasToque}</b> de 7 días · <b data-tq-ntipos>${f.tipos.length}</b> tipo${f.tipos.length === 1 ? '' : 's'}` : `Sin tocarlo ${deSemana}`}</div>${f.tipos.length ? `<div data-tq-tipos>${f.tipos.map(([k, n]) => `<span class="tq-ch" data-tq-tipo="${k}">${TQ_TIPO[k]}${n > 1 ? ` <b>×${n}</b>` : ''}</span>`).join('')}</div>` : ''}</td>
       <td data-tq="seguimiento">${celdaSeg(f)}</td>
       <td data-tq="ciclo" style="min-width:150px">${D.actual && typeof ppCiclo === 'function' ? ppCiclo(f.c) : '<span class="tq-cero">—</span>'}</td>
       <td data-tq="pendientes">${D.actual && typeof ppCelda === 'function' ? ppCelda(f) : '<span class="tq-cero">—</span>'}</td>
@@ -557,6 +561,8 @@ routes.toques = async () => {
   .tq-acc a.cp-btn{text-decoration:none;display:inline-block}
   .tq-falta{font-weight:700;color:#8A6410}
   .tq-rojo{font-weight:700;color:#B2402B}
+  .tq-hw-n{font-size:10.5px;color:#8A8780;line-height:1.3;margin:-1px 0 3px}
+  .tq-ch b{font-weight:800;color:#1F1F1F}
   .tq-ch{display:inline-block;font-size:10.5px;font-weight:700;background:#F1EFE9;color:#555;border-radius:999px;padding:1px 7px;margin:3px 3px 0 0}
   .tq-tira{display:flex;gap:3px}
   .tq-dia{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;font-size:10px;font-weight:700;color:#9A978F;background:#F1EFE9;box-sizing:border-box}

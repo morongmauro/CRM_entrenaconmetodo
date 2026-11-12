@@ -136,7 +136,7 @@ for (const [tag, ancho] of [['ancho', 1440], ['telefono', 390]]) {
   const celda = async (c, k) => (await p.locator(`tr[data-tq-cliente="${c}"] [data-tq="${k}"]`).innerText()).trim();
   ok(`${tag} · Sofía: seguimiento semanal hecho`, /^Hecho/.test(await celda('c5', 'seguimiento')));
   ok(`${tag} · Marta: le falta el seguimiento semanal`, /^Falta/.test(await celda('c4', 'seguimiento')));
-  ok(`${tag} · Ana: seguimiento y respuesta el mismo día = 1 toque`, (await p.locator('tr[data-tq-cliente="c0"] [data-tq-dias]').innerText()).trim() === '1 de 7 días' && /Seguimiento/.test(await celda('c0', 'semana')) && /Respuesta/.test(await celda('c0', 'semana')), await celda('c0', 'semana'));
+  ok(`${tag} · Ana: seguimiento y respuesta el mismo día = 1 día, 2 tipos`, (await p.locator('tr[data-tq-cliente="c0"] [data-tq-dias]').innerText()).trim() === '1 de 7 días · 2 tipos' && /Seguimiento/.test(await celda('c0', 'semana')) && /Respuesta/.test(await celda('c0', 'semana')), await celda('c0', 'semana'));
   ok(`${tag} · Ana: el día de hoy marcado en su semana`, await p.locator('tr[data-tq-cliente="c0"] .tq-dia.t').count() === 1);
   ok(`${tag} · Ana: te escribió y le respondiste`, /respondido/.test(await celda('c0', 'escribio-app')) && /^1 entreno/.test(await celda('c0', 'su-semana')));
   ok(`${tag} · Carlos: «Responder» en vez de «Seguimiento»`, await p.locator('tr[data-tq-cliente="c1"] [data-tq-responder]').count() === 1 && /sin responder/.test(await celda('c1', 'escribio-app')));
