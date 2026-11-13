@@ -56,7 +56,8 @@ async function meCargar() {
     const canal = app ? 'app' : /solo guardado/i.test(titulo) ? 'guardado' : (s.origen === 'manual' || atendido) ? 'marcado' : 'whatsapp';
     items.push({ fuente: 'seg', id: s.id, cliente: porId.get(String(s.cliente_id)), cliente_id: s.cliente_id, t: s.created_at || `${s.fecha}T12:00:00Z`, canal, tipo: meTipo(s), texto: s.texto, retirado: s.retirado_en, appNota: app });
   });
-  (caps || []).forEach(k => items.push({ fuente: 'cap', id: k.id, cliente: porId.get(String(k.cliente_id)), cliente_id: k.cliente_id, t: k.enviada_en, canal: 'whatsapp', tipo: 'Cápsula con pregunta', texto: `«${k.capsula_titulo || k.capsula_id}»${k.pregunta ? ` · Cuando la leas, cuéntame: ${k.pregunta}` : ''}`, retirado: k.retirado_en, extra: k.recordada_en ? `recordada ${meCuando(k.recordada_en)}` : '' }));
+  // La que leyó por su cuenta y respondió en su app no es un mensaje tuyo.
+  (caps || []).filter(k => !k.por_su_cuenta).forEach(k => items.push({ fuente: 'cap', id: k.id, cliente: porId.get(String(k.cliente_id)), cliente_id: k.cliente_id, t: k.enviada_en, canal: 'whatsapp', tipo: 'Cápsula con pregunta', texto: `«${k.capsula_titulo || k.capsula_id}»${k.pregunta ? ` · Cuando la leas, cuéntame: ${k.pregunta}` : ''}`, retirado: k.retirado_en, extra: k.recordada_en ? `recordada ${meCuando(k.recordada_en)}` : '' }));
   (coms || []).forEach(k => items.push({ fuente: 'com', id: k.id, cliente: porId.get(String(k.cliente_id)), cliente_id: k.cliente_id, t: k.creado_en, canal: 'app',
     tipo: `Comentario en ejercicio · ${ejNom.get(String(k.ejercicio_id)) || 'ejercicio'}`, texto: k.texto, visto: k.leido_en, retirado: k.quitado_en,
     extra: k.tipo === 'siempre' ? 'Siempre presente (fijo en la tarjeta del ejercicio)' : 'Para la próxima vez' }));

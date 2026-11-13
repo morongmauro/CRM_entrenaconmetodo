@@ -175,6 +175,18 @@ const est = async (p, id) => cel(p, id).locator('[data-cp-estado]').getAttribute
   const h = await p.locator('[data-tq-historial]').innerText();
   ok('el historial dice que se la enviaste y lo que te respondió', /Le enviaste la cápsula «Dormir mejor con lo que tienes»/.test(h) && /Te respondió sobre «Dormir mejor con lo que tienes»: «Voy a dejar el celular/.test(h), h.slice(0, 300));
   await p.evaluate(() => closeModal());
+
+  // Respuesta desde su app, de una que leyó por su cuenta (la fila la crea la app).
+  await p.evaluate((d) => { window.TABLAS_FALSAS.capsulas_pedidas.push({ id: 'k9', user_id: 'coach-1', cliente_id: 'c1', capsula_id: 'nut-07-cada-macro', capsula_titulo: 'Cuánto de cada macro',
+    pregunta: '¿qué?', enviada_en: d, recordada_en: null, respondio_en: d, respuesta: 'Huevos en el desayuno', respondio_app: true, por_su_cuenta: true }); }, new Date().toISOString());
+  await p.evaluate(() => routes.toques()); await p.waitForTimeout(2000);
+  t = (await cel(p, 'c1').innerText()).replace(/\s+/g, ' ');
+  ok(`respuesta desde su app: «Respondió en su app» y «La leyó por su cuenta» (${t})`, /Respondió en su app · hoy/.test(t) && /La leyó por su cuenta/.test(t) && /Huevos en el desayuno/.test(t), t);
+  await p.evaluate(() => tqHistorial('c1'));
+  await p.locator('[data-tq-historial]').waitFor({ timeout: 8000 });
+  const h2 = await p.locator('[data-tq-historial]').innerText();
+  ok('historial: lo cuenta como mensaje suyo, no como cápsula enviada por ti', /Leyó «Cuánto de cada macro» por su cuenta y te respondió en su app: «Huevos/.test(h2) && !/Le enviaste la cápsula «Cuánto de cada macro»/.test(h2), h2.slice(0, 400));
+  await p.evaluate(() => closeModal());
   ok('sin errores', errores.length === 0, errores.join(' | '));
   await ctx.close();
 }

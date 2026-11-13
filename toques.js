@@ -161,7 +161,10 @@ function tqCalcular(R, ref) {
   const resp = hasta(R.resp, x => tqDia(x.created_at)), com = hasta(R.com, x => tqDia(x.creado_en)), toq = hasta(R.toq, x => x.fecha);
   const vEnt = hasta(R.vEnt, x => tqDia(x.entregado_en)), yaPedi = hasta(R.yaPedi, x => tqDia(x.pedido_en));
   // Cápsulas: enviarla, recordarla y su respuesta (cada momento, hasta ese día).
-  const cps = (R.cps || []).flatMap(x => [x.enviada_en, x.recordada_en, x.respondio_en].filter(t => t && tqDia(t) <= hoy).map(t => ({ cliente_id: x.cliente_id, t })));
+  // La que leyó por su cuenta (no se la enviaste) no es toque tuyo, y su
+  // respuesta desde la app es un mensaje suyo, no algo que hiciste tú.
+  const cps = (R.cps || []).flatMap(x => [x.por_su_cuenta ? null : x.enviada_en, x.recordada_en, x.respondio_app ? null : x.respondio_en].filter(t => t && tqDia(t) <= hoy).map(t => ({ cliente_id: x.cliente_id, t })));
+  const cpsApp = (R.cps || []).filter(x => x.respondio_app && x.respondio_en && tqDia(x.respondio_en) <= hoy);
   // Los videos como estaban ese día: lo revisado después seguía pendiente.
   const vids = hasta(R.vids, x => x.pedido_en).map(x => (x.revisado_en && tqDia(x.revisado_en) > hoy ? { ...x, estado: 'pedido', revisado_en: null } : x));
   const de = (l, id) => (l || []).filter(x => String(x.cliente_id) === String(id));
@@ -202,6 +205,7 @@ function tqCalcular(R, ref) {
       ...n.map(x => ['app', x.fecha || tqDia(x.created_at), mom(x.fecha, x.created_at), listo(x, `nota:${x.id}`)]),
       ...notasSes.map(x => ['app', x.fecha, mom(x.fecha), listo(x, `cierre:${x.id}`)]),
       ...meWa.map(x => ['whatsapp', x.fecha, mom(x.fecha, x.created_at), false]),
+      ...de(cpsApp, c.id).map(x => ['app', tqDia(x.respondio_en), mom(0, x.respondio_en), listo(x, `cap:${x.id}`)]),
     ].filter(x => x[1]);
     const suyosPend = suyos.filter(x => !x[3]);
     const ultDe = (l, i) => l.map(x => x[i]).sort().pop() || null;
@@ -415,9 +419,9 @@ window.tqHistorial = async (id) => {
   de(R.yaPedi).forEach(x => ev.push([tqDia(x.pedido_en), `${x.detalle === 'recordatorio' ? 'Le recordaste' : 'Le pediste'} ${PED_NOM[x.tipo] || x.tipo}`, true]));
   de(R.cps).forEach(x => {
     const t = escapeHtml(x.capsula_titulo || x.capsula_id);
-    ev.push([tqDia(x.enviada_en), `Le enviaste la cápsula «${t}»`, true]);
+    if (!x.por_su_cuenta) ev.push([tqDia(x.enviada_en), `Le enviaste la cápsula «${t}»`, true]);
     if (x.recordada_en) ev.push([tqDia(x.recordada_en), `Le recordaste la cápsula «${t}»`, true]);
-    if (x.respondio_en) ev.push([tqDia(x.respondio_en), `Te respondió sobre «${t}»${x.respuesta ? `: «${escapeHtml(corto(x.respuesta))}»` : ''}`, true]);
+    if (x.respondio_en) ev.push([tqDia(x.respondio_en), `${x.respondio_app ? `Leyó «${t}»${x.por_su_cuenta ? ' por su cuenta' : ''} y te respondió en su app` : `Te respondió sobre «${t}»`}${x.respuesta ? `: «${escapeHtml(corto(x.respuesta))}»` : ''}`, !x.respondio_app]);
   });
   de(R.ses).filter(x => String(x.notas_cliente || '').trim()).forEach(x => ev.push([x.fecha, `Te dejó una nota al terminar: «${escapeHtml(corto(x.notas_cliente))}»`, false]));
   const QT_V = { felicita: 'Lo felicitaste', pide: 'Le pediste', corrige: 'Le corregiste' };

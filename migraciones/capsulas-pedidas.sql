@@ -35,3 +35,10 @@ notify pgrst, 'reload schema';
 
 -- Comprobación: debe decir «sí».
 select 'capsulas_pedidas' as que, case when to_regclass('public.capsulas_pedidas') is not null then 'sí' else 'no' end as existe;
+
+-- Respuesta desde la app (el cliente responde la pregunta al final de la cápsula):
+--   · respondio_app → la respuesta llegó desde su app (es un mensaje suyo, no un toque tuyo)
+--   · por_su_cuenta → la leyó sin que se la enviaras (la fila la creó la app)
+alter table capsulas_pedidas add column if not exists respondio_app boolean;
+alter table capsulas_pedidas add column if not exists por_su_cuenta boolean;
+notify pgrst, 'reload schema';
