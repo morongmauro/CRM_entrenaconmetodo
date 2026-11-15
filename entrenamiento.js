@@ -753,8 +753,8 @@ function entFiltrarSinOrden(lista) {
     if (f.uso === 'ingles' && !(window.grNecesitaIngles && grNecesitaIngles(e))) return false;
     if (f.uso === 'repetidos' && !(_ent.grRep && _ent.grRep.has(e.id))) return false;
     //   «fb-hoy» / «fb-analisis» → video de Functional Bodybuilding (functional-bodybuilding.js).
-    if (f.uso === 'fb-hoy' && !(window.fbPendiente && fbPendiente(e, 'hoy'))) return false;
-    if (f.uso === 'fb-analisis' && !(window.fbPendiente && fbPendiente(e, 'analisis'))) return false;
+    if (f.uso === 'fb-hoy' && !(window.fbEnGrupo && fbEnGrupo(e, 'hoy'))) return false;
+    if (f.uso === 'fb-analisis' && !(window.fbEnGrupo && fbEnGrupo(e, 'analisis'))) return false;
     //   «fichas» → les falta patrón, músculos, cómo hacerlo bien o errores (fichas-ia.js).
     if (f.uso === 'fichas' && !(window.fiIncompleta && fiIncompleta(e))) return false;
     if (musculos.length) {
@@ -936,7 +936,7 @@ function entNivelesCuenta() {
   const decidir = _ent.enUso ? todos.filter(entPorDecidir) : null;
   return {
     elegidos: elegidos && de(elegidos), decidir: decidir && de(decidir),
-    fbHoy: fb && fb.hoy ? { n: fb.hoy, sin: 0 } : null, fbAnalisis: fb && fb.analisis ? { n: fb.analisis, sin: 0, exactos: fb.exactos } : null, clientes: ahora && de(ahora), antes: antes && de(antes), analisis: analisis && de(analisis), duplicados: duplicados.length ? { n: duplicados.length, sin: 0 } : null,
+    fbHoy: fb && (fb.hoy || fb.revHoy) ? { n: fb.hoy, sin: 0, rev: fb.revHoy } : null, fbAnalisis: fb && (fb.analisis || fb.revAnalisis) ? { n: fb.analisis, sin: 0, exactos: fb.exactos, rev: fb.revAnalisis } : null, clientes: ahora && de(ahora), antes: antes && de(antes), analisis: analisis && de(analisis), duplicados: duplicados.length ? { n: duplicados.length, sin: 0 } : null,
     fichas: fichas ? { n: fichas, sin: 0 } : null,
     ingles: ingles ? { n: ingles, sin: 0 } : null, repetidos: grupos.length ? { n: grupos.length, sin: 0 } : null, '': de(todos) };
 }
@@ -1074,8 +1074,8 @@ function entNivelesResumen(compacto = false) {
       ${caja('', '📚', '3 · Toda la galería', c[''])}
     </div>
     ${c.ingles || c.repetidos || c.fichas || c.fbHoy || c.fbAnalisis ? `<div class="mt-2 grid ${compacto ? 'grid-cols-2' : 'grid-cols-1 md:grid-cols-3'} gap-2" data-niveles-revision>
-      ${c.fbHoy ? cajaRev('fb-hoy', 'Functional Bodybuilding · los de hoy', `<b class="text-slate-900">${c.fbHoy.n}</b> ejercicios · <b class="text-blue-700">compara y elige</b>`) : ''}
-      ${c.fbAnalisis ? cajaRev('fb-analisis', 'Functional Bodybuilding · en análisis', `<b class="text-slate-900">${c.fbAnalisis.n}</b> ejercicios${c.fbAnalisis.exactos ? ` · <b class="text-green-700">${c.fbAnalisis.exactos} con el mismo nombre</b>` : ''}`) : ''}
+      ${c.fbHoy ? cajaRev('fb-hoy', 'Functional Bodybuilding · los de hoy', `<b class="text-slate-900">${c.fbHoy.n}</b> por revisar${c.fbHoy.rev ? ` · <b class="text-green-700">${c.fbHoy.rev} ya revisados</b>` : ''}`) : ''}
+      ${c.fbAnalisis ? cajaRev('fb-analisis', 'Functional Bodybuilding · en análisis', `<b class="text-slate-900">${c.fbAnalisis.n}</b> por revisar${c.fbAnalisis.rev ? ` · <b class="text-green-700">${c.fbAnalisis.rev} ya revisados</b>` : ''}${c.fbAnalisis.exactos ? ` · ${c.fbAnalisis.exactos} con el mismo nombre` : ''}`) : ''}
       ${c.fichas ? cajaRev('fichas', 'Ficha incompleta', `<b class="text-slate-900">${c.fichas.n}</b> ejercicios · <b class="text-green-700">complétalas con IA</b>`) : ''}
       ${c.ingles ? cajaRev('ingles', 'Sin nombre en inglés', `<b class="text-slate-900">${c.ingles.n}</b> ejercicios · <b class="text-blue-700">ponles el inglés</b>`) : ''}
       ${c.repetidos ? cajaRev('repetidos', 'Repetidos', `<b class="text-slate-900">${c.repetidos.n}</b> grupos · <b class="text-amber-700">elige cuál dejar</b>`) : ''}

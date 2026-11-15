@@ -81,9 +81,9 @@ for (const [ancho, alto] of [[1440, 1000], [390, 844]]) {
   await p.evaluate(() => { if (window.entTab) entTab('ejercicios'); });
   const hoyBtn = p.locator('[data-niveles-revision] [data-nivel="fb-hoy"]');
   await hoyBtn.waitFor({ timeout: 15000 });
-  ok('caja «los de hoy»: 2 (el que ya es del canal no cuenta)', /\b2\b\s*ejercicios/.test(await hoyBtn.innerText()), await hoyBtn.innerText());
+  ok('caja «los de hoy»: 2 (el que ya es del canal no cuenta)', /\b2\b\s*por revisar/.test(await hoyBtn.innerText()), await hoyBtn.innerText());
   const anaBtn = p.locator('[data-niveles-revision] [data-nivel="fb-analisis"]');
-  ok('caja «en análisis»: 2, 1 con el mismo nombre (el raro no sale)', /\b2\b\s*ejercicios/.test(await anaBtn.innerText()) && /1 con el mismo nombre/.test(await anaBtn.innerText()), await anaBtn.innerText());
+  ok('caja «en análisis»: 2, 1 con el mismo nombre (el raro no sale)', /\b2\b\s*por revisar/.test(await anaBtn.innerText()) && /1 con el mismo nombre/.test(await anaBtn.innerText()), await anaBtn.innerText());
   await hoyBtn.click();
   await p.locator('[data-fb-lista="hoy"]').waitFor({ timeout: 10000 });
   const filas = await p.locator('[data-fb-ej]').evaluateAll(l => l.map(x => x.dataset.fbEj));
@@ -98,6 +98,15 @@ for (const [ancho, alto] of [[1440, 1000], [390, 844]]) {
   await p.waitForTimeout(900);
   t = await p.evaluate(() => window.TABLAS_FALSAS.ejercicios);
   ok('«Dejar el actual»: el Pallof sigue con su video y sale de la lista', t.find(e => e.id === 'h1').video_ref === 'M7lc1UVf-VE' && (await p.locator('[data-fb-ej]').count()) === 0);
+  // Ya revisados: el que usó el del canal y el que se quedó con el suyo, marcados.
+  await p.locator('[data-fb-ver="rev"]').click(); await p.waitForTimeout(600);
+  const rev = await p.locator('[data-fb-ej]').evaluateAll(l => l.map(x => x.dataset.fbEj + ':' + (x.querySelector('[data-fb-hecho]') || {}).dataset?.fbHecho).sort());
+  ok('«Ya revisados»: los del canal (Clapping Push Up, Goblet Cossack) y el Pallof (se quedó con el suyo), marcados', JSON.stringify(rev) === '["h1:actual","h2:fb","h6:fb"]', JSON.stringify(rev));
+  if (FOTO) { await p.waitForTimeout(1200); await p.locator('#flt-lista').screenshot({ path: path.join(CAPTURAS, `fb-revisados-${ancho}-${FOTO}.png`) }); }
+  ok('la caja dice 0 por revisar y 3 ya revisados', /0\s*por revisar/.test(await p.locator('[data-niveles-revision] [data-nivel="fb-hoy"]').innerText()) && /3 ya revisados/.test(await p.locator('[data-niveles-revision] [data-nivel="fb-hoy"]').innerText()), await p.locator('[data-niveles-revision] [data-nivel="fb-hoy"]').innerText());
+  t = await p.evaluate(() => window.TABLAS_FALSAS.ejercicios);
+  ok('«Dejar el actual» queda guardado en la base (video_elegido_at)', !!t.find(e => e.id === 'h1').video_elegido_at);
+  await p.evaluate(() => fbVer('hoy', 'pend'));
   await p.evaluate(() => entIrNivel('fb-analisis'));
   await p.locator('[data-fb-lista="analisis"]').waitFor({ timeout: 10000 });
   ok('en análisis: Cossack Squat (mismo nombre) y Dumbbell Front Raise (parecido)', (await p.locator('[data-fb-ej="h3"] [data-fb-cand="dhDjKmTX8tU"]').count()) === 1 && (await p.locator('[data-fb-ej="h4"] .fb-cand').count()) >= 1 && (await p.locator('[data-fb-ej="h5"]').count()) === 0);

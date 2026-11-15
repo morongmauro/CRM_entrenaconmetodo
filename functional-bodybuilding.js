@@ -88,13 +88,26 @@ const fbEsDelCanal = (e) => !!(e && e.video_fuente === 'youtube' && e.video_ref 
 const fbDejados = () => { try { return new Set(JSON.parse(localStorage.getItem(FB_CLAVE_DEJAR) || '[]')); } catch (x) { return new Set(); } };
 function fbDejar(id) { try { const s = fbDejados(); s.add(id); localStorage.setItem(FB_CLAVE_DEJAR, JSON.stringify([...s])); } catch (x) { /* sin almacenamiento */ } }
 
-// ¿Entra en la revisión? `cual`: 'hoy' (los usan ahora) o 'analisis'.
-function fbPendiente(e, cual) {
+// ¿Ya lo revisaste? 'fb' = quedó con el video del canal; 'actual' = te
+// quedaste con el que tenía (o elegiste otro a mano); null = falta revisarlo.
+function fbRevisado(e) {
+  if (!e) return null;
+  if (fbEsDelCanal(e)) return 'fb';
+  if (fbDejados().has(e.id) || e.video_elegido_at) return 'actual';
+  return null;
+}
+window.fbRevisado = fbRevisado;
+// ¿Es de esta revisión (revisado o no)? `cual`: 'hoy' (los usan ahora) o 'analisis'.
+function fbEnGrupo(e, cual) {
   if (!e || e.archivado || !_fb.lista) return false;
   const hoy = !!(_ent.enUso && _ent.enUso.has(e.id));
   if ((cual === 'hoy') !== hoy) return false;
-  if (fbEsDelCanal(e) || fbDejados().has(e.id)) return false;
-  return fbCandidatos(e, 1).length > 0;
+  return fbEsDelCanal(e) ? !!fbRevisado(e) && fbCandidatos(e, 1).length > 0 : fbCandidatos(e, 1).length > 0;
+}
+window.fbEnGrupo = fbEnGrupo;
+// Lo que falta revisar.
+function fbPendiente(e, cual) {
+  return fbEnGrupo(e, cual) && !fbRevisado(e);
 }
 window.fbPendiente = fbPendiente;
 function fbCuenta(lista) {
@@ -102,7 +115,9 @@ function fbCuenta(lista) {
   const hoy = lista.filter(e => fbPendiente(e, 'hoy')).length;
   const analisis = lista.filter(e => fbPendiente(e, 'analisis'));
   const exactos = analisis.filter(e => fbExacto(e)).length;
-  return { hoy, analisis: analisis.length, exactos };
+  const revHoy = lista.filter(e => fbEnGrupo(e, 'hoy') && fbRevisado(e)).length;
+  const revAnalisis = lista.filter(e => fbEnGrupo(e, 'analisis') && fbRevisado(e)).length;
+  return { hoy, analisis: analisis.length, exactos, revHoy, revAnalisis };
 }
 window.fbCuenta = fbCuenta;
 const fbExacto = (e) => { const c = fbCandidatos(e, 1)[0]; return c && c.p === 1 ? c : null; };
@@ -141,13 +156,14 @@ function fbFila(e, cual) {
   const n = entNombres(e);
   const cands = fbCandidatos(e, 3);
   return `
-    <div class="fb-fila" data-fb-ej="${e.id}">
+    <div class="fb-fila${fbRevisado(e) ? ' fb-rev' : ''}" data-fb-ej="${e.id}">
       <div class="fb-actual">
+        ${fbRevisado(e) ? `<div class="fb-hecho" data-fb-hecho="${fbRevisado(e)}">✓ Revisado · ${fbRevisado(e) === 'fb' ? 'quedó con el de Functional Bodybuilding' : 'te quedaste con su video'}</div>` : ''}
         <div class="fb-cab">Su video ahora</div>
         ${fbPrevFicha(e)}
         <div class="fb-n"><b>${escapeHtml(n.grande)}</b>${n.chico ? `<span>${escapeHtml(n.chico)}</span>` : ''}</div>
         <div class="fb-tags">${fbUso(e)}${(e.video_fuente || 'ninguno') === 'ninguno' ? '<span class="tag tag-red">sin video</span>' : ''}</div>
-        ${(e.video_fuente || 'ninguno') !== 'ninguno' ? `<button type="button" class="btn btn-ghost btn-sm" data-fb-dejar="${e.id}" onclick="fbDejarActual('${e.id}')">Dejar el actual</button>` : ''}
+        ${(e.video_fuente || 'ninguno') !== 'ninguno' && !fbRevisado(e) ? `<button type="button" class="btn btn-ghost btn-sm" data-fb-dejar="${e.id}" onclick="fbDejarActual('${e.id}')">Dejar el actual</button>` : ''}
       </div>
       <div class="fb-cands">
         <div class="fb-cab">En Functional Bodybuilding</div>
@@ -157,16 +173,38 @@ function fbFila(e, cual) {
               ${fbPrevYt(c.id, c.t)}
               <div class="fb-t">${escapeHtml(c.t)}</div>
               <div class="fb-tags">${c.p === 1 ? '<span class="tag tag-green">mismo nombre</span>' : '<span class="tag tag-gray">parecido</span>'}</div>
-              <button type="button" class="btn btn-primary btn-sm" data-fb-usar="${escapeHtml(c.id)}" onclick="fbUsar('${e.id}', '${escapeHtml(c.id)}')">Usar este</button>
+              ${e.video_ref === c.id ? '<span class="tag tag-green" data-fb-puesto>Es el que tiene</span>' : `<button type="button" class="btn btn-primary btn-sm" data-fb-usar="${escapeHtml(c.id)}" onclick="fbUsar('${e.id}', '${escapeHtml(c.id)}')">Usar este</button>`}
             </div>`).join('')}
         </div>
       </div>
     </div>`;
 }
+// Las decisiones viejas de «Dejar el actual» vivían solo en este navegador:
+// se pasan a la base una vez, para verlas en cualquier computador.
+async function fbSubirDejados() {
+  if (_fb.subidos) return; _fb.subidos = true;
+  const ids = [...fbDejados()].filter(id => { const e = (_ent.ejercicios || []).find(x => x.id === id); return e && !e.video_elegido_at; });
+  for (const id of ids) {
+    const ahora = new Date().toISOString();
+    try { const { error } = await sb.from('ejercicios').update({ video_elegido_at: ahora }).eq('id', id); if (error) return; const e = (_ent.ejercicios || []).find(x => x.id === id); if (e) e.video_elegido_at = ahora; } catch (x) { return; }
+  }
+}
+window.fbVer = (cual, vista) => { _fb.vista = _fb.vista || {}; _fb.vista[cual] = vista; entRepintarGaleria(); };
 function fbHtml(lista, cual) {
   if (!_fb.lista) return '<div class="card text-center text-slate-500 py-8">Cargando los videos del canal…</div>';
+  fbSubirDejados();
+  const rev = lista.filter(e => fbEnGrupo(e, cual) && fbRevisado(e));
+  const vista = (_fb.vista && _fb.vista[cual]) || 'pend';
+  const pestanas = `<div class="fb-pest" data-fb-pest>
+    <button type="button" class="${vista === 'pend' ? 'on' : ''}" data-fb-ver="pend" onclick="fbVer('${cual}', 'pend')">Por revisar <b>${lista.filter(e => fbPendiente(e, cual)).length}</b></button>
+    <button type="button" class="${vista === 'rev' ? 'on' : ''}" data-fb-ver="rev" onclick="fbVer('${cual}', 'rev')">Ya revisados <b>${rev.length}</b></button></div>`;
+  if (vista === 'rev') {
+    const orden = rev.sort((a, b) => String(b.video_elegido_at || '').localeCompare(String(a.video_elegido_at || '')) || entNombres(a).grande.localeCompare(entNombres(b).grande));
+    return `${pestanas}<div class="fb-intro">Lo que ya revisaste: con el video de Functional Bodybuilding o con el que tenía. Si cambias de opinión, toca «Usar este» en otro.</div>`
+      + (orden.length ? `<div class="fb-lista" data-fb-lista="${cual}-rev">${orden.map(e => fbFila(e, cual)).join('')}</div>` : '<div class="card text-center text-slate-500 py-8">Aún no has revisado ninguno.</div>');
+  }
   const pend = lista.filter(e => fbPendiente(e, cual));
-  if (!pend.length) return `<div class="card text-center text-slate-500 py-8" data-fb-vacio>${cual === 'hoy' ? 'Todos los de hoy ya tienen su video de Functional Bodybuilding, o elegiste dejar el actual.' : 'No quedan ejercicios en análisis con video en Functional Bodybuilding.'}</div>`;
+  if (!pend.length) return pestanas + `<div class="card text-center text-slate-500 py-8" data-fb-vacio>${cual === 'hoy' ? 'Todos los de hoy ya tienen su video de Functional Bodybuilding, o elegiste dejar el actual.' : 'No quedan ejercicios en análisis con video en Functional Bodybuilding.'}</div>`;
   // Primero los que no tienen video, luego los que más clientes tienen.
   const uso = (e) => (_ent.enUso && _ent.enUso.get(e.id)) || 0;
   pend.sort((a, b) => (((a.video_fuente || 'ninguno') === 'ninguno') ? 0 : 1) - (((b.video_fuente || 'ninguno') === 'ninguno') ? 0 : 1) || uso(b) - uso(a) || entNombres(a).grande.localeCompare(entNombres(b).grande));
@@ -174,7 +212,7 @@ function fbHtml(lista, cual) {
   const cab = cual === 'hoy'
     ? `<div class="fb-intro" data-fb-cabecera>Los que tus clientes tienen hoy y cuyo video no es de Functional Bodybuilding, pero el canal tiene el ejercicio. Mira los dos y elige: «Usar este» o «Dejar el actual». Primero los que no tienen video.</div>`
     : `<div class="fb-intro" data-fb-cabecera><span>Los que no usa nadie hoy. ${exactos.length ? `<b>${exactos.length}</b> ${exactos.length === 1 ? 'tiene' : 'tienen'} en el canal un video con el mismo nombre: se ponen todos con el botón. Los parecidos, elígelos uno a uno.` : 'Ninguno coincide exacto: elígelos uno a uno.'}</span>${exactos.length ? `<button type="button" class="btn btn-primary btn-sm" data-fb-todos onclick="fbPonerExactos()">${exactos.length === 1 ? 'Poner el que tiene el mismo nombre' : `Poner los ${exactos.length} con el mismo nombre`}</button>` : ''}</div>`;
-  return `${cab}<div class="fb-lista" data-fb-lista="${cual}">${pend.map(e => fbFila(e, cual)).join('')}</div>`;
+  return `${pestanas}${cab}<div class="fb-lista" data-fb-lista="${cual}">${pend.map(e => fbFila(e, cual)).join('')}</div>`;
 }
 window.fbHtml = fbHtml;
 
@@ -221,6 +259,12 @@ window.fbPonerExactos = async () => {
   .fb-n{font-size:14px;color:#1F1F1F;line-height:1.3}.fb-n b{font-weight:700;display:block}.fb-n span{font-size:12.5px;color:#6B6B70}
   .fb-t{font-size:13.5px;font-weight:650;color:#1F1F1F;line-height:1.3}
   .fb-tags{display:flex;gap:4px;flex-wrap:wrap}
+  .fb-pest{display:inline-flex;gap:4px;background:#EFEDE7;border-radius:12px;padding:3px;margin:0 0 12px}
+  .fb-pest button{border:0;background:transparent;border-radius:9px;padding:7px 14px;font:inherit;font-size:13.5px;font-weight:650;color:#6B6B70;cursor:pointer}
+  .fb-pest button.on{background:#fff;color:#1F1F1F;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+  .fb-pest b{font-weight:800;margin-left:4px}
+  .fb-rev{background:#FBFDFB;box-shadow:0 0 0 1.5px #CFE6D5}
+  .fb-hecho{font-size:12.5px;font-weight:750;color:#2F7F45;background:#E6F2E9;border-radius:99px;padding:4px 10px}
   @media (max-width:720px){.fb-fila{grid-template-columns:1fr}.fb-actual{border-right:0;padding-right:0;border-bottom:1px solid #F3F1EB;padding-bottom:12px}}
   `;
   document.head.appendChild(s);
