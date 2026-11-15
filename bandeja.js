@@ -38,6 +38,9 @@ const _bdj = { filtro: 'todo', datos: null, cargando: null, cargadoEn: 0 };
 // avisos (medidas, entrenos saltados, comida, estancados…) y las victorias
 // son para revisar, no mensajes por responder.
 const bdjEsMensaje = (a) => /^(nota|cierre):/.test(String(a && a.id));
+// Lo que el cliente REGISTRÓ en su app: peso, composición (medición) y fotos
+// de progreso. También llega a la Bandeja y suma en su número.
+const bdjEsRegistro = (a) => /^(medida|registro|fotos):/.test(String(a && a.id));
 
 // ─── Utilidades de fecha (en local, como todo el CRM) ────────────────
 function bdjSumarDias(ymd, n) {
@@ -527,6 +530,15 @@ routes.bandeja = async () => {
   const pasa = (tipo) => _bdj.filtro === 'todo' || tipo === _bdj.filtro;
   const pendientes = d.atencion.filter(a => !vistos.has(a.id) && pasa(a.tipo));
   const mensajes = pendientes.filter(bdjEsMensaje);
+  // Peso, composición y fotos: una tarjeta por cliente y día (todo junto).
+  const registros = [];
+  d.atencion.filter(a => bdjEsRegistro(a) && !vistos.has(a.id)).forEach(a => {
+    const k = `${a.cliente_id}|${a.fecha}`;
+    let g = registros.find(x => x.k === k);
+    if (!g) { g = { k, cliente_id: a.cliente_id, cliente: a.cliente, fecha: a.fecha, items: [] }; registros.push(g); }
+    g.items.push(a);
+  });
+  registros.sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
   const felicitar = d.felicitar.filter(a => !vistos.has(a.id) && pasa(a.tipo));
   // Notas: pendientes y las que ya marcaste «Listo» (en la base o en este navegador).
   const notasPend = d.atencion.filter(a => a.tipo === 'nota' && !vistos.has(a.id));
@@ -610,6 +622,29 @@ routes.bandeja = async () => {
       ${mensajes.length ? mensajes.map(a => tarjeta(a, 'Listo')).join('')
         : '<div class="text-sm text-slate-500 py-3">Ningún mensaje por responder.</div>'}
     </div>
+    <div class="card mb-4" data-bdj-registros>
+      <div class="flex items-baseline justify-between mb-1">
+        <h3 class="font-bold text-slate-900">Peso, composición y fotos</h3>
+        <span class="text-xs text-slate-400">${registros.length}</span>
+      </div>
+      <p class="text-xs text-slate-500 mb-1">Lo que tus clientes registraron en su app en las últimas 2 semanas. Revísalo en Composición y márcalo «Listo».</p>
+      ${registros.length ? registros.map(g => {
+        const tipos = [...new Set(g.items.map(a => /^fotos:/.test(a.id) || /fotogr/i.test(a.titulo) ? 'fotos' : /^registro:/.test(a.id) && /pes[oó]/i.test(a.titulo) ? 'peso' : 'composición'))];
+        const titulo = 'Registró ' + (tipos.length > 1 ? tipos.slice(0, -1).join(', ') + ' y ' + tipos[tipos.length - 1] : tipos[0]);
+        const detalle = g.items.map(a => String(a.detalle || '').replace(/\s*—\s*(mira|míralas|pídele)[^]*$/, '')).filter(Boolean).join(' · ');
+        const ids = g.items.map(a => a.id).join(',');
+        return `
+        <div class="flex items-start gap-3 py-2.5" style="border-bottom:1px solid #f1f5f9" data-bdj-registro="${escapeHtml(g.k)}">
+          <div class="min-w-0 flex-1 cursor-pointer" onclick="verCliente('${g.cliente_id}')">
+            <div class="text-sm"><strong class="text-slate-900">${escapeHtml(g.cliente || '')}</strong><span class="text-slate-700"> · ${escapeHtml(titulo)}</span></div>
+            ${detalle ? `<div class="text-xs text-slate-500 mt-0.5 leading-relaxed">${escapeHtml(detalle)}</div>` : ''}
+            <div class="text-[11px] text-slate-400 mt-0.5">${g.fecha === fmt.hoy() ? 'hoy' : fmt.fechaCorta(g.fecha)}</div>
+          </div>
+          <button class="btn btn-primary btn-sm flex-shrink-0" data-bdj-ver-comp onclick="bdjVerComp('${g.cliente_id}')">Ver en Composición</button>
+          <button class="btn btn-secondary btn-sm flex-shrink-0" data-bdj-registro-listo onclick="bdjListoVarios('${escapeHtml(ids)}')">Listo</button>
+        </div>`; }).join('')
+        : '<div class="text-sm text-slate-500 py-3">Nada nuevo registrado.</div>'}
+    </div>
     </div>`}
 
     <details class="card" data-bdj-dia-a-dia>
@@ -655,6 +690,16 @@ window.bdjListo = async (id, notaId) => {
   bdjPintarContador();
   routes.bandeja();
 };
+// Peso, composición y fotos de un mismo día: «Listo» los marca todos.
+window.bdjListoVarios = (ids) => {
+  String(ids).split(',').filter(Boolean).forEach(id => bdjMarcarVisto(id));
+  bdjPintarContador();
+  routes.bandeja();
+};
+window.bdjVerComp = (id) => {
+  navigate('composicion');
+  setTimeout(() => { if (typeof compAbrirCliente === 'function') compAbrirCliente(id); }, 400);
+};
 // Una nota marcada «Listo» por error vuelve a pendientes.
 window.bdjDeshacer = async (id, notaId) => {
   bdjQuitarVisto(id);
@@ -666,13 +711,13 @@ window.bdjDeshacer = async (id, notaId) => {
   routes.bandeja();
 };
 
-// El número en el botón de la barra: solo los MENSAJES que aún no marcaste
-// (no los avisos ni las victorias).
+// El número en el botón de la barra: los MENSAJES y lo que REGISTRARON (peso,
+// composición, fotos) que aún no marcaste (no los demás avisos ni las victorias).
 function bdjPintarContador() {
   const btn = document.querySelector('.nav-item[data-view="bandeja"]');
   if (!btn || !_bdj.datos) return;
   const vistos = bdjVistos();
-  const n = _bdj.datos.atencion.filter(a => bdjEsMensaje(a) && !vistos.has(a.id)).length;
+  const n = _bdj.datos.atencion.filter(a => (bdjEsMensaje(a) || bdjEsRegistro(a)) && !vistos.has(a.id)).length;
   btn.textContent = n ? `📥 Bandeja (${n})` : '📥 Bandeja';
 }
 

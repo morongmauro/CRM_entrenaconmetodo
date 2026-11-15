@@ -46,7 +46,16 @@ function tablas() {
     id: 's' + k, user_id: 'coach-1', cliente_id: 'c0', semana, fecha: '2026-09-1' + k, fuerza_planeados: 5, fuerza_ejecutados: [4, 3, 5, 4][k], estado: 'hecho',
   }));
   return {
-    clientes: [cliente], seguimientos, pagos: [], pendientes: [], mediciones_corporales: [],
+    clientes: [cliente], seguimientos, pagos: [], pendientes: [],
+    // Peso y composición que registró en su app (y la anterior, para la diferencia) + 2 fotos el mismo día.
+    mediciones_corporales: [
+      { id: 'mc0', user_id: 'coach-1', cliente_id: 'c0', fecha: hace(40), peso: 72, grasa_pct: 26 },
+      { id: 'mc1', user_id: 'coach-1', cliente_id: 'c0', fecha: hace(1), peso: 71.2, grasa_pct: 24.8, origen: 'cliente' },
+    ],
+    fotos_progreso: [
+      { id: 'fp1', user_id: 'coach-1', cliente_id: 'c0', fecha: hace(1), pose: 'frente', peso_kg: 71.2, created_at: hace(1) + 'T09:00:00Z' },
+      { id: 'fp2', user_id: 'coach-1', cliente_id: 'c0', fecha: hace(1), pose: 'perfil', peso_kg: null, created_at: hace(1) + 'T09:01:00Z' },
+    ],
     settings: [{ user_id: 'coach-1', usd_cop_rate: 4000, nombre_coach: 'Mauro' }],
     metas_historial: [], nutricion_insights: [], ia_uso: [], push_pago_log: [],
     fases: fixture.fases, rutinas: fixture.rutinas, rutina_ejercicios: re, rutina_bloques: fixture.rutina_bloques,
@@ -152,6 +161,14 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 900], ['telefono', 390, 844]])
   await p.evaluate(() => { const n = TABLAS_FALSAS.notas_entreno.find(x => x.id === 'n1'); n.leida_en = null; TABLAS_FALSAS.comentarios_coach.length = 0; });
   await p.evaluate(() => bdjFiltro('todo'));
   ok(`${tag} · en «Todo» sigue como antes`, await p.locator('[data-bdj-mensajes]').count() === 1 && await p.locator('[data-notas-listas]').count() === 0);
+  // Peso, composición y fotos: llegan a la Bandeja (una tarjeta por cliente y día) y suman en su número.
+  const reg = (await p.locator('[data-bdj-registros]').innerText()).replace(/\s+/g, ' ');
+  ok(`${tag} · «Peso, composición y fotos»: Ana registró composición y fotos, con la diferencia`, /Ana Pérez · Registró composición y fotos/.test(reg) && /71,2 kg \(-0,8 kg\)/.test(reg) && /24,8% grasa/.test(reg), reg.slice(0, 300));
+  if (tag === 'ancho') await p.locator('[data-bdj-registros]').screenshot({ path: '/tmp/claude-0/-home-user/72c7c01f-58d6-5368-9640-a3136112d4a6/scratchpad/bdj-registros.png' });
+  const num0 = await p.evaluate(() => document.querySelector('.nav-item[data-view="bandeja"]')?.textContent || '');
+  await p.locator('[data-bdj-registro-listo]').first().click(); await p.waitForTimeout(500);
+  const num1 = await p.evaluate(() => document.querySelector('.nav-item[data-view="bandeja"]')?.textContent || '');
+  ok(`${tag} · «Listo» la quita y baja el número de la Bandeja`, /Nada nuevo registrado/.test(await p.locator('[data-bdj-registros]').innerText()) && Number((num0.match(/\((\d+)\)/) || [])[1] || 0) === Number((num1.match(/\((\d+)\)/) || [])[1] || 0) + 2, num0 + ' → ' + num1);
   ok(`${tag} · sin scroll de lado`, await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   ok(`${tag} · sin errores de JavaScript`, a.errores.length === 0, a.errores.join(' | '));
   await a.ctx.close();
