@@ -158,7 +158,7 @@ function fbFila(e, cual) {
   return `
     <div class="fb-fila${fbRevisado(e) ? ' fb-rev' : ''}" data-fb-ej="${e.id}">
       <div class="fb-actual">
-        ${fbRevisado(e) ? `<div class="fb-hecho" data-fb-hecho="${fbRevisado(e)}">✓ Revisado · ${fbRevisado(e) === 'fb' ? 'quedó con el de Functional Bodybuilding' : 'te quedaste con su video'}</div>` : ''}
+        ${fbRevisado(e) ? `<div class="fb-hecho" data-fb-hecho="${fbRevisado(e)}">✓ Revisado · ${fbRevisado(e) === 'fb' ? 'quedó con el de Functional Bodybuilding' : fbDejados().has(e.id) ? 'te quedaste con su video' : 'con el video que elegiste'}</div>` : ''}
         <div class="fb-cab">Su video ahora</div>
         ${fbPrevFicha(e)}
         <div class="fb-n"><b>${escapeHtml(n.grande)}</b>${n.chico ? `<span>${escapeHtml(n.chico)}</span>` : ''}</div>
@@ -177,8 +177,43 @@ function fbFila(e, cual) {
             </div>`).join('')}
         </div>
       </div>
+      ${fbOtras(e)}
     </div>`;
 }
+// Ni el actual ni el de Functional Bodybuilding: las propuestas de otros
+// canales (las mismas de la ventana de videos), buscar en PROET o YouTube, o
+// pegar tu link. Lo que pongas aquí queda como «elegido por ti».
+function fbOtras(e) {
+  const props = ((typeof _vid !== 'undefined' && _vid.propuestas) || {})[e.id] || [];
+  const otras = props.filter(p => p.ref && p.ref !== e.video_ref && !(_fb.ids && _fb.ids.has(p.ref))).slice(0, 2);
+  const q = encodeURIComponent((e.alias || e.nombre || '') + ' exercise');
+  return `
+      <div class="fb-otras" data-fb-otras="${e.id}">
+        <div class="fb-cab">Otras opciones</div>
+        ${otras.length ? `<div class="fb-otras-g">${otras.map(p => `
+          <div class="fb-cand" data-fb-otra="${escapeHtml(p.ref)}">
+            ${fbPrevYt(p.ref, p.titulo || '')}
+            <div class="fb-t">${escapeHtml(p.titulo || '')}</div>
+            <div class="fb-tags"><span class="tag tag-gray">${escapeHtml(p.canal || 'YouTube')}</span></div>
+            <button type="button" class="btn btn-primary btn-sm" onclick="fbUsar('${e.id}', '${escapeHtml(p.ref)}')">Usar este</button>
+          </div>`).join('')}</div>` : ''}
+        <div class="fb-buscar">
+          <a target="_blank" rel="noopener" href="https://www.youtube.com/@proetejercicioterapeutico5675/search?query=${encodeURIComponent(e.nombre || '')}">Buscar en PROET ↗</a>
+          <a target="_blank" rel="noopener" href="https://www.youtube.com/results?search_query=${q}">Buscar en YouTube ↗</a>
+        </div>
+        <div class="fb-pegar">
+          <input id="fb-link-${e.id}" placeholder="Pega un link de YouTube" onkeydown="if(event.key==='Enter')fbPegarLink('${e.id}')">
+          <button type="button" class="btn btn-secondary btn-sm" data-fb-pegar="${e.id}" onclick="fbPegarLink('${e.id}')">Usar link</button>
+        </div>
+      </div>`;
+}
+window.fbPegarLink = async (id) => {
+  const inp = document.getElementById('fb-link-' + id), url = inp ? inp.value.trim() : '';
+  const ref = typeof entYoutubeId === 'function' ? entYoutubeId(url) : null;
+  if (!ref) { toast('Ese link de YouTube no es válido'); if (inp) inp.focus(); return; }
+  const ini = typeof entYoutubeInicio === 'function' ? entYoutubeInicio(url) : null;
+  if (typeof entPonerVideo === 'function' && await entPonerVideo(id, ref, ini)) { toast('Listo: video puesto'); entRepintarGaleria(); }
+};
 // Las decisiones viejas de «Dejar el actual» vivían solo en este navegador:
 // se pasan a la base una vez, para verlas en cualquier computador.
 async function fbSubirDejados() {
@@ -193,6 +228,9 @@ window.fbVer = (cual, vista) => { _fb.vista = _fb.vista || {}; _fb.vista[cual] =
 function fbHtml(lista, cual) {
   if (!_fb.lista) return '<div class="card text-center text-slate-500 py-8">Cargando los videos del canal…</div>';
   fbSubirDejados();
+  if (typeof entCargarPropuestas === 'function' && typeof _vid !== 'undefined' && !_vid.propuestas && !_fb.pidiendoProps) {
+    _fb.pidiendoProps = true; entCargarPropuestas().then(() => entRepintarGaleria()).catch(() => {});
+  }
   const rev = lista.filter(e => fbEnGrupo(e, cual) && fbRevisado(e));
   const vista = (_fb.vista && _fb.vista[cual]) || 'pend';
   const pestanas = `<div class="fb-pest" data-fb-pest>
@@ -246,7 +284,7 @@ window.fbPonerExactos = async () => {
   s.textContent = `
   .fb-intro{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;font-size:13.5px;color:#55565B;margin:0 0 12px;line-height:1.45}
   .fb-lista{display:flex;flex-direction:column;gap:12px}
-  .fb-fila{display:grid;grid-template-columns:minmax(220px,280px) 1fr;gap:16px;background:#fff;border-radius:16px;padding:14px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 6px 18px rgba(40,40,30,.05)}
+  .fb-fila{display:grid;grid-template-columns:minmax(220px,280px) minmax(0,1fr) minmax(220px,300px);gap:16px;background:#fff;border-radius:16px;padding:14px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 6px 18px rgba(40,40,30,.05)}
   .fb-cab{font-size:11.5px;font-weight:700;color:#8A877F;margin-bottom:6px}
   .fb-actual{display:flex;flex-direction:column;gap:6px;align-items:flex-start;border-right:1px solid #F3F1EB;padding-right:16px}
   .fb-cands-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
@@ -259,6 +297,11 @@ window.fbPonerExactos = async () => {
   .fb-n{font-size:14px;color:#1F1F1F;line-height:1.3}.fb-n b{font-weight:700;display:block}.fb-n span{font-size:12.5px;color:#6B6B70}
   .fb-t{font-size:13.5px;font-weight:650;color:#1F1F1F;line-height:1.3}
   .fb-tags{display:flex;gap:4px;flex-wrap:wrap}
+  .fb-otras{display:flex;flex-direction:column;gap:8px;border-left:1px solid #F3F1EB;padding-left:16px;min-width:0}
+  .fb-otras-g{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .fb-buscar{display:flex;flex-wrap:wrap;gap:10px;font-size:12.5px}.fb-buscar a{color:#55565B;text-decoration:underline}
+  .fb-pegar{display:flex;gap:6px}.fb-pegar input{flex:1;min-width:0;border:1px solid #E2E0D9;border-radius:10px;padding:6px 10px;font-size:13px}
+  @media (max-width:1180px){.fb-fila{grid-template-columns:minmax(200px,260px) minmax(0,1fr)}.fb-otras{grid-column:1/-1;border-left:0;padding-left:0;border-top:1px solid #F3F1EB;padding-top:12px}.fb-otras-g{grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}}
   .fb-pest{display:inline-flex;gap:4px;background:#EFEDE7;border-radius:12px;padding:3px;margin:0 0 12px}
   .fb-pest button{border:0;background:transparent;border-radius:9px;padding:7px 14px;font:inherit;font-size:13.5px;font-weight:650;color:#6B6B70;cursor:pointer}
   .fb-pest button.on{background:#fff;color:#1F1F1F;box-shadow:0 1px 2px rgba(0,0,0,.08)}

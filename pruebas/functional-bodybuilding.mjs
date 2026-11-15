@@ -52,6 +52,7 @@ const tablas = () => ({
   ],
   musculos: [], sesiones: [], series_log: [], eventos: [], evento_registros: [], actividades: [], ejercicio_video_estado: [],
   ejercicios_nombre_respaldo: [], cambios_ejercicio: [],
+  ejercicio_video_propuestas: [{ id: 'pp1', ejercicio_id: 'h4', ref: 'otroCanal01', titulo: 'Dumbbell Front Raise · técnica', canal: 'PROET', orden: 1 }],
 });
 
 const b = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME } : {});
@@ -115,6 +116,13 @@ for (const [ancho, alto] of [[1440, 1000], [390, 844]]) {
   await p.waitForTimeout(1200);
   t = await p.evaluate(() => window.TABLAS_FALSAS.ejercicios);
   ok('«Poner los de mismo nombre»: Cossack Squat queda con el del canal; el parecido no se toca', t.find(e => e.id === 'h3').video_ref === 'dhDjKmTX8tU' && !t.find(e => e.id === 'h4').video_ref);
+  // Otras opciones: propuestas de otros canales, buscar y pegar link.
+  ok('«Otras opciones»: la propuesta de otro canal (PROET) y los enlaces para buscar', (await p.locator('[data-fb-ej="h4"] [data-fb-otra="otroCanal01"]').count()) === 1 && /Buscar en PROET/.test(await p.locator('[data-fb-otras="h4"]').innerText()));
+  if (FOTO && ancho === 1440) { await p.waitForTimeout(1200); await p.locator('[data-fb-ej="h4"]').screenshot({ path: path.join(CAPTURAS, `fb-otras-${ancho}-${FOTO}.png`) }); }
+  await p.fill('#fb-link-h4', 'https://youtu.be/AbCdEfGhIjK?t=12');
+  await p.evaluate(() => fbPegarLink('h4')); await p.waitForTimeout(900);
+  t = await p.evaluate(() => window.TABLAS_FALSAS.ejercicios);
+  ok('«Usar link»: queda con el video pegado (y el segundo de inicio) y como elegido', t.find(e => e.id === 'h4').video_ref === 'AbCdEfGhIjK' && t.find(e => e.id === 'h4').video_inicio_seg === 12 && !!t.find(e => e.id === 'h4').video_elegido_at, JSON.stringify(t.find(e => e.id === 'h4')));
   ok('sin errores en la página', !errores.length, errores.join(' | '));
   await ctx.close();
 }
