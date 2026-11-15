@@ -170,6 +170,12 @@ function entPintarVideoRapido() {
           ${actual ? `<div class="mt-2"><div class="text-[11px] font-bold text-slate-600 mb-1">Imagen del preview</div>
             <div id="vr-cuadros">${entHtmlCuadros(actual, entCuadroYt(e.poster_url), 'entVrCuadro')}</div></div>` : ''}
           ${previo ? `<button class="btn btn-ghost btn-sm mt-2" onclick="entDeshacerVideo()">↩ Volver al que tenía antes</button>` : ''}
+          <div class="flex flex-wrap items-center gap-2 mt-3" data-vr-decidir>
+            ${(e.video_fuente || 'ninguno') !== 'ninguno' ? (window.entVideoElegido && entVideoElegido(e)
+              ? '<span class="tag tag-green" data-vr-elegido>Video ya elegido</span>'
+              : `<button class="btn btn-primary btn-sm" data-vr-bien onclick="entVrEstaBien()" title="Se queda este video y sale de «Te falta decidir»">Este está bien</button>`) : ''}
+            ${!(_ent.enUso && _ent.enUso.has(id)) ? `<button class="btn btn-ghost btn-sm" data-vr-archivar onclick="entVrArchivar()" title="Sale de la galería; no se borra y no toca rutinas">No lo necesito · archivar</button>` : ''}
+          </div>
         </div>
         <div>
           <div class="sec-title">Pega tu link</div>
@@ -238,6 +244,27 @@ async function entTrasCambiar(mensaje) {
   if (_vid.cola.length > 1 && _vid.pos < _vid.cola.length - 1) { _vid.pos++; }
   entPintarVideoRapido();
 }
+
+// «Este está bien»: se queda el video que tiene, marcado como elegido.
+window.entVrEstaBien = async () => {
+  const id = _vid.cola[_vid.pos];
+  const ahora = new Date().toISOString();
+  const { error } = await sb.from('ejercicios').update({ video_elegido_at: ahora, updated_at: ahora }).eq('id', id);
+  if (error) return toast(/video_elegido_at/.test(error.message || '') ? 'Falta la columna video_elegido_at en Supabase' : error.message);
+  const e = (_ent.ejercicios || []).find(x => x.id === id);
+  if (e) e.video_elegido_at = ahora;
+  entTrasCambiar('✓ Se queda este video');
+};
+// «No lo necesito»: archivado (sale de la galería, no se borra).
+window.entVrArchivar = async () => {
+  const id = _vid.cola[_vid.pos];
+  if (!confirm('¿Archivar este ejercicio? Sale de la galería; no se borra y no toca ninguna rutina.')) return;
+  const ok = await entDb.archivarEjercicio(id);
+  if (!ok) return;
+  const e = (_ent.ejercicios || []).find(x => x.id === id);
+  if (e) e.archivado = true;
+  entTrasCambiar('Archivado');
+};
 
 window.entUsarPropuesta = async (ref) => {
   const id = _vid.cola[_vid.pos];

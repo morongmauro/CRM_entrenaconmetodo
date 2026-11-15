@@ -183,7 +183,12 @@ window.fbUsar = async (id, ref) => {
   if (typeof entPonerVideo !== 'function') return;
   if (await entPonerVideo(id, ref)) { toast('Listo: video de Functional Bodybuilding puesto'); entRepintarGaleria(); }
 };
-window.fbDejarActual = (id) => { fbDejar(id); toast('Listo: se queda el video que tenía'); entRepintarGaleria(); };
+window.fbDejarActual = async (id) => {
+  fbDejar(id);
+  const ahora = new Date().toISOString();
+  try { const { error } = await sb.from('ejercicios').update({ video_elegido_at: ahora, updated_at: ahora }).eq('id', id); if (!error) { const e = (_ent.ejercicios || []).find(x => x.id === id); if (e) e.video_elegido_at = ahora; } } catch (x) { /* queda en este navegador */ }
+  toast('Listo: se queda el video que tenía'); entRepintarGaleria();
+};
 window.fbPonerExactos = async () => {
   const lista = (_ent.ejercicios || []).filter(e => fbPendiente(e, 'analisis') && !e.video_elegido_at).map(e => [e, fbExacto(e)]).filter(([, c]) => c);
   if (!lista.length) return;

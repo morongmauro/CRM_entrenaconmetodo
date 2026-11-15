@@ -697,6 +697,19 @@ function entFiltrar(lista) {
   return entOrdenarPorUso(entFiltrarSinOrden(lista));
 }
 
+// ── Selección definitiva de videos ──
+// Ya decidido = lo usan hoy (se da por bueno) o elegiste su video a mano:
+// cambiaste el video, tocaste «Este está bien», o «Dejar el actual» en
+// Functional Bodybuilding. Lo demás es lo que falta decidir.
+function entVideoElegido(e) {
+  return !!(e && (e.video_elegido_at || (window.fbDejados && fbDejados().has(e.id))));
+}
+window.entVideoElegido = entVideoElegido;
+function entPorDecidir(e) {
+  return !!e && !e.archivado && !(_ent.enUso && _ent.enUso.has(e.id)) && !entVideoElegido(e);
+}
+window.entPorDecidir = entPorDecidir;
+
 // Los filtros de tipo, segmento, patrón, músculo y equipo admiten VARIAS
 // opciones a la vez (kettlebell + mancuerna, tren superior + inferior): pasa
 // el ejercicio que cumpla cualquiera de las marcadas. Un texto suelto (como
@@ -728,6 +741,10 @@ function entFiltrarSinOrden(lista) {
     //   «analisis» → toda la galería MENOS lo que usan hoy (los usados antes
     //   y los que nunca se han usado): lo que está en revisión de videos.
     if (f.uso === 'analisis' && _ent.enUso && _ent.enUso.has(e.id)) return false;
+    //   «elegidos» → hoy no los usa nadie, pero ya elegiste su video.
+    //   «decidir»  → hoy no los usa nadie y aún no elegiste: lo que falta.
+    if (f.uso === 'elegidos' && (!_ent.enUso || _ent.enUso.has(e.id) || !entVideoElegido(e))) return false;
+    if (f.uso === 'decidir' && (!_ent.enUso || !entPorDecidir(e))) return false;
     //   «duplicados» → fichas marcadas como copia de otra (nombres-en-analisis.sql),
     //   para decidir una a una. Las que usan hoy nunca salen aquí.
     if (f.uso === 'duplicados' && !entEsDuplicado(e)) return false;
@@ -755,6 +772,10 @@ function entFiltrarSinOrden(lista) {
 // Con «Los que usan mis clientes», primero los que usan más clientes: son los
 // videos que más gente ve.
 function entOrdenarPorUso(lista) {
+  if (_ent.filtros.uso === 'decidir') {
+    const antes = (e) => (_ent.usados && _ent.usados.has(e.id)) ? 0 : 1, sin = (e) => ((e.video_fuente || 'ninguno') === 'ninguno') ? 1 : 0;
+    return [...lista].sort((a, b) => antes(a) - antes(b) || sin(a) - sin(b) || entNombres(a).grande.localeCompare(entNombres(b).grande));
+  }
   if (_ent.filtros.uso !== 'clientes' || !_ent.enUso) return lista;
   return [...lista].sort((a, b) => (_ent.enUso.get(b.id) || 0) - (_ent.enUso.get(a.id) || 0));
 }
@@ -911,7 +932,10 @@ function entNivelesCuenta() {
   _ent.grRep = new Set(grupos.flat().map(e => e.id));
   const fichas = window.fiIncompleta ? todos.filter(fiIncompleta).length : 0;
   const fb = window.fbCuenta && _ent.enUso ? fbCuenta(todos) : null;
+  const elegidos = _ent.enUso ? todos.filter(e => !_ent.enUso.has(e.id) && entVideoElegido(e)) : null;
+  const decidir = _ent.enUso ? todos.filter(entPorDecidir) : null;
   return {
+    elegidos: elegidos && de(elegidos), decidir: decidir && de(decidir),
     fbHoy: fb && fb.hoy ? { n: fb.hoy, sin: 0 } : null, fbAnalisis: fb && fb.analisis ? { n: fb.analisis, sin: 0, exactos: fb.exactos } : null, clientes: ahora && de(ahora), antes: antes && de(antes), analisis: analisis && de(analisis), duplicados: duplicados.length ? { n: duplicados.length, sin: 0 } : null,
     fichas: fichas ? { n: fichas, sin: 0 } : null,
     ingles: ingles ? { n: ingles, sin: 0 } : null, repetidos: grupos.length ? { n: grupos.length, sin: 0 } : null, '': de(todos) };
@@ -964,6 +988,8 @@ function entNivelesOpciones() {
     ['clientes', entNivelEtiqueta('clientes', '👥 1 · Los usan ahora')],
     ['antes', entNivelEtiqueta('antes', '🕘 2 · Los usaron antes (hoy no)')],
     ['analisis', entNivelEtiqueta('analisis', '🔬 En análisis (todo menos lo de hoy)')],
+    ['elegidos', entNivelEtiqueta('elegidos', 'Selección · ya elegiste el video')],
+    ['decidir', entNivelEtiqueta('decidir', 'Selección · te falta decidir')],
     ...(entNivelesCuenta().duplicados ? [['duplicados', entNivelEtiqueta('duplicados', '🔁 Duplicados (para decidir)')]] : []),
     ...(entNivelesCuenta().fichas ? [['fichas', entNivelEtiqueta('fichas', 'Ficha incompleta')]] : []),
     ...(entNivelesCuenta().ingles ? [['ingles', entNivelEtiqueta('ingles', 'Sin nombre en inglés')]] : []),
@@ -1020,7 +1046,26 @@ function entNivelesResumen(compacto = false) {
         <div class="${compacto ? 'text-xs leading-tight' : 'text-sm'}"><b class="text-slate-900">${x.n}</b> · <b class="text-amber-700">para decidir</b></div>
       </button>`;
   };
-  return `
+  const sel = (nivel, titulo, n, texto, tono) => {
+    const marcado = (f.uso || '') === (nivel === 'clientes-todos' ? 'clientes' : nivel) && !f.video;
+    return `<button type="button" data-sel-nivel="${nivel}" onclick="entIrNivel('${nivel}')" class="text-left rounded-lg border ${compacto ? 'px-2 py-1.5 min-w-0' : 'px-3 py-2'}"
+      style="background:${marcado ? tono[0] : '#fff'};border-color:${marcado ? tono[1] : '#E2E0D9'}">
+      <div class="${compacto ? 'text-[10.5px] truncate' : 'text-[11px]'} text-slate-500">${titulo}</div>
+      <div class="${compacto ? 'text-xs leading-tight' : 'text-sm'}"><b class="text-slate-900">${n}</b> ${texto}</div></button>`;
+  };
+  const seleccion = c.decidir ? `
+    <div class="mt-2 rounded-xl p-2.5" style="background:#F7F6F2;border:1px solid #ECE9E1" data-seleccion>
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <div class="text-sm font-bold text-slate-900">Selección definitiva de videos <span class="font-normal text-slate-500">· ${c.clientes.n + c.elegidos.n} de ${c.clientes.n + c.elegidos.n + c.decidir.n} listos</span></div>
+        ${c.decidir.n ? `<button type="button" class="btn btn-primary btn-sm" data-sel-revisar onclick="entRevisarDecidir()">Revisar los ${c.decidir.n} que faltan, uno a uno</button>` : '<span class="tag tag-green">Todo decidido</span>'}
+      </div>
+      <div class="grid ${compacto ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-3'} gap-2">
+        ${sel('clientes-todos', '1 · En uso hoy', c.clientes.n, '<span class="text-green-700 font-bold">listos</span>', ['#EEF6F0', '#46965A'])}
+        ${sel('elegidos', '2 · Ya elegiste el video', c.elegidos.n, '<span class="text-green-700 font-bold">listos</span>', ['#EEF6F0', '#46965A'])}
+        ${sel('decidir', '3 · Te falta decidir', c.decidir.n, `<span class="text-amber-700 font-bold">en esto te enfocas</span>${c.decidir.sin ? ` · <span class="text-red-600">${c.decidir.sin} sin video</span>` : ''}`, ['#FDF3E7', '#EE8434'])}
+      </div>
+    </div>` : '';
+  return `${seleccion}
     <div class="mt-2 grid ${compacto ? 'grid-cols-2' : `grid-cols-1 md:grid-cols-2 xl:grid-cols-${c.duplicados ? 5 : 4}`} gap-2" data-niveles>
       ${caja('clientes', '👥', '1 · Los usan ahora', c.clientes)}
       ${c.antes ? caja('antes', '🕘', '2 · Los usaron antes', c.antes) : ''}
@@ -1250,11 +1295,18 @@ window.entReporteSinHistorial = async () => {
     ${cuerpo}`), { wide: true });
 };
 
+// «Revisar los que faltan, uno a uno»: el grupo 3, con la ventana de videos.
+window.entRevisarDecidir = async () => {
+  entIrNivel('decidir');
+  if (typeof entRevisarVideos === 'function') await entRevisarVideos();
+};
+
 // Un clic en un nivel: ese nivel + «Sin video», lo que falta por buscar.
 window.entIrNivel = (nivel) => {
   _ent.filtros.uso = nivel;
   // En duplicados se ven todos, tengan o no video: lo que falta es decidir.
-  _ent.filtros.video = ['duplicados', 'ingles', 'repetidos', 'fichas', 'fb-hoy', 'fb-analisis'].includes(nivel) ? '' : 'sin';
+  _ent.filtros.video = ['duplicados', 'ingles', 'repetidos', 'fichas', 'fb-hoy', 'fb-analisis', 'elegidos', 'decidir', 'clientes-todos'].includes(nivel) ? '' : 'sin';
+  if (nivel === 'clientes-todos') _ent.filtros.uso = 'clientes';
   document.querySelectorAll('select[data-sel="uso"]').forEach(s => { s.value = nivel; });
   document.querySelectorAll('select[data-sel="video"]').forEach(s => { s.value = _ent.filtros.video; });
   entRepintarGaleria();
