@@ -180,26 +180,87 @@ function fbFila(e, cual) {
       ${fbOtras(e)}
     </div>`;
 }
-// Ni el actual ni el de Functional Bodybuilding: las propuestas de otros
-// canales (las mismas de la ventana de videos), buscar en PROET o YouTube, o
-// pegar tu link. Lo que pongas aquí queda como «elegido por ti».
+// Ni el actual ni el de Functional Bodybuilding: los canales de siempre
+// (PROET en español, Central Athlete ATX en inglés; lista en canales-videos.json),
+// las propuestas cargadas y, si no está en ninguno, el más cercano en YouTube
+// (/api/yt-buscar). Lo que pongas aquí queda como «elegido por ti».
+const _cv = { canales: null, cargando: null, yt: {} };
+const CV_VACIAS = new Set(['de', 'con', 'en', 'la', 'el', 'los', 'las', 'y', 'a', 'al', 'del', 'para', 'sobre', 'un', 'una', 'por', 'o']);
+function cvTokens(t, idioma) {
+  if (idioma === 'en') return fbTokens(t);
+  return String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim().split(' ')
+    .filter(w => w && !CV_VACIAS.has(w)).map(w => (w.length > 4 && w.endsWith('es') ? w.slice(0, -2) : w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w));
+}
+function cvCargar() {
+  if (_cv.canales) return Promise.resolve(_cv.canales);
+  if (_cv.cargando) return _cv.cargando;
+  _cv.cargando = fetch('/canales-videos.json?v=20261115').then(r => r.json()).then(d => {
+    _cv.canales = (d.canales || []).map(c => {
+      const lista = c.videos.map(([id, t]) => ({ id, t, k: cvTokens(t, c.idioma) }));
+      const idx = new Map(); lista.forEach(v => v.k.forEach(w => { if (!idx.has(w)) idx.set(w, []); idx.get(w).push(v); }));
+      return { ...c, lista, idx };
+    });
+    return _cv.canales;
+  }).catch(() => { _cv.canales = []; return _cv.canales; });
+  return _cv.cargando;
+}
+window.cvCargar = cvCargar;
+// Lo más parecido de un canal: en PROET por el nombre en español, en Central por el inglés.
+function cvCandidatos(c, e, max = 2) {
+  const nombres = c.idioma === 'es' ? [e.nombre] : [...new Set([typeof grIngles === 'function' ? grIngles(e) : '', e.alias].filter(Boolean))];
+  const vistos = new Map();
+  nombres.filter(Boolean).forEach(n => {
+    const k = cvTokens(n, c.idioma); if (!k.length) return;
+    const pool = new Set(); k.forEach(w => (c.idx.get(w) || []).forEach(v => pool.add(v)));
+    pool.forEach(v => { const p = fbParecido(k, v.k); if (p >= 0.5 && (!vistos.has(v.id) || vistos.get(v.id).p < p)) vistos.set(v.id, { ...v, p }); });
+  });
+  return [...vistos.values()].filter(v => v.id !== e.video_ref).sort((x, y) => y.p - x.p || x.t.length - y.t.length).slice(0, max);
+}
+function cvTarjeta(e, id, titulo, etiqueta, extra = '') {
+  return `<div class="fb-cand" data-fb-otra="${escapeHtml(id)}">
+            ${fbPrevYt(id, titulo)}
+            <div class="fb-t">${escapeHtml(titulo)}</div>
+            <div class="fb-tags"><span class="tag tag-gray">${escapeHtml(etiqueta)}</span>${extra}</div>
+            ${e.video_ref === id ? '<span class="tag tag-green">Es el que tiene</span>' : `<button type="button" class="btn btn-primary btn-sm" onclick="fbUsar('${e.id}', '${escapeHtml(id)}')">Usar este</button>`}
+          </div>`;
+}
+// El más cercano en YouTube (solo cuando no está en los canales).
+function cvYoutube(e) {
+  const r = _cv.yt[e.id];
+  if (r === undefined) {
+    _cv.yt[e.id] = null;
+    const q = (typeof grIngles === 'function' && grIngles(e)) || e.alias || e.nombre || '';
+    fetch('/api/yt-buscar?q=' + encodeURIComponent(q)).then(x => x.json()).then(j => { _cv.yt[e.id] = (j.videos || []).filter(v => v.id !== e.video_ref).slice(0, 2); })
+      .catch(() => { _cv.yt[e.id] = []; })
+      .then(() => { const caja = document.querySelector(`[data-cv-yt="${e.id}"]`); if (caja) caja.innerHTML = cvYoutubeHtml(e); });
+  }
+  return `<div data-cv-yt="${e.id}">${cvYoutubeHtml(e)}</div>`;
+}
+function cvYoutubeHtml(e) {
+  const r = _cv.yt[e.id];
+  if (!r) return '<div class="fb-buscando">Buscando el más cercano en YouTube…</div>';
+  if (!r.length) return '<div class="fb-buscando">YouTube no dio resultados: búscalo con los enlaces de abajo.</div>';
+  return `<div class="fb-sub">No está en tus canales · lo más cercano en YouTube</div><div class="fb-otras-g">${r.map(v => cvTarjeta(e, v.id, v.titulo, v.canal || 'YouTube', v.seg ? `<span class="tag tag-gray">${Math.floor(v.seg / 60)}:${String(v.seg % 60).padStart(2, '0')}</span>` : '')).join('')}</div>`;
+}
 function fbOtras(e) {
+  if (!_cv.canales && !_cv.cargando) cvCargar().then(() => entRepintarGaleria());
+  const deCanales = (_cv.canales || []).flatMap(c => cvCandidatos(c, e, 2).map(v => ({ ...v, canal: c.nombre })));
   const props = ((typeof _vid !== 'undefined' && _vid.propuestas) || {})[e.id] || [];
-  const otras = props.filter(p => p.ref && p.ref !== e.video_ref && !(_fb.ids && _fb.ids.has(p.ref))).slice(0, 2);
+  const usados = new Set(deCanales.map(v => v.id));
+  const otras = props.filter(p => p.ref && p.ref !== e.video_ref && !usados.has(p.ref) && !(_fb.ids && _fb.ids.has(p.ref))).slice(0, 2);
   const q = encodeURIComponent((e.alias || e.nombre || '') + ' exercise');
+  const cuerpo = !_cv.canales ? '<div class="fb-buscando">Buscando en tus canales…</div>'
+    : deCanales.length || otras.length
+      ? `<div class="fb-otras-g">${deCanales.map(v => cvTarjeta(e, v.id, v.t, v.canal, v.p === 1 ? '<span class="tag tag-green">mismo nombre</span>' : '')).join('')}${otras.map(p => cvTarjeta(e, p.ref, p.titulo || '', p.canal || 'YouTube')).join('')}</div>`
+      : cvYoutube(e);
   return `
       <div class="fb-otras" data-fb-otras="${e.id}">
         <div class="fb-cab">Otras opciones</div>
-        ${otras.length ? `<div class="fb-otras-g">${otras.map(p => `
-          <div class="fb-cand" data-fb-otra="${escapeHtml(p.ref)}">
-            ${fbPrevYt(p.ref, p.titulo || '')}
-            <div class="fb-t">${escapeHtml(p.titulo || '')}</div>
-            <div class="fb-tags"><span class="tag tag-gray">${escapeHtml(p.canal || 'YouTube')}</span></div>
-            <button type="button" class="btn btn-primary btn-sm" onclick="fbUsar('${e.id}', '${escapeHtml(p.ref)}')">Usar este</button>
-          </div>`).join('')}</div>` : ''}
+        ${cuerpo}
         <div class="fb-buscar">
-          <a target="_blank" rel="noopener" href="https://www.youtube.com/@proetejercicioterapeutico5675/search?query=${encodeURIComponent(e.nombre || '')}">Buscar en PROET ↗</a>
-          <a target="_blank" rel="noopener" href="https://www.youtube.com/results?search_query=${q}">Buscar en YouTube ↗</a>
+          <a target="_blank" rel="noopener" href="https://www.youtube.com/@proetejercicioterapeutico5675/search?query=${encodeURIComponent(e.nombre || '')}">PROET ↗</a>
+          <a target="_blank" rel="noopener" href="https://www.youtube.com/@CentralAthleteatx/search?query=${encodeURIComponent(e.alias || e.nombre || '')}">Central Athlete ↗</a>
+          <a target="_blank" rel="noopener" href="https://www.youtube.com/results?search_query=${q}">YouTube ↗</a>
         </div>
         <div class="fb-pegar">
           <input id="fb-link-${e.id}" placeholder="Pega un link de YouTube" onkeydown="if(event.key==='Enter')fbPegarLink('${e.id}')">
@@ -299,6 +360,8 @@ window.fbPonerExactos = async () => {
   .fb-tags{display:flex;gap:4px;flex-wrap:wrap}
   .fb-otras{display:flex;flex-direction:column;gap:8px;border-left:1px solid #F3F1EB;padding-left:16px;min-width:0}
   .fb-otras-g{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .fb-buscando{font-size:12.5px;color:#8A877F;background:#F7F6F2;border-radius:10px;padding:10px}
+  .fb-sub{font-size:11.5px;font-weight:700;color:#B5561A}
   .fb-buscar{display:flex;flex-wrap:wrap;gap:10px;font-size:12.5px}.fb-buscar a{color:#55565B;text-decoration:underline}
   .fb-pegar{display:flex;gap:6px}.fb-pegar input{flex:1;min-width:0;border:1px solid #E2E0D9;border-radius:10px;padding:6px 10px;font-size:13px}
   @media (max-width:1180px){.fb-fila{grid-template-columns:minmax(200px,260px) minmax(0,1fr)}.fb-otras{grid-column:1/-1;border-left:0;padding-left:0;border-top:1px solid #F3F1EB;padding-top:12px}.fb-otras-g{grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}}

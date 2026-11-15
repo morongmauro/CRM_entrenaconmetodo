@@ -69,6 +69,7 @@ for (const [ancho, alto] of [[1440, 1000], [390, 844]]) {
   await ctx.addInitScript((t) => { window.TABLAS_FALSAS = t; }, tablas());
   await p.route('**/*', (ruta) => {
     const u = ruta.request().url();
+    if (u.startsWith(BASE + '/api/yt-buscar')) return ruta.fulfill({ contentType: 'application/json', body: JSON.stringify({ videos: [{ id: 'ytCercano1', titulo: 'Odd Move demo', canal: 'Algún canal', seg: 40 }] }) });
     if (u.startsWith(BASE)) return ruta.continue();
     if (u.includes('supabase-js')) return ruta.fulfill({ contentType: 'text/javascript', body: falso });
     if (u.includes('fonts.googleapis.com') || u.includes('fonts.gstatic.com')) return ruta.continue().catch(() => ruta.abort());
@@ -117,7 +118,16 @@ for (const [ancho, alto] of [[1440, 1000], [390, 844]]) {
   t = await p.evaluate(() => window.TABLAS_FALSAS.ejercicios);
   ok('«Poner los de mismo nombre»: Cossack Squat queda con el del canal; el parecido no se toca', t.find(e => e.id === 'h3').video_ref === 'dhDjKmTX8tU' && !t.find(e => e.id === 'h4').video_ref);
   // Otras opciones: propuestas de otros canales, buscar y pegar link.
-  ok('«Otras opciones»: la propuesta de otro canal (PROET) y los enlaces para buscar', (await p.locator('[data-fb-ej="h4"] [data-fb-otra="otroCanal01"]').count()) === 1 && /Buscar en PROET/.test(await p.locator('[data-fb-otras="h4"]').innerText()));
+  await p.waitForTimeout(1500);
+  const otras = await p.locator('[data-fb-otras="h4"]').innerText();
+  const tarjOtras = await p.locator('[data-fb-ej="h4"] [data-fb-otra]').count();
+  ok('«Otras opciones»: opciones de PROET / Central Athlete o propuestas, y los enlaces de los 3 lugares', tarjOtras >= 1 && /PROET ↗/.test(otras) && /Central Athlete ↗/.test(otras) && /YouTube ↗/.test(otras), otras.slice(0, 300));
+  // Si no está en tus canales: el más cercano en YouTube (/api/yt-buscar).
+  const yt = await p.evaluate(async () => { const e = { id: 'zz9', nombre: 'Qwxz raro', alias: 'Qwxz Odd Move', video_ref: null };
+    document.body.insertAdjacentHTML('beforeend', '<div id="prueba-yt">' + fbOtras(e) + '</div>');
+    await new Promise(r => setTimeout(r, 1200)); return document.getElementById('prueba-yt').innerText; });
+  ok('sin coincidencia en tus canales: muestra lo más cercano en YouTube', /lo más cercano en YouTube/.test(yt) && /Odd Move demo/.test(yt), yt.slice(0, 300));
+  await p.evaluate(() => document.getElementById('prueba-yt').remove());
   if (FOTO && ancho === 1440) { await p.waitForTimeout(1200); await p.locator('[data-fb-ej="h4"]').screenshot({ path: path.join(CAPTURAS, `fb-otras-${ancho}-${FOTO}.png`) }); }
   await p.fill('#fb-link-h4', 'https://youtu.be/AbCdEfGhIjK?t=12');
   await p.evaluate(() => fbPegarLink('h4')); await p.waitForTimeout(900);
