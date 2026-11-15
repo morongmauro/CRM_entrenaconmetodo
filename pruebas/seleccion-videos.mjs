@@ -89,6 +89,17 @@ ok('«No lo necesito»: archivado y pasa al siguiente', t.find(e => e.id === 'h3
 await p.evaluate(() => closeModal()); await p.waitForTimeout(300); await p.evaluate(() => entRepintarGaleria()); await p.waitForTimeout(1200);
 const t1 = (await p.locator('[data-seleccion]').first().innerText()).replace(/\s+/g, ' ');
 ok('después: 3 ya elegidos y 2 por decidir', /2 · Ya elegiste el video 3/.test(t1) && /3 · Te falta decidir 2/.test(t1), t1);
+// Quién lo usa: en la tarjeta (ventana) y dentro de la ventana de videos (sin cerrarla).
+await p.evaluate(() => entVideoRapido('h1')); await p.locator('[data-video-rapido="h1"]').waitFor({ timeout: 10000 });
+await p.locator('[data-vr-uso] [data-quien-usa]').click(); await p.waitForTimeout(800);
+const aqui = (await p.locator('[data-vr-uso] [data-quien-aqui]').innerText()).replace(/\s+/g, ' ');
+ok('en la ventana de videos: «1 cliente ahora ›» abre ahí mismo quién y en qué rutina', /Ana Pérez/.test(aqui) && /Full/.test(aqui) && (await p.locator('[data-video-rapido="h1"]').count()) === 1, aqui);
+await p.screenshot({ path: path.join(CAPTURAS, 'quien-usa-ventana.png') });
+await p.evaluate(() => closeModal()); await p.waitForTimeout(300);
+await p.evaluate(() => entQuienUsa('h6')); await p.waitForTimeout(800);
+const ven = (await p.locator('[data-quien-lista]').innerText()).replace(/\s+/g, ' ');
+ok('la etiqueta de la tarjeta abre su ventana con cliente y rutina', /Ana Pérez/.test(ven) && /Full/.test(ven), ven);
+await p.evaluate(() => closeModal());
 ok('sin errores', !errores.length, errores.join(' | '));
 await b.close(); servidor.close();
 console.log(mal ? `\n${mal} MAL` : '\ntodo bien'); process.exit(mal ? 1 : 0);

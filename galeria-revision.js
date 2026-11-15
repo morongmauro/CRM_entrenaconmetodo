@@ -125,7 +125,7 @@ function grHtmlSugerencia(e) {
 }
 function grEtiquetaUso(e) {
   const n = _ent.enUso && _ent.enUso.get(e.id);
-  if (n) return `<span class="tag tag-blue">${n} ${n === 1 ? 'cliente' : 'clientes'} ahora</span>`;
+  if (n) return window.entEtiquetaQuienUsa ? entEtiquetaQuienUsa(e.id) : `<span class="tag tag-blue">${n} ${n === 1 ? 'cliente' : 'clientes'} ahora</span>`;
   if (_ent.usados && _ent.usados.has(e.id)) return '<span class="tag tag-gray">Usado antes</span>';
   return '<span class="tag tag-gray">Nadie lo usa</span>';
 }

@@ -170,6 +170,7 @@ function entPintarVideoRapido() {
           ${actual ? `<div class="mt-2"><div class="text-[11px] font-bold text-slate-600 mb-1">Imagen del preview</div>
             <div id="vr-cuadros">${entHtmlCuadros(actual, entCuadroYt(e.poster_url), 'entVrCuadro')}</div></div>` : ''}
           ${previo ? `<button class="btn btn-ghost btn-sm mt-2" onclick="entDeshacerVideo()">↩ Volver al que tenía antes</button>` : ''}
+          <div class="mt-3" data-vr-uso>${_ent.enUso && _ent.enUso.get(id) && window.entEtiquetaQuienUsa ? `${entEtiquetaQuienUsa(id, true)}<div data-quien-aqui hidden class="mt-1 rounded-lg bg-slate-50 px-3"></div>` : `<span class="tag tag-gray">${_ent.usados && _ent.usados.has(id) ? 'Hoy nadie lo usa · usado antes' : 'Hoy nadie lo usa'}</span>`}</div>
           <div class="flex flex-wrap items-center gap-2 mt-3" data-vr-decidir>
             ${(e.video_fuente || 'ninguno') !== 'ninguno' ? (window.entVideoElegido && entVideoElegido(e)
               ? '<span class="tag tag-green" data-vr-elegido>Video ya elegido</span>'

@@ -84,7 +84,7 @@ await p.evaluate(() => { _ent.filtros.video = ''; _ent.filtros.uso = 'clientes';
 const enUso = await p.evaluate(() => entFiltrar(DB.ejercicios).map(e => [e.id, _ent.enUso.get(e.id)]));
 ok('en uso: solo los de rutinas activas de clientes activos, el más usado primero', JSON.stringify(enUso) === JSON.stringify([['e3', 2], ['e2', 1]]), JSON.stringify(enUso));
 await p.evaluate(() => { document.getElementById('ent-body').innerHTML = entTarjetaEjercicio(DB.ejercicios[2]); });
-ok('la tarjeta dice cuántos clientes lo usan', (await p.locator('#ent-body', { hasText: '👥 2 clientes' }).count()) === 1);
+ok('la tarjeta dice cuántos clientes lo usan', (await p.locator('#ent-body', { hasText: '2 clientes ahora' }).count()) === 1);
 // e2 ya tiene video (se eligió arriba) y e3 tiene uno subido: con «Sin video»
 // no queda ninguno; al quitarle el video a e2, aparece.
 await p.evaluate(() => { _ent.filtros.video = 'sin'; });

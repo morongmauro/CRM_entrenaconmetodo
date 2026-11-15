@@ -135,7 +135,7 @@ window.fbPrevYt = fbPrevYt;
 // ── La lista de cada revisión ────────────────────────────────────────────
 function fbUso(e) {
   const n = _ent.enUso && _ent.enUso.get(e.id);
-  return n ? `<span class="tag tag-blue">${n} ${n === 1 ? 'cliente' : 'clientes'} ahora</span>` : '';
+  return n ? (window.entEtiquetaQuienUsa ? entEtiquetaQuienUsa(e.id) : `<span class="tag tag-blue">${n} ${n === 1 ? 'cliente' : 'clientes'} ahora</span>`) : '';
 }
 function fbFila(e, cual) {
   const n = entNombres(e);

@@ -863,7 +863,7 @@ function entTarjetaEjercicio(e, opts = {}) {
         <div class="min-w-0 flex-1">
           <div class="font-bold text-slate-900 text-sm truncate">${escapeHtml(entNombres(e).grande)}</div>
           ${entNombreChico(e)}
-          ${_ent.enUso && _ent.enUso.get(e.id) ? `<button type="button" class="tag tag-blue" style="cursor:pointer" data-quien-usa="${e.id}" title="Ver quién lo tiene, en qué ciclo y en qué rutina" onclick="event.stopPropagation(); entQuienUsa('${e.id}')">👥 ${_ent.enUso.get(e.id)} ${_ent.enUso.get(e.id) === 1 ? 'cliente' : 'clientes'} ahora ›</button>`
+          ${_ent.enUso && _ent.enUso.get(e.id) ? `<button type="button" class="tag tag-blue" style="cursor:pointer" data-quien-usa="${e.id}" title="Ver quién lo tiene, en qué ciclo y en qué rutina" onclick="event.stopPropagation(); entQuienUsa('${e.id}')">${_ent.enUso.get(e.id)} ${_ent.enUso.get(e.id) === 1 ? 'cliente' : 'clientes'} ahora ›</button>`
             : _ent.usados && _ent.usados.has(e.id) ? '<span class="tag tag-gray" title="Lo usó algún cliente en un ciclo anterior; hoy nadie lo tiene">🕘 Usado antes</span>' : ''}
           <div class="text-xs text-slate-500 mb-1">
             ${entLabel(ENT_TIPOS, e.tipo)} · ${entLabel(ENT_SEGMENTOS, e.segmento)}
@@ -1089,19 +1089,40 @@ const ENT_TIPO_CICLO = {
   borrador: ['borrador de Trainerize', '#EFEDE7', '#55565B'],
   viene: ['el que viene', '#EAF1FB', '#1E4E8C'],
 };
-window.entQuienUsa = async (id) => {
-  const e = (_ent.ejercicios || []).find(x => x.id === id);
+// La lista (cliente · ciclo · rutina) sirve en su ventana y también dentro de
+// otra ventana (la de videos uno a uno), sin cerrarla.
+async function entQuienUsaLista(id) {
   const lista = (_ent.dondeUsa && _ent.dondeUsa.get(id)) || [];
-  const { data: clis } = await sb.from('clientes').select('id, nombre');
-  const nombre = Object.fromEntries((clis || []).map(c => [c.id, c.nombre || 'Sin nombre']));
+  if (!_ent.nombresCli) { const { data: clis } = await sb.from('clientes').select('id, nombre'); _ent.nombresCli = Object.fromEntries((clis || []).map(c => [c.id, c.nombre || 'Sin nombre'])); }
+  const nombre = _ent.nombresCli;
   const filas = [...new Map(lista.map(x => [`${x.cli}|${x.ciclo}|${x.rutina}`, x])).values()]
     .sort((a, b) => String(nombre[a.cli] || '').localeCompare(String(nombre[b.cli] || '')) || a.rutina.localeCompare(b.rutina));
   const chip = (t) => { const [txt, bg, col] = ENT_TIPO_CICLO[t] || ENT_TIPO_CICLO.viejo; return `<span class="tag" style="background:${bg};color:${col}">${txt}</span>`; };
+  return `<div class="divide-y divide-slate-100" data-quien-lista>
+      ${filas.length ? filas.map(x => `<div class="py-2 flex flex-wrap items-center gap-2 text-sm" data-quien-fila="${x.tipo}"><b class="text-slate-900">${escapeHtml(nombre[x.cli] || '')}</b><span class="text-slate-500">· ${escapeHtml(x.ciclo)} · ${escapeHtml(x.rutina)}</span>${chip(x.tipo)}</div>`).join('') : '<div class="text-sm text-slate-500 py-2">No encontré en qué rutina está.</div>'}
+    </div>`;
+}
+window.entQuienUsaLista = entQuienUsaLista;
+// La etiqueta «N clientes ahora ›» que abre quién lo usa (en cualquier lista).
+window.entEtiquetaQuienUsa = (id, enVentana = false) => {
+  const n = _ent.enUso && _ent.enUso.get(id);
+  if (!n) return '';
+  return `<button type="button" class="tag tag-blue" style="cursor:pointer" data-quien-usa="${id}" title="Ver quién lo tiene, en qué ciclo y en qué rutina" onclick="event.stopPropagation(); ${enVentana ? `entQuienUsaAqui('${id}', this)` : `entQuienUsa('${id}')`}">${n} ${n === 1 ? 'cliente' : 'clientes'} ahora ›</button>`;
+};
+// Dentro de otra ventana: la lista se abre debajo de la etiqueta (y se cierra con otro toque).
+window.entQuienUsaAqui = async (id, btn) => {
+  const caja = btn && btn.parentElement && btn.parentElement.querySelector('[data-quien-aqui]');
+  if (!caja) return entQuienUsa(id);
+  if (!caja.hidden) { caja.hidden = true; return; }
+  caja.innerHTML = '<div class="text-sm text-slate-500 py-2">Buscando…</div>'; caja.hidden = false;
+  caja.innerHTML = await entQuienUsaLista(id);
+};
+window.entQuienUsa = async (id) => {
+  const e = (_ent.ejercicios || []).find(x => x.id === id);
+  const lista = await entQuienUsaLista(id);
   openModal(modalShell(`Quién tiene «${escapeHtml(e ? entNombres(e).grande : 'este ejercicio')}»`, `
     <p class="text-sm text-slate-600 mb-3">«Ahora» cuenta el ciclo que cada cliente ve hoy en la app y también los ciclos que siguen marcados «activa» o en borrador. Aquí ves cuál es cuál.</p>
-    <div class="divide-y divide-slate-100" data-quien-lista>
-      ${filas.length ? filas.map(x => `<div class="py-2 flex flex-wrap items-center gap-2 text-sm" data-quien-fila="${x.tipo}"><b class="text-slate-900">${escapeHtml(nombre[x.cli] || '')}</b><span class="text-slate-500">· ${escapeHtml(x.ciclo)} · ${escapeHtml(x.rutina)}</span>${chip(x.tipo)}</div>`).join('') : '<div class="text-sm text-slate-500 py-2">No encontré en qué rutina está.</div>'}
-    </div>`));
+    ${lista}`));
 };
 
 // ---------- Reporte: ejercicios sin video, por cliente ----------
