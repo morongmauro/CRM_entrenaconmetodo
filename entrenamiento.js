@@ -2386,9 +2386,10 @@ async function entPintarGaleriaCons() {
 // ventana, con sus músculos y, desde la galería, «+ Añadir a la rutina».
 const entTieneVideo = (e) => (e?.video_fuente === 'youtube' && !!e.video_ref) || (e?.video_fuente === 'archivo' && !!e.video_path);
 
-// Preview chico de un ejercicio (alternativas del agente y «Cambiar solo los
-// ejercicios»): la miniatura con ▶, y al tocarla el video corre AHÍ MISMO.
-// Abrir la ventana del video taparía la elección que el coach está haciendo.
+// Preview chico de un ejercicio (alternativas del agente, «Cambiar solo los
+// ejercicios», pedir videos, pedidos en Toques): la miniatura con ▶. Al
+// tocarla el video se abre en grande en una capa encima (videoGrande), sin
+// cerrar la ventana donde el coach está eligiendo.
 function entMiniPreviewHTML(e) {
   if (!e) return '';
   // El ejercicio que viene pegado a la rutina no trae los campos del video.
@@ -2401,16 +2402,40 @@ function entMiniPreviewHTML(e) {
 }
 window.entMiniPreviewPlay = async (el, id) => {
   const e = (_ent.ejercicios || []).find(x => x.id === id)
-    || (_ent.rutina?.ejercicios || []).map(x => x.ejercicios).find(x => x && x.id === id);
+    || (_ent.rutina?.ejercicios || []).map(x => x.ejercicios).find(x => x && x.id === id)
+    || ((await entDb.ejercicios()) || []).find(x => x.id === id);
   if (!e || !entTieneVideo(e)) return;
-  el.onclick = (ev) => ev.stopPropagation();
-  el.classList.add('reproduciendo');
-  if (e.video_fuente === 'youtube') {
-    const ini = Number(e.video_inicio_seg) > 0 ? `&start=${Number(e.video_inicio_seg)}` : '';
-    el.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(e.video_ref)}?autoplay=1&mute=1&rel=0&playsinline=1${ini}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
-  } else {
-    const url = await entVideoFirmado(e.video_path);
-    el.innerHTML = url ? `<video src="${escapeHtml(url)}" autoplay muted loop playsinline controls></video>` : '<span class="ent-mini-nada">Sin video</span>';
+  videoGrande(e.video_fuente === 'youtube'
+    ? { yt: e.video_ref, inicio: e.video_inicio_seg, titulo: entNombres(e).grande }
+    : { path: e.video_path, titulo: entNombres(e).grande });
+};
+
+// ── Video en grande, ENCIMA de lo que estés haciendo ───────────────────
+// Tocar cualquier vista previa (pedidos en Toques, pedir videos, alternativas,
+// revisión de la galería) abre el video grande en una capa. Al cerrarla
+// (×, tocar fuera o Esc) vuelves a la misma ventana, tal cual la dejaste.
+window.videoGrande = async ({ yt, inicio, path, titulo } = {}) => {
+  document.querySelector('[data-video-grande]')?.remove();
+  const capa = document.createElement('div');
+  capa.className = 'vg-capa';
+  capa.setAttribute('data-video-grande', '');
+  capa.innerHTML = `<div class="vg-caja" role="dialog" aria-label="Video">
+      <div class="vg-cab"><span class="vg-tit">${escapeHtml(titulo || '')}</span><button type="button" class="vg-x" data-vg-cerrar aria-label="Cerrar">×</button></div>
+      <div class="vg-vid" data-vg-vid>${yt
+        ? `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(yt)}?autoplay=1&rel=0&playsinline=1${Number(inicio) > 0 ? `&start=${Number(inicio)}` : ''}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`
+        : '<span class="vg-nada">Cargando video…</span>'}</div>
+    </div>`;
+  const cerrar = () => { capa.remove(); window.removeEventListener('keydown', tecla, true); };
+  const tecla = (ev) => { if (ev.key === 'Escape') { ev.stopImmediatePropagation(); ev.preventDefault(); cerrar(); } };
+  capa.addEventListener('click', (ev) => { ev.stopPropagation(); if (ev.target === capa || ev.target.closest('[data-vg-cerrar]')) cerrar(); });
+  window.addEventListener('keydown', tecla, true);
+  document.body.appendChild(capa);
+  if (!yt && path) {
+    const url = typeof entVideoFirmado === 'function' ? await entVideoFirmado(path) : null;
+    const caja = capa.querySelector('[data-vg-vid]');
+    if (caja && capa.isConnected) caja.innerHTML = url
+      ? `<video src="${escapeHtml(url)}" controls autoplay playsinline></video>`
+      : '<span class="vg-nada">No pude cargar el video.</span>';
   }
 };
 

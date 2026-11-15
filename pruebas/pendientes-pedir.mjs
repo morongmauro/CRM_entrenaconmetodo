@@ -122,6 +122,8 @@ function tablas() {
     ev('e4f', 'c4', 'fotos', { fecha: LUNES }),
   ];
   T.evento_registros = [mas(LUNES, -14), mas(LUNES, -7), LUNES].map((f, i) => ({ id: 'g' + i, cliente_id: 'c4', evento_id: 'e4p', fecha: f, estado: 'hecho' }));
+  // Press banca con su video de YouTube (para la vista previa que se abre en grande).
+  T.ejercicios = [...(T.ejercicios || []).filter(e => e.id !== 'x1'), { id: 'x1', user_id: 'coach-1', nombre: 'Press banca', tipo: 'fuerza', segmento: 'tren_superior', video_fuente: 'youtube', video_ref: 'dQw4w9WgXcQ', archivado: false, musculos_primarios: [], musculos_secundarios: [] }];
   T.videos_tecnica = [
     { id: 'v1', cliente_id: 'c1', ejercicio_id: 'x1', ejercicio_nombre: 'Press banca', estado: 'pedido', pedido_en: mas(HOY, -9), revisado_en: null, created_at: mas(HOY, -9) + 'T10:00:00Z' },
     { id: 'v1b', cliente_id: 'c1', ejercicio_id: 'x3', ejercicio_nombre: 'Remo con barra', estado: 'pedido', pedido_en: mas(HOY, -9), revisado_en: null, created_at: mas(HOY, -9) + 'T10:05:00Z' },
@@ -295,6 +297,23 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   await vent.waitFor({ timeout: 8000 });
   ok('«Ver videos» abre el detalle: los 2 pedidos, por llegar, cada uno con su vista previa', await vent.locator('[data-ppv-fila]').count() === 2 && await estadoV('x1') === 'falta' && await estadoV('x3') === 'falta' && await vent.locator('.ppv-prev').count() >= 2 && /2 pedidos · 0 entregados · 2 faltan/.test(await vent.innerText()));
   if (process.env.FOTO) await p.screenshot({ path: path.join(CAPTURAS, 'toques-videos-detalle.png') });
+  // Tocar la vista previa abre el video en grande ENCIMA; al cerrarlo sigue la ventana de videos.
+  const miniV = vent.locator('[data-mini-prev].ent-foto-video').first();
+  if (await miniV.count()) {
+    await miniV.click();
+    await p.locator('[data-video-grande] iframe, [data-video-grande] video').first().waitFor({ timeout: 5000 });
+    const caja = await p.locator('[data-video-grande] .vg-caja').boundingBox();
+    ok('tocar la vista previa abre el video en grande, encima de la ventana', !!caja && caja.width >= 600 && await vent.isVisible(), JSON.stringify(caja));
+    // Solo para la foto: en la prueba no hay YouTube, se pone un cuadro fijo donde iría el video.
+    if (process.env.FOTO_CUADRO) await p.evaluate((src) => { const f = document.querySelector('[data-video-grande] iframe'); if (f) f.outerHTML = `<img src="${src}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">`; }, 'data:image/jpeg;base64,' + fs.readFileSync(process.env.FOTO_CUADRO).toString('base64'));
+    if (process.env.FOTO) await p.screenshot({ path: path.join(CAPTURAS, 'toques-video-grande.png') });
+    await p.keyboard.press('Escape');
+    ok('Esc cierra el video y la ventana de videos sigue abierta', await p.locator('[data-video-grande]').count() === 0 && await vent.isVisible());
+    await miniV.click();
+    await p.locator('[data-video-grande]').waitFor({ timeout: 5000 });
+    await p.mouse.click(5, 5);
+    ok('tocar fuera también lo cierra (la ventana sigue)', await p.locator('[data-video-grande]').count() === 0 && await vent.isVisible());
+  } else ok('hay una vista previa con video para tocar', false);
   // «Recordar los que faltan» → su WhatsApp con el recordatorio de los dos.
   await p.locator('[data-ppv-recordar]').click();
   await p.waitForTimeout(1500);

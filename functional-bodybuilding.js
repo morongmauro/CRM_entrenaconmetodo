@@ -126,9 +126,12 @@ const fbExacto = (e) => { const c = fbCandidatos(e, 1)[0]; return c && c.p === 1
 function fbPrevYt(ref, titulo = '') {
   return `<span class="fb-prev" role="button" tabindex="0" title="Ver el video" onclick="event.stopPropagation(); fbPlay(this, '${escapeHtml(ref)}')"><img src="https://i.ytimg.com/vi/${encodeURIComponent(ref)}/mqdefault.jpg" alt="${escapeHtml(titulo)}" loading="lazy" onerror="this.remove()"><span class="fb-play">▶</span></span>`;
 }
+// Al tocar la vista previa, el video se abre en grande encima (videoGrande).
 window.fbPlay = (el, ref) => {
+  const t = el.querySelector('img')?.getAttribute('alt') || '';
+  if (typeof videoGrande === 'function') return videoGrande({ yt: ref, titulo: t });
   el.onclick = (ev) => ev.stopPropagation();
-  el.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(ref)}?autoplay=1&mute=1&rel=0&playsinline=1&loop=1&playlist=${encodeURIComponent(ref)}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+  el.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(ref)}?autoplay=1&mute=1&rel=0&playsinline=1" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
 };
 // El video que tiene hoy una ficha (de YouTube o subido), o «Sin video».
 function fbPrevFicha(e) {
@@ -141,6 +144,7 @@ function fbPrevFicha(e) {
 }
 window.fbPrevFicha = fbPrevFicha;
 window.fbPlayArchivo = async (el, path) => {
+  if (typeof videoGrande === 'function') return videoGrande({ path });
   el.onclick = (ev) => ev.stopPropagation();
   const url = typeof entVideoFirmado === 'function' ? await entVideoFirmado(path) : null;
   el.innerHTML = url ? `<video src="${escapeHtml(url)}" autoplay muted loop playsinline controls></video>` : '<span class="fb-nada">No se pudo abrir</span>';

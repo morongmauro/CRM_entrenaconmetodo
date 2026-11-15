@@ -92,6 +92,13 @@ for (const [ancho, alto] of [[1440, 1000], [390, 844]]) {
   ok('primero el que no tiene video (Clapping Push Up), luego el Pallof', JSON.stringify(filas) === '["h2","h1"]', JSON.stringify(filas));
   ok('el Pallof: su video de hoy y el del canal lado a lado, «mismo nombre»', (await p.locator('[data-fb-ej="h1"] .fb-actual .fb-prev').count()) === 1 && (await p.locator('[data-fb-ej="h1"] [data-fb-cand="jT4fAKZkfr4"]').count()) === 1 && /mismo nombre/.test(await p.locator('[data-fb-ej="h1"] [data-fb-cand="jT4fAKZkfr4"]').innerText()));
   if (FOTO) { await p.waitForTimeout(1500); await p.locator('#flt-lista').screenshot({ path: path.join(CAPTURAS, `fb-hoy-${ancho}-${FOTO}.png`) }); }
+  // Tocar una vista previa abre el video en grande encima; Esc lo cierra y la lista sigue igual.
+  await p.locator('[data-fb-ej="h1"] [data-fb-cand="jT4fAKZkfr4"] .fb-prev').first().click();
+  await p.locator('[data-video-grande] iframe').waitFor({ timeout: 5000 });
+  const cajaG = await p.locator('[data-video-grande] .vg-caja').boundingBox();
+  ok('tocar la vista previa del canal abre el video en grande (el de ese canal)', !!cajaG && cajaG.width >= Math.min(600, ancho - 40) && /jT4fAKZkfr4/.test(await p.locator('[data-video-grande] iframe').getAttribute('src')), JSON.stringify(cajaG));
+  await p.keyboard.press('Escape');
+  ok('Esc lo cierra y la lista sigue', await p.locator('[data-video-grande]').count() === 0 && await p.locator('[data-fb-lista="hoy"]').isVisible());
   await p.locator('[data-fb-ej="h2"] [data-fb-usar="vv1aPhOLPrk"]').click();
   await p.waitForTimeout(900);
   let t = await p.evaluate(() => window.TABLAS_FALSAS.ejercicios);

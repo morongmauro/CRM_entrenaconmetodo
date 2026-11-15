@@ -414,6 +414,8 @@ window.ppVideos = async (id) => {
   const faltan = pedidos.filter(o => o.x.estado === 'pedido' && !o.m && !o.fuera);
   const pausados = pedidos.filter(o => o.x.estado === 'pedido' && !o.m && o.fuera);
   const entregados = pedidos.filter(o => o.m || o.x.estado !== 'pedido');
+  // Las vistas previas necesitan los videos de la galería (aunque no hayas abierto el constructor).
+  try { if (typeof entDb !== 'undefined' && !(typeof _ent !== 'undefined' && (_ent.ejercicios || []).length)) await entDb.ejercicios(); } catch (e) { /* sin galería: «Sin video» */ }
   const prev = (ejId, nombre) => {
     const h = ejId && typeof entMiniPreviewHTML === 'function' ? entMiniPreviewHTML({ id: ejId }) : '';
     return `<div class="ppv-prev">${h || 'Sin video'}</div>`;
