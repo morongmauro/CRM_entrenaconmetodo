@@ -114,6 +114,16 @@ function evtPorFecha(eventos, fasesPorId) {
   (eventos || []).forEach(ev => {
     evtFechasDe(ev, fasesPorId[ev.fase_id]).forEach(f => { (mapa[f] ||= []).push(ev); });
   });
+  // UN REGISTRO POR DÍA (igual que en la app del cliente): si el mismo día
+  // caen las fotos del fin de ciclo («auto») y las tuyas, o peso y medición,
+  // queda uno. Gana el del fin de ciclo; entre peso y medición, la medición.
+  const grupo = (t) => (t === 'fotos' ? 'fotos' : (t === 'medidas' || t === 'medicion' || t === 'peso') ? 'comp' : null);
+  const rango = (ev) => (ev.auto ? 2 : 0) + (ev.tipo !== 'peso' ? 1 : 0);
+  Object.keys(mapa).forEach(f => {
+    const gana = {};
+    mapa[f].forEach(ev => { const g = grupo(ev.tipo); if (g && (!gana[g] || rango(ev) > rango(gana[g]))) gana[g] = ev; });
+    if (Object.keys(gana).length) mapa[f] = mapa[f].filter(ev => { const g = grupo(ev.tipo); return !g || gana[g] === ev; });
+  });
   return mapa;
 }
 
