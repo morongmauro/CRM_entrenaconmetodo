@@ -130,6 +130,8 @@ async function tqCrudo(forzar = false) {
   try { eng = typeof engDatos === 'function' ? await engDatos() : null; } catch (e) { eng = null; }
   try { if (typeof ausCargar === 'function') await ausCargar(); } catch (e) { /* sin tabla */ }
   const clientes = (await db.clientes.list()).filter(c => String(c.estado || 'activo').toLowerCase() === 'activo');
+  // Lo que te escribió y lo que subió desde su app (lo mismo que la Bandeja).
+  try { _tq.bdj = typeof bdjCargar === 'function' ? await bdjCargar() : null; } catch (e) { _tq.bdj = null; }
   // Pendientes por pedir (pendientes-pedir.js): fotos, medidas, peso y videos.
   try { if (typeof ppCargar === 'function') await ppCargar(clientes, vids); } catch (e) { console.warn('pendientes', e); }
   // Las cápsulas que le pediste leer (capsulas-toques.js).
@@ -447,6 +449,41 @@ window.tqHistorial = async (id) => {
     `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>`));
 };
 
+// ── Lo que te escribió y lo que subió (de la Bandeja), por cliente y semana ──
+function tqBandeja(cid, desde, hasta) {
+  const B = _tq.bdj;
+  if (!B) return { msj: [], sub: [] };
+  const todo = [...(B.atencion || []), ...(B.notasListas || [])]
+    .filter(x => String(x.cliente_id) === String(cid) && x.fecha && x.fecha >= desde && x.fecha <= hasta);
+  const visto = new Set();
+  const uno = (l) => l.filter(x => (visto.has(x.id) ? false : visto.add(x.id))).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+  return {
+    msj: uno(todo.filter(x => /^(nota|cierre|cap):/.test(x.id))),
+    sub: uno(todo.filter(x => /^(medida|registro|fotos):/.test(x.id))),
+  };
+}
+const tqCorto = (t, n = 70) => { t = String(t || '').trim().replace(/\s+/g, ' '); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+const tqDiaCorto = (f) => { const t = new Date(f + 'T12:00:00Z'); return `${TQ_DSEM[t.getUTCDay()]} ${t.getUTCDate()}`; };
+// Lo que subió, en corto: «Peso y grasa · 82,4 kg · 19,1 % grasa», «3 fotos de progreso».
+const tqSubido = (x) => {
+  const det = String(x.detalle || '').split(' — ')[0].replace(/\s*\([^)]*\)/g, '');
+  const tit = /^fotos:/.test(x.id) ? String(x.titulo).replace(/^Subió /, '').replace(/^una /, '1 ').replace(/^(\w)/, (m) => m.toUpperCase()) : String(x.titulo).replace(/^Registró su medida$/, 'Peso y composición');
+  return `${escapeHtml(tit)}${det && !/^fotos:/.test(x.id) ? ` · ${escapeHtml(tqCorto(det, 40))}` : ''}`;
+};
+// Toda la semana de mensajes de un cliente, completos, con ir a la Bandeja.
+window.tqMensajes = (cid) => {
+  const D = _tq.vista || {};
+  const c = ((_tq.crudo && _tq.crudo.clientes) || []).find(x => String(x.id) === String(cid));
+  const { msj } = tqBandeja(cid, evtSumarDias(D.lunes || fmt.hoy(), -21), D.hasta || fmt.hoy());
+  openModal(modalShell(`Te escribió · ${escapeHtml((c && c.nombre) || '')}`, `<div data-tq-mensajes="${cid}">
+      ${msj.length ? msj.map(x => `<div style="border-bottom:1px solid #EFEDE7;padding:10px 0">
+        <div class="tq-sub" style="margin:0 0 3px">${tqDiaCorto(x.fecha)} · ${escapeHtml(x.titulo || 'Te escribió')}${x.listo_en ? ' · ya atendido' : ''}</div>
+        <div style="font-size:14px;color:#1F1F1F;line-height:1.45">«${escapeHtml(x.detalle || '')}»</div></div>`).join('')
+        : '<p class="text-sm text-slate-500">No te escribió en la app en las últimas semanas.</p>'}
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button><button class="btn btn-primary" onclick="closeModal();navigate('bandeja')">Responder en la Bandeja</button>`));
+};
+
 routes.toques = async () => {
   cargando('Juntando los toques de la semana…');
   let D, sems = [];
@@ -459,6 +496,7 @@ routes.toques = async () => {
     D = sems[2];
   } catch (e) { D = { filas: [], hoy: fmt.hoy(), lunes: tqLunes(fmt.hoy()), actual: true }; console.warn('toques', e); }
   finCargando();
+  _tq.vista = { lunes: D.lunes, hasta: evtSumarDias(D.lunes, 6) };
   const deSemana = (D.actual ? 'esta semana' : 'esa semana');
   const porCliente = sems.map(S => new Map(S.filas.map(f => [String(f.c.id), f])));
   const color = (f) => TQ_TONO[f.estado][0];
@@ -500,11 +538,25 @@ routes.toques = async () => {
       <td data-tq="historial" class="tq-hist-cel" onclick="tqHistorial('${f.c.id}')" title="Toca para ver su historial de 6 semanas">${histCel(f)}</td>
       <td data-tq="semana">${tira(f)}<div class="tq-sub" data-tq-dias>${f.diasToque ? `<b>${f.diasToque}</b> de 7 días · <b data-tq-ntipos>${f.tipos.length}</b> tipo${f.tipos.length === 1 ? '' : 's'}` : `Sin tocarlo ${deSemana}`}</div>${f.tipos.length ? `<div data-tq-tipos>${f.tipos.map(([k, n]) => `<span class="tq-ch" data-tq-tipo="${k}">${TQ_TIPO[k]}${n > 1 ? ` <b>×${n}</b>` : ''}</span>`).join('')}</div>` : ''}</td>
       <td data-tq="seguimiento">${celdaSeg(f)}</td>
-      <td data-tq="ciclo" style="min-width:150px">${D.actual && typeof ppCiclo === 'function' ? ppCiclo(f.c) : '<span class="tq-cero">—</span>'}</td>
+      <td data-tq="ciclo" style="min-width:150px">${D.actual && typeof ppCiclo === 'function'
+        // Toda la celda lleva a sus rutinas (Entrenamiento › el cliente).
+        ? `<div data-tq-ir-rutinas="${f.c.id}" role="button" tabindex="0" title="Ver sus rutinas" onclick="_ent.subtab='rutinas';verEntrenamientoCliente('${f.c.id}')" onkeydown="if(event.key==='Enter'){_ent.subtab='rutinas';verEntrenamientoCliente('${f.c.id}')}" style="cursor:pointer">${ppCiclo(f.c)}<div class="tq-sub" style="color:#2F6CC4;font-weight:700;margin-top:4px">Ver rutinas ›</div></div>`
+        : '<span class="tq-cero">—</span>'}</td>
       <td data-tq="pendientes">${D.actual && typeof ppCelda === 'function' ? ppCelda(f) : '<span class="tq-cero">—</span>'}</td>
       <td data-tq="capsulas">${D.actual && typeof capCelda === 'function' ? capCelda(f) : '<span class="tq-cero">—</span>'}</td>
       <td data-tq="videos" class="tq-vid-cel" onclick="vtAbrir('${f.c.id}')" title="Toca para revisar sus videos">${celdaVid(f)}<div class="tq-sub tq-wa-mas">revisar</div></td>
-      <td data-tq="escribio-app">${celdaCanal(f.escApp)}</td>
+      <td data-tq="escribio-app" class="tq-wa-cel" onclick="tqMensajes('${f.c.id}')" title="Toca para leer sus mensajes" style="min-width:190px">${celdaCanal(f.escApp)}${(() => {
+        const { msj } = tqBandeja(f.c.id, D.lunes, evtSumarDias(D.lunes, 6));
+        return msj.slice(0, 2).map(x => `<div class="tq-sub" data-tq-msj style="color:#1F1F1F;margin-top:3px">«${escapeHtml(tqCorto(x.detalle, 60))}» <span style="color:#8A8A90">${tqDiaCorto(x.fecha)}</span></div>`).join('')
+          + (msj.length > 2 ? `<div class="tq-sub">y ${msj.length - 2} más</div>` : '') + (f.escApp || msj.length ? '<div class="tq-sub tq-wa-mas">leer</div>' : '');
+      })()}</td>
+      <td data-tq="subio" style="min-width:170px">${(() => {
+        const { sub } = tqBandeja(f.c.id, D.lunes, evtSumarDias(D.lunes, 6));
+        if (!sub.length) return '<span class="tq-cero">—</span>';
+        return `<div data-tq-ir-comp="${f.c.id}" role="button" tabindex="0" title="Ver en Composición" onclick="bdjVerComp('${f.c.id}')" style="cursor:pointer">`
+          + sub.slice(0, 3).map(x => `<div class="tq-sub" data-tq-subido style="color:#1F1F1F;margin-top:2px">${tqSubido(x)} <span style="color:#8A8A90">${tqDiaCorto(x.fecha)}</span></div>`).join('')
+          + `<div class="tq-sub" style="color:#2F6CC4;font-weight:700;margin-top:4px">Ver en Composición ›</div></div>`;
+      })()}</td>
       ${D.actual ? `<td data-tq="escribio-wa" class="tq-wa-cel" onclick="tqWaCelda('${f.c.id}')" title="Toca para registrar que te escribió por WhatsApp">${celdaCanal(f.escWa, true)}<div class="tq-sub tq-wa-mas">+ registrar</div></td>` : `<td data-tq="escribio-wa">${celdaCanal(f.escWa, true)}</td>`}
       <td data-tq="su-semana"><span class="tq-nw">${f.entrenos} entreno${f.entrenos === 1 ? '' : 's'}</span>${app(f)}</td>
       <td><div class="tq-acc">
@@ -539,7 +591,7 @@ routes.toques = async () => {
       <label class="tq-orden">Ordenar <select data-tq-orden onchange="tqOrden(this.value)">${TQ_ORDENES.map(([k, t]) => `<option value="${k}" ${_tq.orden === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
     </div>
     <div class="card lis-tabla-caja" data-tq-tabla>
-      <table class="lis-tabla tq-tabla"><thead><tr><th class="lis-nom">Cliente</th><th>Semáforo</th><th>Lo que le has dicho</th><th>Últimas 3 semanas</th><th>Tus toques ${deSemana}</th><th>Seguimiento<br>semanal</th><th>Ciclo</th><th>Pendientes<br>por pedir</th><th>Cápsulas</th><th>Videos</th><th>Te escribió<br>en la app</th><th>Te escribió<br>por WhatsApp</th><th>Su semana</th><th></th></tr></thead>
+      <table class="lis-tabla tq-tabla"><thead><tr><th class="lis-nom">Cliente</th><th>Semáforo</th><th>Lo que le has dicho</th><th>Últimas 3 semanas</th><th>Tus toques ${deSemana}</th><th>Seguimiento<br>semanal</th><th>Ciclo</th><th>Pendientes<br>por pedir</th><th>Cápsulas</th><th>Videos</th><th>Te escribió<br>en la app</th><th>Subió<br>en la app</th><th>Te escribió<br>por WhatsApp</th><th>Su semana</th><th></th></tr></thead>
       <tbody>${lista.map(fila).join('')}</tbody></table>
       ${lista.length ? '' : '<p class="text-sm text-slate-500" style="padding:0 16px 16px">Nadie en este filtro.</p>'}
       <p class="text-sm text-slate-500" style="padding:0 16px 16px" data-tq-sin-coincidencia hidden>Nadie con ese nombre en este filtro.</p>
@@ -549,6 +601,7 @@ routes.toques = async () => {
         <div><b>Tus toques</b>Un toque es un día en que le escribiste algo: seguimiento, pedirle video, responder su nota (o marcarla «Listo» en la Bandeja) o abrir su WhatsApp desde el CRM. Si el mismo día haces dos cosas, cuenta 1. En la semana: <span class="tq-dia t">L</span> lo tocaste ese día, <span class="tq-dia s">L</span> te escribió.</div>
         <div><b>Seguimiento semanal</b>Hecho si esta semana le mandaste el seguimiento (lo copiaste desde el CRM) o tocaste «Marcar hecho». «Esta semana no»: ya lo tocaste y no está frío; esta semana no cuenta como pendiente y la próxima sí. El botón «Seguimiento» lo abre en otra pestaña.</div>
         <div><b>Te escribió</b>En la app: sus notas (las de la Bandeja). Por WhatsApp: lo que registras tú tocando esa casilla. En rojo si todavía no le respondes; abrir su WhatsApp o responderle en la app cuenta como respuesta.</div>
+        <div><b>Subió en la app</b>El peso, la composición y las fotos que registró en su app esa semana (lo mismo que llega a la Bandeja). Toca para verlo en Composición. En «Te escribió en la app» ves sus mensajes; toca para leerlos completos.</div>
         <div><b>Últimas 3 semanas</b>Un recuadro por semana (el azul es esta) con los días que lo tocaste y lo que pasó: <span class="tq-et az">Seguimiento</span> <span class="tq-et na">Pedí N videos</span> <span class="tq-et na">N por llegar</span> <span class="tq-et gr">Revisé N</span> <span class="tq-et am">Esta semana no</span> <span class="tq-et ro">Sin toque</span>. Toca el nombre o los recuadros para ver su historial de 6 semanas, día por día. Arriba eliges qué semana ver en la tabla.</div>
         <div><b>Ciclo</b>La semana del ciclo en que va y los días que le faltan. En la última semana, si ya le salió en la app el aviso de que pronto cambia de ciclo (la ventana que ve una sola vez, el primer día que abre la app esa semana); antes, el día en que le va a salir.</div>
         <div><b>Pendientes por pedir</b>Fotos, peso y medidas: solo cuando su app ya le mostró el recordatorio y lleva 1 semana o más sin hacerlo. Video: si empezó ciclo nuevo o lleva 6 semanas sin mandar; y si se lo pediste hace una semana y no llega, <span class="tq-et ro">Recordar</span> abre su WhatsApp con el recordatorio. <span class="tq-et na">Toca pedir</span>: «Pedir» abre su WhatsApp con el mensaje (el video, con el ejercicio que elijas) y «Ya lo pedí» lo marca si se lo pediste por otro lado. <span class="tq-et gr">Pedido</span>: esperando; si te lo mandó por WhatsApp, «Ya lo entregó». <span class="tq-et ve">Entregado</span>: se marca solo cuando llega por la app.</div>

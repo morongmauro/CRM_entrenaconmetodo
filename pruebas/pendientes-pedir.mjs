@@ -99,7 +99,9 @@ function tablas() {
   T.mediciones_corporales = [
     { id: 'm0', cliente_id: 'c0', fecha: LUNES, peso: 60 },
     { id: 'm2', cliente_id: 'c2', fecha: mas(HOY, -50), peso: 70 },
+    { id: 'm5b', cliente_id: 'c5', fecha: HOY, peso: 68.4, grasa_pct: 24.1, origen: 'cliente' },
   ];
+  T.notas_entreno = [...(T.notas_entreno || []), { id: 'n2', cliente_id: 'c2', fecha: HOY, created_at: HOY + 'T09:00:00Z', texto: 'Hoy no pude dormir bien, ¿bajo la carga?', leida_en: null }];
   T.fases = [
     { id: 'fa2', cliente_id: 'c2', nombre: 'Ciclo 2', fecha_inicio: mas(LUNES, -14), semanas: 5, estado: 'activa', visible_cliente: true, orden: 2 },
     { id: 'fa4', cliente_id: 'c4', nombre: 'Ciclo 4', fecha_inicio: mas(LUNES, -56), semanas: 12, estado: 'activa', visible_cliente: true, orden: 1 },
@@ -400,6 +402,30 @@ const item = async (p, id, tipo) => { const l = celda(p, id).locator(`[data-pp="
   await p.waitForTimeout(1800);
   ok('«Ver fotos ›» abre Composición en Fotos, del cliente', await p.evaluate(() => _currentView === 'composicion' && _comp.tab === 'fotos' && String(_comp.clienteId) === 'c4'));
   await p.evaluate(() => navigate('toques'));
+  await p.locator('[data-tq-tabla]').waitFor({ timeout: 15000 });
+  await p.waitForTimeout(600);
+  // Lo que te escribió y lo que subió en su app, en su fila (de la Bandeja).
+  const fila2 = p.locator('tr[data-tq-cliente="c2"]');
+  ok('«Te escribió en la app» muestra el mensaje', /no pude dormir bien/.test(await fila2.locator('[data-tq="escribio-app"]').innerText()), await fila2.locator('[data-tq="escribio-app"]').innerText());
+  const fila5 = p.locator('tr[data-tq-cliente="c5"]');
+  ok('«Subió en la app» muestra su peso y composición', /Peso y composición/.test(await fila5.locator('[data-tq="subio"]').innerText()) && /68,4 kg/.test(await fila5.locator('[data-tq="subio"]').innerText()), await fila5.locator('[data-tq="subio"]').innerText());
+  await fila2.locator('[data-tq="escribio-app"]').click(); await p.waitForTimeout(500);
+  ok('tocar «Te escribió» abre sus mensajes completos', /no pude dormir bien, ¿bajo la carga\?/.test(await p.locator('[data-tq-mensajes="c2"]').innerText()));
+  if (process.env.FOTO) await p.screenshot({ path: path.join(CAPTURAS, 'toques-mensajes.png') });
+  await p.evaluate(() => closeModal());
+  if (process.env.FOTO) { await fila5.locator('[data-tq="subio"]').scrollIntoViewIfNeeded(); await p.screenshot({ path: path.join(CAPTURAS, 'toques-columnas.png') }); }
+  // La celda del ciclo lleva a sus rutinas (Entrenamiento › ese cliente).
+  await p.locator('[data-tq-filtro="todos"]').first().click(); await p.waitForTimeout(500);
+  ok('Ciclo: dice «Ver rutinas ›»', /Ver rutinas/.test(await ciclo('c2')));
+  await p.locator('tr[data-tq-cliente="c2"] [data-tq-ir-rutinas]').click();
+  await p.waitForTimeout(1500);
+  ok('tocar el ciclo abre Entrenamiento con sus rutinas', await p.evaluate(() => _currentView === 'entrenamiento' && _ent.tab === 'clientes' && _ent.subtab === 'rutinas' && String(_ent.clienteId) === 'c2'));
+  // «‹ Volver a Toques»: el botón de atrás dice a dónde vuelve y te deja ahí.
+  ok('sale «‹ Volver a Toques»', await p.locator('[data-crm-atras]').isVisible() && /Volver a Toques/.test(await p.locator('[data-crm-atras]').innerText()), await p.locator('[data-crm-atras]').innerText().catch(() => ''));
+  if (process.env.FOTO) await p.screenshot({ path: path.join(CAPTURAS, 'crm-atras.png') });
+  await p.locator('[data-crm-atras]').click();
+  await p.waitForTimeout(1500);
+  ok('«Atrás» vuelve a Toques', await p.evaluate(() => _currentView === 'toques'));
   await p.locator('[data-tq-tabla]').waitFor({ timeout: 15000 });
   await p.waitForTimeout(600);
   // Semana pasada: la columna no aplica.
