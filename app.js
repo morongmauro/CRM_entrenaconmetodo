@@ -4909,8 +4909,10 @@ function historialCorporalHTML(cliente, meds, opts = {}) {
   const primera = conPeso[0];
   const ultima = conPeso[conPeso.length - 1];
   const anterior = conPeso.length >= 2 ? conPeso[conPeso.length - 2] : null;
-  const dTotal = primera && ultima && primera !== ultima ? +(ultima.peso - primera.peso).toFixed(1) : null;
-  const dUlt = anterior ? +(ultima.peso - anterior.peso).toFixed(1) : null;
+  // Restas de peso y % de grasa con 2 decimales (66,15 → 64,5 = −1,65), igual que
+  // en la app del cliente: así cuadra con la cuenta que hace él o su báscula.
+  const dTotal = primera && ultima && primera !== ultima ? +(ultima.peso - primera.peso).toFixed(2) : null;
+  const dUlt = anterior ? +(ultima.peso - anterior.peso).toFixed(2) : null;
   const semanasEntre = anterior && ultima.fecha && anterior.fecha ? fmt.diasEntre(anterior.fecha, ultima.fecha) / 7 : null;
   const ritmo = dUlt != null && semanasEntre > 0 ? +(dUlt / semanasEntre).toFixed(2) : null;
   const flecha = (d) => d == null ? '' : d > 0 ? '▲' : d < 0 ? '▼' : '=';
@@ -4994,8 +4996,8 @@ function historialCorporalHTML(cliente, meds, opts = {}) {
   const filas = idxDesc.map(i => {
     const m = asc[i], c = comps[i];
     const p = i > 0 ? asc[i - 1] : null;
-    const dp = p && m.peso != null && p.peso != null ? +(m.peso - p.peso).toFixed(1) : null;
-    const dg = p && m.grasa_pct != null && p.grasa_pct != null ? +(m.grasa_pct - p.grasa_pct).toFixed(1) : null;
+    const dp = p && m.peso != null && p.peso != null ? +(m.peso - p.peso).toFixed(2) : null;
+    const dg = p && m.grasa_pct != null && p.grasa_pct != null ? +(m.grasa_pct - p.grasa_pct).toFixed(2) : null;
     return `
       <tr>
         <td class="whitespace-nowrap">${fmt.fechaCorta(m.fecha)}</td>
@@ -5177,7 +5179,7 @@ async function abrirModalSeguimiento(clienteId, semana, segExistente = null) {
   const ultMedModal = medsAscModal.length ? medsAscModal[medsAscModal.length - 1] : null;
   const prevMedModal = medsAscModal.length >= 2 ? medsAscModal[medsAscModal.length - 2] : null;
   const deltaPesoModal = ultMedModal?.peso != null && prevMedModal?.peso != null
-    ? +(ultMedModal.peso - prevMedModal.peso).toFixed(1) : null;
+    ? +(ultMedModal.peso - prevMedModal.peso).toFixed(2) : null;
 
   const html = `
     <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-10">

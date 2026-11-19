@@ -102,7 +102,7 @@ function compEvaluarMeta(cliente, meds, metas) {
 
   let dPeso = null, dGrasa = null;
   if (pesoRef != null) {
-    dPeso = +(Number(ultima.peso) - pesoRef).toFixed(1);
+    dPeso = +(Number(ultima.peso) - pesoRef).toFixed(2);
     const umbral = Math.max(COMP_UMBRALES.kg, pesoRef * COMP_UMBRALES.kg_pct);
     if (Math.abs(dPeso) >= umbral) {
       razones.push(`El peso se movió <strong>${dPeso > 0 ? '+' : ''}${dPeso} kg</strong> desde que se calculó la meta (${pesoRef} kg → ${ultima.peso} kg). El umbral para este cliente es ${umbral.toFixed(1)} kg.`);
@@ -112,7 +112,7 @@ function compEvaluarMeta(cliente, meds, metas) {
   }
 
   if (ultima.grasa_pct != null && grasaRef != null) {
-    dGrasa = +(Number(ultima.grasa_pct) - grasaRef).toFixed(1);
+    dGrasa = +(Number(ultima.grasa_pct) - grasaRef).toFixed(2);
     if (Math.abs(dGrasa) >= COMP_UMBRALES.grasa_pp) {
       razones.push(`El % de grasa se movió <strong>${dGrasa > 0 ? '+' : ''}${dGrasa} puntos</strong> (${grasaRef}% → ${ultima.grasa_pct}%). Cambia la masa magra, que es la que fija la proteína.`);
     }
@@ -890,8 +890,8 @@ function compFotosHTML() {
     }
     return { peso: f.peso_kg != null ? Number(f.peso_kg) : (mejor && mejor.peso != null ? Number(mejor.peso) : null), grasa: mejor && mejor.grasa_pct != null ? Number(mejor.grasa_pct) : null };
   };
-  const kg = (n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(1).replace('.', ',')} kg`;
-  const pts = (n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(1).replace('.', ',')} pts grasa`;
+  const kg = (n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${String(+Math.abs(n).toFixed(2)).replace('.', ',')} kg`;
+  const pts = (n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${String(+Math.abs(n).toFixed(2)).replace('.', ',')} pts grasa`;
   const etiqueta = (f) => { const m = medidaDe(f); return `${fmt.fechaCorta(f.fecha)}${m.peso != null ? ` · ${String(m.peso).replace('.', ',')} kg` : ''}`; };
 
   // Comparador lado a lado: la más vieja contra la más nueva de cada pose
