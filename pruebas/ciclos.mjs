@@ -49,9 +49,9 @@ function tablas() {
   ];
   // Rutinas: Beto repite el ciclo anterior tal cual; Dani tiene el que sigue con una rutina vacía.
   const rut = (id, fid, cli, nombre) => ({ id, fase_id: fid, cliente_id: cli, user_id: 'coach-1', nombre, dia_orden: 1 });
-  const rutinas = [rut('r1p', 'f1p', 'c1', 'Día A'), rut('r1', 'f1', 'c1', 'Día A'), rut('r3', 'f3', 'c3', 'Día A'), rut('r3b', 'f3b', 'c3', 'Día B')];
+  const rutinas = [rut('r1p', 'f1p', 'c1', 'Día A'), rut('r1', 'f1', 'c1', 'Día A'), rut('r1pb', 'f1p', 'c1', 'Día B'), rut('r1b', 'f1', 'c1', 'Día B'), rut('r3', 'f3', 'c3', 'Día A'), rut('r3b', 'f3b', 'c3', 'Día B')];
   const re = (id, r, e) => ({ id, rutina_id: r, ejercicio_id: e, user_id: 'coach-1', orden: 1 });
-  const rutina_ejercicios = [re('x1', 'r1p', 'e1'), re('x2', 'r1p', 'e2'), re('x3', 'r1', 'e2'), re('x4', 'r1', 'e1'), re('x5', 'r3', 'e1'), re('x6', 'r3', 'e3')];
+  const rutina_ejercicios = [re('x1', 'r1p', 'e1'), re('x2', 'r1p', 'e2'), re('x3', 'r1', 'e2'), re('x4', 'r1', 'e1'), re('x5', 'r3', 'e1'), re('x6', 'r3', 'e3'), re('x7', 'r1pb', 'e4'), re('x8', 'r1b', 'e3')];
   return { clientes, fases, seguimientos: [], pagos: [], pendientes: [], mediciones_corporales: [], settings: [{ user_id: 'coach-1', usd_cop_rate: 4000, nombre_coach: 'Mauro' }],
     metas_historial: [], nutricion_insights: [], ia_uso: [], push_pago_log: [], rutinas, rutina_ejercicios, sesiones: [], series_log: [], ejercicios: [],
     comunidad_posts: [], comunidad_reacciones: [], comunidad_comentarios: [], comunidad_vistas: [] };
@@ -116,12 +116,12 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
   const pv = await caja('[data-por-vencer]'), ve = await caja('[data-vencidos]'), ig = await caja('[data-ciclo-igual]'), va = await caja('[data-rutinas-vacias]');
   ok(`${tag} · Por vencer: Ana (2 días) y Beto (5 días), y Carla/Fede si terminan en 7 o menos`, /Ana Pérez/.test(pv) && /Beto Ruiz/.test(pv) && /en 2 días · sin el que sigue/.test(pv), pv);
   ok(`${tag} · Ya vencieron: Eva, hace 3 días`, /Eva Ríos/.test(ve) && /hace 3 días/.test(ve) && !/Ana Pérez/.test(ve), ve);
-  ok(`${tag} · Ciclo igual al anterior: Beto (Ciclo 5 igual a Ciclo 4), no Dani`, /Beto Ruiz/.test(ig) && /Ciclo 5 igual a Ciclo 4/.test(ig) && !/Dani/.test(ig), ig);
+  ok(`${tag} · Rutinas sin cambio: Beto, 1 de 2 en Ciclo 5; no Dani`, /Beto Ruiz/.test(ig) && /1 de 2 en Ciclo 5/.test(ig) && !/Dani/.test(ig), ig);
   ok(`${tag} · Rutinas vacías: Dani, 1 vacía en el que sigue (Beto no)`, /Dani Mejía/.test(va) && /1 vacía en el que sigue/.test(va) && !/Beto/.test(va), va);
   const chipsBeto = await p.locator('[data-ciclo-cliente="c1"] [data-rutinas-ciclo]').first().innerText().catch(() => '');
-  ok(`${tag} · en la fila de Beto: sus rutinas con cuántos ejercicios y «igual al anterior»`, /Día A · 2 ej\. · igual al anterior/.test(chipsBeto.replace(/\s+/g, ' ')), chipsBeto);
+  ok(`${tag} · en la fila de Beto: «Sin cambio (1)» con Día A y sus 2 ejercicios, comparado con Ciclo 4`, /comparadas con Ciclo 4/.test(chipsBeto) && /Sin cambio \(1\) ?Día A · 2 ej\./.test(chipsBeto.replace(/\s+/g, ' ')) && /Cambiaron \(1\) ?Día B · 1 ej\./.test(chipsBeto.replace(/\s+/g, ' ')), chipsBeto);
   const chipsDani = (await p.locator('[data-ciclo-cliente="c3"]').innerText()).replace(/\s+/g, ' ');
-  ok(`${tag} · en la fila de Dani: la del que sigue sale «vacía»`, /Rutinas del que sigue Día B · vacía/.test(chipsDani), chipsDani);
+  ok(`${tag} · en la fila de Dani: la del que sigue sale en «Vacías» y la que va en «Cambiaron»… o «Rutinas»`, /Rutinas del que sigue \(comparadas con Ciclo 8\) Vacías \(1\) Día B/.test(chipsDani), chipsDani);
   if (tag === 'telefono') ok(`${tag} · sin scroll de lado`, await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   await p.screenshot({ path: path.join(CAPTURAS, `ciclos-${tag}.png`), fullPage: true });
   // Tocar uno abre su entrenamiento

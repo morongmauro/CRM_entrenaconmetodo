@@ -93,16 +93,20 @@ async function cicRutinas(filas) {
 
 // Las rutinas de un ciclo en chips: nombre y cuántos ejercicios; vacía en
 // rojo, igual a la del ciclo anterior en ámbar.
-function cicChipsRutinas(lista, etiqueta) {
+function cicChipsRutinas(lista, etiqueta, conAnterior = true) {
   if (!lista) return '';
   if (!lista.length) return `<div class="mt-2 text-[11px] font-bold" style="color:${CIC_TONO.rojo.tinta}">${etiqueta}: sin rutinas</div>`;
+  // Tres grupos, cada uno en su línea: cambiaron, sin cambio y vacías.
+  const chip = (x, t) => `<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" style="background:${t.fondo};color:${t.tinta}" data-rutina-estado="${!x.n ? 'vacia' : x.igual ? 'igual' : 'ok'}">${escapeHtml(String(x.nombre || 'Rutina'))}${x.n ? ` · ${x.n} ej.` : ''}</span>`;
+  const grupo = (titulo, xs, t, attr) => xs.length ? `<div class="flex flex-wrap items-center gap-1 mt-1" ${attr}>
+      <span class="text-[11px] font-bold mr-1" style="color:${t.tinta}">${titulo} (${xs.length})</span>${xs.map(x => chip(x, t)).join('')}</div>` : '';
+  const vacias = lista.filter(x => !x.n), iguales = lista.filter(x => x.n && x.igual), nuevas = lista.filter(x => x.n && !x.igual);
   return `<div class="mt-2" data-rutinas-ciclo>
-    <div class="text-[11px] font-bold text-slate-500 mb-1">${etiqueta}</div>
-    <div class="flex flex-wrap gap-1">${lista.map(x => {
-      const t = !x.n ? CIC_TONO.rojo : x.igual ? CIC_TONO.ambar : CIC_TONO.gris;
-      return `<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold" style="background:${t.fondo};color:${t.tinta}" data-rutina-estado="${!x.n ? 'vacia' : x.igual ? 'igual' : 'ok'}">
-        ${escapeHtml(String(x.nombre || 'Rutina'))} · ${x.n ? `${x.n} ej.` : 'vacía'}${x.igual ? ' · igual al anterior' : ''}</span>`;
-    }).join('')}</div></div>`;
+    <div class="text-[11px] font-bold text-slate-500">${etiqueta}</div>
+    ${grupo(conAnterior ? 'Cambiaron' : 'Rutinas', nuevas, CIC_TONO.ok, 'data-rutinas-cambiaron')}
+    ${grupo('Sin cambio', iguales, CIC_TONO.ambar, 'data-rutinas-sin-cambio')}
+    ${grupo('Vacías', vacias, CIC_TONO.rojo, 'data-rutinas-vacias-cli')}
+  </div>`;
 }
 
 // El estado de un cliente: qué ciclo va, cuál sigue y qué tan urgente es.
@@ -220,8 +224,16 @@ function cicResumen(filas, hoy) {
     .map(f => ({ ...f, _det: `${f.quedan === 0 ? 'hoy' : f.quedan === 1 ? 'mañana' : `en ${f.quedan} días`}${f.siguiente ? ' · ya tiene el que sigue' : ' · sin el que sigue'}` }));
   const vencidos = filas.filter(f => !f.actual && f.ultima).sort((a, b) => (b.hace || 0) - (a.hace || 0))
     .map(f => ({ ...f, _det: `hace ${f.hace} ${f.hace === 1 ? 'día' : 'días'}${f.siguiente ? ` · arranca el ${cicFecha(f.siguiente.fecha_inicio)}` : ''}` }));
-  const iguales = filas.filter(f => (f.actual && f.sinCambio) || f.sigSinCambio)
-    .map(f => ({ ...f, _det: f.sigSinCambio ? `${escapeHtml(cicNombre(f.siguiente))} igual a ${escapeHtml(cicNombre(f.actual || f.ultima))}` : `${escapeHtml(cicNombre(f.actual))} igual a ${escapeHtml(cicNombre(f.previo))}` }));
+  // Toda rutina con los mismos ejercicios que en el ciclo anterior, aunque
+  // el resto haya cambiado: «2 de 4 sin cambio en Ciclo 5».
+  const nIg = (xs) => (xs || []).filter(x => x.n && x.igual).length;
+  const iguales = filas.filter(f => (f.actual && f.previo && nIg(f.rutinas)) || (f.siguiente && nIg(f.rutinasSig)))
+    .map(f => {
+      const partes = [];
+      if (f.actual && f.previo && nIg(f.rutinas)) partes.push(`${nIg(f.rutinas) === f.rutinas.length ? 'todas' : `${nIg(f.rutinas)} de ${f.rutinas.length}`} en ${escapeHtml(cicNombre(f.actual))}`);
+      if (f.siguiente && nIg(f.rutinasSig)) partes.push(`${nIg(f.rutinasSig) === f.rutinasSig.length ? 'todas' : `${nIg(f.rutinasSig)} de ${f.rutinasSig.length}`} en ${escapeHtml(cicNombre(f.siguiente))}`);
+      return { ...f, _det: partes.join(' · ') };
+    });
   const nVac = (n) => `${n} vacía${n === 1 ? '' : 's'}`;
   // Un ciclo sin ninguna rutina también cuenta: es lo mismo que tenerlas vacías.
   const sinRut = (f) => f.actual && f.rutinas && !f.rutinas.length;
@@ -241,7 +253,7 @@ function cicResumen(filas, hoy) {
   return `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 mb-3" data-resumen-ciclos>
     ${caja('ambar', 'Por vencer', `Su ciclo termina en ${CIC_AVISO_DIAS} días o menos.`, porVencer, 'data-por-vencer')}
     ${caja('rojo', 'Ya vencieron', 'Sin ciclo vigente: el último ya terminó.', vencidos, 'data-vencidos')}
-    ${caja('ambar', 'Ciclo igual al anterior', 'Mismas rutinas y mismos ejercicios que el ciclo de antes.', iguales, 'data-ciclo-igual')}
+    ${caja('ambar', 'Rutinas sin cambio', 'Rutinas del ciclo nuevo con los mismos ejercicios que en el ciclo de antes.', iguales, 'data-ciclo-igual')}
     ${caja('rojo', 'Rutinas vacías', 'Ciclos sin rutinas o rutinas sin ningún ejercicio, en el que va o en el que sigue.', vacias, 'data-rutinas-vacias')}
   </div>`;
 }
@@ -301,8 +313,8 @@ window.cicVista = async () => {
           </div>
           ${a ? `<div class="mt-2 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${t.punto}"></div></div>` : ''}
           <div class="mt-2">${cicLinea(f, hoy)}</div>
-          ${cicChipsRutinas(f.rutinas, f.actual ? 'Rutinas del ciclo que va' : 'Rutinas del último ciclo')}
-          ${f.siguiente ? cicChipsRutinas(f.rutinasSig, 'Rutinas del que sigue') : ''}
+          ${cicChipsRutinas(f.rutinas, f.actual ? `Rutinas del ciclo que va${f.previo ? ` (comparadas con ${escapeHtml(cicNombre(f.previo))})` : ''}` : 'Rutinas del último ciclo', !!f.previo)}
+          ${f.siguiente ? cicChipsRutinas(f.rutinasSig, `Rutinas del que sigue (comparadas con ${escapeHtml(cicNombre(f.actual || f.ultima || {}))})`) : ''}
           <div class="mt-2 flex items-center justify-between gap-2">
             <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold" style="background:${t.fondo};color:${t.tinta}">
               <i style="width:7px;height:7px;border-radius:99px;background:${t.punto}"></i>${escapeHtml(f.texto)}</span>
