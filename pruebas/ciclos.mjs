@@ -45,9 +45,15 @@ function tablas() {
     fase('f4', 'c4', 'Ciclo 1', -3, 4, true),                      // terminó hace 3 días → rojo
     fase('f6', 'c6', 'Ciclo 4', 4, 4, true), fase('f6b', 'c6', 'Ciclo 5', 39, 5, false),   // el siguiente arranca en 5 días sin enviar → ámbar
     fase('f9', 'c9', 'Ciclo 1', -40, 4, true),                     // en pausa: no cuenta
+    fase('f1p', 'c1', 'Ciclo 4', -30, 5, true),                    // el anterior de Beto: mismas rutinas que el que va
   ];
+  // Rutinas: Beto repite el ciclo anterior tal cual; Dani tiene el que sigue con una rutina vacía.
+  const rut = (id, fid, cli, nombre) => ({ id, fase_id: fid, cliente_id: cli, user_id: 'coach-1', nombre, dia_orden: 1 });
+  const rutinas = [rut('r1p', 'f1p', 'c1', 'Día A'), rut('r1', 'f1', 'c1', 'Día A'), rut('r3', 'f3', 'c3', 'Día A'), rut('r3b', 'f3b', 'c3', 'Día B')];
+  const re = (id, r, e) => ({ id, rutina_id: r, ejercicio_id: e, user_id: 'coach-1', orden: 1 });
+  const rutina_ejercicios = [re('x1', 'r1p', 'e1'), re('x2', 'r1p', 'e2'), re('x3', 'r1', 'e2'), re('x4', 'r1', 'e1'), re('x5', 'r3', 'e1'), re('x6', 'r3', 'e3')];
   return { clientes, fases, seguimientos: [], pagos: [], pendientes: [], mediciones_corporales: [], settings: [{ user_id: 'coach-1', usd_cop_rate: 4000, nombre_coach: 'Mauro' }],
-    metas_historial: [], nutricion_insights: [], ia_uso: [], push_pago_log: [], rutinas: [], rutina_ejercicios: [], sesiones: [], series_log: [], ejercicios: [],
+    metas_historial: [], nutricion_insights: [], ia_uso: [], push_pago_log: [], rutinas, rutina_ejercicios, sesiones: [], series_log: [], ejercicios: [],
     comunidad_posts: [], comunidad_reacciones: [], comunidad_comentarios: [], comunidad_vistas: [] };
 }
 const b = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME } : {});
@@ -106,6 +112,16 @@ for (const [tag, ancho, alto] of [['ancho', 1440, 1000], ['telefono', 390, 844]]
   ok(`${tag} · «Cycle» se lee «Ciclo» y salen las fechas y la semana`, /Ciclo 3 · .* → .* · semana 4 de 4/.test(txt.c0), txt.c0);
   ok(`${tag} · los urgentes van primero`, filas.slice(0, 3).every(f => f[1] === 'rojo'), JSON.stringify(filas.map(f => f[1])));
   ok(`${tag} · cada uno con su línea de tiempo`, (await p.locator('[data-linea-ciclo]').count()) === 7);
+  const caja = async (sel) => (await p.locator(`[data-resumen-ciclos] ${sel}`).innerText().catch(() => '')).replace(/\s+/g, ' ');
+  const pv = await caja('[data-por-vencer]'), ve = await caja('[data-vencidos]'), ig = await caja('[data-ciclo-igual]'), va = await caja('[data-rutinas-vacias]');
+  ok(`${tag} · Por vencer: Ana (2 días) y Beto (5 días), y Carla/Fede si terminan en 7 o menos`, /Ana Pérez/.test(pv) && /Beto Ruiz/.test(pv) && /en 2 días · sin el que sigue/.test(pv), pv);
+  ok(`${tag} · Ya vencieron: Eva, hace 3 días`, /Eva Ríos/.test(ve) && /hace 3 días/.test(ve) && !/Ana Pérez/.test(ve), ve);
+  ok(`${tag} · Ciclo igual al anterior: Beto (Ciclo 5 igual a Ciclo 4), no Dani`, /Beto Ruiz/.test(ig) && /Ciclo 5 igual a Ciclo 4/.test(ig) && !/Dani/.test(ig), ig);
+  ok(`${tag} · Rutinas vacías: Dani, 1 vacía en el que sigue (Beto no)`, /Dani Mejía/.test(va) && /1 vacía en el que sigue/.test(va) && !/Beto/.test(va), va);
+  const chipsBeto = await p.locator('[data-ciclo-cliente="c1"] [data-rutinas-ciclo]').first().innerText().catch(() => '');
+  ok(`${tag} · en la fila de Beto: sus rutinas con cuántos ejercicios y «igual al anterior»`, /Día A · 2 ej\. · igual al anterior/.test(chipsBeto.replace(/\s+/g, ' ')), chipsBeto);
+  const chipsDani = (await p.locator('[data-ciclo-cliente="c3"]').innerText()).replace(/\s+/g, ' ');
+  ok(`${tag} · en la fila de Dani: la del que sigue sale «vacía»`, /Rutinas del que sigue Día B · vacía/.test(chipsDani), chipsDani);
   if (tag === 'telefono') ok(`${tag} · sin scroll de lado`, await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   await p.screenshot({ path: path.join(CAPTURAS, `ciclos-${tag}.png`), fullPage: true });
   // Tocar uno abre su entrenamiento

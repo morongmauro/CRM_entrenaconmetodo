@@ -34,7 +34,75 @@ async function cicDatos() {
   const activos = (clis || []).filter(c => String(c.estado || 'activo').toLowerCase() === 'activo');
   const porCli = new Map(activos.map(c => [c.id, []]));
   (fasesR.data || []).forEach(f => { if (porCli.has(f.cliente_id) && f.estado !== 'archivada') porCli.get(f.cliente_id).push(f); });
-  return activos.map(c => ({ cliente: c, ...cicEstado(porCli.get(c.id) || [], fmt.hoy()) }));
+  const filas = activos.map(c => ({ cliente: c, ...cicEstado(porCli.get(c.id) || [], fmt.hoy()) }));
+  try { await cicRutinas(filas); } catch (e) { /* sin rutinas: la lista sale igual, sin el detalle */ }
+  return filas;
+}
+
+// ── Rutinas de cada ciclo ────────────────────────────────────────────────
+// Para el ciclo que va (o el último, si ya venció) y el que sigue: qué rutinas
+// tiene, cuántos ejercicios lleva cada una y si es igual a una del ciclo
+// anterior (mismos ejercicios). Un ciclo nuevo cuyas rutinas son todas
+// iguales a las del anterior se marca: puede que falte cambiarlo.
+const cicTandas = (xs, n = 80) => { const out = []; for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n)); return out; };
+async function cicRutinas(filas) {
+  const anteriorDe = (f, x) => { if (!x) return null; const i = f.fases.findIndex(y => y.id === x.id); return i > 0 ? f.fases[i - 1] : null; };
+  filas.forEach(f => {
+    if (!f.fases) return;
+    f.base = f.actual || f.ultima || null;            // el ciclo que se revisa
+    f.previo = anteriorDe(f, f.base);
+  });
+  const faseIds = [...new Set(filas.flatMap(f => [f.base, f.previo, f.siguiente].filter(Boolean).map(x => x.id)))];
+  if (!faseIds.length) return;
+  const rutinas = [];
+  for (const t of cicTandas(faseIds)) {
+    // Todas las columnas: así no depende de que exista una u otra (archivada).
+    const { data } = await sb.from('rutinas').select('*').in('fase_id', t);
+    rutinas.push(...(data || []).filter(x => !x.archivada));
+  }
+  const ejs = {};
+  for (const t of cicTandas(rutinas.map(x => x.id))) {
+    let desde = 0;
+    for (;;) {
+      const { data } = await sb.from('rutina_ejercicios').select('rutina_id, ejercicio_id').in('rutina_id', t).order('id').range(desde, desde + 999);
+      (data || []).forEach(x => (ejs[x.rutina_id] ||= []).push(x.ejercicio_id));
+      if (!data || data.length < 1000) break;
+      desde += 1000;
+    }
+  }
+  const firma = (id) => (ejs[id] || []).slice().sort().join(',');
+  const deFase = (fid) => rutinas.filter(x => x.fase_id === fid).sort((a, b) => (a.dia_orden || 0) - (b.dia_orden || 0) || String(a.nombre).localeCompare(String(b.nombre)))
+    .map(x => ({ id: x.id, nombre: x.nombre, n: (ejs[x.id] || []).length, firma: firma(x.id) }));
+  const comparar = (nuevas, viejas) => {
+    const libres = viejas.map(v => v.firma);
+    nuevas.forEach(x => { const i = x.n ? libres.indexOf(x.firma) : -1; x.igual = i >= 0; if (i >= 0) libres.splice(i, 1); });
+    return nuevas.length > 0 && viejas.length > 0 && nuevas.every(x => x.igual);
+  };
+  filas.forEach(f => {
+    if (!f.base) return;
+    f.rutinas = deFase(f.base.id);
+    f.vacias = f.rutinas.filter(x => !x.n).length;
+    f.sinCambio = f.previo ? comparar(f.rutinas, deFase(f.previo.id)) : false;
+    if (f.siguiente) {
+      f.rutinasSig = deFase(f.siguiente.id);
+      f.sigSinCambio = comparar(f.rutinasSig, f.rutinas.map(x => ({ ...x })));
+      f.vaciasSig = f.rutinasSig.filter(x => !x.n).length;
+    }
+  });
+}
+
+// Las rutinas de un ciclo en chips: nombre y cuántos ejercicios; vacía en
+// rojo, igual a la del ciclo anterior en ámbar.
+function cicChipsRutinas(lista, etiqueta) {
+  if (!lista) return '';
+  if (!lista.length) return `<div class="mt-2 text-[11px] font-bold" style="color:${CIC_TONO.rojo.tinta}">${etiqueta}: sin rutinas</div>`;
+  return `<div class="mt-2" data-rutinas-ciclo>
+    <div class="text-[11px] font-bold text-slate-500 mb-1">${etiqueta}</div>
+    <div class="flex flex-wrap gap-1">${lista.map(x => {
+      const t = !x.n ? CIC_TONO.rojo : x.igual ? CIC_TONO.ambar : CIC_TONO.gris;
+      return `<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold" style="background:${t.fondo};color:${t.tinta}" data-rutina-estado="${!x.n ? 'vacia' : x.igual ? 'igual' : 'ok'}">
+        ${escapeHtml(String(x.nombre || 'Rutina'))} · ${x.n ? `${x.n} ej.` : 'vacía'}${x.igual ? ' · igual al anterior' : ''}</span>`;
+    }).join('')}</div></div>`;
 }
 
 // El estado de un cliente: qué ciclo va, cuál sigue y qué tan urgente es.
@@ -138,6 +206,46 @@ function cicLinea(f, hoy) {
     </div>`;
 }
 
+// Arriba de la pestaña: las tres listas para revisar de un vistazo.
+//   · Por vencer: el ciclo que va termina en 7 días o menos.
+//   · Ya vencieron: no tiene ciclo vigente y el último ya terminó.
+//   · Ciclo igual al anterior: el que va (o el que sigue) tiene las mismas
+//     rutinas, con los mismos ejercicios, que el ciclo de antes.
+function cicResumen(filas, hoy) {
+  const ir = (f) => `<button type="button" class="text-left w-full rounded-lg px-2 py-1.5 hover:bg-slate-50 flex items-center justify-between gap-2"
+      onclick="_ent.tab='clientes'; entVerCliente('${f.cliente.id}'); routes.entrenamiento()">
+      <span class="font-semibold text-slate-800 text-sm truncate">${escapeHtml(f.cliente.nombre)}</span>
+      <span class="text-[11px] text-slate-500 whitespace-nowrap">${f._det}</span></button>`;
+  const porVencer = filas.filter(f => f.actual && f.quedan <= CIC_AVISO_DIAS).sort((a, b) => a.quedan - b.quedan)
+    .map(f => ({ ...f, _det: `${f.quedan === 0 ? 'hoy' : f.quedan === 1 ? 'mañana' : `en ${f.quedan} días`}${f.siguiente ? ' · ya tiene el que sigue' : ' · sin el que sigue'}` }));
+  const vencidos = filas.filter(f => !f.actual && f.ultima).sort((a, b) => (b.hace || 0) - (a.hace || 0))
+    .map(f => ({ ...f, _det: `hace ${f.hace} ${f.hace === 1 ? 'día' : 'días'}${f.siguiente ? ` · arranca el ${cicFecha(f.siguiente.fecha_inicio)}` : ''}` }));
+  const iguales = filas.filter(f => (f.actual && f.sinCambio) || f.sigSinCambio)
+    .map(f => ({ ...f, _det: f.sigSinCambio ? `${escapeHtml(cicNombre(f.siguiente))} igual a ${escapeHtml(cicNombre(f.actual || f.ultima))}` : `${escapeHtml(cicNombre(f.actual))} igual a ${escapeHtml(cicNombre(f.previo))}` }));
+  const nVac = (n) => `${n} vacía${n === 1 ? '' : 's'}`;
+  // Un ciclo sin ninguna rutina también cuenta: es lo mismo que tenerlas vacías.
+  const sinRut = (f) => f.actual && f.rutinas && !f.rutinas.length;
+  const sinRutSig = (f) => f.siguiente && f.rutinasSig && !f.rutinasSig.length;
+  const vacias = filas.filter(f => f.vacias > 0 || f.vaciasSig > 0 || sinRut(f) || sinRutSig(f))
+    .map(f => ({ ...f, _det: [sinRut(f) ? 'el que va sin rutinas' : f.vacias ? `${nVac(f.vacias)} en el que va` : null,
+      sinRutSig(f) ? 'el que sigue sin rutinas' : f.vaciasSig ? `${nVac(f.vaciasSig)} en el que sigue` : null].filter(Boolean).join(' · ') }));
+  const caja = (tono, titulo, nota, xs, attr) => `
+    <div class="card" style="padding:12px 14px" ${attr}>
+      <div class="flex items-center justify-between gap-2 mb-1">
+        <div class="font-bold text-sm" style="color:${CIC_TONO[tono].tinta}">${titulo}</div>
+        <span class="rounded-full px-2 py-0.5 text-[11px] font-bold" style="background:${CIC_TONO[tono].fondo};color:${CIC_TONO[tono].tinta}">${xs.length}</span>
+      </div>
+      <div class="text-[11px] text-slate-500 mb-1">${nota}</div>
+      ${xs.length ? xs.map(ir).join('') : '<div class="text-xs text-slate-400 py-1">Nadie.</div>'}
+    </div>`;
+  return `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 mb-3" data-resumen-ciclos>
+    ${caja('ambar', 'Por vencer', `Su ciclo termina en ${CIC_AVISO_DIAS} días o menos.`, porVencer, 'data-por-vencer')}
+    ${caja('rojo', 'Ya vencieron', 'Sin ciclo vigente: el último ya terminó.', vencidos, 'data-vencidos')}
+    ${caja('ambar', 'Ciclo igual al anterior', 'Mismas rutinas y mismos ejercicios que el ciclo de antes.', iguales, 'data-ciclo-igual')}
+    ${caja('rojo', 'Rutinas vacías', 'Ciclos sin rutinas o rutinas sin ningún ejercicio, en el que va o en el que sigue.', vacias, 'data-rutinas-vacias')}
+  </div>`;
+}
+
 // La pestaña «Ciclos».
 window.cicVista = async () => {
   const body = $('#ent-body');
@@ -169,6 +277,7 @@ window.cicVista = async () => {
         <span class="inline-flex items-center gap-1"><i style="width:2px;height:12px;background:#1D1D1F"></i>hoy</span>
       </div>
     </div>
+    ${cicResumen(filas, hoy)}
     <div class="grid grid-cols-1 xl:grid-cols-2 gap-2" data-lista-ciclos>
       ${filas.map(f => {
         const t = CIC_TONO[f.tono];
@@ -192,6 +301,8 @@ window.cicVista = async () => {
           </div>
           ${a ? `<div class="mt-2 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${t.punto}"></div></div>` : ''}
           <div class="mt-2">${cicLinea(f, hoy)}</div>
+          ${cicChipsRutinas(f.rutinas, f.actual ? 'Rutinas del ciclo que va' : 'Rutinas del último ciclo')}
+          ${f.siguiente ? cicChipsRutinas(f.rutinasSig, 'Rutinas del que sigue') : ''}
           <div class="mt-2 flex items-center justify-between gap-2">
             <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold" style="background:${t.fondo};color:${t.tinta}">
               <i style="width:7px;height:7px;border-radius:99px;background:${t.punto}"></i>${escapeHtml(f.texto)}</span>
